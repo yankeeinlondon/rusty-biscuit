@@ -254,6 +254,36 @@ fn an_interrupt_after_the_move_cancels_and_a_retry_by_name_finishes_silently() {
     assert_eq!(fixture.pending(), 0, "completion leaves no record");
 }
 
+/// An interrupted removal whose saved record has since become unreadable is
+/// explained by name, never resumed, and nothing more is deleted: the moved
+/// checkout, the record, and the branch stay as they were (exit 1).
+#[test]
+fn an_unreadable_record_of_an_interrupted_removal_is_explained_and_nothing_is_deleted() {
+    use worktree::remove::recovery::store::{RECORD_FILE, STORE_DIR};
+
+    let (fixture, _wt) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
+    let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
+    let store = fixture.repo().join(".git").join(STORE_DIR);
+    let operation = fs::read_dir(&store).unwrap().filter_map(Result::ok).find(|entry| entry.file_name() != "locks").unwrap();
+    let record = operation.path().join(RECORD_FILE);
+    fs::write(&record, b"{\"record_version\": 2,").unwrap();
+
+    let output = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Nothing was removed. The record of an earlier removal could not be read"), "{stderr}");
+    assert!(stderr.contains(&*operation.file_name().to_string_lossy()) && stderr.contains("malformed"), "{stderr}");
+    assert!(!stderr.contains("Delete it?") && !stderr.contains("not found"), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "nothing more is deleted");
+    assert_eq!(fs::read(&record).unwrap(), b"{\"record_version\": 2,", "the record is kept as it was");
+    assert!(fixture.branch_exists("feat/x"));
+}
+
 /// Ctrl-C before `wt` starts removing (here, during the branch checks that
 /// precede the report) keeps the platform default: `wt` ends by the signal
 /// and nothing is saved, moved, or deleted.

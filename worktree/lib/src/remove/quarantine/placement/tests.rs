@@ -26,10 +26,6 @@ fn planned(repo: &TestRepo, checkout: &Path) -> MovePlan {
     plan_move(&repo.path(), &entry, &OperationId::generate().unwrap()).unwrap()
 }
 
-fn quiet() -> bool {
-    false
-}
-
 /// The checkout's directory, its `.git` file, Git's record, and the listing.
 #[derive(Debug, PartialEq)]
 struct Snapshot {
@@ -79,7 +75,6 @@ fn only_an_unmovable_link_refusal_is_deleted_in_place() {
     for refusal in [
         MoveRefusal::NotARealDirectory(PathBuf::from("x")),
         MoveRefusal::Locked { reason: None },
-        MoveRefusal::Submodules { entry: PathBuf::from("vendor") },
         MoveRefusal::Unsupported("main checkout".into()),
         MoveRefusal::Association(crate::remove::admin_entry::AssociationError::NotFound),
         MoveRefusal::Changed("its .git file names another record".into()),
@@ -95,7 +90,7 @@ fn a_normal_checkout_is_moved() {
     let target = repo.add_worktree("feat/moved", "moved", "main");
     let plan = planned(&repo, &target);
 
-    let placement = place(&repo.path(), &plan, &[], &quiet).unwrap();
+    let placement = place(&repo.path(), &plan, &[]).unwrap();
 
     assert_eq!(placement, Placement::Moved);
     assert!(!target.exists());
@@ -117,7 +112,7 @@ fn an_unsupported_rename_deletes_in_place_and_changes_nothing() {
     let unsupported: fn() -> io::Error = || io::Error::from_raw_os_error(50); // ERROR_NOT_SUPPORTED
     let faults = Faults { rename_instead: Some(unsupported), ..Faults::default() };
 
-    let placement = place_with(&repo.path(), &plan, &[], &quiet, &faults).unwrap();
+    let placement = place_with(&repo.path(), &plan, &[], &faults).unwrap();
 
     assert_eq!(placement, Placement::InPlace(InPlaceReason::NoReplaceUnsupported));
     assert_in_place(&repo, &plan, &before);
@@ -137,7 +132,7 @@ fn a_nested_mount_deletes_in_place_without_trying_the_move() {
     let attempted: fn() -> io::Error = || panic!("the move was attempted");
     let faults = Faults { rename_instead: Some(attempted), ..Faults::default() };
 
-    let placement = place_with(&repo.path(), &plan, &table, &quiet, &faults).unwrap();
+    let placement = place_with(&repo.path(), &plan, &table, &faults).unwrap();
 
     assert_eq!(placement, Placement::InPlace(InPlaceReason::NestedMounts(vec![inside])));
     assert_in_place(&repo, &plan, &before);
@@ -153,7 +148,7 @@ fn a_collision_at_the_hidden_name_stays_an_error_and_replaces_nothing() {
     fs::write(plan.quarantine.join("occupant.txt"), "kept\n").unwrap();
     let occupant = rename::identity(&plan.quarantine).unwrap();
 
-    let error = place(&repo.path(), &plan, &[], &quiet).unwrap_err();
+    let error = place(&repo.path(), &plan, &[]).unwrap_err();
 
     assert!(matches!(&error, MoveError::Rename(rename) if rename.kind == RenameFailure::Collision), "{error:?}");
     assert_eq!(rename::identity(&plan.quarantine).unwrap(), occupant, "the occupant stays");
@@ -175,7 +170,7 @@ fn a_rename_to_another_volume_stays_an_error() {
     let cross_device: fn() -> io::Error = || io::Error::from_raw_os_error(17); // ERROR_NOT_SAME_DEVICE
     let faults = Faults { rename_instead: Some(cross_device), ..Faults::default() };
 
-    let error = place_with(&repo.path(), &plan, &[], &quiet, &faults).unwrap_err();
+    let error = place_with(&repo.path(), &plan, &[], &faults).unwrap_err();
 
     assert!(matches!(&error, MoveError::Rename(rename) if rename.kind == RenameFailure::CrossDevice), "{error:?}");
     assert_in_place(&repo, &plan, &before);
@@ -192,7 +187,7 @@ fn an_open_file_in_the_checkout_deletes_in_place() {
     let before = snapshot(&repo, &plan);
     let held = fs::File::open(plan.original.join("README.md")).unwrap();
 
-    let placement = place(&repo.path(), &plan, &[], &quiet);
+    let placement = place(&repo.path(), &plan, &[]);
 
     drop(held);
     assert_eq!(placement.unwrap(), Placement::InPlace(InPlaceReason::InUse));

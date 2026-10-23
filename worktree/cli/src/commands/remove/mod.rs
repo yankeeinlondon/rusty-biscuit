@@ -7,14 +7,14 @@
 //! asked one question about the checkout unless `--force` answered it; a
 //! caller nobody can ask is refused (exit 3) when there is anything to warn
 //! about, and the checkout is removed when there is not ([`policy`]). After
-//! "yes" the library's confirmed lifecycle ([`confirmed::remove`]) deletes
+//! "yes" the library's removal lifecycle ([`lifecycle::remove`]) deletes
 //! the checkout; nothing about its content stops it. The branch's safety
 //! tiers and questions are unchanged, and `--force` never implies
 //! `--force-branch` or `--force-remote`.
 //!
 //! A removal an earlier run left unfinished is found by the name the user
-//! typed ([`confirmed::resolve`]) and finished with its saved approval,
-//! asking nothing ([`confirmed::finish_pending`]). Removing the worktree the
+//! typed ([`lifecycle::resolve`]) and finished with its saved approval,
+//! asking nothing ([`lifecycle::finish_pending`]). Removing the worktree the
 //! caller stands in is handed to the shell wrapper: the first run asks, saves
 //! the approval, and prints `cd:` plus `remove-handoff:<token>`, and the
 //! wrapper's `wt remove --handoff <token>` finishes that operation from
@@ -37,7 +37,7 @@ use worktree::{WorktreeCandidate, WorktreeError};
 use worktree::fork_origin::{ForkOriginStore, fork_origin_path};
 use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::clock::HostClock;
-use worktree::remove::confirmed::{
+use worktree::remove::lifecycle::{
     self, ApprovedBranch, Candidate, Env, ExitClass, Notify, Removal, Request, Resolved, ResolveError, Revalidate,
 };
 use worktree::remove::delete::Wait;
@@ -238,13 +238,13 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     // One listing finds the base checkout and resolves the name.
     let entries = worktree_entries()?;
     let base = resolve_worktree(&entries, "base")?.path;
-    let entry = match confirmed::resolve_in(&base, entries, name) {
+    let entry = match lifecycle::resolve_in(&base, entries, name) {
         Ok(Resolved::Live(entry)) => entry,
         // An earlier run's removal is finished with its own approval (R19).
         Ok(Resolved::Pending(id)) => {
             std::env::set_current_dir(&base)?;
             return with_env(&terminal, &base, |env| {
-                finish(&terminal, confirmed::finish_pending(&base, &id, env), None, outcome::Report::default())
+                finish(&terminal, lifecycle::finish_pending(&base, &id, env), None, outcome::Report::default())
             });
         }
         Ok(Resolved::Ambiguous(candidates)) => return Err(ambiguous(name, &candidates)),
@@ -341,7 +341,7 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     if moving && matches!(gathered.target, Target::Checkout { .. }) {
         return hand_off(&terminal, &request, &branch, &actions, &cwd);
     }
-    with_env(&terminal, &base, |env| finish(&terminal, confirmed::remove(&request, env), lost, branch.unbound_report(&actions)))?;
+    with_env(&terminal, &base, |env| finish(&terminal, lifecycle::remove(&request, env), lost, branch.unbound_report(&actions)))?;
     if moving {
         let (landing, _) = landing(&base, &entry, &cwd)?;
         println!("cd:{}", landing.display());
@@ -586,7 +586,7 @@ fn hand_off(
     actions: &Actions,
     cwd: &Path,
 ) -> Result<(), WorktreeError> {
-    let id = with_env(terminal, request.base, |env| confirmed::save_approval(request, env))
+    let id = with_env(terminal, request.base, |env| lifecycle::save_approval(request, env))
         .map_err(|refusal| outcome::refusal_error(&refusal))?;
     // What the second run cannot say: a branch the policy kept, and a
     // remote deletion the preflight could not bind.
@@ -672,7 +672,7 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         })?;
     std::env::set_current_dir(&base)?;
     with_env(&terminal, &base, |env| {
-        finish(&terminal, confirmed::finish_handoff(&base, &record, &cwd, env), None, outcome::Report::default())
+        finish(&terminal, lifecycle::finish_handoff(&base, &record, &cwd, env), None, outcome::Report::default())
     })?;
     print(&terminal, format!("<dim>You are now in {}.</dim>", esc(&cwd.display().to_string())));
     Ok(())

@@ -21,7 +21,8 @@ use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 use super::OperationId;
 use crate::strict_json;
 
-/// The only `record_version` this build reads or writes.
+/// The legacy `record_version`. This build reads it only to migrate it and
+/// never writes it (tests build legacy fixtures with `RecoveryRecord::to_json`).
 pub const RECORD_VERSION: u32 = 1;
 
 /// The quarantine's file-name prefix; the record refuses any other.
@@ -48,9 +49,11 @@ pub struct RecoveryRecord {
     pub branch: BranchBinding,
     /// The commit the checkout's `HEAD` was approved at.
     pub approved_tip: String,
-    /// [`crate::remove::Inventory::fingerprint`] the consent was given for.
+    /// The digest of the checkout's state that the earlier `wt` bound
+    /// consent to. Validated as part of the record, never compared.
     pub consent_fingerprint: String,
-    /// The decisive Sniff query that found no usage.
+    /// The usage query that earlier `wt` decided on. Read as part of the
+    /// record, never used.
     pub discovery: PathUsageReport,
     /// Always includes [`IntendedAction::RemoveCheckout`].
     pub intended_actions: Vec<IntendedAction>,
@@ -194,7 +197,8 @@ impl RecoveryRecord {
         Ok(())
     }
 
-    pub fn to_json(&self) -> Vec<u8> {
+    #[cfg(test)]
+    pub(crate) fn to_json(&self) -> Vec<u8> {
         serde_json::to_vec_pretty(self).expect("a recovery record always serializes")
     }
 }

@@ -40,29 +40,15 @@ which = "8.0"
 # no-replacement renames (`renameat2`, `renamex_np`) for the quarantine move.
 libc = "0.2"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-# `wt remove`'s activity observer on Linux; no default features (they add a
-# tokio stream).
-inotify = { version = "0.11", default-features = false }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# `wt remove`'s activity observer on macOS: FSEvents, including
-# `FSEventStreamFlushSync`, which the drain barrier needs.
-fsevent-sys = "4.1"
-
 [target.'cfg(windows)'.dependencies]
 # The quarantine move's no-replacement rename (`SetFileInformationByHandle`)
-# and its `FileIdInfo` directory identity; `wt remove`'s activity observer
-# (`ReadDirectoryChangesW` with overlapped reads and events); the system
-# directory (`GetSystemDirectoryW`) that Windows Search's processes must run
-# from for the usage check's one recheck.
+# and its `FileIdInfo` directory identity, `wt remove`'s deletion by handle
+# (`CreateFileW`, which needs `Win32_Security`, and
+# `SetFileInformationByHandle`), and the mount table (volume mount points).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
-    "Win32_System_IO",
-    "Win32_System_SystemInformation",
-    "Win32_System_Threading",
 ] }
 
 [features]

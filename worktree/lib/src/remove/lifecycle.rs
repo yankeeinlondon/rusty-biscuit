@@ -1,352 +1,264 @@
-//! One contention-aware removal of a linked checkout, from the decisive usage
-//! query to the closed recovery record.
+//! A removal the user confirmed (or forced): after "yes", the checkout is
+//! deleted. Nothing about its content stops it; only the boundaries that
+//! keep deletion inside the approved checkout, a permanent refusal by the
+//! operating system, and the user's own Ctrl-C do.
 //!
-//! [`remove_checkout`] runs the order `2026-10-05-graceful-file-contention`
-//! decides (its decision 8), each step through the module that owns it:
+//! [`remove`] runs the steps in the order of the flowchart in
+//! `2026-10-22-confirmed-remove-always-deletes`, each recorded in the
+//! operation's compact record ([`CompactRecord`]) before the next starts:
 //!
-//! 1. [`plan_move`] fixes the quarantine and refuses ineligible topologies
-//!    (locked, submodules, links) before anything else;
-//! 2. activity [`observation`](super::observation) starts and the
-//!    [`DeletionInventory`] is captured, so no window exists in which a new
-//!    writer is seen by neither;
-//! 3. the decisive [`check_usage`] runs on the inventory's
-//!    [`tree_index`](DeletionInventory::tree_index) instead of walking the
-//!    checkout again, excluding only the observer's own registered handles
-//!    (and rechecking once, on the same index, when only Windows Search held
-//!    files);
-//! 4. the approval's bindings are read again (the branch tip and the consent
-//!    fingerprint), the inventory is confirmed against everything observed
-//!    so far, and the index is bound ([`bind_index`]);
-//! 5. [`RecoveryStore::begin`] sizes the journal from the inventory, refuses
-//!    when the space available cannot hold it, and makes the record and the
-//!    inventory durable, and one last drain refuses anything that changed
-//!    since;
-//! 6. [`move_to_quarantine`], then the move's own events are explained
-//!    (the original moved away, the quarantine moved in, the rewritten admin
-//!    `gitdir`) before [`delete_content`](super::observation::deletion::delete_content)
-//!    and [`unregister_quarantine`];
-//! 7. only then the original's copy record and the branch actions, and
-//!    [`Operation::complete`] persists completion before the journal goes.
+//! 1. **Save the approval.** The record binds the checkout's identity, the
+//!    repository, the worktree's Git record, and the approved branch steps.
+//!    It is durable before anything is unlocked, moved, or deleted; when it
+//!    cannot be saved nothing is changed ([`Refusal::NotSaved`]).
+//! 2. **Unlock** a locked worktree, with `git worktree unlock`, when the
+//!    question showed the lock.
+//! 3. **Place** the checkout: move it to its hidden quarantine, or mark it
+//!    for deletion in place where a move is unsafe (a nested mount, a
+//!    filesystem without a no-replacement rename, a held file on Windows, a
+//!    `.git` link that cannot be kept).
+//! 4. Run `git status` once more ([`late`]) to name uncommitted files the
+//!    question did not show; this never blocks.
+//! 5. **Delete** the placed checkout with the plain engine
+//!    ([`delete_tree`](super::delete::delete_tree)), waiting out temporary
+//!    contention. A nested mount or a permanent failure keeps the record, the
+//!    registration, and the branches until a later `wt remove` finishes.
+//! 6. **Unregister** with plain `git worktree remove` of the now absent
+//!    checkout (which deletes the worktree's Git record, its submodules'
+//!    `modules/` included), then the copy record.
+//! 7. **Branch steps** ([`branches`]), each bound to its approved tip,
+//!    endpoint, and lease; a changed branch is kept and the run exits 1.
+//! 8. **Finish**: the record is deleted, so a completed removal leaves
+//!    nothing.
 //!
-//! Nothing is moved before step 6, so every failure up to there is a
-//! [`Refusal`] that changed nothing (exit 3 or 4, or 1 for an operational
-//! error or an interrupt seen just before the move). From the move on, the operation always ends as [`Finished`]: a
-//! saved report, and a pending record whenever the checkout or a branch
-//! action is unfinished. [`resume`] picks such a record up again, and
-//! [`resolve_target`] finds it by the name the user typed.
+//! An interrupted operation is finished by [`resume::finish_pending`], which
+//! reads the paths and the registration as they are rather than trusting
+//! the record's progress marker. A worktree that is not a checkout
+//! directory (gone, a file, or a link) has no content to delete in steps
+//! 3–5 and is handled in one short pass that saves no record.
 
-mod resolve;
-mod resume;
+pub mod branches;
+pub mod late;
+pub mod resolve;
+pub mod resume;
 #[cfg(test)]
 mod tests;
 
-pub use resolve::{Candidate, PendingTarget, ResolveError, Target, resolve_target, resolve_target_in};
-pub use resume::{Inspection, RecordApproval, Resolution, ResumeRequest, inspect, release_unstarted, resume, resume_consent};
+pub use branches::{BranchOutcome, BranchResult, Revalidate};
+pub use resolve::{Candidate, Resolved, ResolveError, resolve, resolve_in};
+pub use resume::{finish_handoff, finish_pending};
 
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::fmt::Display;
+use std::ffi::OsStr;
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use sniff::filesystem::query::{FileIdentity, NativeString};
+use sniff::filesystem::query::FileIdentity;
 
 use crate::availability::{self, EntryKind};
 use crate::error::WorktreeError;
 use crate::worktree::WorktreeEntry;
 
-use super::admin_entry::{BackReferenceError, read_back_reference, same_location};
-use super::included::classify_included;
-use super::inventory::{Inventory, collect_inventory};
-use super::missing::{IndexBinding, MissingRefusal, bind_index, recorded_head};
-use super::observation::deletion::{DeletionOptions, Stop, delete_content_with, own_move};
-use super::observation::inventory::{DeletionInventory, InventoryRefusal};
-use super::observation::{DiagnosticsHandle, Drain, EventKind, Observation, ObservationError, ObserverOptions, Scope, Targets};
-use super::outcome::{
-    ActivityKind, ActivityLocation, BranchOutcome, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult,
-    DiscoveryRun, ObservedActivity, OperationReport, OriginalState, QuarantineReport, QuarantineState, RegistrationState,
-    RemovalOutcome, ReportNote, Step, StepResult, TimelineEvent,
-};
-use super::quarantine::association::{MoveError, MoveErrorClass, MovePlan, MoveRefusal, move_to_quarantine, plan_move};
-use super::quarantine::association::CheckoutLocation;
+use super::admin_entry::{AdminEntry, BackReferenceError, admin_entry_in, common_git_dir, read_back_reference, same_location};
+use super::clock::Clock;
+use super::delete::{self, Deletion, Failure, UsageHolders, Wait};
+use super::facts::{Facts, LinkTarget, Target, Warning};
+use super::faults::FsFaults;
+use super::mounts::{Mount, MountInfo};
+use super::quarantine::association::{Faults, MoveError, MoveErrorClass, MovePlan, MoveRefusal, plan_move};
+use super::quarantine::placement::{Placement, in_place_for_refusal, place_with};
 use super::quarantine::rename;
-use super::quarantine::unregister::{UnregisterError, unregister_quarantine};
 use super::recovery::OperationId;
-use super::recovery::journal::{EntryState, summarize};
-use super::recovery::lock::LockError;
-use super::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord, RepositoryBinding};
-use super::recovery::space::SpaceSource;
-use super::recovery::store::{BookkeepingWarning, Operation, RecoveryStore, StoreError};
-use super::remote::delete_remote_branch;
-use super::remove_local_branch;
-use super::usage::{OwnedHandles, UsageClearance, UsageRefusal, UsageSource, check_usage};
+use super::recovery::compact::{
+    BranchAction, BranchStep, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepApproval, StepState,
+};
+use super::recovery::lock::{LockError, OperationLock};
+use super::recovery::record::RepositoryBinding;
+use super::recovery::store::{PendingRemoval, RecoveryStore, StoreError};
+use super::usage::UsageSource;
 
-/// What the user approved, as the report showed it.
+/// One branch deletion the user approved, and how.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Approval {
-    /// The checkout's files, with its include assessment; on resume,
-    /// [`ResumeConsent::inventory`].
-    pub inventory: Inventory,
-    /// [`Inventory::fingerprint`] of `inventory` (see [`consent_state`]); on
-    /// resume, [`ResumeConsent::fingerprint`].
-    pub fingerprint: String,
-    /// The commit the checkout's branch (or detached HEAD) was approved at.
-    pub tip: String,
-    /// Consent to discard what `inventory` says needs it.
-    pub discard_files: bool,
+pub struct ApprovedBranch {
+    /// [`BranchAction::Local`] or [`BranchAction::Remote`].
+    pub action: BranchAction,
+    pub approval: StepApproval,
 }
 
-/// The consent-relevant state of the checkout at `checkout` now: its files
-/// and include assessment, and their fingerprint. Runs `git status`, which
-/// may rewrite the worktree's index.
-///
-/// ## Errors
-///
-/// Git's failure, or [`WorktreeError::Io`] when a file consent would cover
-/// cannot be read.
-pub fn consent_state(base: &Path, checkout: &Path, branch: Option<&str>) -> Result<(Inventory, String), WorktreeError> {
-    let mut inventory = collect_inventory(base, checkout)?;
-    inventory.included = classify_included(base, checkout, branch)?;
-    let fingerprint = inventory.fingerprint(base, checkout)?;
-    Ok((inventory, fingerprint))
-}
-
-/// The consent state of a pending removal's moved checkout: what
-/// [`consent_state`] collects there, less the dirty entries the operation's
-/// own confirmed deletions explain. Built by [`resume_consent`]; a retry's
-/// [`Approval`] carries `inventory` and `fingerprint`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResumeConsent {
-    /// Everything `git status` lists in the moved checkout.
-    pub raw: Inventory,
-    /// `raw` without `excluded`: what the report lists and consent covers.
-    pub inventory: Inventory,
-    /// Each an unstaged deletion (porcelain ` D`) of a path that some
-    /// attempt's journal records as `Deleted`, inspected absent now.
-    pub excluded: Vec<PathBuf>,
-    /// [`Inventory::fingerprint`] of `raw`, bound to `excluded`, so a retry's
-    /// approval and the recheck under the operation lock compare both views.
-    pub fingerprint: String,
-}
-
-/// `raw` split into what consent covers and what this operation's confirmed
-/// deletions explain. `deleted` holds every journal path with a durable
-/// `Deleted` result; `absent` inspects a quarantine-relative path without
-/// following links, and an inspection error is not absence.
-///
-/// Paths are compared by component, which is exact and case-sensitive but
-/// lets Git's `/` match a Windows journal's `\`; a deleted directory
-/// explains no path beneath it.
-fn explain_deletions(raw: &Inventory, deleted: &HashSet<&Path>, absent: impl Fn(&Path) -> bool) -> (Inventory, Vec<PathBuf>) {
-    let mut inventory = raw.clone();
-    let mut excluded = Vec::new();
-    inventory.dirty.retain(|entry| {
-        let explained = entry.status == " D" && deleted.get(entry.path.as_path()).is_some_and(|journaled| absent(journaled));
-        if explained {
-            excluded.push(entry.path.clone());
-        }
-        !explained
-    });
-    (inventory, excluded)
-}
-
-/// Deletes the local branch `name` while its tip is still `expected_tip`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalBranchDeletion {
-    pub name: String,
-    pub expected_tip: String,
-}
-
-/// Deletes branch `destination` on `remote` through `endpoint`, leased to
-/// `expected_sha`; see [`delete_remote_branch`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteBranchDeletion {
-    pub remote: String,
-    pub destination: String,
-    pub endpoint: String,
-    pub expected_sha: String,
-}
-
-/// The approved branch actions, run only after the checkout's removal is
-/// verified, local before remote.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BranchActions {
-    pub local: Option<LocalBranchDeletion>,
-    pub remote: Option<RemoteBranchDeletion>,
-}
-
-/// One removal of the live, linked worktree `entry`.
+/// One confirmed removal of `entry`, as the question described it.
 #[derive(Debug, Clone, Copy)]
-pub struct RemovalRequest<'a> {
+pub struct Request<'a> {
+    /// The base (main) checkout, from which every Git command runs.
     pub base: &'a Path,
     pub entry: &'a WorktreeEntry,
-    /// The name the user typed; saved so a retry finds the operation by it.
+    /// The name the user typed; saved so a later run finds the operation.
     pub requested_name: &'a str,
-    pub approval: &'a Approval,
-    pub branches: &'a BranchActions,
+    /// What the question showed ([`gather`](super::facts::gather)). Its
+    /// target decides the steps, its lock warning approves unlocking, and
+    /// its inventory is what [`late`] compares against.
+    pub facts: &'a Facts,
+    /// Local before remote; at most one of each.
+    pub branches: &'a [ApprovedBranch],
 }
 
-/// How an observer is started: `moved` says the tree is already at the
-/// quarantine; the predicate is [`Environment::interrupted`].
-pub type StartObservation<'a> = dyn Fn(Targets, bool, &dyn Fn() -> bool) -> Result<Observation, ObservationError> + 'a;
+/// Told what the removal is waiting for, so the user can see it.
+pub trait Notify {
+    /// Another `wt remove` of this worktree holds its lock (R16); this run
+    /// waits for it to finish or exit.
+    fn removal_running(&self) {}
 
-/// What the lifecycle asks of its surroundings. Tests inject each.
-pub struct Environment<'a> {
+    /// Deletion waits on held or refilling entries (R22, R24); called when
+    /// the wait starts and when what it reports changes.
+    fn waiting(&self, _wait: &Wait) {}
+}
+
+/// [`Notify`] that shows nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Quiet;
+
+impl Notify for Quiet {}
+
+/// What the removal depends on outside the repository; tests inject each.
+pub struct Env<'a> {
+    /// Names the programs a deletion wait is waiting on.
     pub usage: &'a dyn UsageSource,
-    /// Read before an attempt's journal is written, which refuses when the
-    /// journal cannot fit ([`RecoveryStore::begin`], [`RecoveryStore::reopen`]).
-    pub space: &'a dyn SpaceSource,
-    /// Polled once before the move, where it refuses with nothing changed,
-    /// at every deletion entry boundary, where it stops the removal, and by
-    /// every wait for change delivery, which it ends at once: before the
-    /// move that refuses, after it the removal stops.
-    pub interrupted: &'a dyn Fn() -> bool,
-    pub observe: &'a StartObservation<'a>,
-    /// Called at most once per attempt, after observation starts and before
-    /// the move (on a resumed attempt, before its further deletion), when
-    /// the startup ([`ObservationDiagnostics::startup_ms`]) took longer than
-    /// [`SLOW_STARTUP`]. The removal continues.
-    ///
-    /// [`ObservationDiagnostics::startup_ms`]: super::observation::ObservationDiagnostics::startup_ms
-    pub slow_startup: &'a dyn Fn(Duration),
+    pub mounts: &'a dyn MountInfo,
+    /// Every wait: deletion's backoff and the lock wait.
+    pub clock: &'a dyn Clock,
+    pub faults: &'a dyn FsFaults,
+    /// The user's Ctrl-C; polled at every entry and by every wait.
+    pub cancelled: &'a dyn Fn() -> bool,
+    /// Rechecks a conditionally approved branch on a later run.
+    pub revalidate: &'a dyn Revalidate,
+    pub notify: &'a dyn Notify,
 }
 
-/// The observation startup above which [`Environment::slow_startup`] is told.
-pub const SLOW_STARTUP: Duration = Duration::from_secs(1);
-
-/// Tells [`Environment::slow_startup`] when `observation` took longer than
-/// [`SLOW_STARTUP`] to start.
-fn report_slow_startup(observation: &Observation, env: &Environment<'_>) {
-    let startup = observation.diagnostics().startup_ms.map(Duration::from_millis);
-    if let Some(startup) = startup.filter(|startup| *startup > SLOW_STARTUP) {
-        (env.slow_startup)(startup);
-    }
-}
-
-/// [`StartObservation`] with this platform's native adapter.
-pub fn native_observation(targets: Targets, moved: bool, interrupted: &dyn Fn() -> bool) -> Result<Observation, ObservationError> {
-    if moved {
-        Observation::start_at_quarantine(targets, ObserverOptions::default(), interrupted)
-    } else {
-        Observation::start(targets, ObserverOptions::default(), interrupted)
-    }
-}
-
-/// How the CLI exits for an ended removal: `wt`'s exit codes 0, 1, 3, and 4.
+/// How the CLI exits (N5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitClass {
-    /// 0: verified removal with every branch action done.
+    /// 0: the checkout is gone and every branch step is done.
     Success,
-    /// 1: a move happened, the state is uncertain, a branch action failed,
-    /// or an operational error that changed nothing.
+    /// 1: something needs the user (a permanent failure, a retained mount, a
+    /// kept branch, an approval that could not be saved, Ctrl-C).
     Failure,
-    /// 3: refused before anything changed; a fresh run or a fix to the
-    /// worktree is needed.
+    /// 3: refused before anything changed, because what is there is not
+    /// what was approved, or a record cannot be used.
     Refused,
-    /// 4: this environment cannot run the lifecycle; nothing changed.
+    /// 4: refused before the question: the shell running `wt` stands in the
+    /// checkout on Windows (R15).
     Blocked,
 }
 
-/// Why nothing was moved or deleted. Earlier preparation (a repaired link)
-/// is the caller's to report.
+/// Why nothing was unlocked, moved, or deleted.
 #[derive(Debug, thiserror::Error)]
 pub enum Refusal {
+    #[error("the main checkout is never removed")]
+    MainCheckout,
+    /// Windows R15: the shell's working directory is inside the checkout.
+    #[error("the shell running wt is inside the worktree, which blocks deleting it")]
+    ShellInside,
+    /// The approval could not be saved, so nothing was deleted (R29).
     #[error(transparent)]
-    Usage(UsageRefusal),
-    /// A topology or state the move does not support.
-    #[error(transparent)]
-    Ineligible(MoveRefusal),
-    #[error(transparent)]
-    Inventory(InventoryRefusal),
-    #[error(transparent)]
-    Observation(ObservationError),
-    /// Approved state (tip, files, index, Git's record) changed.
-    #[error("{0}")]
-    Changed(String),
-    /// The checkout holds content that needs consent, and none was given.
-    #[error("the worktree holds files that need consent to discard, and none was given")]
-    ConsentRequired,
-    #[error(transparent)]
-    Index(MissingRefusal),
+    NotSaved(StoreError),
     #[error(transparent)]
     Store(StoreError),
-    /// The move failed and the checkout and its registration are where they
-    /// were ([`MoveError::nothing_changed`]).
+    /// The checkout cannot be bound to its own Git record, or changed since
+    /// it was inspected.
+    #[error(transparent)]
+    Ineligible(MoveRefusal),
+    /// The move failed with the checkout and its registration where they
+    /// were. A lock the user approved removing stays removed.
     #[error(transparent)]
     Move(MoveError),
     #[error(transparent)]
     Git(WorktreeError),
-    /// A pending operation that [`resume`] cannot continue; nothing is
-    /// cleaned up automatically.
-    #[error("removal {} cannot be resumed: {}", .0.id, .0.resolution)]
-    Recovery(Box<Inspection>),
-    /// [`Environment::interrupted`] held before the move, or before a
-    /// resumed attempt's deletion.
-    #[error("the removal was interrupted before it changed anything")]
-    Interrupted,
+    /// What a pending operation would delete is no longer what it approved.
+    #[error("{0}")]
+    Replaced(String),
+    #[error("the removal was cancelled before anything was deleted")]
+    Cancelled,
 }
 
 impl Refusal {
     pub fn exit_class(&self) -> ExitClass {
         match self {
-            Self::Inventory(InventoryRefusal::Coverage(_)) | Self::Observation(_) => ExitClass::Blocked,
-            Self::Store(error) => match error {
-                StoreError::Storage { .. }
-                | StoreError::Io(_)
-                | StoreError::JournalWrite(_)
-                | StoreError::JournalSize(_)
-                | StoreError::InsufficientSpace { .. }
-                | StoreError::SpaceUnknown { .. } => ExitClass::Blocked,
-                StoreError::Lock(LockError::Busy | LockError::Storage(_) | LockError::Io(_)) => ExitClass::Blocked,
-                StoreError::Pending(_) | StoreError::Record { .. } | StoreError::Journal { .. } | StoreError::InventoryMismatch => {
-                    ExitClass::Refused
-                }
-                StoreError::WrongLock
-                | StoreError::PhaseOrder
-                | StoreError::Completed(_)
-                | StoreError::NotSaved(_)
-                | StoreError::Cancelled => ExitClass::Failure,
-            },
-            Self::Move(error) => match error.class() {
-                MoveErrorClass::Refused => ExitClass::Refused,
-                MoveErrorClass::BlockedByEnvironment => ExitClass::Blocked,
-                MoveErrorClass::Failed => ExitClass::Failure,
-            },
-            Self::Git(_) | Self::Interrupted => ExitClass::Failure,
-            Self::Usage(_)
-            | Self::Ineligible(_)
-            | Self::Inventory(_)
-            | Self::Changed(_)
-            | Self::ConsentRequired
-            | Self::Index(_)
-            | Self::Recovery(_) => ExitClass::Refused,
+            Self::ShellInside => ExitClass::Blocked,
+            Self::MainCheckout | Self::Ineligible(_) | Self::Replaced(_) => ExitClass::Refused,
+            Self::Store(StoreError::Record { .. } | StoreError::Pending(_)) => ExitClass::Refused,
+            Self::Move(error) if error.class() == MoveErrorClass::Refused => ExitClass::Refused,
+            Self::NotSaved(_) | Self::Store(_) | Self::Move(_) | Self::Git(_) | Self::Cancelled => ExitClass::Failure,
         }
     }
 }
 
-/// An operation that reached its end after the move, or resumed after one.
+/// What became of the checkout itself.
+#[derive(Debug)]
+pub enum CheckoutResult {
+    /// Deleted, with its Git record.
+    Removed,
+    /// It was already gone (R17): only its Git record was removed.
+    AlreadyRemoved,
+    /// Everything else is deleted; these mounts and the directories above
+    /// them are kept, with the registration, the record, and the branches,
+    /// until they are unmounted (R7).
+    RetainedMounts(Vec<Mount>),
+    /// Everything else is deleted; these entries are kept until their cause
+    /// is fixed (R29). Mounts kept as well are listed.
+    Permanent { failures: Vec<Failure>, retained_mounts: Vec<Mount> },
+    /// The user pressed Ctrl-C; `waiting_on` is what a wait was for.
+    Cancelled { waiting_on: Vec<PathBuf> },
+    /// The operation stopped where a step could not be completed; the
+    /// sentence names the path and the cause.
+    Stopped(String),
+}
+
+/// A removal that got past saving its approval (or needed none).
 #[derive(Debug)]
 pub struct Finished {
-    /// Also saved at `report_path`, unless `warnings` says it could not be.
-    pub report: OperationReport,
-    pub report_path: PathBuf,
+    /// `None` for a removal that saved no record.
+    pub id: Option<OperationId>,
+    /// The worktree's path, as the user knows it.
+    pub path: PathBuf,
+    pub checkout: CheckoutResult,
+    /// Entries deleted by this run; `None` when not counted.
+    pub entries: Option<u64>,
+    /// Uncommitted files `git status` listed just before deletion that the
+    /// question did not show (R14), checkout-relative.
+    pub late_changes: Vec<PathBuf>,
+    pub branches: Vec<BranchResult>,
+    /// New content found at the original path after the move; kept.
+    pub original_kept: Option<PathBuf>,
     /// Bookkeeping that failed without changing the outcome.
     pub warnings: Vec<String>,
 }
 
 impl Finished {
-    pub fn exit_class(&self) -> ExitClass {
-        if self.report.outcome == RemovalOutcome::Removed && !self.report.branch_failed() && self.report.errors.is_empty() {
-            ExitClass::Success
-        } else {
-            ExitClass::Failure
+    fn new(id: Option<OperationId>, path: &Path) -> Self {
+        Self {
+            id,
+            path: path.to_path_buf(),
+            checkout: CheckoutResult::Removed,
+            entries: None,
+            late_changes: Vec::new(),
+            branches: Vec::new(),
+            original_kept: None,
+            warnings: Vec::new(),
         }
+    }
+
+    /// Whether the record is kept for a later `wt remove` to finish.
+    pub fn pending(&self) -> bool {
+        !matches!(self.checkout, CheckoutResult::Removed | CheckoutResult::AlreadyRemoved)
+    }
+
+    pub fn exit_class(&self) -> ExitClass {
+        let branches_done = self.branches.iter().all(|branch| branch.outcome.is_done());
+        if !self.pending() && branches_done { ExitClass::Success } else { ExitClass::Failure }
     }
 }
 
-/// How one removal attempt ended.
+/// How one run ended.
 #[derive(Debug)]
 pub enum Removal {
     Refused(Box<Refusal>),
@@ -362,781 +274,672 @@ impl Removal {
     }
 }
 
-/// Removes the live, linked worktree `request.entry` through the whole
-/// lifecycle (see the module docs).
-pub fn remove_checkout(request: &RemovalRequest<'_>, env: &Environment<'_>) -> Removal {
-    match run_with(request, env, &mut |_| false) {
+/// Removes `request.entry` after the user confirmed the question (see the
+/// module docs).
+pub fn remove(request: &Request<'_>, env: &Env<'_>) -> Removal {
+    match run_with(request, env, &mut Seams::none()) {
         Ok(removal) => removal,
         Err(Crashed) => unreachable!("only a test hook stops the lifecycle"),
     }
 }
 
-/// A point the lifecycle passes, for crash-injection tests.
+/// A point the lifecycle passes, for crash-injection tests; in flowchart
+/// order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Boundary {
-    /// The record is durable; nothing has moved.
+    /// The approval is durable; nothing has changed.
     Begun,
-    /// Moved and associated; nothing deleted.
+    Unlocked,
     Moved,
-    /// About to journal deletion batch `n` (batches before it are durable).
+    MarkedInPlace,
+    /// Another `delete::BATCH_ENTRIES` entries are gone (the total so far).
+    /// Passed, but cannot crash in process.
     DeletionBatch(u64),
     ContentRemoved,
     Unregistered,
+    /// Branch step `i` is recorded as finished.
+    BranchAction(usize),
     BranchesDone,
 }
 
-/// A test hook asked the lifecycle to stop at a [`Boundary`] as if the
-/// process had died there: nothing more is written.
+/// A test hook stopped the lifecycle at a [`Boundary`] as if the process had
+/// died there: nothing more is written.
 #[derive(Debug)]
 pub(crate) struct Crashed;
 
-/// Returns `true` to crash at the boundary. A deletion-batch boundary cannot
-/// crash in-process; a hook blocks there for a real process kill instead.
+/// Returns `true` to crash at the boundary.
 pub(crate) type Hook<'h> = dyn FnMut(Boundary) -> bool + 'h;
 
-pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
-    let refuse = |refusal: Refusal| Ok(Removal::Refused(Box::new(refusal)));
-    let RemovalRequest { base, entry, requested_name, approval, branches } = *request;
-    if approval.inventory.needs_consent() && !approval.discard_files {
-        return refuse(Refusal::ConsentRequired);
+/// The crate-internal seams of one run.
+pub(crate) struct Seams<'s> {
+    pub hook: Box<Hook<'s>>,
+    /// Faults for the move's rename and association steps.
+    pub moves: Faults,
+}
+
+impl Seams<'_> {
+    pub(crate) fn none() -> Self {
+        Self { hook: Box::new(|_| false), moves: Faults::default() }
     }
+
+    fn at(&mut self, boundary: Boundary) -> Result<(), Crashed> {
+        if (self.hook)(boundary) { Err(Crashed) } else { Ok(()) }
+    }
+}
+
+pub(crate) fn run_with(request: &Request<'_>, env: &Env<'_>, seams: &mut Seams<'_>) -> Result<Removal, Crashed> {
+    let refuse = |refusal: Refusal| Ok(Removal::Refused(Box::new(refusal)));
+    if request.entry.is_main {
+        return refuse(Refusal::MainCheckout);
+    }
+    if request.facts.blocker.is_some() {
+        return refuse(Refusal::ShellInside);
+    }
+    match &request.facts.target {
+        Target::Checkout { .. } => checkout(request, env, seams),
+        Target::Link { own: true, resolved: LinkTarget::Resolved(real), .. } => Ok(without_record(request, env, Some(real))),
+        Target::Link { .. } | Target::NotADirectory | Target::Uninspectable | Target::Missing | Target::Vanished => {
+            Ok(without_record(request, env, None))
+        }
+    }
+}
+
+/// The checkout directory, bound before its approval is saved.
+struct Bound {
+    original: PathBuf,
+    identity: FileIdentity,
+    common_dir: PathBuf,
+    admin: AdminEntry,
+}
+
+impl Bound {
+    fn repository(&self) -> io::Result<RepositoryBinding> {
+        Ok(RepositoryBinding {
+            common_dir: self.common_dir.as_path().into(),
+            common_dir_identity: rename::identity(&self.common_dir)?,
+            admin_dir: self.admin.dir.as_path().into(),
+            admin_dir_identity: rename::identity(&self.admin.dir)?,
+        })
+    }
+}
+
+/// Binds the checkout at `entry.path` to its own Git record without a move
+/// plan, for a checkout that will be deleted in place.
+fn bind_in_place(base: &Path, entry: &WorktreeEntry) -> Result<Bound, Refusal> {
+    let original = entry.path.clone();
+    match availability::inspect(&original) {
+        Ok(EntryKind::Directory) => {}
+        Ok(_) => return Err(Refusal::Ineligible(MoveRefusal::NotARealDirectory(original))),
+        Err(error) => return Err(Refusal::Ineligible(MoveRefusal::Uninspectable(format!("{}: {error}", original.display())))),
+    }
+    let identity = rename::identity(&original).map_err(|error| Refusal::Git(WorktreeError::Io(error)))?;
+    let common_dir = common_git_dir(base).map_err(Refusal::Git)?;
+    let admin = admin_entry_in(&common_dir, &original).map_err(|error| Refusal::Ineligible(MoveRefusal::Association(error)))?;
+    Ok(Bound { original, identity, common_dir, admin })
+}
+
+fn checkout(request: &Request<'_>, env: &Env<'_>, seams: &mut Seams<'_>) -> Result<Removal, Crashed> {
+    match approve(request, env) {
+        Approval::Saved(saved) => {
+            let (pending, plan) = *saved;
+            seams.at(Boundary::Begun)?;
+            let finished = Finished::new(Some(pending.id().clone()), pending.record().original.as_path());
+            let operation = Operation { base: request.base, env, pending, finished, fresh: true };
+            operation.run(Progress::Approved, plan, Some(request.facts), seams)
+        }
+        // An earlier run of this worktree's removal exited (R16, R19):
+        // finish that one, with its own approval.
+        Approval::Earlier(other) => resume::resume_with(request.base, &other, env, seams, None),
+        Approval::Refused(refusal) => Ok(Removal::Refused(Box::new(refusal))),
+    }
+}
+
+/// Saves the approval of `request` as a pending operation and returns its
+/// id, changing nothing else: the shell wrapper's first run (R18) prints the
+/// id in its handoff, and the second run finishes it with
+/// [`finish_handoff`]. An operation an earlier run of this worktree left is
+/// returned instead, to be finished the same way.
+///
+/// ## Errors
+///
+/// The [`Refusal`] that kept the approval from being saved; a target that
+/// is not a checkout directory is [`Refusal::Ineligible`], since it has
+/// nothing for a shell to stand in.
+pub fn save_approval(request: &Request<'_>, env: &Env<'_>) -> Result<OperationId, Refusal> {
+    if request.entry.is_main {
+        return Err(Refusal::MainCheckout);
+    }
+    if request.facts.blocker.is_some() {
+        return Err(Refusal::ShellInside);
+    }
+    if !matches!(request.facts.target, Target::Checkout { .. }) {
+        return Err(Refusal::Ineligible(MoveRefusal::Unsupported("only a checkout directory is handed off".into())));
+    }
+    match approve(request, env) {
+        Approval::Saved(saved) => Ok(saved.0.id().clone()),
+        Approval::Earlier(other) => Ok(other),
+        Approval::Refused(refusal) => Err(refusal),
+    }
+}
+
+/// How saving an approval ended.
+enum Approval {
+    Saved(Box<(PendingRemoval, Option<MovePlan>)>),
+    /// Another operation of this worktree is stored.
+    Earlier(OperationId),
+    Refused(Refusal),
+}
+
+fn approve(request: &Request<'_>, env: &Env<'_>) -> Approval {
+    let refuse = Approval::Refused;
+    let Request { base, entry, requested_name, facts, branches } = *request;
     let id = match OperationId::generate() {
         Ok(id) => id,
         Err(error) => return refuse(Refusal::Git(error)),
     };
-    let plan = match plan_move(base, entry, &id) {
-        Ok(plan) => plan,
+    let (bound, plan, mut in_place) = match plan_move(base, entry, &id) {
+        Ok(plan) => {
+            let bound = Bound { original: plan.original.clone(), identity: plan.identity, common_dir: plan.common_dir.clone(), admin: plan.admin.clone() };
+            (bound, Some(plan), false)
+        }
+        // R10, R13: the question said Git cannot read the checkout, so a
+        // `.git` the move cannot follow is no reason to stop; the checkout
+        // is bound by its Git record's back-reference and deleted in place.
+        Err(refusal) if in_place_for_refusal(&refusal).is_some() || unreadable_by_git(facts, &refusal) => match bind_in_place(base, entry) {
+            Ok(bound) => (bound, None, true),
+            Err(refusal) => return refuse(refusal),
+        },
         Err(refusal) => return refuse(Refusal::Ineligible(refusal)),
     };
-    let store = match RecoveryStore::open(&plan.common_dir) {
+    let mounts = nested_mounts(env.mounts, &bound.original);
+    in_place |= !mounts.is_empty();
+    let repository = match bound.repository() {
+        Ok(repository) => repository,
+        Err(error) => return refuse(Refusal::Git(WorktreeError::Io(error))),
+    };
+    let store = match RecoveryStore::open(&bound.common_dir) {
         Ok(store) => store,
         Err(error) => return refuse(Refusal::Store(error)),
     };
-    // `begin` refuses these too; asking first spares the usage query.
-    if let Err(error) = no_pending(&store, &plan.admin.dir) {
-        return refuse(Refusal::Store(error));
-    }
-    let Some(targets) = Targets::new(&plan.original, &plan.quarantine, &plan.admin.dir) else {
-        return refuse(Refusal::Ineligible(MoveRefusal::Unsupported("its quarantine is not a sibling".into())));
-    };
-    let mut timeline = Vec::new();
-    let mut observation = match (env.observe)(targets, false, env.interrupted) {
-        Ok(observation) => observation,
-        Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
-        Err(error) => return refuse(Refusal::Observation(error)),
-    };
-    report_slow_startup(&observation, env);
-    timeline.push(event(Step::ObservationStarted, StepResult::Succeeded, None));
-    let inventory = match DeletionInventory::capture(&plan.original, &approval.inventory.consent_sensitive_paths()) {
-        Ok(inventory) => inventory,
-        Err(refusal) => return refuse(Refusal::Inventory(refusal)),
-    };
-    timeline.push(event(Step::InventoryCaptured, StepResult::Succeeded, Some(format!("{} entries", inventory.entries().len()))));
-    let index = Arc::new(inventory.tree_index());
-
-    let mut own = OwnedHandles::default();
-    observation.register_handles(&mut own);
-    let discovered_at = now_ms();
-    let clearance = match check_usage(env.usage, &plan.original, &own, Some(&index)) {
-        Ok(clearance) => clearance,
-        Err(refusal) => return refuse(Refusal::Usage(refusal)),
-    };
-    let search_recheck = clearance.search_recheck.as_ref().map(|search| search.summary(true));
-    timeline.push(event(Step::Discovery, StepResult::Succeeded, search_recheck));
-
-    // After discovery and observation setup: the approval must still
-    // describe the checkout.
-    let current = || consent_state(base, &entry.path, entry.branch.as_deref()).map_err(Refusal::Git);
-    if let Err(refusal) = recheck(base, entry, approval, current) {
-        return refuse(refusal);
-    }
-    // Rechecking ran `git status`, which may rewrite the index; the binding
-    // is taken after it, so admin events up to here are not refused.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, true) {
-        return refuse(refusal);
-    }
-    let binding = match bind_index(base, &plan.admin, approval.tip.clone()) {
-        Ok(binding) => binding,
-        Err(refusal) => return refuse(Refusal::Index(refusal)),
-    };
-
-    let record = match new_record(&plan, &id, requested_name, entry, approval, branches, clearance.report.clone()) {
-        Ok(record) => record,
-        Err(error) => return refuse(Refusal::Git(WorktreeError::Io(error))),
-    };
-    let lock = match store.lock(&record.repository) {
+    let lock = match take_lock(&store, &repository, env) {
         Ok(lock) => lock,
-        Err(error) => return refuse(Refusal::Store(error)),
+        Err(error) => return refuse(error),
     };
-    let inventory = Arc::new(inventory);
-    let operation = match store.begin(lock, record, Arc::clone(&inventory), env.space) {
-        Ok(operation) => operation,
-        Err(error) => return refuse(Refusal::Store(error)),
+    let (deletion_path, deletion_mode) = match (&plan, in_place) {
+        (Some(plan), false) => (plan.quarantine.clone(), DeletionMode::Moved),
+        _ => (bound.original.clone(), DeletionMode::InPlace),
     };
-    timeline.push(event(Step::RecordCreated, StepResult::Succeeded, None));
-    if hook(Boundary::Begun) {
-        return Err(Crashed);
-    }
-
-    if (env.interrupted)() {
-        return Ok(discard(operation, Refusal::Interrupted));
-    }
-    // The last look before the move; anything since the binding refuses.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, false) {
-        return Ok(discard(operation, refusal));
-    }
-    let moved = {
-        let observation = RefCell::new(&mut observation);
-        move_to_quarantine(base, &plan, &|| unexpected_before_rollback(&mut observation.borrow_mut(), env.interrupted))
+    let record = CompactRecord {
+        record_version: COMPACT_RECORD_VERSION,
+        operation_id: id.clone(),
+        created_at_ms: now_ms(),
+        requested_name: requested_name.to_string(),
+        aliases: aliases(entry, &bound.original, requested_name),
+        original: bound.original.as_path().into(),
+        deletion_path: deletion_path.as_path().into(),
+        deletion_mode,
+        checkout_identity: bound.identity,
+        repository,
+        unlock_needed: facts.warnings.iter().any(|warning| matches!(warning, Warning::Locked { .. })),
+        branch_steps: branches
+            .iter()
+            .map(|branch| BranchStep { action: branch.action.clone(), approval: branch.approval, state: StepState::Pending })
+            .collect(),
+        progress: Progress::Approved,
     };
+    match store.approve(lock, record) {
+        Ok(pending) => Approval::Saved(Box::new((pending, plan))),
+        Err(StoreError::Pending(other)) => Approval::Earlier(other),
+        Err(error @ (StoreError::NotSaved(_) | StoreError::Io(_) | StoreError::Storage { .. })) => refuse(Refusal::NotSaved(error)),
+        Err(error) => refuse(Refusal::Store(error)),
+    }
+}
 
-    let mut report = OperationReport::new(Some(id), RemovalOutcome::Removed, NativeString::from(plan.original.as_path()));
-    report.timeline = timeline;
-    report.discovery.extend(preflight_runs(discovered_at, NativeString::from(plan.original.as_path()), clearance));
-    let mut attempt = Attempt::new(base, env, operation, report, branches, &plan.original, &plan.quarantine, plan.identity, &plan.admin.dir);
-    attempt.observed_by(&observation);
-    match moved {
-        Ok(()) => {}
-        Err(error) if error.nothing_changed() => return Ok(discard(attempt.operation, Refusal::Move(error))),
-        Err(error) => {
-            attempt.step(Step::Moved, StepResult::Failed, Some(error.to_string()));
-            if let MoveError::Stranded { state, .. } = &error
-                && state.checkout == CheckoutLocation::Quarantine
-                && let Err(write) = attempt.operation.advance_to(Phase::Moved)
-            {
-                attempt.warnings.push(format!("the recovery record could not be updated: {write}"));
-            }
-            return Ok(attempt.stop(RemovalOutcome::CleanupFailed, error));
+/// Whether `refusal` is about the checkout's `.git` link, which the question
+/// already warned Git cannot read.
+fn unreadable_by_git(facts: &Facts, refusal: &MoveRefusal) -> bool {
+    let warned = facts.warnings.iter().any(|warning| matches!(warning, Warning::GitUnreadable { .. } | Warning::Unchecked { .. }));
+    warned && matches!(refusal, MoveRefusal::Unsupported(_) | MoveRefusal::Uninspectable(_) | MoveRefusal::Association(_))
+}
+
+/// Takes the worktree's removal lock, telling [`Notify::removal_running`]
+/// and waiting while another removal holds it.
+fn take_lock(store: &RecoveryStore, repository: &RepositoryBinding, env: &Env<'_>) -> Result<OperationLock, Refusal> {
+    match store.lock(repository) {
+        Ok(lock) => Ok(lock),
+        Err(StoreError::Lock(LockError::Busy)) => {
+            env.notify.removal_running();
+            store.lock_waiting(repository, env.clock, env.cancelled).map_err(|error| match error {
+                StoreError::Cancelled => Refusal::Cancelled,
+                error => Refusal::Store(error),
+            })
         }
-    }
-    observation.moved_to_quarantine(env.interrupted);
-    attempt.step(Step::Moved, StepResult::Succeeded, None);
-    attempt.step(Step::AssociationUpdated, StepResult::Succeeded, None);
-    attempt.report.original_state = OriginalState::Moved;
-    attempt.report.registration = RegistrationState::AtQuarantine;
-    attempt.report.quarantine = Some(QuarantineReport {
-        path: NativeString::from(plan.quarantine.as_path()),
-        identity: plan.identity,
-        state: QuarantineState::Present,
-        retained_entries: inventory.entries().len() as u64,
-        retained: Vec::new(),
-    });
-    if let Err(error) = attempt.operation.advance(Phase::Associated) {
-        return Ok(attempt.stop(RemovalOutcome::CleanupFailed, format!("the recovery record could not be updated: {error}")));
-    }
-    if hook(Boundary::Moved) {
-        return Err(Crashed);
-    }
-    // The move's own events: explained here, since the deletion engine
-    // treats every admin event as activity.
-    let own = observation.drain(env.interrupted);
-    if let Some((outcome, activity, why)) = unexplained_move_events(&plan, &own) {
-        for observed in activity {
-            attempt.report.push_activity(observed);
-        }
-        return Ok(attempt.stop(outcome, why));
-    }
-    if own.interrupted {
-        return Ok(attempt.stop(Stop::Interrupted.outcome(), Stop::Interrupted));
-    }
-    attempt.delete(observation, &binding, hook)
-}
-
-/// The report's runs for one preflight check that started at
-/// `discovered_at`: the decisive query, preceded by the first one when only
-/// Windows Search held files and the check rechecked.
-fn preflight_runs(discovered_at: u64, path: NativeString, clearance: UsageClearance) -> Vec<DiscoveryRun> {
-    let mut runs = Vec::new();
-    let mut at_ms = discovered_at;
-    if let Some(recheck) = clearance.search_recheck {
-        runs.push(DiscoveryRun {
-            at_ms,
-            purpose: DiscoveryPurpose::WindowsSearchHold,
-            path: path.clone(),
-            result: DiscoveryResult::Report(Box::new(recheck.first)),
-        });
-        at_ms = ms(recheck.rechecked_at);
-    }
-    runs.push(DiscoveryRun { at_ms, purpose: DiscoveryPurpose::Preflight, path, result: DiscoveryResult::Report(Box::new(clearance.report)) });
-    runs
-}
-
-/// Refuses while any operation of the worktree record `admin_dir` is
-/// pending, or any record cannot be read (it might be one).
-fn no_pending(store: &RecoveryStore, admin_dir: &Path) -> Result<(), StoreError> {
-    for pending in store.pending()? {
-        match pending.record {
-            Ok(record) if record.repository.admin_name() == admin_dir.file_name() => return Err(StoreError::Pending(pending.id)),
-            Ok(_) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-/// The approval's bindings read fresh: the branch tip, and the consented
-/// inventory and fingerprint `current` collects ([`consent_state`] of the
-/// original, or [`resume_consent`] on resume).
-fn recheck(
-    base: &Path,
-    entry: &WorktreeEntry,
-    approval: &Approval,
-    current: impl FnOnce() -> Result<(Inventory, String), Refusal>,
-) -> Result<(), Refusal> {
-    let tip = recorded_head(base, entry).map_err(Refusal::Git)?;
-    if tip != approval.tip {
-        return Err(Refusal::Changed(format!("the worktree's HEAD moved from {} to {tip} after it was checked", approval.tip)));
-    }
-    let (inventory, fingerprint) = current()?;
-    if inventory.dirty != approval.inventory.dirty || fingerprint != approval.fingerprint {
-        return Err(Refusal::Changed("the worktree's files or staged changes changed after they were checked".into()));
-    }
-    Ok(())
-}
-
-/// Where the observed tree is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tree {
-    AtOriginal,
-    AtQuarantine,
-}
-
-/// The finishing consistency check before a mutation: every tree path
-/// `drain` names must still match `inventory` (the tree is at `root`),
-/// nothing may appear at the other location, and admin events refuse unless
-/// `admin_allowed`. A drain the interrupt ended refuses as an interrupt.
-fn confirm_unchanged(inventory: &DeletionInventory, drain: &Drain, root: &Path, tree: Tree, admin_allowed: bool) -> Result<(), Refusal> {
-    if let Some(lost) = &drain.lost {
-        return Err(Refusal::Inventory(InventoryRefusal::Coverage(lost.clone())));
-    }
-    if drain.interrupted {
-        return Err(Refusal::Interrupted);
-    }
-    let mut tree_events = Vec::new();
-    for observed in &drain.events {
-        match (&observed.scope, tree) {
-            (Scope::Admin(name), _) if !admin_allowed => {
-                return Err(Refusal::Changed(format!(
-                    "Git's record of the worktree changed ({}) after it was checked",
-                    name.to_string_lossy()
-                )));
-            }
-            (Scope::Admin(_), _) => {}
-            (Scope::Tree(_), _) | (Scope::Original(_), Tree::AtOriginal) => tree_events.push(observed.clone()),
-            (Scope::Quarantine(relative), Tree::AtQuarantine) => {
-                let mut observed = observed.clone();
-                observed.scope = Scope::Tree(relative.clone());
-                tree_events.push(observed);
-            }
-            (Scope::Quarantine(_), Tree::AtOriginal) => {
-                return Err(Refusal::Changed("something appeared at the quarantine path before the move".into()));
-            }
-            (Scope::Original(_), Tree::AtQuarantine) => {
-                return Err(Refusal::Changed("something appeared at the worktree's original path".into()));
-            }
-        }
-    }
-    inventory.confirm(root, &Drain { events: tree_events, lost: None, interrupted: false }).map_err(Refusal::Inventory)
-}
-
-/// Called by a move whose association failed, before it undoes the rename:
-/// anything but the move's own events, lost coverage, or a wait the
-/// interrupt ended keeps the quarantine in place.
-fn unexpected_before_rollback(observation: &mut Observation, interrupted: &dyn Fn() -> bool) -> bool {
-    let drain = observation.drain(interrupted);
-    drain.lost.is_some()
-        || drain.interrupted
-        || drain.events.iter().any(|observed| match &observed.scope {
-            Scope::Original(relative) | Scope::Quarantine(relative) | Scope::Tree(relative) => !relative.as_os_str().is_empty(),
-            Scope::Admin(name) => name != "gitdir",
-        })
-}
-
-/// The move's own events checked against what is there now: the original
-/// moved away and absent, the quarantine (or the tree's root) moved in and
-/// the checkout, and the admin `gitdir` holding the rewritten record.
-/// Anything else is activity; lost coverage is unverified state.
-fn unexplained_move_events(plan: &MovePlan, drain: &Drain) -> Option<(RemovalOutcome, Vec<ObservedActivity>, String)> {
-    if let Some(lost) = &drain.lost {
-        let activity = observed(ActivityLocation::Quarantine, &plan.quarantine, ActivityKind::CoverageLost, None);
-        return Some((RemovalOutcome::StateUnverified, vec![activity], format!("activity observation was lost: {lost}")));
-    }
-    let cumulative = DeletionOptions::default().cumulative_kinds;
-    let original_kinds: Vec<EventKind> = drain
-        .events
-        .iter()
-        .filter(|observed| matches!(&observed.scope, Scope::Original(relative) if relative.as_os_str().is_empty()))
-        .map(|observed| observed.kind)
-        .collect();
-    let moved_away = own_move(&original_kinds, cumulative) && absent(&plan.original);
-    let moved_in = rename::identity(&plan.quarantine).is_ok_and(|identity| identity == plan.identity);
-    let mut activity = Vec::new();
-    for event in &drain.events {
-        let (location, path) = match &event.scope {
-            Scope::Original(relative) if relative.as_os_str().is_empty() && moved_away => continue,
-            Scope::Quarantine(relative) | Scope::Tree(relative) if relative.as_os_str().is_empty() && moved_in => continue,
-            Scope::Admin(name) if name == "gitdir" && plan.back_reference_rewritten() => continue,
-            Scope::Original(relative) => (ActivityLocation::Original, plan.original.join(relative)),
-            Scope::Quarantine(relative) | Scope::Tree(relative) => (ActivityLocation::Quarantine, plan.quarantine.join(relative)),
-            Scope::Admin(name) => (ActivityLocation::Admin, plan.admin.dir.join(name)),
-        };
-        activity.push(observed(location, &path, activity_kind(event.kind), Some(event.received)));
-    }
-    (!activity.is_empty())
-        .then(|| (RemovalOutcome::ActivityDetected, activity, "activity was observed while the worktree was moved aside".to_string()))
-}
-
-fn activity_kind(kind: EventKind) -> ActivityKind {
-    match kind {
-        EventKind::Created | EventKind::MovedTo => ActivityKind::Created,
-        EventKind::Removed | EventKind::MovedFrom => ActivityKind::Vanished,
-        EventKind::Modified | EventKind::Metadata => ActivityKind::Modified,
+        Err(error) => Err(Refusal::Store(error)),
     }
 }
 
-fn observed(location: ActivityLocation, path: &Path, kind: ActivityKind, received: Option<SystemTime>) -> ObservedActivity {
-    ObservedActivity { location, path: NativeString::from(path), kind, received_at_ms: ms(received.unwrap_or_else(SystemTime::now)) }
-}
-
-/// Ends an operation that changed nothing: its directory is deleted, so no
-/// record describes a removal that never happened. A failure to delete it
-/// leaves a record that [`inspect`] resolves as [`Resolution::NotStarted`].
-fn discard(operation: Operation, refusal: Refusal) -> Removal {
-    let _ = operation.discard();
-    Removal::Refused(Box::new(refusal))
-}
-
-fn new_record(
-    plan: &MovePlan,
-    id: &OperationId,
-    requested_name: &str,
-    entry: &WorktreeEntry,
-    approval: &Approval,
-    branches: &BranchActions,
-    discovery: sniff::filesystem::query::PathUsageReport,
-) -> io::Result<RecoveryRecord> {
-    let repository = RepositoryBinding {
-        common_dir: plan.common_dir.as_path().into(),
-        common_dir_identity: rename::identity(&plan.common_dir)?,
-        admin_dir: plan.admin.dir.as_path().into(),
-        admin_dir_identity: rename::identity(&plan.admin.dir)?,
-    };
+/// The other names that find this operation: the branch and the directory.
+fn aliases(entry: &WorktreeEntry, original: &Path, requested_name: &str) -> Vec<String> {
     let mut aliases = Vec::new();
-    let directory = plan.original.file_name().map(|name| name.to_string_lossy().into_owned());
+    let directory = original.file_name().map(|name| name.to_string_lossy().into_owned());
     for alias in entry.branch.iter().cloned().chain(directory) {
         if alias != requested_name && !alias.is_empty() && !aliases.contains(&alias) {
             aliases.push(alias);
         }
     }
-    let mut intended_actions = vec![IntendedAction::RemoveCheckout];
-    if let Some(local) = &branches.local {
-        intended_actions.push(IntendedAction::DeleteLocalBranch { name: local.name.clone() });
-    }
-    if let Some(remote) = &branches.remote {
-        intended_actions.push(IntendedAction::DeleteRemoteBranch { remote: remote.remote.clone(), name: remote.destination.clone() });
-    }
-    Ok(RecoveryRecord {
-        record_version: RECORD_VERSION,
-        operation_id: id.clone(),
-        created_at_ms: now_ms(),
-        requested_name: requested_name.to_string(),
-        aliases,
-        original: plan.original.as_path().into(),
-        quarantine: plan.quarantine.as_path().into(),
-        checkout_identity: plan.identity,
-        repository,
-        branch: entry.branch.clone().map_or(BranchBinding::Detached, BranchBinding::Named),
-        approved_tip: approval.tip.clone(),
-        consent_fingerprint: approval.fingerprint.clone(),
-        discovery,
-        intended_actions,
-        completed_phase: Phase::Prepared,
-    })
+    aliases
 }
 
-/// An operation from its move (or its resumption) on: everything a stop
-/// needs to report the actual state.
-struct Attempt<'a> {
-    base: &'a Path,
-    env: &'a Environment<'a>,
-    operation: Operation,
-    report: OperationReport,
-    branches: &'a BranchActions,
-    original: PathBuf,
-    quarantine: PathBuf,
-    identity: FileIdentity,
-    admin_dir: PathBuf,
-    warnings: Vec<String>,
-    /// The report lists every journal entry, so completion may delete the
-    /// journals.
-    journal_reported: bool,
-    /// The attempt's observer, read into the report whenever it is saved;
-    /// `None` for an attempt that started none.
-    observation: Option<DiagnosticsHandle>,
+/// The mounts strictly inside the checkout at `spelled`, re-spelled under
+/// it. Native tables spell real paths, so the checkout is resolved the same
+/// way to find them. An unreadable table is no mounts here: the engine's
+/// device check still never crosses one, and the question warned.
+fn nested_mounts(mounts: &dyn MountInfo, spelled: &Path) -> Vec<Mount> {
+    let Ok(table) = mounts.mounts() else { return Vec::new() };
+    let real = biscuit_file::canonicalize_simplified(spelled).unwrap_or_else(|_| spelled.to_path_buf());
+    let mut nested: Vec<Mount> = table
+        .iter()
+        .filter_map(|mount| {
+            let rest = mount.mount_point.strip_prefix(&real).ok().or_else(|| mount.mount_point.strip_prefix(spelled).ok())?;
+            (!rest.as_os_str().is_empty()).then(|| Mount { mount_point: spelled.join(rest), ..mount.clone() })
+        })
+        .collect();
+    nested.sort_by_key(|mount| mount.mount_point.components().count());
+    nested.dedup();
+    nested
 }
 
-impl<'a> Attempt<'a> {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        base: &'a Path,
-        env: &'a Environment<'a>,
-        operation: Operation,
-        report: OperationReport,
-        branches: &'a BranchActions,
-        original: &Path,
-        quarantine: &Path,
-        identity: FileIdentity,
-        admin_dir: &Path,
-    ) -> Self {
-        Self {
-            base,
-            env,
-            operation,
-            report,
-            branches,
-            original: original.to_path_buf(),
-            quarantine: quarantine.to_path_buf(),
-            identity,
-            admin_dir: admin_dir.to_path_buf(),
-            warnings: Vec::new(),
-            journal_reported: false,
-            observation: None,
-        }
+/// One saved operation being carried forward, from its approval or a later
+/// run's resumption to its finish.
+pub(crate) struct Operation<'a> {
+    pub base: &'a Path,
+    pub env: &'a Env<'a>,
+    pub pending: PendingRemoval,
+    pub finished: Finished,
+    /// The approval was given in this run, so a conditional branch step was
+    /// just assessed and is not rechecked.
+    pub fresh: bool,
+}
+
+impl Operation<'_> {
+    fn record(&self) -> &CompactRecord {
+        self.pending.record()
     }
 
-    fn observed_by(&mut self, observation: &Observation) {
-        self.observation = Some(observation.diagnostics_handle());
-    }
-
-    fn record_observation(&mut self) {
-        if let Some(observation) = &self.observation {
-            self.report.observation = Some(observation.snapshot());
-        }
-    }
-
-    fn step(&mut self, step: Step, result: StepResult, detail: Option<String>) {
-        self.report.timeline.push(event(step, result, detail));
-    }
-
-    /// Deletes the quarantined checkout, unregisters it, then runs the
-    /// branch actions.
-    fn delete(mut self, mut observation: Observation, binding: &IndexBinding, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
-        if let Err(error) = self.operation.advance_to(Phase::Deleting) {
-            return Ok(self.stop(RemovalOutcome::CleanupFailed, format!("the recovery record could not be updated: {error}")));
-        }
-        let deletion = delete_content_with(
-            &mut observation,
-            self.operation.journal(),
-            self.env.interrupted,
-            DeletionOptions::default(),
-            &mut |batch| {
-                hook(Boundary::DeletionBatch(batch));
-            },
-        );
-        self.report.record_deletion(&self.quarantine, &deletion);
-        self.step(Step::DeletionBatch, StepResult::Succeeded, Some(format!("{} entries deleted", deletion.deleted.len())));
-        if let Some(stop) = deletion.stop {
-            if let super::observation::deletion::Stop::CoverageLost(_) = &stop {
-                self.report.push_activity(observed(ActivityLocation::Quarantine, &self.quarantine, ActivityKind::CoverageLost, None));
+    /// Runs every step after `from`, which a resumed operation reads from
+    /// the paths and Git rather than from the record's marker. An approved
+    /// unlock the marker does not show as done is made in any case (it is a
+    /// no-op once the lock is gone). `plan` is the move to make; `facts` is
+    /// the question this run showed, for [`late`].
+    pub(crate) fn run(
+        mut self,
+        from: Progress,
+        plan: Option<MovePlan>,
+        facts: Option<&Facts>,
+        seams: &mut Seams<'_>,
+    ) -> Result<Removal, Crashed> {
+        if self.record().progress < Progress::Unlocked {
+            if let Err(stopped) = self.unlock() {
+                return Ok(self.stop(stopped));
             }
-            return Ok(self.stop(stop.outcome(), stop));
+            seams.at(Boundary::Unlocked)?;
         }
-        self.step(Step::ContentRemoved, StepResult::Succeeded, None);
-        if let Err(error) = self.operation.advance(Phase::ContentRemoved) {
-            return Ok(self.stop(RemovalOutcome::CleanupFailed, format!("the recovery record could not be updated: {error}")));
+        if from < Progress::Placed {
+            match self.place(plan, seams) {
+                Ok(boundary) => seams.at(boundary)?,
+                Err(Ended::Refused(refusal)) => return Ok(self.close(refusal)),
+                Err(Ended::Stopped(stopped)) => return Ok(self.stop(stopped)),
+            }
         }
-        if hook(Boundary::ContentRemoved) {
-            return Err(Crashed);
+        let root = self.record().deletion_path.as_path().to_path_buf();
+        if let Some(facts) = facts {
+            self.finished.late_changes = late::unseen(self.base, &root, facts.inventory.as_ref());
         }
-        match unregister_quarantine(self.base, &mut observation, binding, self.env.interrupted) {
-            Ok(warning) => self.warnings.extend(warning.map(|warning| format!("could not delete the copy record: {warning}"))),
+        if from < Progress::ContentRemoved {
+            match self.delete(&root, seams) {
+                Deleted::Done => {}
+                Deleted::Kept(result) => {
+                    self.finished.checkout = result;
+                    return Ok(Removal::Finished(Box::new(self.finished)));
+                }
+                Deleted::Replaced(refusal) => return Ok(self.close(refusal)),
+                Deleted::NotRecorded(sentence) => return Ok(self.stop(sentence)),
+            }
+            seams.at(Boundary::ContentRemoved)?;
+        }
+        if from < Progress::Unregistered {
+            if let Err(stopped) = self.unregister() {
+                return Ok(self.stop(stopped));
+            }
+            seams.at(Boundary::Unregistered)?;
+        }
+        self.branch_steps(seams)
+    }
+
+    fn unlock(&mut self) -> Result<(), String> {
+        let original = self.record().original.as_path().to_path_buf();
+        let admin = self.record().repository.admin_dir.as_path().to_path_buf();
+        if self.record().unlock_needed && availability::inspect(&admin.join("locked")).is_ok() {
+            unlock(self.base, &original, &admin)?;
+        }
+        self.pending.advance(Progress::Unlocked).map_err(not_recorded)
+    }
+
+    /// Moves the checkout aside, or marks it for deletion in place.
+    fn place(&mut self, plan: Option<MovePlan>, seams: &mut Seams<'_>) -> Result<Boundary, Ended> {
+        let original = self.record().original.as_path().to_path_buf();
+        let moved = match (self.record().deletion_mode, plan) {
+            (DeletionMode::InPlace, _) | (DeletionMode::Moved, None) => false,
+            (DeletionMode::Moved, Some(plan)) => {
+                let mounts = nested_mounts(self.env.mounts, &original);
+                match place_with(self.base, &plan, &mounts, &seams.moves) {
+                    Ok(Placement::Moved) => true,
+                    Ok(Placement::InPlace(_)) => false,
+                    Err(error) if error.nothing_changed() => return Err(Ended::Refused(Refusal::Move(error))),
+                    Err(error) => return Err(Ended::Stopped(format!("{} could not be moved aside: {error}", original.display()))),
+                }
+            }
+        };
+        if !moved {
+            self.pending.mark_in_place().map_err(|error| Ended::Stopped(not_recorded(error)))?;
+        }
+        self.pending.advance(Progress::Placed).map_err(|error| Ended::Stopped(not_recorded(error)))?;
+        Ok(if moved { Boundary::Moved } else { Boundary::MarkedInPlace })
+    }
+
+    /// Deletes the placed checkout.
+    fn delete(&mut self, root: &Path, seams: &mut Seams<'_>) -> Deleted {
+        let identity = self.record().checkout_identity;
+        let mounts = nested_mounts(self.env.mounts, root);
+        let holders = UsageHolders(self.env.usage);
+        let env = delete::Env { clock: self.env.clock, faults: self.env.faults, mounts: &mounts, holders: &holders, cancelled: self.env.cancelled };
+        let mut progress = Reported { notify: self.env.notify, hook: &mut *seams.hook, deleted: None };
+        let deletion = delete::delete_tree(delete::Target { root, identity: &identity }, &env, &mut progress);
+        self.finished.entries = progress.deleted;
+        match deletion {
+            Deletion::Done => match self.pending.advance(Progress::ContentRemoved) {
+                Ok(()) => Deleted::Done,
+                Err(error) => Deleted::NotRecorded(not_recorded(error)),
+            },
+            Deletion::RetainedMounts(mounts) => Deleted::Kept(CheckoutResult::RetainedMounts(mounts)),
+            Deletion::Permanent { failures, retained_mounts } => Deleted::Kept(CheckoutResult::Permanent { failures, retained_mounts }),
+            Deletion::Cancelled { waiting_on } => Deleted::Kept(CheckoutResult::Cancelled { waiting_on }),
+            Deletion::RootReplaced => Deleted::Replaced(Refusal::Replaced(format!(
+                "{} is no longer the worktree that was approved for removal, so it was not deleted",
+                root.display()
+            ))),
+        }
+    }
+
+    /// Removes Git's registration of the deleted checkout, then its copy
+    /// record. Git's record is gone already after a crash just past this.
+    fn unregister(&mut self) -> Result<(), String> {
+        let record = self.record();
+        let registered = record.deletion_path.as_path().to_path_buf();
+        let original = record.original.as_path().to_path_buf();
+        let admin = record.repository.admin_dir.as_path().to_path_buf();
+        if record.deletion_mode == DeletionMode::Moved {
+            match rename::identity(&original) {
+                Ok(_) => self.finished.original_kept = Some(original.clone()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => self.finished.original_kept = Some(original.clone()),
+            }
+        }
+        if !absent(&admin) {
+            remove_registration(self.base, &registered, &admin)?;
+        }
+        if let Some(warning) = crate::copy_record::delete_for(self.base, &original) {
+            self.finished.warnings.push(format!("could not delete the copy record: {warning}"));
+        }
+        self.pending.advance(Progress::Unregistered).map_err(not_recorded)
+    }
+
+    fn branch_steps(mut self, seams: &mut Seams<'_>) -> Result<Removal, Crashed> {
+        let steps = self.record().branch_steps.clone();
+        let remote_deleted = steps.iter().any(|step| matches!(step.action, BranchAction::Remote { .. }));
+        for (index, step) in steps.iter().enumerate() {
+            if step.state != StepState::Pending {
+                self.finished.branches.push(BranchResult::recorded(step));
+                continue;
+            }
+            let outcome = branches::run(self.base, step, self.env.revalidate, self.fresh, remote_deleted);
+            let state = if outcome.is_done() { StepState::Done } else { StepState::Kept };
+            self.finished.branches.push(BranchResult { target: branches::target(&step.action), outcome });
+            if let Err(error) = self.pending.finish_step(index, state) {
+                self.finished.warnings.push(not_recorded(error));
+                return Ok(Removal::Finished(Box::new(self.finished)));
+            }
+            seams.at(Boundary::BranchAction(index))?;
+        }
+        seams.at(Boundary::BranchesDone)?;
+        let Self { pending, mut finished, .. } = self;
+        if let Err(error) = pending.finish() {
+            finished.warnings.push(format!("the finished removal's record could not be deleted: {error}"));
+        }
+        Ok(Removal::Finished(Box::new(finished)))
+    }
+
+    /// Ends the run with the record kept for the next `wt remove`.
+    fn stop(mut self, sentence: String) -> Removal {
+        self.finished.checkout = CheckoutResult::Stopped(sentence);
+        Removal::Finished(Box::new(self.finished))
+    }
+
+    /// Ends an operation whose checkout is not to be deleted any more: the
+    /// record goes, so a later run starts from a fresh question.
+    fn close(self, refusal: Refusal) -> Removal {
+        let _ = self.pending.finish();
+        Removal::Refused(Box::new(refusal))
+    }
+}
+
+/// How deletion of a placed checkout ended.
+enum Deleted {
+    Done,
+    /// Something is left; the record is kept for a later run.
+    Kept(CheckoutResult),
+    /// The root is not the approved checkout; the operation is closed.
+    Replaced(Refusal),
+    NotRecorded(String),
+}
+
+/// How placement ended a run early.
+enum Ended {
+    Refused(Refusal),
+    Stopped(String),
+}
+
+fn not_recorded(error: StoreError) -> String {
+    format!("the removal's progress could not be recorded: {error}")
+}
+
+/// Passes deletion's progress to the hook and the user.
+struct Reported<'r, 'h> {
+    notify: &'r dyn Notify,
+    hook: &'r mut Hook<'h>,
+    deleted: Option<u64>,
+}
+
+impl delete::Progress for Reported<'_, '_> {
+    fn batch(&mut self, deleted: u64) {
+        (self.hook)(Boundary::DeletionBatch(deleted));
+    }
+
+    fn waiting(&mut self, wait: &Wait) {
+        self.notify.waiting(wait);
+    }
+
+    fn finished(&mut self, deleted: u64) {
+        self.deleted = Some(deleted);
+    }
+}
+
+/// `git worktree unlock` of the worktree registered at `registered`. Never
+/// by hand (N7).
+fn unlock(base: &Path, registered: &Path, admin: &Path) -> Result<(), String> {
+    let output = crate::git::git_from_output(base, base, &[OsStr::new("worktree"), OsStr::new("unlock"), registered.as_os_str()])
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() && availability::inspect(&admin.join("locked")).is_ok() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("{} could not be unlocked: {stderr}", registered.display()));
+    }
+    Ok(())
+}
+
+/// Plain `git worktree remove` of the worktree registered at `registered`,
+/// whose checkout is gone, after confirming `admin` is still its record.
+/// Git deletes the record, its `modules/` included.
+fn remove_registration(base: &Path, registered: &Path, admin: &Path) -> Result<(), String> {
+    match read_back_reference(admin) {
+        Ok(named) if same_location(&named, &registered.join(".git")) => {}
+        Ok(named) => return Err(format!("Git's record of {} now names {}, so it was kept", registered.display(), named.display())),
+        Err(BackReferenceError::Missing) if absent(admin) => return Ok(()),
+        Err(error) => return Err(format!("Git's record of {} could not be read: {error}", registered.display())),
+    }
+    if !absent(registered) {
+        return Err(format!("{} still exists, so Git's record of it was kept", registered.display()));
+    }
+    let output = crate::git::git_from_output(base, base, &[OsStr::new("worktree"), OsStr::new("remove"), registered.as_os_str()])
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("Git's record of {} could not be removed: {stderr}", registered.display()));
+    }
+    Ok(())
+}
+
+/// A worktree with no checkout directory to delete through a record: gone
+/// (R12, R17), a file or an unreadable path (R11), or a link (R9). With
+/// `own_checkout`, the link leads to this worktree's own checkout, which is
+/// deleted in place first. Short and idempotent, so it saves no record: an
+/// interrupted run leaves a state the next question describes.
+fn without_record(request: &Request<'_>, env: &Env<'_>, own_checkout: Option<&PathBuf>) -> Removal {
+    let Request { base, entry, facts, branches, .. } = *request;
+    let path = entry.path.clone();
+    let mut finished = Finished::new(None, &path);
+    let Some(admin) = &facts.admin else {
+        return Removal::Refused(Box::new(Refusal::Replaced(format!("Git's record of {} could not be found", path.display()))));
+    };
+    if facts.warnings.iter().any(|warning| matches!(warning, Warning::Locked { .. }))
+        && availability::inspect(&admin.dir.join("locked")).is_ok()
+        && let Err(stopped) = unlock(base, &path, &admin.dir)
+    {
+        finished.checkout = CheckoutResult::Stopped(stopped);
+        return Removal::Finished(Box::new(finished));
+    }
+    if let Some(real) = own_checkout {
+        let identity = match rename::identity(real) {
+            Ok(identity) => Some(identity),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => {
-                if let UnregisterError::Activity(activity) = &error {
-                    for observed in activity {
-                        self.report.push_activity(observed.clone());
-                    }
-                }
-                return Ok(self.stop(error.outcome(), error));
+                finished.checkout = CheckoutResult::Stopped(format!("{} could not be inspected: {error}", real.display()));
+                return Removal::Finished(Box::new(finished));
             }
-        }
-        drop(observation);
-        self.unregistered(hook)
-    }
-
-    /// The registration is gone: records it, deletes the original's copy
-    /// record, and runs the branch actions.
-    fn unregistered(mut self, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
-        self.step(Step::Unregistered, StepResult::Succeeded, None);
-        self.report.registration = RegistrationState::Removed;
-        if let Some(quarantine) = self.report.quarantine.as_mut() {
-            quarantine.state = QuarantineState::Removed;
-        }
-        self.report.set_retained(Vec::new());
-        if let Err(error) = self.operation.advance_to(Phase::Unregistered) {
-            return Ok(self.stop(RemovalOutcome::CleanupFailed, format!("the recovery record could not be updated: {error}")));
-        }
-        // Only now: until the registration is verified gone, the copy record
-        // is part of what a retry re-checks.
-        if let Some(warning) = crate::copy_record::delete_for(self.base, &self.original) {
-            self.warnings.push(format!("could not delete the copy record: {warning}"));
-        }
-        if hook(Boundary::Unregistered) {
-            return Err(Crashed);
-        }
-        self.branch_actions(hook)
-    }
-
-    /// Local branch, then remote; a failure leaves the rest not attempted
-    /// and the record pending.
-    fn branch_actions(mut self, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
-        let mut failed = false;
-        if let Some(local) = &self.branches.local {
-            let state = match remove_local_branch(self.base, &local.name, &local.expected_tip) {
-                Ok(()) => BranchState::Deleted,
-                Err(error) => {
-                    failed = true;
-                    BranchState::Failed { error: error.to_string() }
-                }
+        };
+        if let Some(identity) = identity {
+            let mounts = nested_mounts(env.mounts, real);
+            let holders = UsageHolders(env.usage);
+            let delete_env = delete::Env { clock: env.clock, faults: env.faults, mounts: &mounts, holders: &holders, cancelled: env.cancelled };
+            let mut hook = |_| false;
+            let mut progress = Reported { notify: env.notify, hook: &mut hook, deleted: None };
+            let deletion = delete::delete_tree(delete::Target { root: real, identity: &identity }, &delete_env, &mut progress);
+            finished.entries = progress.deleted;
+            let result = match deletion {
+                Deletion::Done => None,
+                Deletion::RetainedMounts(mounts) => Some(CheckoutResult::RetainedMounts(mounts)),
+                Deletion::Permanent { failures, retained_mounts } => Some(CheckoutResult::Permanent { failures, retained_mounts }),
+                Deletion::Cancelled { waiting_on } => Some(CheckoutResult::Cancelled { waiting_on }),
+                Deletion::RootReplaced => Some(CheckoutResult::Stopped(format!(
+                    "{} is no longer the worktree that was approved for removal, so it was not deleted",
+                    real.display()
+                ))),
             };
-            self.branch_step(BranchTarget::Local { name: local.name.clone() }, state);
-        }
-        if let Some(remote) = &self.branches.remote {
-            let target = BranchTarget::Remote { remote: remote.remote.clone(), name: remote.destination.clone() };
-            let state = if failed {
-                BranchState::NotAttempted
-            } else {
-                match delete_remote_branch(self.base, &remote.endpoint, &remote.destination, &remote.expected_sha) {
-                    Ok(()) => BranchState::Deleted,
-                    Err(error) => {
-                        failed = true;
-                        BranchState::Failed { error }
-                    }
-                }
-            };
-            self.branch_step(target, state);
-        }
-        self.report.outcome = RemovalOutcome::Removed;
-        self.summarize_journal();
-        if failed {
-            self.save_report();
-            return Ok(self.finished());
-        }
-        if let Err(error) = self.operation.advance_to(Phase::BranchActions) {
-            self.warnings.push(format!("the recovery record could not be updated: {error}"));
-            self.save_report();
-            return Ok(self.finished());
-        }
-        if hook(Boundary::BranchesDone) {
-            return Err(Crashed);
-        }
-        self.step(Step::Completed, StepResult::Succeeded, None);
-        self.record_observation();
-        let Self { operation, report, mut warnings, journal_reported, .. } = self;
-        let report_path = operation.report_path();
-        match operation.complete(&report, journal_reported) {
-            Ok(bookkeeping) => warnings.extend(bookkeeping.into_iter().map(|BookkeepingWarning::JournalNotCleared { path, error }| {
-                format!("could not delete the deletion journal {}: {error}", path.display())
-            })),
-            Err(error) => warnings.push(format!("the removal's completion could not be recorded: {error}")),
-        }
-        if !journal_reported {
-            warnings.push("the deletion journals were kept, since the report could not list their entries".into());
-        }
-        Ok(Removal::Finished(Box::new(Finished { report, report_path, warnings })))
-    }
-
-    fn branch_step(&mut self, target: BranchTarget, state: BranchState) {
-        let result = match &state {
-            BranchState::Deleted | BranchState::Kept => StepResult::Succeeded,
-            BranchState::NotAttempted => return self.report.branches.push(BranchOutcome { target, state }),
-            BranchState::Failed { .. } => StepResult::Failed,
-        };
-        self.step(Step::BranchAction, result, None);
-        self.report.branches.push(BranchOutcome { target, state });
-    }
-
-    /// Ends the operation where it stands: the actual state of both paths
-    /// and of Git's registration, a diagnostic usage query of each real
-    /// directory there, and the report saved beside the pending record.
-    fn stop(mut self, outcome: RemovalOutcome, error: impl Display) -> Removal {
-        self.report.outcome = outcome;
-        self.report.errors.push(error.to_string());
-        self.describe_locations();
-        self.summarize_journal();
-        for target in self.intended_branch_targets() {
-            self.report.branches.push(BranchOutcome { target, state: BranchState::NotAttempted });
-        }
-        self.save_report();
-        self.finished()
-    }
-
-    fn intended_branch_targets(&self) -> Vec<BranchTarget> {
-        let local = self.branches.local.iter().map(|local| BranchTarget::Local { name: local.name.clone() });
-        let remote = self
-            .branches
-            .remote
-            .iter()
-            .map(|remote| BranchTarget::Remote { remote: remote.remote.clone(), name: remote.destination.clone() });
-        local.chain(remote).collect()
-    }
-
-    fn describe_locations(&mut self) {
-        let original = presence(&self.original, &self.identity);
-        self.report.original_state = match &original {
-            Presence::Absent => OriginalState::Moved,
-            Presence::Checkout => OriginalState::Kept,
-            Presence::Other => OriginalState::Recreated,
-            Presence::Uninspectable(_) => OriginalState::Unknown,
-        };
-        let quarantine = presence(&self.quarantine, &self.identity);
-        let state = match &quarantine {
-            Presence::Absent => QuarantineState::Removed,
-            Presence::Checkout => QuarantineState::Present,
-            Presence::Other | Presence::Uninspectable(_) => QuarantineState::Unknown,
-        };
-        let report = self.report.quarantine.get_or_insert_with(|| QuarantineReport {
-            path: NativeString::from(self.quarantine.as_path()),
-            identity: self.identity,
-            state,
-            retained_entries: 0,
-            retained: Vec::new(),
-        });
-        report.state = state;
-        match quarantine {
-            Presence::Checkout => match retained_entries(&self.quarantine, &self.identity) {
-                Ok(entries) => self.report.set_retained(entries),
-                Err(error) => self.report.errors.push(format!("what remains in the quarantine could not be listed: {error}")),
-            },
-            _ => self.report.set_retained(Vec::new()),
-        }
-        self.report.registration = registration_state(&self.admin_dir, &self.original, &self.quarantine);
-
-        // Diagnostics only: who might be using what is left. A real directory
-        // is queried; a replacement link is never followed to gather this.
-        for (path, at) in [(&self.original, &original), (&self.quarantine, &quarantine)] {
-            if matches!(availability::inspect(path), Ok(EntryKind::Directory)) && !matches!(at, Presence::Uninspectable(_)) {
-                // A fresh walk: the attempt's index describes the checkout
-                // before deletion, not what is left.
-                let result = match self.env.usage.query(path, None) {
-                    Ok(report) => DiscoveryResult::Report(Box::new(report)),
-                    Err(error) => DiscoveryResult::Failed { kind: error.kind().to_string(), message: error.to_string() },
-                };
-                self.report.discovery.push(DiscoveryRun {
-                    at_ms: now_ms(),
-                    purpose: DiscoveryPurpose::Diagnostic,
-                    path: NativeString::from(path.as_path()),
-                    result,
-                });
+            if let Some(result) = result {
+                finished.checkout = result;
+                return Removal::Finished(Box::new(finished));
             }
         }
     }
+    let had_content = !matches!(facts.target, Target::Missing | Target::Vanished);
+    if had_content && let Err(failure) = remove_entry(&path) {
+        finished.checkout = CheckoutResult::Permanent { failures: vec![failure], retained_mounts: Vec::new() };
+        return Removal::Finished(Box::new(finished));
+    }
+    if let Err(stopped) = remove_registration(base, &path, &admin.dir) {
+        finished.checkout = CheckoutResult::Stopped(stopped);
+        return Removal::Finished(Box::new(finished));
+    }
+    if let Some(warning) = crate::copy_record::delete_for(base, &path) {
+        finished.warnings.push(format!("could not delete the copy record: {warning}"));
+    }
+    if matches!(facts.target, Target::Missing | Target::Vanished) {
+        finished.checkout = CheckoutResult::AlreadyRemoved;
+    }
+    let remote_deleted = branches.iter().any(|branch| matches!(branch.action, BranchAction::Remote { .. }));
+    for branch in branches {
+        let step = BranchStep { action: branch.action.clone(), approval: branch.approval, state: StepState::Pending };
+        let outcome = branches::run(base, &step, env.revalidate, true, remote_deleted);
+        finished.branches.push(BranchResult { target: branches::target(&step.action), outcome });
+    }
+    Removal::Finished(Box::new(finished))
+}
 
-    /// Fills the report's journal counts, entries, and deleted paths from
-    /// every attempt's journal, asking the quarantine (through a verified
-    /// handle) about the current attempt's unconfirmed entries.
-    fn summarize_journal(&mut self) {
-        let quarantine = presence(&self.quarantine, &self.identity);
-        let handle = match quarantine {
-            Presence::Checkout => super::observation::inventory::open_root(&self.quarantine, Some(&self.identity)).ok().map(|(dir, _)| dir),
-            _ => None,
-        };
-        let entries = self.operation.journal_entries(|relative| match (&quarantine, &handle) {
-            (Presence::Absent, _) => Ok(false),
-            (_, Some(dir)) => match dir.symlink_metadata(relative) {
-                Ok(_) => Ok(true),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(error),
-            },
-            _ => Err(io::Error::other("the quarantine is not the moved checkout")),
-        });
-        match entries {
-            Ok(entries) => {
-                self.report.journal = summarize(&entries);
-                let deleted = entries.iter().filter(|entry| entry.state == EntryState::Deleted);
-                self.report.set_deleted(deleted.map(|entry| NativeString::from(self.quarantine.join(entry.path.as_path()).as_path())).collect());
-                if self.report.journal.deleted.total() > 0 && !self.report.notes.contains(&ReportNote::ConcurrentWriteLimit) {
-                    self.report.notes.push(ReportNote::ConcurrentWriteLimit);
-                }
-                self.report.journal_entries = entries;
-                self.journal_reported = true;
-            }
-            Err(error) => {
-                self.journal_reported = false;
-                self.report.errors.push(format!("the deletion journal could not be summarized: {error}"));
-            }
+/// Removes the entry at `path` as itself: a link (a junction or other
+/// reparse point on Windows) is never followed, and a file is unlinked.
+fn remove_entry(path: &Path) -> Result<(), Failure> {
+    let removed = match availability::inspect(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => Err(error),
+        Ok(EntryKind::Directory) => return Ok(()),
+        Ok(EntryKind::Link) => remove_link(path),
+        Ok(EntryKind::File) => std::fs::remove_file(path),
+    };
+    match removed {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(Failure { path: path.to_path_buf(), cause: error }),
+        _ => Ok(()),
+    }
+}
+
+fn remove_link(path: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        // A junction or directory symlink reports no `is_dir`, and deleting
+        // it as a file is denied; it is removed as a directory entry, which
+        // never touches its target.
+        let directory = std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0);
+        if directory {
+            return std::fs::remove_dir(path);
         }
     }
-
-    fn save_report(&mut self) {
-        self.record_observation();
-        if let Err(error) = self.operation.save_report(&self.report) {
-            self.warnings.push(format!("the report could not be saved: {error}"));
-        }
-    }
-
-    fn finished(self) -> Removal {
-        let report_path = self.operation.report_path();
-        Removal::Finished(Box::new(Finished { report: self.report, report_path, warnings: self.warnings }))
-    }
-}
-
-/// What is at one of an operation's two paths, read without following a
-/// link.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Presence {
-    Absent,
-    /// A real directory with the checkout's identity.
-    Checkout,
-    /// Something else: never deleted, traversed, or overwritten.
-    Other,
-    Uninspectable(String),
-}
-
-pub(crate) fn presence(path: &Path, identity: &FileIdentity) -> Presence {
-    match availability::inspect(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Presence::Absent,
-        Err(error) => Presence::Uninspectable(error.to_string()),
-        Ok(EntryKind::Directory) => match rename::identity(path) {
-            Ok(found) if found == *identity => Presence::Checkout,
-            Ok(_) => Presence::Other,
-            Err(error) => Presence::Uninspectable(error.to_string()),
-        },
-        Ok(_) => Presence::Other,
-    }
-}
-
-/// Where the worktree record `admin_dir` points, read from the record itself.
-pub(crate) fn registration_state(admin_dir: &Path, original: &Path, quarantine: &Path) -> RegistrationState {
-    match read_back_reference(admin_dir) {
-        Ok(named) if same_location(&named, &original.join(".git")) => RegistrationState::AtOriginal,
-        Ok(named) if same_location(&named, &quarantine.join(".git")) => RegistrationState::AtQuarantine,
-        Err(BackReferenceError::Missing) if absent(admin_dir) => RegistrationState::Removed,
-        _ => RegistrationState::Unknown,
-    }
-}
-
-/// Every entry left in the quarantine, relative to it, without following
-/// links.
-pub(crate) fn retained_entries(quarantine: &Path, identity: &FileIdentity) -> Result<Vec<NativeString>, InventoryRefusal> {
-    let listing = DeletionInventory::capture(quarantine, &[])?;
-    if listing.root() != identity {
-        return Err(InventoryRefusal::Changed { path: quarantine.to_path_buf(), change: super::observation::inventory::Change::Replaced });
-    }
-    Ok(listing.entries().iter().map(|entry| entry.path.clone()).collect())
+    std::fs::remove_file(path)
 }
 
 fn absent(path: &Path) -> bool {
     matches!(std::fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound)
 }
 
-fn event(step: Step, result: StepResult, detail: Option<String>) -> TimelineEvent {
-    TimelineEvent { at_ms: now_ms(), step, result, detail }
-}
-
 fn now_ms() -> u64 {
-    ms(SystemTime::now())
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
 }
 
-fn ms(at: SystemTime) -> u64 {
-    at.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
+impl fmt::Display for CheckoutResult {
+    /// One plain sentence about what is left, for a run that did not finish.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Removed => f.write_str("the worktree was removed"),
+            Self::AlreadyRemoved => f.write_str("the worktree was already gone; Git's record of it was removed"),
+            Self::RetainedMounts(mounts) => {
+                let points: Vec<String> = mounts.iter().map(|mount| mount.mount_point.display().to_string()).collect();
+                write!(f, "{} is still mounted inside the worktree; unmount it, then run wt remove again", points.join(", "))
+            }
+            Self::Permanent { failures, .. } => {
+                let sentences: Vec<String> = failures.iter().map(ToString::to_string).collect();
+                f.write_str(&sentences.join("; "))
+            }
+            Self::Cancelled { .. } => f.write_str("the removal was cancelled; run wt remove again to finish it"),
+            Self::Stopped(sentence) => f.write_str(sentence),
+        }
+    }
 }

@@ -5,23 +5,19 @@
 //! ([`handoff`]). A target Git can't read is made checkable first by
 //! [`prepare`]: its worktree record is found ([`admin_entry`]), then a missing
 //! `.git` file is repaired and verified ([`repair`]) or a missing directory's
-//! surviving index is checked ([`missing`]). A contention-aware removal
-//! reports a typed [`outcome`] and keeps durable [`recovery`] state; [`usage`]
-//! is its decisive check that no other process is using the checkout,
-//! [`quarantine`] moves the checkout aside without replacing anything (and
-//! unregisters it once it is gone), and [`observation`] watches both
-//! locations while that happens and deletes the moved checkout entry by
-//! entry against its operation-start inventory. [`delete`] is the plain
-//! engine that replaces that checked deletion: it deletes whatever the
-//! approved checkout holds, never crossing a link or a mount, and waits out
-//! only temporary contention. [`lifecycle`] runs those steps in order as one
-//! removal, and resumes one that stopped. [`confirmed`] is the lifecycle that
-//! replaces it: after the user confirms, it saves a compact approval, unlocks,
-//! places the checkout, deletes it with [`delete`], unregisters it, and runs
-//! the branch steps, finishing an interrupted operation without asking again.
-//! Its waits, mount boundaries, and filesystem failures are injected through
-//! [`clock`], [`mounts`], and [`faults`], so tests never sleep, mount, or need
-//! privileges.
+//! surviving index is checked ([`missing`]). [`facts`] gathers everything the
+//! removal question warns about, including the programs using the checkout
+//! ([`usage`]) and its submodules' work ([`submodules`]).
+//!
+//! After the user confirms, [`lifecycle`] runs the removal: it saves a
+//! compact approval ([`recovery`]), unlocks, places the checkout
+//! ([`quarantine`] moves it aside without replacing anything, or it is
+//! deleted in place), deletes it with the plain engine ([`delete`]), which
+//! never crosses a link or a mount and waits out only temporary contention,
+//! unregisters it, and runs the branch steps, finishing an interrupted
+//! operation without asking again. Its waits, mount boundaries, and
+//! filesystem failures are injected through [`clock`], [`mounts`], and
+//! [`faults`], so tests never sleep, mount, or need privileges.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -29,18 +25,15 @@
 
 pub mod admin_entry;
 pub mod clock;
-pub mod confirmed;
+pub mod lifecycle;
 pub mod delete;
 pub mod facts;
 pub mod faults;
 pub mod handoff;
 pub mod included;
 pub mod inventory;
-pub mod lifecycle;
 pub mod missing;
 pub mod mounts;
-pub mod observation;
-pub mod outcome;
 pub mod quarantine;
 pub mod recovery;
 pub mod remote;

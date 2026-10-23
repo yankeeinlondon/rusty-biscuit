@@ -53,29 +53,21 @@ pub enum InPlaceReason {
 /// Moves the checkout to `plan.quarantine` unless it must be deleted in
 /// place. `mounts` is the mount table; only mounts strictly inside the
 /// checkout count, and any of them rules the move out before it is tried.
-/// `activity_observed` is as for
-/// [`move_to_quarantine`](super::association::move_to_quarantine).
 ///
 /// ## Errors
 ///
 /// The [`MoveError`] of a failed move that does not map to deletion in
 /// place; see the module documentation.
-pub fn place(base: &Path, plan: &MovePlan, mounts: &[Mount], activity_observed: &dyn Fn() -> bool) -> Result<Placement, MoveError> {
-    place_with(base, plan, mounts, activity_observed, &Faults::default())
+pub fn place(base: &Path, plan: &MovePlan, mounts: &[Mount]) -> Result<Placement, MoveError> {
+    place_with(base, plan, mounts, &Faults::default())
 }
 
-pub(crate) fn place_with(
-    base: &Path,
-    plan: &MovePlan,
-    mounts: &[Mount],
-    activity_observed: &dyn Fn() -> bool,
-    faults: &Faults,
-) -> Result<Placement, MoveError> {
+pub(crate) fn place_with(base: &Path, plan: &MovePlan, mounts: &[Mount], faults: &Faults) -> Result<Placement, MoveError> {
     let nested = mounts_within(mounts, &plan.original);
     if !nested.is_empty() {
         return Ok(Placement::InPlace(InPlaceReason::NestedMounts(nested.into_iter().cloned().collect())));
     }
-    let error = match move_with(base, plan, activity_observed, faults) {
+    let error = match move_with(base, plan, faults) {
         Ok(()) => return Ok(Placement::Moved),
         Err(error) => error,
     };
@@ -106,7 +98,6 @@ pub fn in_place_for_refusal(refusal: &MoveRefusal) -> Option<InPlaceReason> {
         MoveRefusal::LinkNotMovable(why) => Some(InPlaceReason::LinkNotMovable(why.clone())),
         MoveRefusal::NotARealDirectory(_)
         | MoveRefusal::Locked { .. }
-        | MoveRefusal::Submodules { .. }
         | MoveRefusal::Unsupported(_)
         | MoveRefusal::Association(_)
         | MoveRefusal::Changed(_)

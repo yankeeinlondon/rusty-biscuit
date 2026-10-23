@@ -16,18 +16,17 @@
 //!   into deletion in place. `git worktree repair` is never run, since it
 //!   rewrites other worktrees' links.
 //! - Git will not move or remove a locked worktree or one with submodules.
-//!   [`plan_move`] refuses both too, before any change, and never removes a
-//!   lock. [`plan_confirmed_move`] accepts both for a removal the user
-//!   confirmed: its caller unlocks (the move still refuses a lock), and
-//!   submodules are deleted with the checkout.
+//!   The user confirmed this removal, so [`plan_move`] accepts both: its
+//!   caller unlocks (the move itself still refuses a lock, and never removes
+//!   one), and submodules are deleted with the checkout.
 //!
 //! [`plan_move`] checks all of this and fixes the quarantine path, which the
-//! recovery record then binds. [`move_to_quarantine`] checks it again
-//! immediately before the rename, then moves, rewrites, and verifies the
-//! result by reading it back with Git. When the rewrite fails, the move is
-//! undone (a rewritten `.git` file restored first) only while that is
-//! provably safe; otherwise the quarantine is left in place and its actual
-//! state reported.
+//! recovery record then binds. The move
+//! ([`place`](super::placement::place)) checks it again immediately before
+//! the rename, then moves, rewrites, and verifies the result by reading it
+//! back with Git. When the rewrite fails, the move is undone (a rewritten
+//! `.git` file restored first) only while that is provably safe; otherwise
+//! the quarantine is left in place and its actual state reported.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -41,7 +40,6 @@ use crate::remove::admin_entry::{
     self, AdminEntry, AssociationError, BackReferenceError, path_from_bytes, read_back_reference, same_location,
 };
 use crate::remove::handoff::is_within;
-use crate::remove::outcome::RegistrationState;
 use crate::remove::recovery::{OperationId, storage};
 use crate::remove::repair::identity_change;
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
@@ -50,7 +48,7 @@ use super::naming;
 use super::rename::{self, RenameError, RenameFailure, Stage};
 
 /// A checked move of one linked checkout to its quarantine. Every field is
-/// what the checks saw; [`move_to_quarantine`] requires each to still hold.
+/// what the checks saw; the move requires each to still hold.
 #[derive(Debug, Clone)]
 pub struct MovePlan {
     pub original: PathBuf,
@@ -67,8 +65,6 @@ pub struct MovePlan {
     rewritten: Vec<u8>,
     /// The checkout's `.git` file, when its link does not survive the move.
     link_rewrite: Option<LinkRewrite>,
-    /// Planned by [`plan_confirmed_move`]: submodules do not refuse.
-    confirmed: bool,
 }
 
 /// The checkout's `.git` file before and after the move.
@@ -88,10 +84,6 @@ pub enum MoveRefusal {
     /// Git's lock on the worktree, with its reason when one was given.
     #[error("the worktree is locked{}", .reason.as_deref().map(|reason| format!(": {reason}")).unwrap_or_default())]
     Locked { reason: Option<String> },
-    /// A submodule: a gitlink entry in the index (its path), or the admin
-    /// directory's `modules` directory.
-    #[error("the worktree contains a submodule ({}), which Git cannot move or remove", .entry.display())]
-    Submodules { entry: PathBuf },
     /// A shape this move does not support, such as the main checkout, or a
     /// `.git` entry that is not a link this move can read.
     #[error("the worktree can't be moved aside: {0}")]
@@ -130,6 +122,15 @@ pub enum CheckoutLocation {
     Unknown,
 }
 
+/// Where Git's registration of the checkout points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationState {
+    AtOriginal,
+    AtQuarantine,
+    Removed,
+    Unknown,
+}
+
 /// The state a move that was not undone left behind, observed afterwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoveState {
@@ -140,7 +141,7 @@ pub struct MoveState {
     pub registration: RegistrationState,
 }
 
-/// Why [`move_to_quarantine`] did not finish.
+/// Why the move to the quarantine did not finish.
 #[derive(Debug, thiserror::Error)]
 pub enum MoveError {
     /// Refused before the rename; nothing changed.
@@ -191,36 +192,18 @@ impl MoveError {
 }
 
 /// Checks that `entry`, a linked worktree, can be moved to its quarantine
-/// under `operation`, and fixes the quarantine path.
+/// under `operation`, and fixes the quarantine path. A lock does not refuse
+/// here: it is checked again when the move is made, so the caller unlocks
+/// the worktree in between. Submodules never refuse: they are deleted with
+/// the checkout, which Git's own refusal does not allow for.
 ///
 /// ## Errors
 ///
-/// A [`MoveRefusal`]: the target is not a real directory, the main checkout,
-/// locked, or holds submodules; its links are in a shape the move cannot
-/// keep ([`MoveRefusal::LinkNotMovable`] when the link is verified but
-/// cannot be rewritten); or Git's records of it can't be read or disagree.
+/// A [`MoveRefusal`]: the target is not a real directory or is the main
+/// checkout; its links are in a shape the move cannot keep
+/// ([`MoveRefusal::LinkNotMovable`] when the link is verified but cannot be
+/// rewritten); or Git's records of it can't be read or disagree.
 pub fn plan_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) -> Result<MovePlan, MoveRefusal> {
-    let plan = plan_unchecked(base, entry, operation, false)?;
-    plan.check(base, true)?;
-    Ok(plan)
-}
-
-/// [`plan_move`] for a removal the user confirmed: a lock and submodules no
-/// longer refuse. The lock is checked again when the move is made, so the
-/// caller unlocks the worktree in between; submodules are deleted with the
-/// checkout, which Git's own refusal does not allow for.
-///
-/// ## Errors
-///
-/// As [`plan_move`], less [`MoveRefusal::Locked`] and
-/// [`MoveRefusal::Submodules`].
-pub fn plan_confirmed_move(base: &Path, entry: &WorktreeEntry, operation: &OperationId) -> Result<MovePlan, MoveRefusal> {
-    let plan = plan_unchecked(base, entry, operation, true)?;
-    plan.check(base, false)?;
-    Ok(plan)
-}
-
-fn plan_unchecked(base: &Path, entry: &WorktreeEntry, operation: &OperationId, confirmed: bool) -> Result<MovePlan, MoveRefusal> {
     if entry.is_main {
         return Err(MoveRefusal::Unsupported("it is the repository's main checkout".into()));
     }
@@ -247,41 +230,9 @@ fn plan_unchecked(base: &Path, entry: &WorktreeEntry, operation: &OperationId, c
             Some(LinkRewrite { original: bytes, rewritten })
         }
     };
-    Ok(MovePlan {
-        original,
-        quarantine,
-        identity,
-        common_dir,
-        admin,
-        entry: entry.clone(),
-        back_reference,
-        rewritten,
-        link_rewrite,
-        confirmed,
-    })
-}
-
-/// Moves the checkout to `plan.quarantine` and points Git's record at it.
-///
-/// Immediately before the rename every [`plan_move`] check runs again
-/// against the plan. After it, the moved directory's identity is compared,
-/// the planned `.git` file and the admin `gitdir` are each replaced
-/// atomically, and a fresh `git worktree list`
-/// must show the same worktree, not prunable, at the quarantine and nothing
-/// at the original. On Windows the quarantine is then marked hidden.
-///
-/// When that update fails, the move is undone only if the original path is
-/// still absent and `activity_observed` reports nothing unexpected (nothing
-/// has been deleted yet, by construction). Undoing never replaces anything at
-/// the original path.
-///
-/// ## Errors
-///
-/// [`MoveError`]: [`MoveError::Refused`] and [`MoveError::Rename`] changed
-/// nothing; [`MoveError::RolledBack`] restored everything; and
-/// [`MoveError::Stranded`] describes what was left where.
-pub fn move_to_quarantine(base: &Path, plan: &MovePlan, activity_observed: &dyn Fn() -> bool) -> Result<(), MoveError> {
-    move_with(base, plan, activity_observed, &Faults::default())
+    let plan = MovePlan { original, quarantine, identity, common_dir, admin, entry: entry.clone(), back_reference, rewritten, link_rewrite };
+    plan.check(base, false)?;
+    Ok(plan)
 }
 
 /// Test seams for the rename and the steps after it.
@@ -298,12 +249,25 @@ pub(crate) struct Faults {
     pub after_rename: Option<Box<dyn Fn()>>,
 }
 
-pub(crate) fn move_with(
-    base: &Path,
-    plan: &MovePlan,
-    activity_observed: &dyn Fn() -> bool,
-    faults: &Faults,
-) -> Result<(), MoveError> {
+/// Moves the checkout to `plan.quarantine` and points Git's record at it.
+///
+/// Immediately before the rename every [`plan_move`] check runs again
+/// against the plan, the lock included. After it, the moved directory's identity is compared,
+/// the planned `.git` file and the admin `gitdir` are each replaced
+/// atomically, and a fresh `git worktree list`
+/// must show the same worktree, not prunable, at the quarantine and nothing
+/// at the original. On Windows the quarantine is then marked hidden.
+///
+/// When that update fails, the move is undone only if the original path is
+/// still absent (nothing has been deleted yet, by construction). Undoing
+/// never replaces anything at the original path.
+///
+/// ## Errors
+///
+/// [`MoveError`]: [`MoveError::Refused`] and [`MoveError::Rename`] changed
+/// nothing; [`MoveError::RolledBack`] restored everything; and
+/// [`MoveError::Stranded`] describes what was left where.
+pub(crate) fn move_with(base: &Path, plan: &MovePlan, faults: &Faults) -> Result<(), MoveError> {
     plan.check(base, true).map_err(MoveError::Refused)?;
     if let Some(make) = faults.rename_instead {
         let source = make();
@@ -314,7 +278,7 @@ pub(crate) fn move_with(
         after_rename();
     }
     if let Err(cause) = associate(base, plan, faults) {
-        return Err(roll_back(base, plan, cause, activity_observed));
+        return Err(roll_back(base, plan, cause));
     }
     // Cosmetic: the leading dot already marks the quarantine elsewhere, and
     // a visible quarantine is still a correct one.
@@ -323,48 +287,9 @@ pub(crate) fn move_with(
     Ok(())
 }
 
-/// Checks that the checkout an interrupted removal moved is still the
-/// worktree Git keeps at `quarantine`: a real directory with `identity`,
-/// listed there exactly once and not prunable, the record `admin_dir` naming
-/// it and its `.git` file naming that record, unlocked, and without
-/// submodules. Returns the listed entry.
-///
-/// ## Errors
-///
-/// A [`MoveRefusal`] for the first condition that does not hold.
-pub fn verify_quarantined(base: &Path, quarantine: &Path, identity: &FileIdentity, admin_dir: &Path) -> Result<WorktreeEntry, MoveRefusal> {
-    if real_directory_identity(quarantine)? != *identity {
-        return Err(MoveRefusal::Changed("a different directory is now at the quarantine".into()));
-    }
-    let admin = AdminEntry { dir: admin_dir.to_path_buf() };
-    match read_back_reference(admin_dir) {
-        Ok(named) if same_location(&named, &quarantine.join(".git")) => {}
-        Ok(named) => return Err(MoveRefusal::Changed(format!("Git's record names {}", named.display()))),
-        Err(error) => return Err(MoveRefusal::Uninspectable(error.to_string())),
-    }
-    check_forward_link(quarantine, admin_dir)?;
-    let entries = worktree_list(base).map_err(MoveRefusal::Changed)?;
-    let found: Vec<&WorktreeEntry> = entries.iter().filter(|listed| same_location(&listed.path, quarantine)).collect();
-    let [entry] = found.as_slice() else {
-        return Err(MoveRefusal::Changed(format!("Git's worktree list shows the quarantine {} times", found.len())));
-    };
-    if entry.prunable.is_some() {
-        return Err(MoveRefusal::Changed("Git marks the quarantine prunable".into()));
-    }
-    check_unlocked(&admin)?;
-    check_no_submodules(base, &admin)?;
-    Ok((*entry).clone())
-}
-
 impl MovePlan {
-    /// Whether the admin `gitdir` holds exactly the record this plan
-    /// rewrites it to, naming the quarantine.
-    pub fn back_reference_rewritten(&self) -> bool {
-        fs::read(self.admin.dir.join("gitdir")).is_ok_and(|bytes| bytes == self.rewritten)
-    }
-
     /// Every condition the move relies on, read fresh. `lock` is false only
-    /// while a confirmed removal plans, before it unlocks.
+    /// while planning, before the caller unlocks.
     fn check(&self, base: &Path, lock: bool) -> Result<(), MoveRefusal> {
         if real_directory_identity(&self.original)? != self.identity {
             return Err(MoveRefusal::Changed("a different directory is now at its path".into()));
@@ -386,7 +311,7 @@ impl MovePlan {
             (ForwardLink::ThroughCheckout { bytes, .. }, Some(rewrite)) if bytes == rewrite.original => {}
             _ => return Err(MoveRefusal::Changed("its .git file changed".into())),
         }
-        if self.confirmed { Ok(()) } else { check_no_submodules(base, &self.admin) }
+        Ok(())
     }
 }
 
@@ -530,29 +455,6 @@ fn absolute_link(admin_dir: &Path, ending: &[u8]) -> Option<Vec<u8>> {
     Some(link)
 }
 
-/// Refuses as Git does (`validate_no_submodules`): a `modules` directory in
-/// the admin directory, or a gitlink (mode `160000`) in the worktree's index.
-fn check_no_submodules(base: &Path, admin: &AdminEntry) -> Result<(), MoveRefusal> {
-    let modules = admin.dir.join("modules");
-    match availability::inspect(&modules) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(MoveRefusal::Uninspectable(format!("{}: {error}", modules.display()))),
-        Ok(_) => return Err(MoveRefusal::Submodules { entry: modules }),
-    }
-    let index = admin.index();
-    let listing = crate::git::staged_entries_of(base, &index)
-        .map_err(|error| MoveRefusal::Uninspectable(format!("{}: {error}", index.display())))?;
-    // Each record is `<mode> <object> <stage>\t<path>`.
-    for record in listing.split(|&byte| byte == 0) {
-        if let Some(rest) = record.strip_prefix(b"160000 ") {
-            let path = rest.iter().position(|&byte| byte == b'\t').map_or(&[][..], |tab| &rest[tab + 1..]);
-            let entry = path_from_bytes(path).unwrap_or_else(|_| PathBuf::from(String::from_utf8_lossy(path).into_owned()));
-            return Err(MoveRefusal::Submodules { entry });
-        }
-    }
-    Ok(())
-}
-
 fn worktree_list(base: &Path) -> Result<Vec<WorktreeEntry>, String> {
     crate::git::worktree_list_from(base, base)
         .map(|listing| parse_worktree_list(&listing))
@@ -644,7 +546,7 @@ fn replace_file(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Undoes the move when that is provably safe, and reports which happened.
-fn roll_back(base: &Path, plan: &MovePlan, cause: AssociationFailure, activity_observed: &dyn Fn() -> bool) -> MoveError {
+fn roll_back(base: &Path, plan: &MovePlan, cause: AssociationFailure) -> MoveError {
     let stranded = |cause: AssociationFailure, reason: &str| MoveError::Stranded {
         cause,
         reason: reason.to_string(),
@@ -654,9 +556,6 @@ fn roll_back(base: &Path, plan: &MovePlan, cause: AssociationFailure, activity_o
     // directory at the original path.
     if cause == AssociationFailure::IdentityChanged {
         return stranded(cause, "the directory there is not the one that was moved");
-    }
-    if activity_observed() {
-        return stranded(cause, "unexpected activity was observed");
     }
     match availability::inspect(&plan.original) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}

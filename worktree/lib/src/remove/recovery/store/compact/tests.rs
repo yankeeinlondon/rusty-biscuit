@@ -10,8 +10,11 @@ use super::fault::{self, Fault};
 use super::*;
 use crate::remove::recovery::compact::{BranchAction, BranchStep, DeletionMode, StepApproval, UnboundTarget};
 use crate::remove::recovery::record::{BranchBinding, IntendedAction, Phase, QUARANTINE_PREFIX, RecoveryRecord};
-use crate::remove::recovery::store::{JOURNAL_FILE, LockError};
+use crate::remove::recovery::store::LockError;
 use crate::remove::test_support::ManualClock;
+
+/// A legacy operation's journal; never read, only deleted.
+const JOURNAL_FILE: &str = "journal.jsonl";
 
 struct Fixture {
     _dir: TempDir,

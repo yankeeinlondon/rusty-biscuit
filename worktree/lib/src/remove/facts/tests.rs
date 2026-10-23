@@ -44,7 +44,7 @@ impl Usage {
 }
 
 impl UsageSource for Usage {
-    fn query(&self, path: &Path, _index: Option<&std::sync::Arc<sniff::filesystem::query::TreeIndex>>) -> Result<PathUsageReport, PathUsageError> {
+    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
         self.queries.fetch_add(1, Ordering::SeqCst);
         (self.script)(path)
     }

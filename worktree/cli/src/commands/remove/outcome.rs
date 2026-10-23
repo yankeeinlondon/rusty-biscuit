@@ -1,5 +1,5 @@
 //! What `wt remove` prints after the confirmed lifecycle
-//! ([`worktree::remove::confirmed`]) ran: the one final line of a removal
+//! ([`worktree::remove::lifecycle`]) ran: the one final line of a removal
 //! that finished, the plain sentences of one that did not (a retained mount,
 //! a permanent failure, a kept branch), and the refusal of one that changed
 //! nothing.
@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use worktree::WorktreeError;
-use worktree::remove::confirmed::{BranchOutcome, BranchResult, Candidate, CheckoutResult, ExitClass, Finished, Refusal};
+use worktree::remove::lifecycle::{BranchOutcome, BranchResult, Candidate, CheckoutResult, ExitClass, Finished, Refusal};
 use worktree::remove::recovery::compact::UnboundTarget;
 
 use super::report::visible;

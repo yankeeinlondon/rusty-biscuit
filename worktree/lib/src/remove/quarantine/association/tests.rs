@@ -31,10 +31,6 @@ fn plan(repo: &TestRepo, checkout: &Path) -> Result<MovePlan, MoveRefusal> {
     plan_move(&repo.path(), &listed(repo, checkout), &OperationId::generate().unwrap())
 }
 
-fn quiet() -> bool {
-    false
-}
-
 /// Every Git-side byte the move could touch: each worktree record's files,
 /// the target's `.git` file, and the listing.
 #[derive(Debug, PartialEq)]
@@ -100,7 +96,7 @@ fn an_absolute_record_moves_and_git_reads_the_quarantine() {
     assert!(name.starts_with(&format!("{QUARANTINE_PREFIX}x-")), "{name}");
 
     recorder::start_recording();
-    move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
+    move_with(&repo.path(), &plan, &Faults::default()).unwrap();
     let calls = recorder::finish_recording();
 
     assert!(!target.exists(), "nothing at the original path");
@@ -145,7 +141,7 @@ fn a_relative_record_keeps_its_format() {
     let plan = plan(&repo, &target).unwrap();
     let name = plan.quarantine.file_name().unwrap().to_string_lossy().into_owned();
 
-    move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
+    move_with(&repo.path(), &plan, &Faults::default()).unwrap();
 
     let rewritten = fs::read_to_string(admin.join("gitdir")).unwrap();
     assert_eq!(rewritten, recorded.replace("/rel/.git", &format!("/{name}/.git")));
@@ -158,41 +154,47 @@ fn a_relative_record_keeps_its_format() {
     assert!(!pruned.contains("worktrees/rel"), "{pruned}");
 }
 
+/// A lock does not refuse planning (the caller unlocks after it), but the
+/// move itself still refuses one and keeps it.
 #[test]
-fn a_locked_worktree_refuses_at_planning_and_at_the_move() {
+fn a_locked_worktree_plans_but_refuses_the_move() {
     let repo = TestRepo::new();
     let target = repo.add_worktree("feat/locked", "locked", "main");
     repo.git(&["worktree", "lock", "--reason", "in use by CI", target.to_str().unwrap()]);
-    assert_eq!(plan(&repo, &target).unwrap_err(), MoveRefusal::Locked { reason: Some("in use by CI".into()) });
-
-    repo.git(&["worktree", "unlock", target.to_str().unwrap()]);
     let plan = plan(&repo, &target).unwrap();
-    repo.git(&["worktree", "lock", target.to_str().unwrap()]);
     let before = git_state(&repo, &target);
 
-    let result = move_to_quarantine(&repo.path(), &plan, &quiet);
+    let result = move_with(&repo.path(), &plan, &Faults::default());
 
-    assert!(matches!(&result, Err(MoveError::Refused(MoveRefusal::Locked { reason: None }))), "{result:?}");
+    assert!(
+        matches!(&result, Err(MoveError::Refused(MoveRefusal::Locked { reason: Some(reason) })) if reason == "in use by CI"),
+        "{result:?}"
+    );
     assert_eq!(result.unwrap_err().class(), MoveErrorClass::Refused);
     assert_untouched(&repo, &plan, &before);
     assert!(admin_dir(&repo, &target).join("locked").exists(), "the lock is kept");
 }
 
+/// Submodules are deleted with the checkout, so neither a gitlink in the
+/// index nor a `modules` directory in the record stops the move, though Git
+/// itself refuses to move either.
 #[test]
-fn a_checkout_with_a_submodule_refuses_before_anything_moves() {
+fn a_checkout_with_a_submodule_moves() {
     let repo = TestRepo::new();
     let gitlink = repo.add_worktree("feat/gitlink", "gitlink", "main");
     let head = repo.sha("HEAD");
     repo.git_in(&gitlink, &["update-index", "--add", "--cacheinfo", &format!("160000,{head},vendor/lib")]);
-    let before = git_state(&repo, &gitlink);
-    assert_eq!(plan(&repo, &gitlink).unwrap_err(), MoveRefusal::Submodules { entry: PathBuf::from("vendor/lib") });
-    assert_eq!(git_state(&repo, &gitlink), before);
-
     let modules = repo.add_worktree("feat/modules", "modules", "main");
     let module_dir = admin_dir(&repo, &modules).join("modules");
     fs::create_dir_all(module_dir.join("lib")).unwrap();
-    assert_eq!(plan(&repo, &modules).unwrap_err(), MoveRefusal::Submodules { entry: module_dir });
-    assert!(modules.join("README.md").is_file() && gitlink.join("README.md").is_file());
+
+    for checkout in [&gitlink, &modules] {
+        let plan = plan(&repo, checkout).unwrap();
+        move_with(&repo.path(), &plan, &Faults::default()).unwrap();
+        assert!(!checkout.exists() && plan.quarantine.join("README.md").is_file(), "{}", checkout.display());
+        assert_eq!(listed_at(&repo, &plan.quarantine).len(), 1);
+    }
+    assert!(module_dir.join("lib").is_dir(), "the record's modules stay with it");
 }
 
 #[test]
@@ -207,7 +209,7 @@ fn unsupported_shapes_refuse_before_anything_moves() {
     let link = b"gitdir: ../../repo/.git/worktrees/lead\n";
     fs::write(target.join(".git"), link).unwrap();
     let plan = plan(&repo, &target).unwrap();
-    move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
+    move_with(&repo.path(), &plan, &Faults::default()).unwrap();
     repo.git_in(&plan.quarantine, &["status", "--porcelain"]);
     assert_eq!(fs::read(plan.quarantine.join(".git")).unwrap(), link);
 }
@@ -223,7 +225,7 @@ fn a_link_through_the_checkout_is_rewritten_for_the_move() {
     let admin = admin_dir(&repo, &target);
     let plan = plan(&repo, &target).unwrap();
 
-    move_to_quarantine(&repo.path(), &plan, &quiet).unwrap();
+    move_with(&repo.path(), &plan, &Faults::default()).unwrap();
 
     let link = fs::read_to_string(plan.quarantine.join(".git")).unwrap();
     let named = link.strip_prefix("gitdir: ").and_then(|rest| rest.strip_suffix("\r\n")).expect(&link);
@@ -233,8 +235,6 @@ fn a_link_through_the_checkout_is_rewritten_for_the_move() {
     assert_eq!((now.len(), now[0].branch.as_deref(), now[0].prunable.as_deref()), (1, Some("feat/bent"), None));
     assert!(listed_at(&repo, &target).is_empty());
     assert_eq!(repo.git_in(&plan.quarantine, &["status", "--porcelain"]), "?? scratch.txt");
-    let verified = verify_quarantined(&repo.path(), &plan.quarantine, &plan.identity, &admin);
-    assert!(verified.is_ok(), "resume accepts the rewritten link: {verified:?}");
 }
 
 /// The rollback puts the original link back before the checkout returns.
@@ -247,7 +247,7 @@ fn a_rewritten_link_is_restored_when_the_move_is_rolled_back() {
     let before = git_state(&repo, &target);
 
     let faults = Faults { fail_write: true, ..Faults::default() };
-    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &faults).unwrap_err();
 
     assert!(matches!(&error, MoveError::RolledBack { cause: AssociationFailure::Write(_) }), "{error:?}");
     assert_untouched(&repo, &plan, &before);
@@ -292,7 +292,7 @@ fn state_that_changed_since_planning_refuses_the_move() {
     let plan_switched = plan(&repo, &switched).unwrap();
     repo.git_in(&switched, &["switch", "-q", "-c", "feat/other"]);
     let before = git_state(&repo, &switched);
-    let result = move_to_quarantine(&repo.path(), &plan_switched, &quiet);
+    let result = move_with(&repo.path(), &plan_switched, &Faults::default());
     assert!(matches!(&result, Err(MoveError::Refused(MoveRefusal::Changed(_)))), "{result:?}");
     assert_untouched(&repo, &plan_switched, &before);
 
@@ -305,14 +305,14 @@ fn state_that_changed_since_planning_refuses_the_move() {
     for name in [".git", "README.md"] {
         fs::copy(saved.join(name), replaced.join(name)).unwrap();
     }
-    let result = move_to_quarantine(&repo.path(), &plan_replaced, &quiet);
+    let result = move_with(&repo.path(), &plan_replaced, &Faults::default());
     assert!(matches!(&result, Err(MoveError::Refused(MoveRefusal::Changed(why))) if why.contains("different directory")), "{result:?}");
     assert!(replaced.join(".git").is_file() && saved.join(".git").is_file() && !plan_replaced.quarantine.exists());
 
     let linked = repo.add_worktree("feat/linked", "linked", "main");
     let plan_linked = plan(&repo, &linked).unwrap();
     let real = crate::remove::test_support::replace_with_link(&linked, "real");
-    let result = move_to_quarantine(&repo.path(), &plan_linked, &quiet);
+    let result = move_with(&repo.path(), &plan_linked, &Faults::default());
     assert!(matches!(&result, Err(MoveError::Refused(MoveRefusal::NotARealDirectory(_)))), "{result:?}");
     assert!(real.join("README.md").is_file() && !plan_linked.quarantine.exists());
 }
@@ -326,7 +326,7 @@ fn a_collision_at_the_quarantine_is_never_replaced() {
     fs::create_dir(&plan.quarantine).unwrap();
     let occupant = rename::identity(&plan.quarantine).unwrap();
 
-    let error = move_to_quarantine(&repo.path(), &plan, &quiet).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &Faults::default()).unwrap_err();
 
     assert!(matches!(&error, MoveError::Rename(rename) if rename.kind == RenameFailure::Collision), "{error:?}");
     assert_eq!((error.class(), error.nothing_changed()), (MoveErrorClass::Failed, true));
@@ -344,7 +344,7 @@ fn a_failed_record_rewrite_is_rolled_back() {
     let before = git_state(&repo, &target);
 
     let faults = Faults { fail_write: true, ..Faults::default() };
-    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &faults).unwrap_err();
 
     assert!(matches!(&error, MoveError::RolledBack { cause: AssociationFailure::Write(_) }), "{error:?}");
     assert_eq!((error.class(), error.nothing_changed()), (MoveErrorClass::Failed, true));
@@ -362,27 +362,10 @@ fn an_unverified_record_rewrite_is_rolled_back_and_restored() {
     let elsewhere = repo.path().parent().unwrap().join("elsewhere").join(".git");
 
     let faults = Faults { write_instead: Some(format!("{}\n", elsewhere.display()).into_bytes()), ..Faults::default() };
-    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &faults).unwrap_err();
 
     assert!(matches!(&error, MoveError::RolledBack { cause: AssociationFailure::Unverified(_) }), "{error:?}");
     assert_untouched(&repo, &plan, &before);
-}
-
-#[test]
-fn observed_activity_leaves_the_quarantine_in_place() {
-    let repo = TestRepo::new();
-    let target = repo.add_worktree("feat/busy", "busy", "main");
-    let plan = plan(&repo, &target).unwrap();
-
-    let faults = Faults { fail_write: true, ..Faults::default() };
-    let error = move_with(&repo.path(), &plan, &|| true, &faults).unwrap_err();
-
-    let MoveError::Stranded { cause, reason, state } = &error else { panic!("{error:?}") };
-    assert!(matches!(cause, AssociationFailure::Write(_)) && reason.contains("activity"), "{error}");
-    let expected = MoveState { checkout: CheckoutLocation::Quarantine, original_recreated: false, registration: RegistrationState::AtOriginal };
-    assert_eq!(*state, expected);
-    assert_eq!((error.class(), error.nothing_changed()), (MoveErrorClass::Failed, false));
-    assert!(!target.exists() && plan.quarantine.join("README.md").is_file());
 }
 
 #[test]
@@ -400,7 +383,7 @@ fn a_recreated_original_is_never_overwritten() {
         })),
         ..Faults::default()
     };
-    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &faults).unwrap_err();
 
     let MoveError::Stranded { reason, state, .. } = &error else { panic!("{error:?}") };
     assert!(reason.contains("original path"), "{reason}");
@@ -429,7 +412,7 @@ fn a_replaced_quarantine_is_not_moved_back() {
         })),
         ..Faults::default()
     };
-    let error = move_with(&repo.path(), &plan, &quiet, &faults).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &faults).unwrap_err();
 
     let MoveError::Stranded { cause, state, .. } = &error else { panic!("{error:?}") };
     assert_eq!(*cause, AssociationFailure::IdentityChanged);
@@ -468,7 +451,7 @@ fn an_open_file_in_the_checkout_blocks_the_move_as_in_use() {
     let before = git_state(&repo, &target);
     let held = fs::File::open(target.join("README.md")).unwrap();
 
-    let error = move_to_quarantine(&repo.path(), &plan, &quiet).unwrap_err();
+    let error = move_with(&repo.path(), &plan, &Faults::default()).unwrap_err();
 
     drop(held);
     assert!(matches!(&error, MoveError::Rename(rename) if rename.kind == RenameFailure::Sharing), "{error:?}");

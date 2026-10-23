@@ -33,7 +33,7 @@ use super::mounts::{self, Mount, MountInfo};
 use super::quarantine::association::leads_to_record;
 use super::repair::RepairGit;
 use super::submodules::{self, Finding, GitDirOwner, SubmoduleReport};
-use super::usage::{CoverageSummary, EvidenceLocation, Holder, OwnedHandles, UsageRefusal, UsageSource, assess};
+use super::usage::{CoverageSummary, EvidenceLocation, Holder, UsageSource, holders};
 use super::{CheckoutState, PrepareRefusal, prepare};
 
 /// How many names a list of files shows before "and N more".
@@ -373,7 +373,7 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
         state.push(Warning::ShellInside);
     }
 
-    let queried = sources.usage.query(&checkout, None);
+    let queried = sources.usage.query(&checkout);
     if matches!(availability::inspect(&checkout), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
         facts.target = Target::Vanished;
         return facts;
@@ -382,10 +382,7 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
     match queried {
         Ok(report) => {
             let coverage = CoverageSummary::of(&report);
-            let mut programs = match assess(report.clone(), &OwnedHandles::default()) {
-                Err(UsageRefusal::InUse(in_use)) => in_use.holders,
-                _ => Vec::new(),
-            };
+            let mut programs = holders(&report);
             programs.retain(|holder| Some(holder.pid) != sources.caller.parent || !only_stands_in(holder));
             if !programs.is_empty() {
                 facts.warnings.push(Warning::Processes { root: report.target.resolved.as_path().to_path_buf(), programs });

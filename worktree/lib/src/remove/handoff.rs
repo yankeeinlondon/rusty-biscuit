@@ -1,15 +1,17 @@
 //! The short-lived record that carries a move-first removal across the shell
 //! wrapper's `cd`.
 //!
-//! The first `wt remove` run asks every question, then stores what it saw and
-//! what the caller approved under a random token and prints
-//! `remove-handoff:<token>`. After a successful `cd`, the wrapper runs
-//! `wt remove --handoff <token>`, which consumes the record (deleting it before
-//! anything else, so it cannot be replayed), re-reads the same state, and
-//! removes only if nothing changed and the caller has left the worktree.
+//! The first `wt remove` run asks every question and saves the approval as
+//! an operation's compact record, then stores that operation's id under a
+//! random token and prints `remove-handoff:<token>`. After a successful
+//! `cd`, the wrapper runs `wt remove --handoff <token>`, which consumes the
+//! handoff (deleting it before anything else, so it cannot be replayed),
+//! checks that the caller has left the worktree, and finishes the operation.
+//! No content of the checkout is compared between the runs.
 //!
 //! Records sit beside the comparison cache as
-//! `<repo hash>.handoff-<token>.json` and expire after [`HANDOFF_TTL`].
+//! `<repo hash>.handoff-<token>.json` and expire after
+//! [`OPERATION_HANDOFF_TTL`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,82 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
-use crate::git::git_from;
-use super::included::{BaselineBinding, RulesBinding};
 use super::recovery::OperationId;
-
-pub const HANDOFF_FORMAT_VERSION: u32 = 4;
-
-/// How long a record stays valid.
-pub const HANDOFF_TTL: Duration = Duration::from_secs(60);
-
-/// Everything the second run re-reads and compares.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandoffState {
-    /// The main worktree, canonical.
-    pub repo: PathBuf,
-    /// The worktree being removed, canonical.
-    pub target: PathBuf,
-    pub head: String,
-    pub branch: Option<String>,
-    /// The Git directory the checkout's `.git` leads to (its worktree record),
-    /// from [`checkout_git_dir`]. A link restored before the first run's
-    /// checks, then broken or redirected, cannot match it.
-    pub git_dir: PathBuf,
-    /// [`crate::remove::Inventory::fingerprint`] of the worktree.
-    pub fingerprint: String,
-    pub rules: RulesBinding,
-    pub baseline: BaselineBinding,
-    /// Where the wrapper moves the caller, canonical.
-    pub landing: PathBuf,
-}
-
-/// What the first run decided to do to the branch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BranchAction {
-    /// Approved by `--force-branch` or an answer: delete whatever the tier.
-    Delete,
-    /// Safe or Pretty safe: delete only if still so.
-    DeleteIfSafe,
-    Keep,
-}
-
-/// The remote deletion `--force-remote` approved, and what the report showed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RemoteApproval {
-    /// The branch name on origin; `None` when there is no `origin` remote.
-    /// The second run refuses if its freshly computed destination differs,
-    /// since a different branch can share `observed_sha`.
-    pub destination: Option<String>,
-    /// Origin's resolved push URL, which the report observed and the deletion
-    /// pushes to. The second run refuses if it differs, since another
-    /// repository can hold the same branch at the same commit.
-    pub endpoint: Option<String>,
-    /// The live head the report showed; the lease is taken against it.
-    /// `None` when origin had no such branch or could not be reached at
-    /// approval; either way the second run accepts only a verified absence,
-    /// so nothing is deleted on origin.
-    pub observed_sha: Option<String>,
-}
-
-/// The caller's approvals from the first run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Approvals {
-    /// Discard the dirty and protected included entries (`--force-worktree` or an answer).
-    pub discard_files: bool,
-    /// `None` for a detached worktree.
-    pub branch: Option<BranchAction>,
-    pub remote: Option<RemoteApproval>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandoffRecord {
-    pub format_version: u32,
-    pub state: HandoffState,
-    pub approvals: Approvals,
-    /// Seconds since the Unix epoch.
-    pub created_at: u64,
-}
 
 /// Why a token did not yield a record. Each leaves the worktree untouched.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,17 +40,6 @@ pub enum HandoffRefusal {
     InsideTarget,
 }
 
-impl HandoffRecord {
-    pub fn new(state: HandoffState, approvals: Approvals, created_at: u64) -> Self {
-        Self {
-            format_version: HANDOFF_FORMAT_VERSION,
-            state,
-            approvals,
-            created_at,
-        }
-    }
-}
-
 /// 128 bits from the OS random source, as 32 lowercase hex characters.
 pub fn new_token() -> Result<String, WorktreeError> {
     let mut bytes = [0_u8; 16];
@@ -137,8 +53,8 @@ pub(crate) fn is_token(token: &str) -> bool {
 }
 
 /// The [`OperationHandoff::format_version`] this build writes. A record of
-/// any other version (including the content-comparing [`HandoffRecord`])
-/// is [`HandoffError::Missing`] to [`consume_operation`].
+/// any other version (including an earlier `wt`'s content-comparing format,
+/// version 4) is [`HandoffError::Missing`] to [`consume_operation`].
 pub const OPERATION_HANDOFF_VERSION: u32 = 5;
 
 /// How long an [`OperationHandoff`] stays valid (R18).
@@ -176,8 +92,8 @@ pub fn write_operation(path: &Path, handoff: &OperationHandoff) -> Result<(), Wo
 }
 
 /// Reads and deletes the handoff at `path`; `now` is seconds since the Unix
-/// epoch. As [`consume`], the file is deleted before it is judged, so a
-/// token works at most once.
+/// epoch. The file is deleted before it is judged, so a token works at most
+/// once whatever the outcome.
 pub fn consume_operation(path: &Path, now: u64) -> Result<OperationHandoff, HandoffError> {
     let bytes = fs::read(path).map_err(|_| HandoffError::Missing)?;
     fs::remove_file(path).map_err(|_| HandoffError::Missing)?;
@@ -185,6 +101,7 @@ pub fn consume_operation(path: &Path, now: u64) -> Result<OperationHandoff, Hand
     if handoff.format_version != OPERATION_HANDOFF_VERSION {
         return Err(HandoffError::Missing);
     }
+    // A record from the future is as suspect as an old one.
     let age = now.checked_sub(handoff.created_at).ok_or(HandoffError::Expired)?;
     if age > OPERATION_HANDOFF_TTL.as_secs() {
         return Err(HandoffError::Expired);
@@ -215,88 +132,6 @@ pub fn handoff_path(repo_root: &Path, token: &str) -> Result<PathBuf, HandoffErr
     repo_cache_file(repo_root, &format!("handoff-{token}.json")).map_err(|_| HandoffError::Missing)
 }
 
-pub fn write_record(path: &Path, record: &HandoffRecord) -> Result<(), WorktreeError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    atomic_write(path, &serde_json::to_vec_pretty(record)?)
-}
-
-/// Reads and deletes the record at `path`; `now` is seconds since the Unix
-/// epoch.
-///
-/// The file is deleted before the record is judged, so a token works at most
-/// once whatever the outcome.
-pub fn consume(path: &Path, now: u64) -> Result<HandoffRecord, HandoffError> {
-    let bytes = fs::read(path).map_err(|_| HandoffError::Missing)?;
-    fs::remove_file(path).map_err(|_| HandoffError::Missing)?;
-    let record: HandoffRecord = serde_json::from_slice(&bytes).map_err(|_| HandoffError::Missing)?;
-    if record.format_version != HANDOFF_FORMAT_VERSION {
-        return Err(HandoffError::Missing);
-    }
-    // A record from the future is as suspect as an old one.
-    let age = now.checked_sub(record.created_at).ok_or(HandoffError::Expired)?;
-    if age > HANDOFF_TTL.as_secs() {
-        return Err(HandoffError::Expired);
-    }
-    Ok(record)
-}
-
-/// Requires `cwd` to be outside the target, then compares the stored state
-/// with `fresh`. Paths are compared canonical, so spellings that name the same
-/// directory (a symlinked temp dir, Windows `\\?\` prefixes) agree.
-pub fn verify(record: &HandoffRecord, fresh: &HandoffState, cwd: &Path) -> Result<(), HandoffRefusal> {
-    let stored = &record.state;
-    // Checked first: a caller who never left also fails the landing check,
-    // but the remedy is to move, not to start again.
-    if is_within(cwd, &stored.target) {
-        return Err(HandoffRefusal::InsideTarget);
-    }
-    let mut changed = Vec::new();
-    if !same_path(&stored.repo, &fresh.repo) {
-        changed.push("repository");
-    }
-    if !same_path(&stored.target, &fresh.target) {
-        changed.push("worktree path");
-    }
-    if stored.head != fresh.head {
-        changed.push("checked-out commit");
-    }
-    if stored.branch != fresh.branch {
-        changed.push("branch");
-    }
-    if !same_path(&stored.git_dir, &fresh.git_dir) {
-        changed.push("worktree link");
-    }
-    if stored.fingerprint != fresh.fingerprint {
-        changed.push("uncommitted or included files");
-    }
-    if stored.rules != fresh.rules {
-        changed.push("include rules");
-    }
-    if stored.baseline != fresh.baseline {
-        changed.push("copy baseline");
-    }
-    if !same_path(&stored.landing, &fresh.landing) {
-        changed.push("landing directory");
-    }
-    if changed.is_empty() {
-        Ok(())
-    } else {
-        Err(HandoffRefusal::Changed(changed))
-    }
-}
-
-/// The Git directory that the checkout at `target` resolves to, canonical.
-/// Git runs from `base`, so nothing holds the target open.
-///
-/// In a directory whose `.git` is gone, Git discovers any enclosing
-/// repository instead, so the answer is the base's Git directory there, which
-/// never equals a linked worktree's record.
-pub fn checkout_git_dir(base: &Path, target: &Path) -> Result<PathBuf, WorktreeError> {
-    git_from(base, target, &["rev-parse", "--path-format=absolute", "--git-dir"]).map(|dir| canonical(Path::new(&dir)))
-}
-
 /// `path` canonical, without Windows' verbatim prefix; unchanged when it
 /// cannot be resolved (for example, it no longer exists).
 pub fn canonical(path: &Path) -> PathBuf {
@@ -317,36 +152,6 @@ pub fn is_within(path: &Path, dir: &Path) -> bool {
 mod tests {
     use super::*;
 
-    fn state(dir: &Path) -> HandoffState {
-        let target = dir.join("wt");
-        let landing = dir.join("base");
-        fs::create_dir_all(&target).unwrap();
-        fs::create_dir_all(&landing).unwrap();
-        HandoffState {
-            repo: landing.clone(),
-            target,
-            head: "1111111111111111111111111111111111111111".into(),
-            branch: Some("feat/x".into()),
-            git_dir: dir.join("base/.git/worktrees/wt"),
-            fingerprint: "f".repeat(64),
-            rules: super::super::included::IncludedAssessment::default().rules,
-            baseline: BaselineBinding::None,
-            landing,
-        }
-    }
-
-    fn approvals() -> Approvals {
-        Approvals {
-            discard_files: true,
-            branch: Some(BranchAction::DeleteIfSafe),
-            remote: Some(RemoteApproval {
-                destination: Some("feat/x".into()),
-                endpoint: Some("/srv/git/widgets.git".into()),
-                observed_sha: Some("2".repeat(40)),
-            }),
-        }
-    }
-
     #[test]
     fn tokens_are_32_random_hex_characters() {
         let first = new_token().unwrap();
@@ -364,149 +169,6 @@ mod tests {
         let path = handoff_path(dir.path(), &"a".repeat(32)).unwrap();
         let cache = crate::cache::cache_path(dir.path()).unwrap();
         assert_eq!(path.parent(), cache.parent());
-    }
-
-    #[test]
-    fn round_trip_then_replay_is_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("cache").join("h.json");
-        let record = HandoffRecord::new(state(dir.path()), approvals(), 1_000);
-
-        write_record(&path, &record).unwrap();
-        // A second write/read keeps every field.
-        let first = consume(&path, 1_010).unwrap();
-        write_record(&path, &first).unwrap();
-        let second = consume(&path, 1_020).unwrap();
-        assert_eq!(first, record);
-        assert_eq!(second, record);
-
-        // Consumed: the same token cannot be used again.
-        assert_eq!(consume(&path, 1_020), Err(HandoffError::Missing));
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn an_expired_or_future_record_is_refused_and_still_deleted() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("h.json");
-        let record = HandoffRecord::new(state(dir.path()), approvals(), 1_000);
-
-        write_record(&path, &record).unwrap();
-        assert!(consume(&path, 1_060).is_ok(), "exactly the TTL is still valid");
-
-        write_record(&path, &record).unwrap();
-        assert_eq!(consume(&path, 1_061), Err(HandoffError::Expired));
-        assert!(!path.exists());
-
-        write_record(&path, &record).unwrap();
-        assert_eq!(consume(&path, 999), Err(HandoffError::Expired));
-    }
-
-    #[test]
-    fn a_corrupt_or_other_version_record_is_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("h.json");
-        fs::write(&path, b"{not json").unwrap();
-        assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
-
-        let mut record = HandoffRecord::new(state(dir.path()), approvals(), 0);
-        record.format_version = 3;
-        write_record(&path, &record).unwrap();
-        assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
-    }
-
-    #[test]
-    fn every_changed_field_refuses() {
-        let dir = tempfile::tempdir().unwrap();
-        let stored = state(dir.path());
-        let record = HandoffRecord::new(stored.clone(), approvals(), 0);
-        let elsewhere = dir.path().join("elsewhere");
-        fs::create_dir_all(&elsewhere).unwrap();
-        let outside = stored.landing.clone();
-
-        assert_eq!(verify(&record, &stored, &outside), Ok(()));
-
-        type Change<'a> = Box<dyn Fn(&mut HandoffState) + 'a>;
-        let cases: Vec<(&str, Change)> = vec![
-            ("repository", Box::new(|s| s.repo = elsewhere.clone())),
-            ("worktree path", Box::new(|s| s.target = elsewhere.clone())),
-            ("checked-out commit", Box::new(|s| s.head = "3".repeat(40))),
-            ("branch", Box::new(|s| s.branch = Some("feat/y".into()))),
-            ("branch", Box::new(|s| s.branch = None)),
-            ("worktree link", Box::new(|s| s.git_dir = elsewhere.clone())),
-            ("uncommitted or included files", Box::new(|s| s.fingerprint = "0".repeat(64))),
-            ("include rules", Box::new(|s| s.rules.presence = "changed".into())),
-            ("copy baseline", Box::new(|s| s.baseline = BaselineBinding::Record {
-                identity: "new".into(), content_digest: "digest".into(),
-            })),
-            ("landing directory", Box::new(|s| s.landing = elsewhere.clone())),
-        ];
-        for (field, change) in cases {
-            let mut fresh = stored.clone();
-            change(&mut fresh);
-            assert_eq!(
-                verify(&record, &fresh, &outside),
-                Err(HandoffRefusal::Changed(vec![field])),
-                "{field}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_checkout_git_dir_follows_the_link_not_the_record() {
-        let repo = super::super::test_support::TestRepo::new();
-        let base = repo.path();
-        let first = repo.add_worktree("feat/a", "a", "main");
-        let second = repo.add_worktree("feat/b", "b", "main");
-        let record_of = |checkout: &Path| {
-            super::super::admin_entry::admin_entry_for(&base, checkout).unwrap().dir
-        };
-        let (first_record, second_record) = (record_of(&first), record_of(&second));
-
-        assert_eq!(checkout_git_dir(&base, &first).unwrap(), canonical(&first_record));
-
-        // `.git` redirected to the other record: the records' back-references
-        // are unchanged, so only the forward link shows it.
-        let redirect = format!("gitdir: {}\n", second_record.display());
-        fs::write(first.join(".git"), redirect).unwrap();
-        assert_eq!(checkout_git_dir(&base, &first).unwrap(), canonical(&second_record));
-        assert_eq!(record_of(&first), first_record);
-
-        // Broken: nothing to resolve outside any repository.
-        fs::remove_file(first.join(".git")).unwrap();
-        let broken = checkout_git_dir(&base, &first);
-        assert!(broken.is_err(), "{broken:?}");
-    }
-
-    #[test]
-    fn a_caller_still_inside_the_target_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let stored = state(dir.path());
-        let record = HandoffRecord::new(stored.clone(), approvals(), 0);
-        let inside = stored.target.join("src");
-        fs::create_dir_all(&inside).unwrap();
-
-        assert_eq!(verify(&record, &stored, &stored.target), Err(HandoffRefusal::InsideTarget));
-        assert_eq!(verify(&record, &stored, &inside), Err(HandoffRefusal::InsideTarget));
-
-        // A sibling whose name extends the target's is outside it.
-        let sibling = dir.path().join("wt2");
-        fs::create_dir_all(&sibling).unwrap();
-        assert_eq!(verify(&record, &stored, &sibling), Ok(()));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn paths_compare_canonical() {
-        let dir = tempfile::tempdir().unwrap();
-        let stored = state(dir.path());
-        let link = dir.path().join("link");
-        std::os::unix::fs::symlink(&stored.target, &link).unwrap();
-        assert!(is_within(&link.join("."), &stored.target));
-        let mut fresh = stored.clone();
-        fresh.target = link;
-        let record = HandoffRecord::new(stored.clone(), approvals(), 0);
-        assert_eq!(verify(&record, &fresh, &stored.landing), Ok(()));
     }
 
     fn operation_handoff(dir: &Path, created_at: u64) -> OperationHandoff {
@@ -560,7 +222,8 @@ mod tests {
     fn only_the_operation_format_is_an_operation_handoff() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("h.json");
-        write_record(&path, &HandoffRecord::new(state(dir.path()), approvals(), 0)).unwrap();
+        let earlier = serde_json::json!({"format_version": 4, "state": {}, "approvals": {}, "created_at": 0});
+        fs::write(&path, serde_json::to_vec(&earlier).unwrap()).unwrap();
         assert_eq!(consume_operation(&path, 0), Err(HandoffError::Missing));
 
         let mut other = operation_handoff(dir.path(), 0);
@@ -593,5 +256,24 @@ mod tests {
         let other = dir.path().join("other");
         fs::create_dir_all(&other).unwrap();
         assert_eq!(verify_operation(&handoff, &other, &repo), Err(HandoffRefusal::Changed(vec!["repository"])));
+    }
+
+    /// Spellings that name the same directory (a symlinked temp dir, Windows
+    /// `\\?\` prefixes) agree.
+    #[cfg(unix)]
+    #[test]
+    fn paths_compare_canonical() {
+        let dir = tempfile::tempdir().unwrap();
+        let handoff = operation_handoff(dir.path(), 0);
+        let repo = dir.path().join("base");
+        fs::create_dir_all(&repo).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&handoff.target, &link).unwrap();
+        let repo_link = dir.path().join("base-link");
+        std::os::unix::fs::symlink(&repo, &repo_link).unwrap();
+
+        assert!(is_within(&link.join("."), &handoff.target));
+        assert_eq!(verify_operation(&handoff, &repo_link, &repo), Ok(()));
+        assert_eq!(verify_operation(&handoff, &repo, &link), Err(HandoffRefusal::InsideTarget));
     }
 }

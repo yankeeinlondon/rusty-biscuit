@@ -66,7 +66,7 @@ pub struct UsageHolders<'a>(pub &'a dyn UsageSource);
 
 impl Holders for UsageHolders<'_> {
     fn query(&self, root: &Path, _blocked: &[PathBuf]) -> HolderReport {
-        let Ok(report) = self.0.query(root, None) else {
+        let Ok(report) = self.0.query(root) else {
             return HolderReport::Unknown;
         };
         let own = std::process::id();

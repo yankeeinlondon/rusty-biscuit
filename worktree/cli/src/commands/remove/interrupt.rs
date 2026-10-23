@@ -40,7 +40,7 @@ impl Window {
     }
 
     /// Whether an interrupt arrived since the window opened; the lifecycle's
-    /// [`Env::cancelled`](worktree::remove::confirmed::Env::cancelled).
+    /// [`Env::cancelled`](worktree::remove::lifecycle::Env::cancelled).
     pub fn interrupted(&self) -> bool {
         INTERRUPTED.load(Ordering::SeqCst)
     }

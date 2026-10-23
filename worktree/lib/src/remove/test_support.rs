@@ -377,7 +377,6 @@ impl super::usage::UsageSource for ClearUsage {
     fn query(
         &self,
         path: &Path,
-        _index: Option<&std::sync::Arc<sniff::filesystem::query::TreeIndex>>,
     ) -> Result<sniff::filesystem::query::PathUsageReport, sniff::filesystem::query::PathUsageError> {
         Ok(clear_report(path))
     }

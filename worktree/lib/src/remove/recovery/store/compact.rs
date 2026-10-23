@@ -349,7 +349,16 @@ pub(crate) mod fault {
     use std::io;
 
     use super::SaveStep;
-    pub(crate) use crate::remove::recovery::store::fault::Fault;
+
+    /// What an injected fault does at a [`SaveStep`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Fault {
+        /// Stop as if the process died: nothing more is written or cleaned
+        /// up.
+        Crash,
+        /// Fail as a write would, through the ordinary error path.
+        Fail,
+    }
 
     type Injector = Box<dyn FnMut(SaveStep) -> Option<Fault>>;
 

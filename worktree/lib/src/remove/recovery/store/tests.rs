@@ -1,27 +1,13 @@
-use std::collections::BTreeSet;
+//! The legacy (`record_version` 1) record loader, through
+//! [`RecoveryStore::resume`]: the only reader of such a record now migrates
+//! it, so every shape the loader decides is asserted at that public result.
 
 use serde_json::{Value, json};
-use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
+use sniff::filesystem::query::{FileIdentity, PathUsageReport};
 use tempfile::TempDir;
 
 use super::*;
-use crate::remove::observation::inventory::DeletionInventory;
-use crate::remove::outcome::RemovalOutcome;
-use crate::remove::recovery::journal::{EntryKind, EntryState, JournalEntry, PlannedEntry, ResultState};
-use super::fault::{self, Fault};
-use crate::remove::recovery::record::{BranchBinding, IntendedAction, RECORD_VERSION};
-
-/// A reading with room for any journal.
-const PLENTY: Space = Space(Ok(u64::MAX));
-
-/// A scripted free-space reading.
-struct Space(Result<u64, &'static str>);
-
-impl SpaceSource for Space {
-    fn available_bytes(&self, _path: &Path) -> Result<u64, String> {
-        self.0.map_err(String::from)
-    }
-}
+use crate::remove::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord};
 
 struct Fixture {
     _dir: TempDir,
@@ -96,233 +82,26 @@ fn record(f: &Fixture, admin: &str) -> RecoveryRecord {
     }
 }
 
-/// The inventory every test operation is approved to delete: one hashed
-/// file first (so the matrix's first-occurrence edits land on it), files and
-/// directories, and a link.
-fn inventory_value() -> Value {
-    let id = |inode: u64| json!({"kind": "unix", "device": "7", "inode": inode.to_string()});
-    let file = |path: &str, inode: u64, content: Value| {
-        json!({"path": {"display": path}, "identity": id(inode),
-               "shape": {"file": {"size": 5, "modified": {"secs": 1_700_000_000, "nanos": 5}, "mode": 420, "content": content}}})
-    };
-    let dir = |path: &str, inode: u64| json!({"path": {"display": path}, "identity": id(inode), "shape": {"directory": {"mode": 493}}});
-    json!({
-        "root": id(3),
-        "entries": [
-            file("a", 10, json!({"blake3": "ab".repeat(32)})),
-            dir("d", 11),
-            file("d/a", 12, json!("unhashed")),
-            file("d/b", 13, json!("unhashed")),
-            dir("e", 14),
-            file("e/x", 15, json!("unhashed")),
-            {"path": {"display": "l"}, "identity": id(16), "shape": {"link": {"target": {"display": "../elsewhere"}}}},
-        ]
-    })
+/// Writes `record` as an earlier `wt` left it, owner-only, and returns its
+/// `record.json`.
+fn save_legacy(f: &Fixture, record: &RecoveryRecord) -> PathBuf {
+    let dir = f.store.operation_dir(&record.operation_id);
+    storage::create_private_dir(&dir).unwrap();
+    let path = dir.join(RECORD_FILE);
+    storage::write_durable(&path, &record.to_json()).unwrap();
+    path
 }
 
-fn inventory() -> Arc<DeletionInventory> {
-    Arc::new(serde_json::from_value(inventory_value()).unwrap())
-}
-
-fn begin(f: &Fixture, record: RecoveryRecord) -> Operation {
-    let lock = f.store.lock(&record.repository).unwrap();
-    f.store.begin(lock, record, inventory(), &PLENTY).unwrap()
-}
-
-fn file(path: &str) -> PlannedEntry {
-    PlannedEntry { path: NativeString::from(path), kind: EntryKind::File }
-}
-
-fn everything_present(_: &Path) -> io::Result<bool> {
-    Ok(true)
-}
-
-#[cfg(unix)]
-fn mode(path: &Path) -> u32 {
-    use std::os::unix::fs::PermissionsExt;
-    fs::metadata(path).unwrap().permissions().mode() & 0o777
-}
-
-#[test]
-fn begin_makes_an_owner_only_pending_operation_that_reads_back() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let op = begin(&f, saved.clone());
-    let dir = op.dir().to_path_buf();
-    assert_eq!(dir, f.common.join(STORE_DIR).join(saved.operation_id.as_str()));
-    #[cfg(unix)]
-    {
-        assert_eq!(mode(&f.common.join(STORE_DIR)), 0o700);
-        assert_eq!(mode(&dir), 0o700);
-        assert_eq!(mode(&dir.join(RECORD_FILE)), 0o600);
-        assert_eq!(mode(&dir.join(JOURNAL_FILE)), 0o600);
-    }
-    drop(op);
-
-    let pending = f.store.pending().unwrap();
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].record.as_ref().unwrap(), &saved);
-    let recovered = f.store.recover(&saved.operation_id, &saved.repository, everything_present).unwrap();
-    assert_eq!(recovered.record, saved);
-    assert!(recovered.entries.is_empty());
-    assert!(!recovered.torn_tail);
-}
-
-#[test]
-fn a_held_lock_refuses_a_second_removal_and_a_stale_lock_file_does_not() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let held = f.store.lock(&saved.repository).unwrap();
-    assert!(matches!(f.store.lock(&saved.repository), Err(StoreError::Lock(LockError::Busy))));
-    drop(held);
-
-    // The lock file remains; only a held lock means an active operation.
-    let op = begin(&f, saved.clone());
-    assert!(matches!(f.store.lock(&saved.repository), Err(StoreError::Lock(LockError::Busy))));
-    drop(op);
-    assert!(f.store.lock(&saved.repository).is_ok());
-}
-
-#[test]
-fn the_lock_covers_only_the_worktree_it_was_taken_for() {
-    let f = fixture();
-    let lock = f.store.lock(&binding(&f, "wt1")).unwrap();
-    assert!(matches!(f.store.begin(lock, record(&f, "wt2"), inventory(), &PLENTY), Err(StoreError::WrongLock)));
-    assert!(f.store.pending().unwrap().is_empty());
-}
-
-#[test]
-fn a_pending_record_blocks_a_new_operation_on_the_same_worktree_only() {
-    let f = fixture();
-    let first = record(&f, "wt1");
-    // Dropping the operation is a crash: the lock goes, the record stays.
-    drop(begin(&f, first.clone()));
-
-    let again = record(&f, "wt1");
-    let lock = f.store.lock(&again.repository).unwrap();
-    match f.store.begin(lock, again, inventory(), &PLENTY) {
-        Err(StoreError::Pending(id)) => assert_eq!(id, first.operation_id),
-        other => panic!("expected the pending record to block: {:?}", other.map(|op| op.id().clone())),
-    }
-    drop(begin(&f, record(&f, "wt2")));
-    assert_eq!(f.store.pending().unwrap().len(), 2);
-}
-
-#[test]
-fn an_unreadable_record_blocks_every_new_operation() {
-    let f = fixture();
-    let first = record(&f, "wt1");
-    drop(begin(&f, first.clone()));
-    let path = f.store.operation_dir(&first.operation_id).join(RECORD_FILE);
-    storage::write_durable(&path, b"{\"record_version\":1}").unwrap();
-
-    let other = record(&f, "wt2");
-    let lock = f.store.lock(&other.repository).unwrap();
-    assert!(matches!(f.store.begin(lock, other, inventory(), &PLENTY), Err(StoreError::Record { .. })));
-    let pending = f.store.pending().unwrap();
-    assert_eq!(pending.len(), 1);
-    assert!(matches!(pending[0].record, Err(StoreError::Record { .. })));
-}
-
-#[test]
-fn a_staging_directory_left_by_a_crash_is_not_an_operation() {
-    let f = fixture();
-    let id = OperationId::generate().unwrap();
-    let staging = f.store.root().join(format!(".{id}.tmp"));
-    fs::create_dir(&staging).unwrap();
-    fs::write(staging.join(RECORD_FILE), b"half").unwrap();
-    assert!(f.store.pending().unwrap().is_empty());
-    drop(begin(&f, record(&f, "wt1")));
-}
-
-#[test]
-fn advance_persists_each_phase_and_only_forward() {
-    let f = fixture();
-    let mut op = begin(&f, record(&f, "wt1"));
-    op.advance(Phase::Moved).unwrap();
-    assert_eq!(f.store.read_record(op.id()).unwrap().completed_phase, Phase::Moved);
-    assert!(matches!(op.advance(Phase::Prepared), Err(StoreError::PhaseOrder)));
-    assert!(matches!(op.advance(Phase::Moved), Err(StoreError::PhaseOrder)));
-    assert!(matches!(op.advance(Phase::Completed), Err(StoreError::PhaseOrder)));
-    assert_eq!(op.record().completed_phase, Phase::Moved);
-}
-
-#[cfg(unix)]
-#[test]
-fn a_failed_phase_write_keeps_the_earlier_phase_on_disk_and_in_memory() {
-    use std::os::unix::fs::PermissionsExt;
-    let f = fixture();
-    let mut op = begin(&f, record(&f, "wt1"));
-    op.advance(Phase::Moved).unwrap();
-    let dir = op.dir().to_path_buf();
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
-    let result = op.advance(Phase::Associated);
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(matches!(result, Err(StoreError::Io(_))), "{result:?}");
-    assert_eq!(op.record().completed_phase, Phase::Moved);
-    assert_eq!(f.store.read_record(op.id()).unwrap().completed_phase, Phase::Moved);
-}
-
-#[cfg(unix)]
-#[test]
-fn a_record_that_cannot_be_created_leaves_no_operation() {
-    use std::os::unix::fs::PermissionsExt;
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let lock = f.store.lock(&saved.repository).unwrap();
-    fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o500)).unwrap();
-    let result = f.store.begin(lock, saved, inventory(), &PLENTY);
-    fs::set_permissions(f.store.root(), fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(matches!(result, Err(StoreError::Io(_))));
-    let names: Vec<_> = fs::read_dir(f.store.root()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
-    assert_eq!(names, vec![std::ffi::OsString::from(LOCKS_DIR)]);
-}
-
-#[test]
-fn completion_keeps_the_report_drops_the_journal_and_never_authorizes_again() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let mut op = begin(&f, saved.clone());
-    op.journal().begin_batch(vec![file("a")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-    let dir = op.dir().to_path_buf();
-    let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
-
-    assert_eq!(op.complete(&report, true).unwrap(), Vec::new());
-    let saved_report: OperationReport = serde_json::from_slice(&fs::read(dir.join(REPORT_FILE)).unwrap()).unwrap();
-    assert_eq!(saved_report, report);
-    assert!(!dir.join(JOURNAL_FILE).exists());
-    assert_eq!(f.store.read_record(&saved.operation_id).unwrap().completed_phase, Phase::Completed);
-    assert!(f.store.pending().unwrap().is_empty());
-    assert!(matches!(
-        f.store.recover(&saved.operation_id, &saved.repository, everything_present),
-        Err(StoreError::Completed(_))
-    ));
-    drop(begin(&f, record(&f, "wt1")));
-}
-
-#[test]
-fn a_journal_that_cannot_be_cleared_is_a_warning_after_completion() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let op = begin(&f, saved.clone());
-    let journal = op.dir().join(JOURNAL_FILE);
-    fs::rename(&journal, op.dir().join("journal.moved")).unwrap();
-    fs::create_dir(&journal).unwrap();
-    fs::write(journal.join("keep"), b"x").unwrap();
-
-    let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
-    let warnings = op.complete(&report, true).unwrap();
-    assert!(matches!(&warnings[..], [BookkeepingWarning::JournalNotCleared { path, .. }] if *path == journal));
-    assert!(f.store.pending().unwrap().is_empty());
+fn resume(f: &Fixture, id: &OperationId, expected: &RepositoryBinding) -> Result<PendingRemoval, StoreError> {
+    let lock = f.store.lock(expected).unwrap();
+    f.store.resume(lock, id, expected)
 }
 
 #[test]
 fn a_linked_operation_directory_is_never_read() {
     let f = fixture();
     let saved = record(&f, "wt1");
-    drop(begin(&f, saved.clone()));
-    let dir = f.store.operation_dir(&saved.operation_id);
+    let dir = save_legacy(&f, &saved).parent().unwrap().to_path_buf();
     let elsewhere = f.common.parent().unwrap().join("elsewhere");
     fs::rename(&dir, &elsewhere).unwrap();
     #[cfg(unix)]
@@ -333,17 +112,18 @@ fn a_linked_operation_directory_is_never_read() {
         // Windows without symlink privilege cannot build this fixture.
         return;
     }
-    let pending = f.store.pending().unwrap();
-    assert!(matches!(pending[0].record, Err(StoreError::Storage { problem: StorageProblem::Link, .. })));
+    let operations = f.store.operations().unwrap();
+    assert!(matches!(operations[0].record, Err(StoreError::Storage { problem: StorageProblem::Link, .. })));
     assert!(matches!(
-        f.store.recover(&saved.operation_id, &saved.repository, everything_present),
+        resume(&f, &saved.operation_id, &saved.repository),
         Err(StoreError::Storage { problem: StorageProblem::Link, .. })
     ));
+    assert!(elsewhere.join(RECORD_FILE).is_file(), "nothing behind the link was touched");
 }
 
 // ---------------------------------------------------------------------------
-// Input robustness matrices. Each starts from files the store itself wrote,
-// applies one edit per cell, and asserts through `recover`.
+// Input robustness matrix. It starts from a record an earlier `wt` wrote,
+// applies one edit per cell, and asserts through `resume`.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Expect {
@@ -354,10 +134,6 @@ enum Expect {
 /// A record field: its name, pointer, wrong-type value, empty value with its
 /// expected outcome (when the shape applies), and an invalid value.
 type RecordField<'a> = (&'a str, &'a str, Value, Option<(Value, Expect)>, Value);
-
-/// A journal cell: its name, the journal, and the expected outcome with the
-/// recovered entry states.
-type JournalCell<'a> = (String, Vec<u8>, Expect, Vec<(&'a str, EntryState)>);
 
 fn edited(original: &Value, pointer: &str, edit: impl FnOnce(&mut Value, &str)) -> Vec<u8> {
     let mut value = original.clone();
@@ -400,11 +176,7 @@ fn record_robustness_matrix() {
     let f = fixture();
     let saved = record(&f, "wt1");
     let id = saved.operation_id.clone();
-    let mut op = begin(&f, saved.clone());
-    op.journal().begin_batch(vec![file("a")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-    drop(op);
-    let path = f.store.operation_dir(&id).join(RECORD_FILE);
+    let path = save_legacy(&f, &saved);
     let written = fs::read(&path).unwrap();
     let doc: Value = serde_json::from_slice(&written).unwrap();
     let other_id = "ffffffffffffffffffffffffffffffff";
@@ -412,7 +184,7 @@ fn record_robustness_matrix() {
     use Expect::*;
     // (field, pointer, wrong type, empty, invalid content)
     let fields: Vec<RecordField> = vec![
-        ("record_version", "/record_version", json!("1"), None, json!(2)),
+        ("record_version", "/record_version", json!("1"), None, json!(99)),
         ("operation_id", "/operation_id", json!(123), Some((json!(""), Invalid)), json!(other_id)),
         ("original", "/original", json!(123), Some((json!({}), Invalid)), json!({"display": "relative/wt1"})),
         ("quarantine", "/quarantine", json!(123), Some((json!({}), Invalid)), json!({"display": f.work.join("wt1-copy")})),
@@ -482,14 +254,14 @@ fn record_robustness_matrix() {
     for (cell, bytes, expect) in cells {
         // A plain rewrite keeps the owner-only file; durability is not under test.
         fs::write(&path, &bytes).unwrap();
-        let outcome = f.store.recover(&id, &saved.repository, everything_present);
+        let outcome = resume(&f, &id, &saved.repository);
         let ok = match (&outcome, expect) {
-            (Ok(recovered), Valid) => recovered.entries.len() == 1,
+            (Ok(resumed), Valid) => resumed.record().operation_id == id,
             (Err(StoreError::Record { .. }), Invalid) => true,
             _ => false,
         };
         if !ok {
-            failures.push(format!("{cell}: expected {expect:?}, got {:?}", outcome.map(|r| r.record.operation_id)));
+            failures.push(format!("{cell}: expected {expect:?}, got {:?}", outcome.map(|r| r.id().clone())));
         }
     }
     assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
@@ -497,471 +269,15 @@ fn record_robustness_matrix() {
     // The reasons a user is shown for the three semantic refusals.
     let reason = |bytes: Vec<u8>| {
         fs::write(&path, &bytes).unwrap();
-        match f.store.recover(&id, &saved.repository, everything_present) {
+        match resume(&f, &id, &saved.repository) {
             Err(StoreError::Record { reason, .. }) => reason,
-            other => panic!("expected a record refusal, got {:?}", other.map(|r| r.record.operation_id)),
+            other => panic!("expected a record refusal, got {:?}", other.map(|r| r.id().clone())),
         }
     };
-    assert_eq!(reason(set(&doc, "/record_version", json!(2))), RecordInvalid::UnsupportedVersion(2));
+    assert_eq!(reason(set(&doc, "/record_version", json!(99))), RecordInvalid::UnsupportedVersion(99));
     assert_eq!(reason(set(&doc, "/operation_id", json!(other_id))), RecordInvalid::OperationMismatch);
     assert_eq!(
         reason(set(&doc, "/repository/common_dir_identity", json!({"kind": "unix", "device": "7", "inode": "999"}))),
         RecordInvalid::IdentityMismatch
     );
-}
-
-#[test]
-fn journal_robustness_matrix() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let id = saved.operation_id.clone();
-    let mut op = begin(&f, saved.clone());
-    op.journal().begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted, ResultState::Kept]).unwrap();
-    op.journal().begin_batch(vec![file("e/x")]).unwrap();
-    drop(op);
-    let path = f.store.operation_dir(&id).join(JOURNAL_FILE);
-    let written = fs::read(&path).unwrap();
-    let lines: Vec<Value> =
-        written.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()).map(|line| serde_json::from_slice(line).unwrap()).collect();
-    assert_eq!(lines.len(), 5, "header, inventory, intent, results, open intent");
-    assert_eq!(lines[1]["inventory"], inventory_value(), "the inventory is persisted as given");
-
-    let join = |lines: &[Vec<u8>]| -> Vec<u8> { lines.iter().flat_map(|line| line.iter().copied().chain(*b"\n")).collect() };
-    let compact = |line: &Value| serde_json::to_vec(line).unwrap();
-    let with_line = |index: usize, replacement: Vec<u8>| -> Vec<u8> {
-        let mut all: Vec<Vec<u8>> = lines.iter().map(compact).collect();
-        all[index] = replacement;
-        join(&all)
-    };
-    let other_id = "ffffffffffffffffffffffffffffffff";
-
-    use EntryState::*;
-    use Expect::*;
-    let control = vec![("d/a", Deleted), ("d/b", Kept), ("e/x", Uncertain)];
-    let mut cells: Vec<JournalCell> = vec![("control".into(), written.clone(), Valid, control.clone())];
-    let mut invalid = |cell: &str, bytes: Vec<u8>| cells.push((cell.to_string(), bytes, Invalid, Vec::new()));
-
-    // (column, line, pointer, wrong type, empty, invalid content). Every
-    // inventory pointer names the first entry (the hashed file "a") or the
-    // only link, so `duplicate`'s first-occurrence edit lands on the same
-    // member.
-    let columns: Vec<(&str, usize, &str, Value, Value, Value)> = vec![
-        ("path", 2, "/intent/entries/0/path", json!(123), json!({}), json!({"display": "../d/a"})),
-        ("kind", 2, "/intent/entries/0/kind", json!(123), json!(""), json!("socket")),
-        ("state", 3, "/results/entries/0/state", json!(123), json!(""), json!("vanished")),
-        ("inventory root", 1, "/inventory/root", json!(123), json!({}), json!({"kind": "unix", "device": "x", "inode": "3"})),
-        ("inventory entries", 1, "/inventory/entries", json!(123), json!({}), json!([{"path": {"display": "a"}}])),
-        ("inventory path", 1, "/inventory/entries/0/path", json!(123), json!({}), json!({"display": "/a"})),
-        ("inventory identity", 1, "/inventory/entries/0/identity", json!(123), json!({}), json!({"kind": "plan9", "qid": "1"})),
-        ("inventory shape", 1, "/inventory/entries/0/shape", json!(123), json!({}), json!({"socket": {}})),
-        ("file size", 1, "/inventory/entries/0/shape/file/size", json!("5"), json!(""), json!(-1)),
-        ("file modified", 1, "/inventory/entries/0/shape/file/modified", json!(123), json!({}), json!({"secs": 1, "nanos": -1})),
-        ("file mode", 1, "/inventory/entries/0/shape/file/mode", json!("644"), json!(""), json!(-1)),
-        ("file content", 1, "/inventory/entries/0/shape/file/content", json!(123), json!(""), json!({"blake3": "zz"})),
-        ("link target", 1, "/inventory/entries/6/shape/link/target", json!(123), json!({}), json!({"display": "a\u{0}b"})),
-    ];
-    for (column, line, pointer, wrong_type, empty, bad) in columns {
-        let key = pointer.rsplit('/').next().unwrap();
-        invalid(&format!("{column}: absent"), with_line(line, remove(&lines[line], pointer)));
-        invalid(&format!("{column}: null"), with_line(line, set(&lines[line], pointer, Value::Null)));
-        invalid(&format!("{column}: wrong type"), with_line(line, set(&lines[line], pointer, wrong_type)));
-        invalid(&format!("{column}: empty"), with_line(line, set(&lines[line], pointer, empty)));
-        invalid(&format!("{column}: duplicate key"), with_line(line, duplicate(&lines[line], key)));
-        invalid(&format!("{column}: invalid content"), with_line(line, set(&lines[line], pointer, bad)));
-    }
-    let entry = lines[2].pointer("/intent/entries/0").unwrap().clone();
-    invalid("entries: one element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([entry, 123]))));
-    invalid("entries: every element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([123]))));
-    invalid("entries: empty batch", with_line(2, set(&lines[2], "/intent/entries", json!([]))));
-    invalid("path: unknown member", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/a", "extra": 1}))));
-    let listed = lines[1].pointer("/inventory/entries/0").unwrap().clone();
-    invalid("inventory entries: one element wrong type", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().push(json!(123));
-    })));
-    invalid("inventory entries: every element wrong type", with_line(1, set(&lines[1], "/inventory/entries", json!([123]))));
-    // An empty inventory is a valid line, but the batches then plan entries it
-    // does not list.
-    invalid("inventory entries: empty", with_line(1, set(&lines[1], "/inventory/entries", json!([]))));
-    invalid("inventory: unknown member", with_line(1, set(&lines[1], "/inventory/extra", json!(1))));
-    invalid("inventory entry: unknown member", with_line(1, set(&lines[1], "/inventory/entries/0/extra", json!(1))));
-    invalid("inventory entries: a path twice", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().push(listed.clone());
-    })));
-    invalid("inventory entries: a child before its directory", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().swap(1, 2);
-    })));
-    invalid("inventory root: another checkout", with_line(1, set(&lines[1], "/inventory/root", json!({"kind": "unix", "device": "7", "inode": "4"}))));
-    invalid("intent: an entry the inventory does not list", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/new"}))));
-    invalid("intent: a kind other than the inventory's", with_line(2, set(&lines[2], "/intent/entries/0/kind", json!("directory"))));
-    let mut garbage = compact(&lines[2]);
-    garbage.extend_from_slice(b" junk");
-    invalid("line: trailing content", with_line(2, garbage));
-    let mut garbage = compact(&lines[1]);
-    garbage.extend_from_slice(b" junk");
-    invalid("inventory line: trailing content", with_line(1, garbage));
-    invalid("line: blank line", with_line(2, Vec::new()));
-    invalid("header: absent", join(&lines[1..].iter().map(compact).collect::<Vec<_>>()));
-    invalid("header: repeated", with_line(2, compact(&lines[0])));
-    invalid("header: other version", with_line(0, set(&lines[0], "/header/journal_version", json!(1))));
-    invalid("header: other operation", with_line(0, set(&lines[0], "/header/operation_id", json!(other_id))));
-    let without_inventory: Vec<Vec<u8>> = lines.iter().enumerate().filter(|(at, _)| *at != 1).map(|(_, line)| compact(line)).collect();
-    invalid("inventory: absent", join(&without_inventory));
-    invalid("inventory: header only", join(&[compact(&lines[0])]));
-    invalid("inventory: repeated", with_line(2, compact(&lines[1])));
-    let mut after_intent: Vec<Vec<u8>> = lines.iter().map(compact).collect();
-    after_intent.swap(1, 2);
-    invalid("inventory: after an intent", join(&after_intent));
-    invalid("results: wrong batch", with_line(3, set(&lines[3], "/results/batch", json!(2))));
-    let mut swapped = lines[3].clone();
-    swapped.pointer_mut("/results/entries").unwrap().as_array_mut().unwrap().reverse();
-    invalid("results: misaligned entries", with_line(3, compact(&swapped)));
-
-    let mut torn_inventory = join(&lines[..1].iter().map(compact).collect::<Vec<_>>());
-    torn_inventory.extend_from_slice(&compact(&lines[1])[..10]);
-    invalid("inventory: torn", torn_inventory);
-
-    // Valid: no batches, the two places a crash can tear a line, and the
-    // unchanged inventory written with different but equivalent spacing.
-    cells.push(("empty: header and inventory only".into(), join(&lines[..2].iter().map(compact).collect::<Vec<_>>()), Valid, Vec::new()));
-    let mut torn_intent = join(&lines[..4].iter().map(compact).collect::<Vec<_>>());
-    torn_intent.extend_from_slice(&compact(&lines[4])[..10]);
-    cells.push(("torn intent".into(), torn_intent, Valid, vec![("d/a", Deleted), ("d/b", Kept)]));
-    let mut torn_results = join(&lines[..3].iter().map(compact).collect::<Vec<_>>());
-    torn_results.extend_from_slice(&compact(&lines[3])[..10]);
-    cells.push(("torn results".into(), torn_results, Valid, vec![("d/a", Uncertain), ("d/b", Planned)]));
-    let pretty_spaces = with_line(1, serde_json::to_string(&lines[1]).unwrap().replace("\":", "\": ").into_bytes());
-    cells.push(("inventory: spaced".into(), pretty_spaces, Valid, control));
-
-    let present = BTreeSet::from(["d/b"]);
-    let mut failures = Vec::new();
-    for (cell, bytes, expect, states) in cells {
-        fs::write(&path, &bytes).unwrap();
-        let outcome = f.store.recover(&id, &saved.repository, |path| Ok(present.contains(path.to_str().unwrap())));
-        let ok = match (&outcome, expect) {
-            (Ok(recovered), Valid) => {
-                let got: Vec<_> = recovered.entries.iter().map(|entry| (entry.path.display().into_owned(), entry.state)).collect();
-                let want: Vec<_> = states.iter().map(|(path, state)| (path.to_string(), *state)).collect();
-                got == want && recovered.torn_tail == cell.starts_with("torn") && recovered.inventory == *inventory()
-            }
-            (Err(StoreError::Journal { .. } | StoreError::InventoryMismatch), Invalid) => true,
-            _ => false,
-        };
-        if !ok {
-            failures.push(format!("{cell}: expected {expect:?}, got {:?}", outcome.map(|r| (r.entries, r.torn_tail))));
-        }
-    }
-    assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
-}
-
-#[test]
-fn begin_refuses_an_inventory_of_another_checkout() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let lock = f.store.lock(&saved.repository).unwrap();
-    let other = Arc::new(DeletionInventory::listing(identity(4), &["a"]));
-    assert!(matches!(f.store.begin(lock, saved.clone(), other, &PLENTY), Err(StoreError::InventoryMismatch)));
-    assert!(f.store.pending().unwrap().is_empty(), "nothing was saved");
-}
-
-// ---- Replacing the journal on retry ----------------------------------------
-
-/// An operation that deleted `a` and stopped, with its lock released: what a
-/// retry finds.
-fn stopped_after_deleting_a(f: &Fixture) -> (RecoveryRecord, Vec<u8>) {
-    let saved = record(f, "wt1");
-    let mut op = begin(f, saved.clone());
-    op.journal().begin_batch(vec![file("a")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-    let journal = fs::read(op.dir().join(JOURNAL_FILE)).unwrap();
-    drop(op);
-    (saved, journal)
-}
-
-fn deleted_a() -> Vec<JournalEntry> {
-    vec![JournalEntry { attempt: 1, batch: 1, path: NativeString::from("a"), kind: EntryKind::File, state: EntryState::Deleted }]
-}
-
-fn reopen(f: &Fixture, saved: &RecoveryRecord) -> Result<Operation, StoreError> {
-    let lock = f.store.lock(&saved.repository).unwrap();
-    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory(), &PLENTY)
-}
-
-/// Every shape `reopen` can leave when it stops part-way: the previous
-/// attempt stays recoverable through the public API, its journal is
-/// unchanged, and no operation (the only thing that journals a deletion)
-/// is returned. A later retry then reopens normally.
-#[test]
-fn a_reopen_stopped_at_any_step_leaves_the_previous_attempt_recoverable() {
-    type Write = fn(&[u8]) -> Vec<u8>;
-    let header_only: Write = |journal| journal[..=journal.iter().position(|b| *b == b'\n').unwrap()].to_vec();
-    let partial_inventory: Write = |journal| {
-        let header = journal.iter().position(|b| *b == b'\n').unwrap() + 1;
-        journal[..header + (journal.len() - header) / 4].to_vec()
-    };
-    let cases: [(&str, ReopenStep, Fault, Option<Write>); 7] = [
-        ("after archiving", ReopenStep::Archived, Fault::Crash, None),
-        ("empty replacement", ReopenStep::Created, Fault::Crash, None),
-        ("header only", ReopenStep::Created, Fault::Crash, Some(header_only)),
-        ("header and part of the inventory", ReopenStep::Created, Fault::Crash, Some(partial_inventory)),
-        ("complete but unpublished", ReopenStep::Initialized, Fault::Crash, None),
-        ("initialization write failure", ReopenStep::Created, Fault::Fail, Some(header_only)),
-        ("publication failure", ReopenStep::Initialized, Fault::Fail, None),
-    ];
-    for (name, at, fault, write) in cases {
-        let f = fixture();
-        let (saved, previous) = stopped_after_deleting_a(&f);
-        let dir = f.store.operation_dir(&saved.operation_id);
-        // The replacement repeats the previous journal's header and
-        // inventory: same operation, same inventory.
-        let written = write.map(|write| write(&previous));
-        let injected = fault::inject(move |step, path| {
-            if step != at {
-                return None;
-            }
-            if let Some(bytes) = &written {
-                fs::write(path, bytes).unwrap();
-            }
-            Some(fault)
-        });
-        let outcome = reopen(&f, &saved);
-        assert!(outcome.is_err(), "{name}: the stopped reopen returned an operation");
-        drop(outcome);
-        drop(injected);
-
-        assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous, "{name}: the journal was replaced");
-        assert_eq!(f.store.pending().unwrap().len(), 1, "{name}");
-        let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
-        assert_eq!(recovered.record, saved, "{name}");
-        assert_eq!(recovered.entries, deleted_a(), "{name}: the confirmed deletion is still recoverable");
-        if fault == Fault::Fail {
-            let hidden = fs::read_dir(&dir).unwrap().filter(|entry| entry.as_ref().unwrap().file_name().to_string_lossy().ends_with(".tmp"));
-            assert_eq!(hidden.count(), 0, "{name}: a failed reopen removes its replacement");
-        }
-
-        // The retry after the stop archives the same journal once, not twice.
-        drop(reopen(&f, &saved).unwrap());
-        assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous, "{name}");
-        assert!(!dir.join("journal-2.jsonl").exists(), "{name}: the same journal was archived twice");
-        let resumed = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
-        assert_eq!(resumed.entries, deleted_a(), "{name}: the new attempt starts its own journal and the earlier deletion is kept");
-    }
-}
-
-/// The clean control: a reopen that runs to the end keeps the previous
-/// journal as `journal-1.jsonl` and publishes a new one holding only the
-/// fresh inventory, owner-only like every store file.
-#[test]
-fn a_completed_reopen_archives_the_previous_journal_and_publishes_a_new_one() {
-    let f = fixture();
-    let (saved, previous) = stopped_after_deleting_a(&f);
-    let mut op = reopen(&f, &saved).unwrap();
-    let dir = op.dir().to_path_buf();
-    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
-    #[cfg(unix)]
-    assert_eq!(mode(&dir.join("journal-1.jsonl")), 0o600);
-    op.journal().begin_batch(vec![file("d/a")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-    drop(op);
-    let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
-    let deleted_d_a = JournalEntry { attempt: 2, batch: 1, path: NativeString::from("d/a"), kind: EntryKind::File, state: EntryState::Deleted };
-    assert_eq!(recovered.entries, [deleted_a(), vec![deleted_d_a]].concat());
-    let names: BTreeSet<String> = fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
-    assert_eq!(names, BTreeSet::from([RECORD_FILE.into(), JOURNAL_FILE.into(), "journal-1.jsonl".into()]));
-}
-
-/// Every attempt's journal is replayed. An earlier attempt keeps what was
-/// gone when the next one began: its deletions, and an unconfirmed entry the
-/// next inventory no longer lists, as uncertain. What the next inventory
-/// lists (kept, or unconfirmed but still present) is left to the attempt
-/// that resolves it, so nothing is counted twice.
-#[test]
-fn earlier_attempts_keep_their_deletions_and_uncertainty_without_double_counting() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let mut op = begin(&f, saved.clone());
-    op.journal().begin_batch(vec![file("e/x")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Kept]).unwrap();
-    op.journal().begin_batch(vec![file("a")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-    // A crash between unlinking `d/a` and writing the batch's results.
-    op.journal().begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
-    drop(op);
-
-    let mut survivors = inventory_value();
-    survivors["entries"].as_array_mut().unwrap().retain(|entry| !["a", "d/a"].contains(&entry["path"]["display"].as_str().unwrap()));
-    let lock = f.store.lock(&saved.repository).unwrap();
-    let survivors: DeletionInventory = serde_json::from_value(survivors).unwrap();
-    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, Arc::new(survivors), &PLENTY).unwrap();
-    op.journal().begin_batch(vec![file("d/b")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted]).unwrap();
-
-    let entry = |attempt, batch, path: &str, state| JournalEntry { attempt, batch, path: NativeString::from(path), kind: EntryKind::File, state };
-    let expected = vec![
-        entry(1, 2, "a", EntryState::Deleted),
-        entry(1, 3, "d/a", EntryState::Uncertain),
-        entry(2, 1, "d/b", EntryState::Deleted),
-    ];
-    // The filesystem now says every path is gone; only the current attempt
-    // asks it.
-    assert_eq!(op.journal_entries(|_| Ok(false)).unwrap(), expected);
-    assert_eq!(f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap().entries, expected);
-
-    // Completion that could not list the entries keeps every journal.
-    let dir = op.dir().to_path_buf();
-    let report = OperationReport::new(Some(saved.operation_id.clone()), RemovalOutcome::Removed, saved.original.clone());
-    assert_eq!(op.complete(&report, false).unwrap(), Vec::new());
-    assert!(dir.join(JOURNAL_FILE).exists() && dir.join("journal-1.jsonl").exists());
-}
-
-/// A discard renames the directory away before deleting it, so a crash
-/// part-way leaves a hidden directory that is no pending operation.
-#[test]
-fn a_discarded_operation_is_never_left_pending_without_its_journal() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let dir = begin(&f, saved.clone()).dir().to_path_buf();
-    // What a crash inside the deletion of the renamed directory leaves.
-    let doomed = f.store.root().join(format!(".{}.discarded", saved.operation_id));
-    fs::rename(&dir, &doomed).unwrap();
-    fs::remove_file(doomed.join(JOURNAL_FILE)).unwrap();
-    assert!(f.store.pending().unwrap().is_empty());
-    drop(begin(&f, record(&f, "wt1")));
-
-    let other = record(&f, "wt2");
-    let dir = begin(&f, other.clone()).dir().to_path_buf();
-    reopen(&f, &other).unwrap().discard().unwrap();
-    assert!(!dir.exists());
-    assert!(!f.store.root().join(format!(".{}.discarded", other.operation_id)).exists());
-}
-
-fn reopen_with(f: &Fixture, saved: &RecoveryRecord, space: &Space) -> Result<Operation, StoreError> {
-    let lock = f.store.lock(&saved.repository).unwrap();
-    f.store.reopen(lock, &saved.operation_id, &saved.repository, inventory(), space)
-}
-
-/// The names in `dir`.
-fn names(dir: &Path) -> BTreeSet<String> {
-    fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect()
-}
-
-/// Each attempt's writer accepts exactly the batch bytes its own inventory
-/// can need: the first attempt's, then a retry's smaller one.
-#[test]
-fn begin_and_reopen_limit_their_journals_to_their_own_inventories_bound() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let first = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
-    let mut op = begin(&f, saved.clone());
-    assert_eq!(op.journal().limit(), first.batches);
-    drop(op);
-
-    let mut survivors = inventory_value();
-    survivors["entries"].as_array_mut().unwrap().retain(|entry| entry["path"]["display"] != "a");
-    let survivors: Arc<DeletionInventory> = Arc::new(serde_json::from_value(survivors).unwrap());
-    let retry = journal::journal_size(&saved.operation_id, &survivors).unwrap();
-    assert!(retry.batches < first.batches);
-    let lock = f.store.lock(&saved.repository).unwrap();
-    let mut op = f.store.reopen(lock, &saved.operation_id, &saved.repository, survivors, &PLENTY).unwrap();
-    assert_eq!(op.journal().limit(), retry.batches);
-}
-
-/// A first attempt needs its whole journal plus the record. One byte short,
-/// or no reading at all, refuses before any operation directory (or its
-/// staging directory) exists; exactly enough begins.
-#[test]
-fn begin_refuses_before_writing_when_the_journal_cannot_fit() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let size = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
-    let needed = size.total().unwrap() + saved.to_json().len() as u64;
-    let before = names(f.store.root());
-
-    for space in [Space(Ok(needed - 1)), Space(Err("statvfs failed"))] {
-        let lock = f.store.lock(&saved.repository).unwrap();
-        match f.store.begin(lock, saved.clone(), inventory(), &space) {
-            Err(StoreError::InsufficientSpace { path, needed: asked, available }) => {
-                assert_eq!((path, asked, available), (f.store.root().to_path_buf(), needed, needed - 1));
-            }
-            Err(StoreError::SpaceUnknown { path, needed: asked, reason }) => {
-                assert_eq!((path, asked, reason.as_str()), (f.store.root().to_path_buf(), needed, "statvfs failed"));
-            }
-            other => panic!("expected a space refusal, got {:?}", other.map(|op| op.id().clone())),
-        }
-        assert!(f.store.pending().unwrap().is_empty());
-        let after = names(f.store.root());
-        assert!(after.difference(&before).all(|name| name == LOCKS_DIR), "{after:?}: only the lock's bookkeeping may appear");
-    }
-
-    let lock = f.store.lock(&saved.repository).unwrap();
-    let op = f.store.begin(lock, saved.clone(), inventory(), &Space(Ok(needed))).unwrap();
-    assert_eq!(op.journal_entries(|_| Ok(true)).unwrap(), Vec::new());
-    assert_eq!(f.store.pending().unwrap().len(), 1);
-}
-
-/// A retry needs its new journal plus a copy of the previous one. Short of
-/// that, or without a reading, it refuses before archiving or creating
-/// anything: the previous journal, its confirmed deletion, and the absence
-/// of any archive or hidden replacement all stay as they were.
-#[test]
-fn reopen_refuses_before_archiving_or_replacing_when_the_journal_cannot_fit() {
-    let f = fixture();
-    let (saved, previous) = stopped_after_deleting_a(&f);
-    let dir = f.store.operation_dir(&saved.operation_id);
-    let size = journal::journal_size(&saved.operation_id, &inventory()).unwrap();
-    let needed = size.total().unwrap() + previous.len() as u64;
-    let before = names(&dir);
-
-    for space in [Space(Ok(needed - 1)), Space(Err("no such volume"))] {
-        match reopen_with(&f, &saved, &space) {
-            Err(StoreError::InsufficientSpace { path, needed: asked, .. }) => assert_eq!((path, asked), (dir.clone(), needed)),
-            Err(StoreError::SpaceUnknown { path, needed: asked, .. }) => assert_eq!((path, asked), (dir.clone(), needed)),
-            other => panic!("expected a space refusal, got {:?}", other.map(|op| op.id().clone())),
-        }
-        assert_eq!(names(&dir), before, "nothing archived or created");
-        assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous);
-        let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
-        assert_eq!(recovered.entries, deleted_a(), "the earlier evidence still reads");
-    }
-
-    drop(reopen_with(&f, &saved, &Space(Ok(needed))).unwrap());
-    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
-}
-
-/// When an earlier stopped retry already archived these exact bytes, no
-/// new copy is written, so none is counted.
-#[test]
-fn an_already_identical_archive_adds_nothing_to_the_space_a_retry_needs() {
-    let f = fixture();
-    let (saved, previous) = stopped_after_deleting_a(&f);
-    let injected = fault::inject(|step, _| (step == ReopenStep::Archived).then_some(Fault::Crash));
-    assert!(reopen(&f, &saved).is_err());
-    drop(injected);
-    let dir = f.store.operation_dir(&saved.operation_id);
-    assert_eq!(fs::read(dir.join("journal-1.jsonl")).unwrap(), previous);
-
-    let needed = journal::journal_size(&saved.operation_id, &inventory()).unwrap().total().unwrap();
-    assert!(matches!(
-        reopen_with(&f, &saved, &Space(Ok(needed - 1))),
-        Err(StoreError::InsufficientSpace { needed: asked, .. }) if asked == needed
-    ));
-    drop(reopen_with(&f, &saved, &Space(Ok(needed))).unwrap());
-    assert!(!dir.join("journal-2.jsonl").exists());
-}
-
-/// A reading is not a reservation: with exactly enough space read, a write
-/// that then fails still leaves the previous attempt as the crash rules
-/// promise.
-#[test]
-fn a_sufficient_reading_then_a_failed_write_leaves_the_previous_attempt_recoverable() {
-    let f = fixture();
-    let (saved, previous) = stopped_after_deleting_a(&f);
-    let dir = f.store.operation_dir(&saved.operation_id);
-    let needed = journal::journal_size(&saved.operation_id, &inventory()).unwrap().total().unwrap() + previous.len() as u64;
-    let injected = fault::inject(|step, _| (step == ReopenStep::Initialized).then_some(Fault::Fail));
-    assert!(matches!(reopen_with(&f, &saved, &Space(Ok(needed))), Err(StoreError::Io(_))));
-    drop(injected);
-    assert_eq!(fs::read(dir.join(JOURNAL_FILE)).unwrap(), previous);
-    let recovered = f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false)).unwrap();
-    assert_eq!(recovered.entries, deleted_a());
 }
