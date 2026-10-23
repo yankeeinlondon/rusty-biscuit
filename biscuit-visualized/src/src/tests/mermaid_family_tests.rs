@@ -3,7 +3,7 @@
 //!
 //! One fixture per family of Merman's family registry at the pinned rev
 //! (`fixtures/merman/families/`), each rendered through
-//! `mermaid::MermaidDiagram` to SVG and PNG under each interim theme. The SVG
+//! `mermaid::MermaidDiagram` to SVG and PNG under each fixed-palette theme. The SVG
 //! artifact is checked for `foreignObject`: it is the SVG the rasterizer
 //! receives for the PNG with the same background (one code path builds both).
 //! Two tests per family (SVG, PNG) keep each test fast; a guard test keeps the list
@@ -31,7 +31,7 @@ const NOT_RENDERED: [(&str, &str); 2] = [
     ),
 ];
 
-/// Every interim theme renders `source` to SVG without HTML labels.
+/// Every fixed-palette theme renders `source` to SVG without HTML labels.
 fn smoke_svg(family: &str, source: &str) {
     let _cache = isolated_cache_dir();
     for theme in THEMES {
@@ -53,7 +53,7 @@ fn smoke_svg(family: &str, source: &str) {
     }
 }
 
-/// Every interim theme renders `source` to PNG, drawn small: the smoke test
+/// Every fixed-palette theme renders `source` to PNG, drawn small: the smoke test
 /// needs a PNG, not its detail, and rasterization is most of its time.
 fn smoke_png(family: &str, source: &str) {
     let _cache = isolated_cache_dir();

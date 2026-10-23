@@ -212,7 +212,7 @@ fn assert_smallest_clearing_spacing(source: &str) -> f32 {
 /// The polygons Merman drew with class `tag-label-bkg`, as `(text, bounds)`
 /// in drawing order, each transform (`translate(a,b) rotate(45, cx,cy)`)
 /// applied.
-fn drawn_tags(svg: &str) -> Vec<(String, Bounds)> {
+pub(super) fn drawn_tags(svg: &str) -> Vec<(String, Bounds)> {
     const POLYGON: &str = r#"<polygon class="tag-label-bkg" points=""#;
     let numbers = |text: &str| -> Vec<f64> {
         text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))

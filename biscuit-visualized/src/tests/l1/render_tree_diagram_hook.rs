@@ -40,8 +40,8 @@ fn no_image_terminal() -> Terminal {
 
 /// Mermaid code blocks under `GraphicsMode::Rich` **with the Mermaid opt-in**
 /// bypass the `CodeRenderer` hook and route to `MermaidDiagram::try_render`.
-/// When the host lacks Mermaid rendering dependencies the renderer records a
-/// lossy diagnostic and falls back to the built-in plain fallback.
+/// When the diagram cannot be drawn as an image the renderer records a lossy
+/// diagnostic and falls back to the built-in plain fallback.
 #[test]
 fn mermaid_rich_mode_with_opt_in_bypasses_code_renderer() {
     use renderable::tree::{GraphicsMode, TerminalMermaidMode};
@@ -68,7 +68,7 @@ fn mermaid_rich_mode_with_opt_in_bypasses_code_renderer() {
     let result = render_terminal_node(&mermaid_node, &opts).expect("render should succeed");
 
     // The output must contain the Mermaid source (plain fallback) when the
-    // host lacks rendering dependencies, OR an image string when it succeeds.
+    // image render fails, OR an image string when it succeeds.
     // Either way, the render must not panic.
     assert!(
         !result.output.is_empty(),

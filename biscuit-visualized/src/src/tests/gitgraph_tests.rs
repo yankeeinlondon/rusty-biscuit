@@ -492,3 +492,88 @@ fn the_spaced_layout_is_the_measured_one() {
     assert!(size.width > unspaced_geometry(&text).width, "{size:?}");
     assert!(size.width >= laid_out.width, "{size:?} vs {}", laid_out.width);
 }
+
+// ---------------------------------------------------------------------------
+// Tag font size as Merman reads it
+// ---------------------------------------------------------------------------
+
+/// Two long tags on neighboring commits, so spacing is written, with the
+/// tag font size an author sets in `%%{init}%%` (`themeVariables` JSON).
+fn sized_tags(variables: &str) -> String {
+    let body = gitgraph(&[
+        "commit id: \"a1\" tag: \"release-candidate-one\"",
+        "commit id: \"a2\" tag: \"release-candidate-two\"",
+    ]);
+    if variables.is_empty() {
+        return body;
+    }
+    format!("%%{{init: {{\"themeVariables\": {{{variables}}}}}}}%%\n{body}")
+}
+
+/// The tag bounds the geometry reports, and that spacing was computed from,
+/// are the polygons Merman draws in the rendered SVG, and those polygons do
+/// not overlap: the tags were measured at the size Merman draws them.
+fn assert_tags_measured_as_drawn(text: &str) {
+    let _cache = isolated_cache_dir();
+    let diagram = MermaidDiagram::new(text).with_theme(MermaidTheme::Default);
+    let laid_out = diagram
+        .gitgraph_geometry()
+        .unwrap_or_else(|error| panic!("{error}: {text}"))
+        .expect("a gitGraph");
+    let request = crate::artifact::RenderRequest {
+        format: crate::artifact::OutputFormat::Svg,
+        ..crate::artifact::RenderRequest::default()
+    };
+    let artifact = diagram.render(&request).expect("the gitGraph renders");
+    let svg = std::fs::read_to_string(&artifact.path).expect("the SVG artifact");
+    let drawn = super::gitgraph_layout_tests::drawn_tags(&svg);
+
+    let ours = laid_out.tag_boxes();
+    assert_eq!(ours.len(), drawn.len(), "ours {ours:?}, drawn {drawn:?}: {text}");
+    for (_, tag, bounds) in &ours {
+        let (_, drawn) = drawn
+            .iter()
+            .find(|(drawn_text, _)| drawn_text == tag)
+            .expect("a drawn tag");
+        assert!(
+            (bounds.x2 - bounds.x1 - (drawn.x2 - drawn.x1)).abs() < TOLERANCE
+                && (bounds.y2 - bounds.y1 - (drawn.y2 - drawn.y1)).abs() < TOLERANCE,
+            "{tag}: measured {bounds:?}, drawn {drawn:?}: {text}"
+        );
+    }
+    let (first, second) = (drawn[0].1, drawn[1].1);
+    let (earlier, later) = if first.x1 <= second.x1 { (first, second) } else { (second, first) };
+    assert!(
+        later.x1 - earlier.x2 >= laid_out.tag_gap - TOLERANCE,
+        "drawn tags {earlier:?} and {later:?} are closer than the {} px gap: {text}",
+        laid_out.tag_gap
+    );
+}
+
+macro_rules! tag_font_size_cases {
+    ($($name:ident => $variables:expr,)+) => {
+        $(
+            #[test]
+            #[serial]
+            fn $name() {
+                assert_tags_measured_as_drawn(&sized_tags($variables));
+            }
+        )+
+    };
+}
+
+tag_font_size_cases! {
+    tag_font_size_absent_is_measured_as_drawn => "",
+    tag_font_size_in_px_is_measured_as_drawn => r#""tagLabelFontSize": "14px""#,
+    tag_font_size_in_percent_is_measured_as_drawn => r#""tagLabelFontSize": "150%""#,
+    tag_font_size_in_em_is_measured_as_drawn => r#""tagLabelFontSize": "1.5em""#,
+    tag_font_size_relative_to_an_overridden_base_is_measured_as_drawn =>
+        r#""fontSize": 20, "tagLabelFontSize": "120%""#,
+    tag_font_size_inherit_is_measured_as_drawn => r#""tagLabelFontSize": "inherit""#,
+    tag_font_size_important_is_measured_as_drawn => r#""tagLabelFontSize": "14px !important""#,
+    tag_font_size_as_a_json_number_is_measured_as_drawn => r#""tagLabelFontSize": 14"#,
+    tag_font_size_unitless_string_is_measured_as_drawn => r#""tagLabelFontSize": "14""#,
+    tag_font_size_not_a_size_is_measured_as_drawn => r#""tagLabelFontSize": "large""#,
+    tag_font_size_unset_is_measured_as_drawn => r#""tagLabelFontSize": "unset""#,
+    tag_font_size_zero_is_measured_as_drawn => r#""tagLabelFontSize": "0""#,
+}

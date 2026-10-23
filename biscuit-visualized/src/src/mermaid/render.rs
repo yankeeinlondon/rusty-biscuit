@@ -793,35 +793,74 @@ fn theme_font_stacks() -> [FontQuery; 2] {
 /// tags get ([`TAG_GAP_EM`] of the font size), read from the layout
 /// document's effective config: `themeVariables.fontFamily`,
 /// `tagLabelFontSize`, and `fontSize`, so an author's `%%{init}%%` override
-/// is measured as Merman draws it. A value that is absent or not a size takes
-/// the built-in themes' default; the layout itself is read strictly by
-/// `gitgraph_layout`.
+/// is measured as Merman draws it. Both sizes follow Merman's own reading
+/// (see [`base_font_size`] and [`tag_font_size`]); the layout itself is read
+/// strictly by `gitgraph_layout`.
 fn tag_metrics(json: &str) -> (TextStyle, f32) {
     let document = serde_json::from_str::<serde_json::Value>(json).ok();
     let variables = document
         .as_ref()
         .and_then(|document| document.pointer("/meta/effective_config/themeVariables"));
     let variable = |name: &str| variables.and_then(|variables| variables.get(name));
-    let px = |value: &serde_json::Value| {
-        value.as_f64().or_else(|| {
-            value
-                .as_str()
-                .and_then(|text| text.trim().trim_end_matches("px").trim().parse::<f64>().ok())
-        })
-    };
-    let font_size = variable("fontSize").and_then(px).filter(|size| *size > 0.0);
-    let tag_size = variable("tagLabelFontSize").and_then(px).filter(|size| *size > 0.0);
+    let font_size = base_font_size(variable("fontSize"));
     let family = variable("fontFamily")
         .and_then(serde_json::Value::as_str)
         .filter(|family| !family.trim().is_empty());
     let style = TextStyle {
         font_family: Some(family.unwrap_or(THEME_FONT_STACK).to_string()),
-        font_size: tag_size.unwrap_or(TAG_LABEL_FONT_SIZE),
+        font_size: tag_font_size(variable("tagLabelFontSize"), font_size),
         font_weight: None,
         font_style: None,
     };
-    let gap = TAG_GAP_EM * font_size.map_or(THEME_FONT_SIZE, |size| size as f32);
+    let gap = TAG_GAP_EM * font_size as f32;
     (style, gap)
+}
+
+/// The gitGraph base font size as Merman reads `themeVariables.fontSize`: a
+/// number, or a string holding a number with an optional `px`; anything else
+/// is the themes' 16 px. Merman clamps it to at least 1 px.
+fn base_font_size(value: Option<&serde_json::Value>) -> f64 {
+    let parsed = value.and_then(|value| {
+        value.as_f64().or_else(|| {
+            let text = value.as_str()?.trim();
+            text.strip_suffix("px").unwrap_or(text).trim().parse::<f64>().ok()
+        })
+    });
+    parsed
+        .filter(|size| size.is_finite())
+        .unwrap_or(f64::from(THEME_FONT_SIZE))
+        .max(1.0)
+}
+
+/// The tag font size as Merman draws it from `themeVariables.tagLabelFontSize`.
+/// Merman reads only a string: `px`, `em` and `%` (of the base size),
+/// `inherit` and `unset` (the base size), or `0`. A JSON number, a unitless
+/// string other than `0`, or anything else draws at the 10 px default, so it
+/// is measured at 10 px too.
+fn tag_font_size(value: Option<&serde_json::Value>, base: f64) -> f64 {
+    let Some(text) = value.and_then(serde_json::Value::as_str).map(str::trim) else {
+        return TAG_LABEL_FONT_SIZE;
+    };
+    let unit = |unit: &str| {
+        text.strip_suffix(unit)?
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|size| size.is_finite() && *size >= 0.0)
+    };
+    if text.eq_ignore_ascii_case("inherit") || text.eq_ignore_ascii_case("unset") {
+        base
+    } else if let Some(size) = unit("px") {
+        size
+    } else if let Some(size) = unit("em") {
+        size * base
+    } else if let Some(size) = unit("%") {
+        size * base / 100.0
+    } else if text.parse::<f64>().is_ok_and(|size| size == 0.0) {
+        0.0
+    } else {
+        TAG_LABEL_FONT_SIZE
+    }
 }
 
 /// Whether the source's own `%%{init}%%` or frontmatter config styles the

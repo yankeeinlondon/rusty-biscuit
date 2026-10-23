@@ -940,16 +940,15 @@ mod tests {
                 );
             }
             Err(e) => {
-                // If the host lacks Mermaid rendering dependencies, skip
-                // the assertion rather than fail — the Level-2 tests
-                // exercise the full pipeline.
+                // A failed render skips the assertion rather than fail —
+                // the Level-2 tests exercise the full pipeline.
                 eprintln!("Mermaid render unavailable in unit-test env: {e}");
             }
         }
     }
 
     /// `render_to_svg` must produce an SVG string containing expected Mermaid
-    /// elements, or gracefully skip when the host lacks rendering deps.
+    /// elements, or gracefully skip when the render fails.
     #[test]
     fn diagram_render_to_svg_produces_svg() {
         let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
@@ -965,9 +964,8 @@ mod tests {
                 );
             }
             Err(e) => {
-                // If the host lacks Mermaid rendering dependencies, skip
-                // rather than fail — the Level-2 tests exercise the full
-                // pipeline.
+                // A failed render skips rather than fails — the Level-2
+                // tests exercise the full pipeline.
                 eprintln!("Mermaid SVG render unavailable in unit-test env: {e}");
             }
         }

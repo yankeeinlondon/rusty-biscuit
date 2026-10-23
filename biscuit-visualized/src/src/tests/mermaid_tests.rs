@@ -651,7 +651,7 @@ fn mermaid_alt_text_uses_title() {
 }
 
 /// An author's `%%{init}%%` theme variables reach Merman (D54's precedence
-/// check for the interim built-in themes).
+/// check).
 #[test]
 #[serial]
 fn mermaid_pie_chart_init_directive_applies_custom_colors() {

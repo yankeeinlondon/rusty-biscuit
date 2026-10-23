@@ -18,7 +18,7 @@
 //!
 //! All edits are string-level and key on the shape of Merman's output at the
 //! pinned rev; a Merman bump must re-check them (the guard tests in
-//! `tests/postprocess_tests.rs` fail when one becomes dead).
+//! `src/tests/postprocess_tests.rs` fail when one becomes dead).
 //!
 //! [`MermaidTarget::HtmlStatic`]: super::MermaidTarget::HtmlStatic
 
