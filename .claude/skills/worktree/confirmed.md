@@ -2,9 +2,8 @@
 
 The lifecycle that replaces the journal-based one in `remove::lifecycle`
 ([lifecycle.md](lifecycle.md)): after "yes" (or `--force`) the checkout is
-deleted. It lives **beside** the old lifecycle until the CLI is rewired to
-it; until then `wt remove` still runs `remove::lifecycle`, and nothing in
-production calls `remove::confirmed`.
+deleted. `wt remove` (`cli/src/commands/remove/mod.rs`) runs it; the old
+lifecycle is still compiled but nothing in production calls it.
 
 ## Entry points
 
@@ -21,6 +20,22 @@ the mount table, the clock, `FsFaults`, cancellation, `Revalidate` (rechecks
 a conditional branch on a later run), and `Notify` (R16 "another removal is
 running", R22 waits). `Removal::exit_class()` is N5.
 
+## How the CLI drives it
+
+- `run`: `resolve_in` → `Pending(id)` is `finish_pending` with no report;
+  `Live` → `facts::gather` → report → `policy::decide` → `remove`, or for a
+  wrapper caller inside a checkout directory `save_approval` +
+  `OperationHandoff` (only a `Target::Checkout` is handed off; an own link
+  is deleted at once and the run prints a bare `cd:`).
+- `Env` in the CLI: `SniffUsage`, `NativeMounts`, `HostClock`, `NoFaults`,
+  the Ctrl-C `interrupt::Window`, `Reconfirm` (the first run's
+  `reconfirm` proof) and `Stderr` (`Notify`).
+- `Revalidate::still_safe(name, tip, remote_deleted)`: `remote_deleted`
+  says the operation also has a remote step, so the branch's origin copy
+  and its PR are no proof (the first run's `force_remote` rule).
+- A remote step whose lease push fails asks the endpoint once
+  (`remote::remote_branch_absent`); a branch already gone is `AlreadyAbsent`.
+
 ## Order (do not reorder)
 
 save approval (`store.approve`) → `git worktree unlock` (only when the
@@ -29,6 +44,10 @@ question showed the lock) → place (`placement::place_with`: move, or
 → `git worktree remove <absent registered path>` + copy record → branch steps
 → `PendingRemoval::finish`.
 
+- **A checkout Git cannot read is deleted in place.** When the question
+  warned `GitUnreadable` or `Unchecked` (R10, R13), a move refusal about the
+  `.git` link (`Unsupported`, `Uninspectable`, `Association`) binds through
+  the admin record's back-reference (`bind_in_place`) instead of refusing.
 - **Plan with `plan_confirmed_move`, not `plan_move`.** It skips the lock
   check at planning (the unlock comes after the save) and drops Git's
   submodule refusal; the move itself (`move_with`) still refuses a lock, so a

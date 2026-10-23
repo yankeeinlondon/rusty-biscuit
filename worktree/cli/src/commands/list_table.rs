@@ -1146,15 +1146,10 @@ fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Opt
     Some(text)
 }
 
-/// Prose markup for why `entry`, in [`Availability::Other`], can't be used:
-/// what was observed, after "Git can't read this worktree" when Git marks it
-/// `prunable`. A link Git still reads through gets no such claim.
-pub(crate) fn unavailable_reason(entry: &WorktreeEntry, condition: &OtherCondition) -> String {
-    reason_note(entry, condition, Note::default().copyable(entry.path.to_string_lossy())).to_markup()
-}
-
-/// [`unavailable_reason`] as a [`Note`], with `path` showing the entry's
-/// path.
+/// Why `entry`, in [`Availability::Other`], can't be used, with `path`
+/// showing the entry's path: what was observed, after "Git can't read this
+/// worktree" when Git marks it `prunable`. A link Git still reads through
+/// gets no such claim.
 fn reason_note(entry: &WorktreeEntry, condition: &OtherCondition, path: Note) -> Note {
     let observed = observed_condition(entry, condition, path);
     if entry.prunable.is_some() { Note::from("Git can't read this worktree: ").then(observed) } else { observed }

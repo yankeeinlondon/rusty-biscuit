@@ -368,7 +368,10 @@
   and `claudine-cli` uses it the same way for a typed Ctrl+C test.
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
-  `sniff` already builds the same version. The workspace's own
+  `sniff` already builds the same version. On Windows it is also a normal
+  dependency: `wt remove` reads its own parent process (PID and name),
+  which std exposes only on Unix, so the caller's shell is not listed as a
+  program using the worktree and is named when it blocks the removal. The workspace's own
   `biscuit-visualized` (`terminal` feature, a normal dependency for the
   `GitGraph` component) also gives the graph tests
   `MermaidDiagram::gitgraph_geometry`, the laid-out graph the image is drawn

@@ -6,15 +6,34 @@ path, ordered `Warning`s (lock first), `Note`s (not risks, no `--force`
 needed), an optional `Blocker` (Windows R15 only), the `git status`
 `Inventory` (the questioned set for the late-change line) and the one usage
 report. `Facts::needs_force()` is "any warning" (N8): a non-interactive run
-refuses without `--force` when it is true. User-facing wording belongs in
-`worktree/docs/cli/remove.md` once the CLI shows it.
+refuses without `--force` when it is true. User-facing wording is in
+`worktree/docs/cli/remove.md`; the CLI renders the list in
+`cli/src/commands/remove/report.rs`.
 
 ## Rules that bite
 
 - **One usage query, one `git status`.** `gather` never queries twice; the
-  report is kept for later enrichment. A failed or partial query is a
+  report is kept for later enrichment. A failed query is a
   `UsageIncomplete` warning, except a query that failed because the checkout
   vanished, which is `Target::Vanished` (R17, "already removed").
+- **Only a real miss warns (`facts::missed`).** Discovery unavailable, the
+  budget run out, or a mechanism `Failed`/`NotAttempted` is
+  `UsageIncomplete`. A mechanism the platform never supports (macOS FSEvents
+  subscriptions, polling watchers) and `Partial` coverage (processes of
+  other users) are on every run on a normal host: counting them made every
+  non-interactive removal on macOS refuse.
+- **The caller's own shell is not a program using the worktree.** A holder
+  whose PID is `Caller::parent` and whose evidence only stands in a
+  directory (`WorkingDirectory`, or an `OpenHandle` on a directory: that is
+  how Sniff sees a shell's working directory on Windows) is dropped; the
+  shell-inside warning or the wrapper's move covers it. The CLI fills
+  `parent` with `std::os::unix::process::parent_id` on Unix and one
+  `sysinfo` lookup on Windows, which also names the shell (`Caller::shell`).
+- **Included copies warn too.** `gather` runs `classify_included` after
+  `git status`: copies that are new, changed, or uncomparable are
+  `Warning::IncludedFiles`; rules that can't be read are
+  `Warning::IncludedUnchecked` (no longer a failure before removal); the
+  assessment's own messages become `Note::IncludedCheck`.
 - **Inject everything through `Sources`.** Usage, mounts, repair Git, the
   caller (`cwd`, wrapper present, shell name) and `Host` (synced-folder
   roots; `Host::detect()` reads the OneDrive variables on Windows only).

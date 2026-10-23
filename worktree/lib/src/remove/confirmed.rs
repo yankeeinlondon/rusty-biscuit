@@ -442,7 +442,10 @@ fn approve(request: &Request<'_>, env: &Env<'_>) -> Approval {
             let bound = Bound { original: plan.original.clone(), identity: plan.identity, common_dir: plan.common_dir.clone(), admin: plan.admin.clone() };
             (bound, Some(plan), false)
         }
-        Err(refusal) if in_place_for_refusal(&refusal).is_some() => match bind_in_place(base, entry) {
+        // R10, R13: the question said Git cannot read the checkout, so a
+        // `.git` the move cannot follow is no reason to stop; the checkout
+        // is bound by its Git record's back-reference and deleted in place.
+        Err(refusal) if in_place_for_refusal(&refusal).is_some() || unreadable_by_git(facts, &refusal) => match bind_in_place(base, entry) {
             Ok(bound) => (bound, None, true),
             Err(refusal) => return refuse(refusal),
         },
@@ -490,6 +493,13 @@ fn approve(request: &Request<'_>, env: &Env<'_>) -> Approval {
         Err(error @ (StoreError::NotSaved(_) | StoreError::Io(_) | StoreError::Storage { .. })) => refuse(Refusal::NotSaved(error)),
         Err(error) => refuse(Refusal::Store(error)),
     }
+}
+
+/// Whether `refusal` is about the checkout's `.git` link, which the question
+/// already warned Git cannot read.
+fn unreadable_by_git(facts: &Facts, refusal: &MoveRefusal) -> bool {
+    let warned = facts.warnings.iter().any(|warning| matches!(warning, Warning::GitUnreadable { .. } | Warning::Unchecked { .. }));
+    warned && matches!(refusal, MoveRefusal::Unsupported(_) | MoveRefusal::Uninspectable(_) | MoveRefusal::Association(_))
 }
 
 /// Takes the worktree's removal lock, telling [`Notify::removal_running`]
@@ -686,12 +696,13 @@ impl Operation<'_> {
 
     fn branch_steps(mut self, seams: &mut Seams<'_>) -> Result<Removal, Crashed> {
         let steps = self.record().branch_steps.clone();
+        let remote_deleted = steps.iter().any(|step| matches!(step.action, BranchAction::Remote { .. }));
         for (index, step) in steps.iter().enumerate() {
             if step.state != StepState::Pending {
                 self.finished.branches.push(BranchResult::recorded(step));
                 continue;
             }
-            let outcome = branches::run(self.base, step, self.env.revalidate, self.fresh);
+            let outcome = branches::run(self.base, step, self.env.revalidate, self.fresh, remote_deleted);
             let state = if outcome.is_done() { StepState::Done } else { StepState::Kept };
             self.finished.branches.push(BranchResult { target: branches::target(&step.action), outcome });
             if let Err(error) = self.pending.finish_step(index, state) {
@@ -864,9 +875,10 @@ fn without_record(request: &Request<'_>, env: &Env<'_>, own_checkout: Option<&Pa
     if matches!(facts.target, Target::Missing | Target::Vanished) {
         finished.checkout = CheckoutResult::AlreadyRemoved;
     }
+    let remote_deleted = branches.iter().any(|branch| matches!(branch.action, BranchAction::Remote { .. }));
     for branch in branches {
         let step = BranchStep { action: branch.action.clone(), approval: branch.approval, state: StepState::Pending };
-        let outcome = branches::run(base, &step, env.revalidate, true);
+        let outcome = branches::run(base, &step, env.revalidate, true, remote_deleted);
         finished.branches.push(BranchResult { target: branches::target(&step.action), outcome });
     }
     Removal::Finished(Box::new(finished))

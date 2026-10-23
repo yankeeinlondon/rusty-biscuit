@@ -260,7 +260,7 @@ A linked worktree can lose its connection to the repository while Git still reco
 
 #### A link in place of the worktree
 
-A worktree directory moved away and replaced by a link to its new location (a symbolic link, or on Windows any reparse point such as a junction) is not marked `prunable`: Git reads the checkout through the link. `wt list` looks at every recorded path without following it, shows such a row as `✕`, and notes `<name>: <path> is a link, which may have replaced the original checkout.` `wt remove` refuses it ([why](remove.md#a-link-in-place-of-the-worktree)). Only the path itself counts; a link among its parent directories, such as macOS's `/tmp`, is not reported.
+A worktree directory moved away and replaced by a link to its new location (a symbolic link, or on Windows any reparse point such as a junction) is not marked `prunable`: Git reads the checkout through the link. `wt list` looks at every recorded path without following it, shows such a row as `✕`, and notes `<name>: <path> is a link, which may have replaced the original checkout.` `wt remove` warns about it and deletes only the link and Git's record, or both when the link leads to the worktree's own checkout ([details](remove.md#a-link-in-place-of-the-worktree)). Only the path itself counts; a link among its parent directories, such as macOS's `/tmp`, is not reported.
 
 ### PR badges
 

@@ -230,10 +230,24 @@ fn inspect(base: &Path, record: &CompactRecord) -> Result<Start, Inspected> {
         (At::Absent, At::Absent, Registered::Original) if record.progress < Progress::Placed => {
             Ok(Start { from: Progress::ContentRemoved, plan: None, in_place: true })
         }
-        (original_at, _, registration) => kept(format!(
-            "the worktree ({original_at:?} at {}) and Git's record ({registration:?}) no longer match any step of its removal, so everything was kept",
-            original.display()
-        )),
+        (original_at, _, registration) => {
+            let found = match original_at {
+                At::Absent => "nothing is",
+                At::Checkout => "the worktree is",
+                At::Other => "something other than the worktree is",
+            };
+            let recorded = match &registration {
+                Registered::Original => "at that path".to_string(),
+                Registered::Deletion => format!("at {}", deletion.display()),
+                Registered::Removed => "nowhere".to_string(),
+                // Returned early above.
+                Registered::Elsewhere(_) => "elsewhere".to_string(),
+            };
+            kept(format!(
+                "{found} at {} and Git records the worktree {recorded}, which no step of its removal left, so everything was kept",
+                original.display()
+            ))
+        }
     }
 }
 

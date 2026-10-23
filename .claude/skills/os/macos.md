@@ -285,6 +285,15 @@ version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
   - An exported `CDPATH` also makes `cd` print the path, so `$(cd … && pwd)`
     captures it twice. Run `.githooks/tests/test-pre-push.sh` as
     `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
+  - `CDPATH` also lists `~/coding/personal`, which holds unrelated
+    repositories (for example `~/coding/personal/repo`). A scratch script
+    that runs `cd repo` and then `git init`/`git add`/`git commit` there
+    commits into a real repository of the user's; it has happened at least
+    three times (2026-10-04, 2026-10-12, 2026-10-22). Build scratch
+    fixtures under `mktemp -d` and `cd` to that absolute path.
+  - In the agent's own shell `cd` may also be wrapped by zoxide (`zoxide: no
+    match found` is the sign), which can jump to a remembered directory.
+    Prefer absolute paths, `git -C`, and `--manifest-path` to `cd`.
 - **Signing fails or opens pinentry because Claudine shadows `HOME`.** An agent
   session can inherit `HOME=~/.claudine` (Claudine's directory), while the
   OpenPGP keyring lives under the login home. Run commit, verify, and push with

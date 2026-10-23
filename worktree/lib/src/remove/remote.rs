@@ -322,6 +322,19 @@ pub fn delete_remote_branch(
     Ok(())
 }
 
+/// Whether `endpoint` answers that it has no `refs/heads/<destination>`;
+/// asked after a lease push failed, so a branch someone else already
+/// deleted completes its step. The stale remote-tracking ref is dropped as
+/// a successful deletion would. An unreachable endpoint proves nothing.
+pub fn remote_branch_absent(base: &Path, endpoint: &str, destination: &str) -> bool {
+    let heads = crate::live_remote::LsRemote { base, deadline: crate::live_remote::LIVE_CHECK_DEADLINE };
+    if heads.live_head(endpoint, destination) != Ok(None) {
+        return false;
+    }
+    let _ = git_from(base, base, &["update-ref", "-d", &format!("refs/remotes/origin/{destination}")]);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

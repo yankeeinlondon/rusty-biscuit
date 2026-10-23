@@ -158,7 +158,7 @@ impl Inputs {
             usage: Usage::clear(),
             mounts: Box::new(FixedMounts::default()),
             git: Box::new(repair::Git),
-            caller: Caller { cwd: repo.path(), shell_wrapper: false, shell: None },
+            caller: Caller { cwd: repo.path(), shell_wrapper: false, shell: None, parent: None },
             host: Host::default(),
         }
     }
@@ -286,6 +286,35 @@ fn each_process_is_named_with_what_it_is_doing() {
     assert!(facts.usage.is_some(), "the report is kept for enrichment");
 }
 
+/// The caller's own shell standing in the checkout is not "a program using
+/// it": the shell-inside warning or the wrapper's move covers it. The same
+/// parent holding a file open is listed.
+#[test]
+fn the_callers_own_shell_standing_in_the_checkout_is_not_listed() {
+    let (repo, checkout) = fixture();
+    let mut inputs = Inputs::new(&repo);
+    inputs.caller.parent = Some(5000);
+    inputs.caller.shell_wrapper = true;
+    inputs.usage = Usage::holding(|root| {
+        vec![
+            process(5000, "zsh", EvidenceKind::WorkingDirectory, root, false),
+            process(5001, "zsh", EvidenceKind::WorkingDirectory, root, false),
+        ]
+    });
+    let facts = inputs.gather(&repo, &listed(&repo, &checkout));
+    let [Warning::Processes { programs, .. }] = facts.warnings.as_slice() else { panic!("{:?}", rendered(&facts)) };
+    assert_eq!(programs.iter().map(|holder| holder.pid).collect::<Vec<_>>(), [5001], "another shell is still listed");
+
+    // Windows reports a shell's working directory as an open handle on it.
+    inputs.usage = Usage::holding(|root| vec![process(5000, "powershell.exe", EvidenceKind::OpenHandle, root, false)]);
+    let facts = inputs.gather(&repo, &listed(&repo, &checkout));
+    assert!(facts.warnings.is_empty(), "{:?}", rendered(&facts));
+
+    inputs.usage = Usage::holding(|root| vec![process(5000, "zsh", EvidenceKind::OpenHandle, &root.join("notes.md"), false)]);
+    let facts = inputs.gather(&repo, &listed(&repo, &checkout));
+    assert!(matches!(facts.warnings.as_slice(), [Warning::Processes { programs, .. }] if programs[0].pid == 5000), "{:?}", rendered(&facts));
+}
+
 #[test]
 fn a_failed_usage_query_warns_that_programs_could_not_be_checked() {
     let (repo, checkout) = fixture();
@@ -318,6 +347,41 @@ fn a_partial_usage_query_warns_with_what_was_missed() {
     let [warning @ Warning::UsageIncomplete { .. }] = facts.warnings.as_slice() else { panic!("{:?}", rendered(&facts)) };
     assert!(warning.to_string().contains("the time allowed for the check ran out"), "{warning}");
     assert!(facts.usage.is_some());
+}
+
+/// The macOS query reports FSEvents watches as unsupported and open files
+/// as partly checked on every run; neither is a miss, so a clean checkout
+/// has no warning (and a non-interactive run needs no `--force`). A failed
+/// mechanism is a miss.
+#[test]
+fn only_a_missed_usage_mechanism_warns() {
+    fn with_coverage(path: &Path, coverage: serde_json::Value) -> PathUsageReport {
+        let mut value = serde_json::to_value(report(path)).unwrap();
+        value["coverage"] = coverage;
+        serde_json::from_value(value).unwrap()
+    }
+    fn entry(mechanism: &str, status: &str) -> serde_json::Value {
+        json!({
+            "mechanism": mechanism, "scope": "target", "status": status, "attempted": 3, "succeeded": 2,
+            "reason": "a reason", "truncation": null, "limitations": []
+        })
+    }
+    let (repo, checkout) = fixture();
+    let mut inputs = Inputs::new(&repo);
+    inputs.usage = Usage::answering(|path| {
+        Ok(with_coverage(path, json!([entry("fsevents", "unsupported"), entry("open_handles", "partial"), entry("working_directories", "complete")])))
+    });
+    let facts = inputs.gather(&repo, &listed(&repo, &checkout));
+    assert!(facts.warnings.is_empty(), "{:?}", rendered(&facts));
+    assert!(!facts.needs_force());
+
+    let mut inputs = Inputs::new(&repo);
+    inputs.usage = Usage::answering(|path| Ok(with_coverage(path, json!([entry("open_handles", "failed"), entry("fsevents", "unsupported")]))));
+    let facts = inputs.gather(&repo, &listed(&repo, &checkout));
+    let [warning @ Warning::UsageIncomplete { .. }] = facts.warnings.as_slice() else { panic!("{:?}", rendered(&facts)) };
+    let text = warning.to_string();
+    assert!(text.contains("open files failed (a reason)"), "{text}");
+    assert!(!text.contains("FSEvents"), "an unsupported mechanism is not a miss: {text}");
 }
 
 /// R17: gone after the usage query is already removed, not a warning.

@@ -27,6 +27,7 @@ use crate::worktree::{WorktreeEntry, parse_worktree_list};
 
 use super::admin_entry::{AdminEntry, AssociationError, admin_entry_for, read_back_reference};
 use super::handoff::is_within;
+use super::included::{Mark, classify_included};
 use super::inventory::{Inventory, collect_inventory};
 use super::mounts::{self, Mount, MountInfo};
 use super::quarantine::association::leads_to_record;
@@ -53,6 +54,12 @@ pub struct Caller {
     /// The parent process's name (N11), when known; names the shell in the
     /// Windows refusal.
     pub shell: Option<String>,
+    /// The parent process's PID, when known. A parent that only stands in
+    /// the checkout (a working directory, or on Windows, where that is how
+    /// Sniff sees one, an open handle on a directory) is the caller's own
+    /// shell, which the shell-inside warning (or the wrapper's move) covers,
+    /// so it is not listed as a program using the worktree.
+    pub parent: Option<u32>,
 }
 
 /// Host facts that are not about the worktree itself.
@@ -169,6 +176,11 @@ pub enum Warning {
     UsageIncomplete { reason: String },
     /// Dirty entries from `git status`, repository-relative.
     Uncommitted { files: Vec<PathBuf> },
+    /// Ignored files `.worktreeinclude` selects that are new, changed since
+    /// they were copied in, or could not be compared with their source.
+    IncludedFiles { files: Vec<(PathBuf, Mark)> },
+    /// The `.worktreeinclude` rules or their copies could not be checked.
+    IncludedUnchecked { reason: String },
     /// `git status` failed (R13); no count is known.
     Unchecked { reason: String },
     /// The directory is gone and its surviving index stages these changes.
@@ -196,6 +208,9 @@ pub enum Warning {
 pub enum Note {
     /// A submodule keeps its Git data outside the worktree; it is retained.
     SubmoduleGitDataRetained { path: PathBuf, git_dir: PathBuf },
+    /// How the included files were compared, when not as usual (a copy
+    /// record that could not be read, for example).
+    IncludedCheck { message: String },
 }
 
 /// Refuses before any question is asked.
@@ -367,15 +382,16 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
     match queried {
         Ok(report) => {
             let coverage = CoverageSummary::of(&report);
-            let programs = match assess(report.clone(), &OwnedHandles::default()) {
+            let mut programs = match assess(report.clone(), &OwnedHandles::default()) {
                 Err(UsageRefusal::InUse(in_use)) => in_use.holders,
                 _ => Vec::new(),
             };
+            programs.retain(|holder| Some(holder.pid) != sources.caller.parent || !only_stands_in(holder));
             if !programs.is_empty() {
                 facts.warnings.push(Warning::Processes { root: report.target.resolved.as_path().to_path_buf(), programs });
             }
-            if !coverage.is_complete() {
-                facts.warnings.push(Warning::UsageIncomplete { reason: coverage_gaps(&coverage) });
+            if let Some(reason) = missed(&coverage) {
+                facts.warnings.push(Warning::UsageIncomplete { reason });
             }
             facts.usage = Some(report);
         }
@@ -384,9 +400,19 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
 
     if git_readable {
         match collect_inventory(sources.base, &checkout) {
-            Ok(inventory) => {
+            Ok(mut inventory) => {
                 if !inventory.dirty.is_empty() {
                     facts.warnings.push(Warning::Uncommitted { files: inventory.dirty.iter().map(|e| e.path.clone()).collect() });
+                }
+                match classify_included(sources.base, &checkout, entry.branch.as_deref()) {
+                    Ok(included) => {
+                        if !included.needs_consent.is_empty() {
+                            facts.warnings.push(Warning::IncludedFiles { files: included.needs_consent.clone() });
+                        }
+                        facts.notes.extend(included.warnings.iter().map(|message| Note::IncludedCheck { message: message.clone() }));
+                        inventory.included = included;
+                    }
+                    Err(error) => facts.warnings.push(Warning::IncludedUnchecked { reason: error.to_string() }),
                 }
                 facts.inventory = Some(inventory);
             }
@@ -418,6 +444,19 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
         facts.warnings.push(Warning::SyncedFolder { root: root.clone() });
     }
     facts
+}
+
+/// Whether every use `holder` makes of the checkout is standing in a
+/// directory of it: a working directory, or an open handle on a directory.
+fn only_stands_in(holder: &Holder) -> bool {
+    holder.evidence.iter().all(|evidence| match evidence.kind {
+        EvidenceKind::WorkingDirectory => true,
+        EvidenceKind::OpenHandle => match &evidence.location {
+            EvidenceLocation::Path(path) => path.as_path().is_dir(),
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// `<admin>/locked`'s trimmed content (`Some(None)` when empty), `None`
@@ -502,8 +541,14 @@ fn is_unregistered_elsewhere(base: &Path, entry: &WorktreeEntry, target: &Path) 
         .all(|listed| !listed.starts_with(target))
 }
 
-/// What did not complete, in plain words.
-fn coverage_gaps(coverage: &CoverageSummary) -> String {
+/// What the usage query missed, in plain words, or `None` when it saw
+/// what this host lets it see. A failed or unattempted mechanism, discovery
+/// that is unavailable, and a budget that ran out are misses. A mechanism
+/// the platform never supports (macOS has no inventory of FSEvents
+/// subscriptions) and one only partly checked because some processes cannot
+/// be inspected are this host's ordinary limits on every run: counting them
+/// would warn about every removal, and so refuse every non-interactive one.
+fn missed(coverage: &CoverageSummary) -> Option<String> {
     let mut gaps = Vec::new();
     match coverage.outcome {
         Outcome::Usable => {}
@@ -513,17 +558,14 @@ fn coverage_gaps(coverage: &CoverageSummary) -> String {
     if coverage.budget_exhausted {
         gaps.push("the time allowed for the check ran out".to_string());
     }
-    for gap in &coverage.gaps {
+    for gap in coverage.gaps.iter().filter(|gap| matches!(gap.status, CoverageStatus::Failed | CoverageStatus::NotAttempted)) {
         let mut text = format!("{} {}", mechanism_name(gap.mechanism), status_name(gap.status));
         if let Some(reason) = &gap.reason {
             text.push_str(&format!(" ({reason})"));
         }
         gaps.push(text);
     }
-    if coverage.evidence_omitted > 0 {
-        gaps.push(format!("{} more uses were not recorded", coverage.evidence_omitted));
-    }
-    gaps.join("; ")
+    (!gaps.is_empty()).then(|| gaps.join("; "))
 }
 
 fn mechanism_name(mechanism: Mechanism) -> &'static str {
@@ -772,6 +814,18 @@ impl fmt::Display for Warning {
                 counted(files.len(), "uncommitted file", "uncommitted files"),
                 shown(files)
             ),
+            Warning::IncludedFiles { files } => {
+                let shown = named(files.iter().map(|(path, mark)| format!("{} ({})", path.display(), included_state(mark))));
+                write!(
+                    f,
+                    "{} copied in by .worktreeinclude will be lost: {shown}",
+                    counted(files.len(), "included file", "included files")
+                )
+            }
+            Warning::IncludedUnchecked { reason } => write!(
+                f,
+                "Files copied in by .worktreeinclude could not be checked ({reason}); they will be deleted."
+            ),
             Warning::Unchecked { reason } => write!(
                 f,
                 "Uncommitted files could not be checked ({reason}); whatever is there will be deleted."
@@ -836,9 +890,21 @@ impl fmt::Display for Warning {
     }
 }
 
+/// What sets an included file apart from its source, in plain words.
+fn included_state(mark: &Mark) -> String {
+    match mark {
+        Mark::New => "new".into(),
+        Mark::Changed => "changed since it was copied".into(),
+        Mark::Unknown(reason) => format!("could not be compared: {reason}"),
+        Mark::Unchanged => "unchanged".into(),
+        Mark::Missing => "missing".into(),
+    }
+}
+
 impl fmt::Display for Note {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Note::IncludedCheck { message } => f.write_str(message),
             Note::SubmoduleGitDataRetained { path, git_dir } => write!(
                 f,
                 "Submodule {} keeps its Git data outside this worktree, at {}; that data is not deleted.",

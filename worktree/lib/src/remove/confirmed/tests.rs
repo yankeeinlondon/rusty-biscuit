@@ -73,7 +73,7 @@ impl Fixture {
     /// What the question shows, gathered as `wt remove` does.
     fn facts_with(&self, mounts: &FixedMounts) -> Facts {
         let entry = self.entry();
-        let caller = Caller { cwd: self.base(), shell_wrapper: false, shell: None };
+        let caller = Caller { cwd: self.base(), shell_wrapper: false, shell: None, parent: None };
         gather(&Sources { base: &self.base(), entry: &entry, usage: &ClearUsage, mounts, git: &repair::Git, caller: &caller, host: &Host::default() })
     }
 
@@ -160,7 +160,7 @@ impl Notify for Notes {
 struct Safe;
 
 impl Revalidate for Safe {
-    fn still_safe(&self, _name: &str, _tip: &str) -> Result<(), String> {
+    fn still_safe(&self, _name: &str, _tip: &str, _remote_deleted: bool) -> Result<(), String> {
         Ok(())
     }
 }

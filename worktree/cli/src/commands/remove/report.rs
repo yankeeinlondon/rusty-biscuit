@@ -1,19 +1,22 @@
-//! The status report `wt remove` prints before asking or removing anything,
-//! and the messages that follow it. Builders return Prose markup so tests can
-//! read them without a terminal; [`render`] turns the report into text.
+//! What `wt remove` prints before asking or removing anything: the
+//! worktree, every warning [`facts::gather`](worktree::remove::facts::gather)
+//! found (the lock first), and the branch's facts. Asked interactively, it is
+//! the one checkout question. Builders return Prose markup so tests can read
+//! them without a terminal; [`render`] turns the report into text.
+//!
+//! Process names, lock reasons, paths, and Git messages come from other
+//! programs and the filesystem, so each is shown through [`visible`].
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
-use worktree::remove::Inventory;
-use worktree::remove::missing::MissingCheckout;
+use worktree::remove::CheckoutState;
+use worktree::remove::facts::{Facts, LATE_CHANGES_NOTE, Warning, describe_process};
 use worktree::remove::remote::{Reinterpretation, RemoteOnly, RemoteState};
 use worktree::remove::safety::{BranchSafety, Commit, Evidence, PrLookup, Tier};
-
-use crate::commands::dirty_tree;
 
 /// Above this many entries a list becomes a count.
 pub const LIST_LIMIT: usize = 10;
@@ -24,25 +27,23 @@ fn esc(text: &str) -> String {
     Prose::escape_text_outside_code_spans(text)
 }
 
-pub fn visible_include_path(path: &Path) -> String {
-    let visible: String = path.as_os_str().as_encoded_bytes().iter()
-        .flat_map(|byte| std::ascii::escape_default(*byte).map(char::from)).collect();
-    esc(&visible)
+/// `text` safe to show: control characters escaped (`\n`, `\u{1b}`), then
+/// Prose markup escaped, so it renders as the literal text it is.
+pub fn visible(text: &str) -> String {
+    let shown: String = text
+        .chars()
+        .map(|c| if c.is_control() { c.escape_default().to_string() } else { c.to_string() })
+        .collect();
+    Prose::escape_text(&shown)
 }
 
 pub struct ReportInput<'a> {
     pub display_name: &'a str,
     pub path: &'a Path,
+    /// The report is the checkout question (interactive, no `--force`).
+    pub asking: bool,
+    pub facts: &'a Facts,
     pub branch: Option<&'a str>,
-    pub inventory: &'a Inventory,
-    /// `Some` when the directory is gone: [`missing_markup`] replaces the
-    /// files block, since `inventory` then holds nothing that was checked.
-    pub missing: Option<&'a MissingCheckout>,
-    /// The `.git` file was missing and `wt` restored it to check the files.
-    pub relinked: bool,
-    /// A retried removal already removed the checkout and its record; only
-    /// branch actions are left.
-    pub checkout_removed: bool,
     /// `None` for a detached worktree.
     pub safety: Option<&'a BranchSafety>,
     pub has_origin: bool,
@@ -56,16 +57,25 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
     // The markup builders lay their text out one line per `\n`.
     let lines = |markup: String| Prose::new(markup).with_line_breaks(LineBreaks::Hard).render(terminal);
     let mut heading = heading_markup(input);
-    if input.relinked {
+    if matches!(input.facts.prepared, Some(CheckoutState::Repaired(_))) {
         heading.push_str(&format!("\n{RELINKED_MARKUP}"));
     }
     let mut blocks = vec![lines(heading)];
-    let files = match input.missing {
-        Some(missing) => missing_markup(missing),
-        None if input.checkout_removed => CHECKOUT_REMOVED_MARKUP.to_string(),
-        None => files_markup(input.inventory),
-    };
-    blocks.push(lines(files));
+    let warnings = warning_markup(input.facts);
+    if !warnings.is_empty() {
+        let mut list = UnorderedList::empty().with_bullet("⚠ ");
+        for warning in warnings {
+            list.add(Prose::new(warning).with_line_breaks(LineBreaks::Hard));
+        }
+        blocks.push(list.render(terminal));
+    }
+    let notes: Vec<String> = input.facts.notes.iter().map(|note| format!("<dim>{}</dim>", visible(&note.to_string()))).collect();
+    if !notes.is_empty() {
+        blocks.push(render_list(terminal, notes));
+    }
+    if input.asking || !input.facts.warnings.is_empty() {
+        blocks.push(lines(format!("<dim>{}</dim>", esc(LATE_CHANGES_NOTE))));
+    }
     match (input.branch, input.safety) {
         (Some(branch), Some(safety)) => {
             let mut block = Prose::new(format!("<b>Branch</b> <blue>{}</blue>", esc(branch)))
@@ -74,7 +84,8 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
             block.push_str(&render_list(terminal, branch_facts(safety, input.has_origin)));
             blocks.push(block);
         }
-        _ => blocks.push(
+        (Some(_), None) => {}
+        (None, _) => blocks.push(
             Prose::new("<dim>Detached HEAD: there is no branch to delete.</dim>").render(terminal),
         ),
     }
@@ -98,11 +109,68 @@ fn render_list(terminal: &Terminal, items: Vec<String>) -> String {
 }
 
 pub fn heading_markup(input: &ReportInput<'_>) -> String {
-    format!(
-        "<b>Removing</b> worktree <blue>{}</blue> <dim>at {}</dim>",
-        esc(input.display_name),
-        esc(&input.path.display().to_string())
-    )
+    let name = esc(input.display_name);
+    let path = visible(&input.path.display().to_string());
+    if input.asking {
+        format!("<b>Remove</b> worktree <blue>{name}</blue> <dim>({path})</dim>?")
+    } else {
+        format!("<b>Removing</b> worktree <blue>{name}</blue> <dim>at {path}</dim>")
+    }
+}
+
+/// One markup item per warning, in [`Facts::warnings`] order (the lock
+/// first). A warning that lists programs or mounts gives each its own line,
+/// built from the parts so that no name can start a line of its own.
+pub fn warning_markup(facts: &Facts) -> Vec<String> {
+    facts
+        .warnings
+        .iter()
+        .map(|warning| match warning {
+            Warning::Locked { .. } => format!("<yellow><b>{}</b></yellow>", visible(&warning.to_string())),
+            Warning::Processes { root, programs } => {
+                let verb = if programs.len() == 1 { "program is" } else { "programs are" };
+                let mut out = format!("<b>{} {verb} using files in this worktree:</b>", programs.len());
+                for program in programs {
+                    out.push_str(&format!("\n    {}", visible(&describe_process(program, root))));
+                }
+                out.push_str("\nDeleting now may make them fail.");
+                out
+            }
+            Warning::NestedMounts { mounts } => {
+                let what = if mounts.len() == 1 { "filesystem is" } else { "filesystems are" };
+                let mut out = format!("<b>{} {what} mounted inside this worktree:</b>", mounts.len());
+                for mount in mounts {
+                    out.push_str(&format!(
+                        "\n    {} (from {})",
+                        visible(&mount.mount_point.display().to_string()),
+                        visible(&mount.source)
+                    ));
+                }
+                out.push_str("\nNothing on them is deleted, and the removal stays incomplete until they are unmounted.");
+                out
+            }
+            other => visible(&with_one_line_reason(other).to_string()),
+        })
+        .collect()
+}
+
+/// `warning` with its Git or operating-system reason on one line; names and
+/// paths are left as they are, for [`visible`] to escape.
+fn with_one_line_reason(warning: &Warning) -> Warning {
+    let line = |reason: &String| super::outcome::one_line(reason);
+    match warning {
+        Warning::RecordUnreadable { reason } => Warning::RecordUnreadable { reason: line(reason) },
+        Warning::GitUnreadable { reason } => Warning::GitUnreadable { reason: line(reason) },
+        Warning::Uninspectable { path, reason } => Warning::Uninspectable { path: path.clone(), reason: line(reason) },
+        Warning::UsageIncomplete { reason } => Warning::UsageIncomplete { reason: line(reason) },
+        Warning::Unchecked { reason } => Warning::Unchecked { reason: line(reason) },
+        Warning::IncludedUnchecked { reason } => Warning::IncludedUnchecked { reason: line(reason) },
+        Warning::StagedUnknown { reason } => Warning::StagedUnknown { reason: line(reason) },
+        Warning::SubmoduleUnchecked { path, reason } => {
+            Warning::SubmoduleUnchecked { path: path.clone(), reason: line(reason) }
+        }
+        other => other.clone(),
+    }
 }
 
 /// The line under the heading for a worktree whose `.git` file was missing.
@@ -110,61 +178,6 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
 /// line does not claim to have touched only this one.
 pub const RELINKED_MARKUP: &str = "<yellow>Its .git file was missing</yellow><dim>; wt restored it to check the \
     files (Git may restore other worktrees' broken links too).</dim>";
-
-/// The files block for a retry whose checkout is already gone.
-pub const CHECKOUT_REMOVED_MARKUP: &str = "<dim>The checkout and Git's record of it were already removed.</dim>";
-
-/// Dirty and protected included files that need consent, plus inventory warnings.
-pub fn files_markup(inventory: &Inventory) -> String {
-    let mut out = String::new();
-    let dirty = inventory.dirty.len();
-    let protected = &inventory.included.needs_consent;
-    if dirty == 0 && protected.is_empty() && inventory.included.warnings.is_empty() {
-        return "<dim>No uncommitted or protected included files.</dim>".to_string();
-    }
-    if dirty > LIST_LIMIT {
-        out.push_str(&format!("<red><b>{dirty} uncommitted files</b></red>\n"));
-    } else if dirty > 0 {
-        out.push_str(&format!("<b>Uncommitted files</b> ({dirty}):\n"));
-        let paths: Vec<PathBuf> = inventory.dirty.iter().map(|e| e.path.clone()).collect();
-        out.push_str(&dirty_tree::render_markup(&paths));
-    }
-    if !protected.is_empty() {
-        if !out.is_empty() { out.push('\n'); }
-        out.push_str("<b>Included files needing consent</b>:\n");
-        for (path, mark) in protected {
-            out.push_str(&format!("  <yellow>{}</yellow> <dim>({})</dim>\n",
-                visible_include_path(path), mark.label()));
-        }
-    }
-    for warning in &inventory.included.warnings {
-        if !out.is_empty() { out.push('\n'); }
-        out.push_str(&format!("<yellow>Warning:</yellow> {}", esc(warning)));
-    }
-    out.trim_end().to_string()
-}
-
-/// The files block for a worktree whose directory is gone: there were no
-/// files to check, only the index its Git record kept.
-pub fn missing_markup(missing: &MissingCheckout) -> String {
-    let staged = missing.staged.len();
-    if staged == 0 {
-        return "<dim>Its directory is already gone. The index Git kept for it matches its last \
-            commit, so removing its record loses no staged changes.</dim>"
-            .to_string();
-    }
-    let mut out = "<b>Its directory is already gone</b>, but the index Git kept for it holds \
-        staged changes that removing its record discards"
-        .to_string();
-    if staged > LIST_LIMIT {
-        out.push_str(&format!(": <red><b>{staged} staged files</b></red>"));
-    } else {
-        out.push_str(&format!(" ({staged}):\n"));
-        let paths: Vec<PathBuf> = missing.staged.iter().map(|e| e.path.clone()).collect();
-        out.push_str(&dirty_tree::render_markup(&paths));
-    }
-    out.trim_end().to_string()
-}
 
 /// The facts under the branch heading: its tier and evidence, ahead/behind,
 /// its origin copy, its PR, and any evidence that did not count.
@@ -403,23 +416,11 @@ fn origin_label(endpoint: &str) -> String {
 mod tests {
     use worktree::default_target::DefaultTarget;
     use worktree::remove::safety::{OriginCopy, PullRequest};
-    use worktree::remove::DirtyEntry;
+    use std::path::PathBuf;
+
+    use worktree::remove::facts::{Note, Target};
 
     use super::*;
-
-    fn dirty(count: usize) -> Inventory {
-        Inventory {
-            dirty: (0..count)
-                .map(|i| DirtyEntry {
-                    status: "??".into(),
-                    path: PathBuf::from(format!("f{i:02}.rs")),
-                    is_source: true,
-                })
-                .collect(),
-            ignored: Vec::new(),
-            included: Default::default(),
-        }
-    }
 
     fn commits(count: usize) -> Vec<Commit> {
         (0..count)
@@ -444,26 +445,6 @@ mod tests {
             origin_copy: None,
             pr: PrLookup::NoneFound,
         }
-    }
-
-    #[test]
-    fn up_to_ten_dirty_files_are_a_tree_and_more_are_a_bold_red_count() {
-        let ten = files_markup(&dirty(10));
-        assert!(ten.starts_with("<b>Uncommitted files</b> (10):"));
-        assert!(ten.contains("<red>f09.rs</red>"));
-
-        let eleven = files_markup(&dirty(11));
-        assert_eq!(eleven, "<red><b>11 uncommitted files</b></red>");
-    }
-
-    #[test]
-    fn disposable_ignored_entries_are_not_reported() {
-        let inventory = Inventory {
-            ignored: vec!["darkmatter/build.log".into(), "target/".into()],
-            ..Inventory::default()
-        };
-        assert_eq!(files_markup(&inventory), files_markup(&Inventory::default()));
-        assert_eq!(files_markup(&inventory), "<dim>No uncommitted or protected included files.</dim>");
     }
 
     #[test]
@@ -580,27 +561,118 @@ mod tests {
         assert!(remote_markup(&named).contains("remote.approved.pushurl"));
     }
 
-    #[test]
-    fn the_rendered_report_has_no_trailing_blank_line() {
-        let terminal = Terminal::default();
-        let inventory = dirty(2);
-        let facts = safety(Tier::NotSafe);
-        let input = ReportInput {
+    /// `text` without its styling (CSI and OSC sequences).
+    fn plain(text: &str) -> String {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '\u{1b}' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('[') => {
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn facts(warnings: Vec<Warning>) -> Facts {
+        Facts {
+            target: Target::Checkout { path: PathBuf::from("/tmp/feat-x") },
+            admin: None,
+            prepared: None,
+            warnings,
+            notes: Vec::new(),
+            blocker: None,
+            inventory: None,
+            usage: None,
+        }
+    }
+
+    fn input<'a>(facts: &'a Facts, safety: &'a BranchSafety, asking: bool) -> ReportInput<'a> {
+        ReportInput {
             display_name: "feat-x",
             path: Path::new("/tmp/feat-x"),
+            asking,
+            facts,
             branch: Some("feat/x"),
-            inventory: &inventory,
-            missing: None,
-            relinked: true,
-            checkout_removed: false,
-            safety: Some(&facts),
+            safety: Some(safety),
             has_origin: false,
             remote: None,
-        };
-        let text = render(&terminal, &input);
+        }
+    }
+
+    #[test]
+    fn the_rendered_question_lists_warnings_lock_first_and_the_late_change_note() {
+        let terminal = Terminal::default();
+        let facts = facts(vec![
+            Warning::Locked { reason: Some("on a USB disk".into()) },
+            Warning::Uncommitted { files: vec!["src/config.rs".into(), "notes.md".into()] },
+        ]);
+        let safety = safety(Tier::NotSafe);
+        let text = plain(&render(&terminal, &input(&facts, &safety, true)));
         assert!(!text.ends_with('\n'), "{text:?}");
-        assert!(text.contains("Uncommitted files"));
-        assert!(text.contains("Not safe"));
-        assert!(text.contains("Its .git file was missing"), "{text}");
+        assert!(text.contains("worktree feat-x (/tmp/feat-x)?"), "{text}");
+        let lock = text.find("with the reason: on a USB disk").expect("lock shown");
+        let files = text.find("2 uncommitted files will be lost: src/config.rs, notes.md").expect("files shown");
+        assert!(lock < files, "the lock comes first: {text}");
+        assert_eq!(text.matches("⚠ ").count(), 2, "{text}");
+        assert!(text.contains(LATE_CHANGES_NOTE), "{text}");
+        assert!(text.contains("Not safe"), "{text}");
+    }
+
+    #[test]
+    fn a_clean_report_without_a_question_has_no_warnings_or_late_change_note() {
+        let terminal = Terminal::default();
+        let facts = facts(Vec::new());
+        let safety = safety(Tier::Safe(Evidence::DefaultBranch("main".into())));
+        let text = plain(&render(&terminal, &input(&facts, &safety, false)));
+        assert!(text.contains("Removing worktree feat-x at /tmp/feat-x"), "{text}");
+        assert!(!text.contains('⚠'), "{text}");
+        assert!(!text.contains(LATE_CHANGES_NOTE), "{text}");
+    }
+
+    /// A lock reason, a path, and a note come from other programs: control
+    /// characters and Prose markup in them render as literal text.
+    #[test]
+    fn untrusted_text_renders_literally() {
+        let terminal = Terminal::default();
+        let mut facts = facts(vec![
+            Warning::Locked { reason: Some("\u{1b}[31mred</b><i>x".into()) },
+            Warning::Uncommitted { files: vec!["a\nb.rs".into()] },
+            Warning::GitUnreadable { reason: "fatal: bad\nfatal: bad\nhint: x".into() },
+        ]);
+        facts.notes.push(Note::IncludedCheck { message: "<b>bold</b>\u{7}".into() });
+        let safety = safety(Tier::NotSafe);
+        let text = render(&terminal, &input(&facts, &safety, true));
+        assert!(!text.contains("\u{1b}[31mred"), "the reason's escape sequence is never sent: {text:?}");
+        assert!(text.contains("\\u{1b}[31mred</b><i>x"), "{text}");
+        assert!(text.contains("a\\nb.rs"), "a file name is escaped, never folded: {text}");
+        assert!(text.contains("fatal: bad; hint: x"), "Git's reason reads as one line: {text}");
+        assert!(text.contains("<b>bold</b>\\u{7}"), "{text}");
+    }
+
+    #[test]
+    fn the_heading_and_branch_section_are_shown_without_a_question() {
+        let terminal = Terminal::default();
+        let facts = facts(Vec::new());
+        let markup = heading_markup(&input(&facts, &safety(Tier::NotSafe), false));
+        assert!(markup.starts_with("<b>Removing</b>"), "{markup}");
+        assert!(plain(&render(&terminal, &input(&facts, &safety(Tier::NotSafe), false))).contains("Branch feat/x"));
     }
 }

@@ -77,35 +77,6 @@ pub fn test_refresh_deadline() -> Option<Duration> {
     milliseconds_from(TEST_REFRESH_DEADLINE_VAR, std::env::var_os(TEST_REFRESH_DEADLINE_VAR).as_deref())
 }
 
-/// A debug build's stand-in for the free space `wt remove` reads before it
-/// writes a deletion journal, in bytes.
-///
-/// Binary tests set it to prove the space refusal through the real binary;
-/// no test can make a real filesystem report a chosen figure. Only debug
-/// builds read it; a release build always reads the filesystem.
-pub const TEST_AVAILABLE_SPACE_VAR: &str = "WT_TEST_AVAILABLE_SPACE_BYTES";
-
-/// The free space a debug build's test asked for through
-/// [`TEST_AVAILABLE_SPACE_VAR`], if any.
-///
-/// ## Panics
-///
-/// When the variable is set to anything but a whole number of bytes.
-#[cfg(debug_assertions)]
-pub fn test_available_space() -> Option<u64> {
-    test_available_space_from(std::env::var_os(TEST_AVAILABLE_SPACE_VAR).as_deref())
-}
-
-#[cfg(debug_assertions)]
-fn test_available_space_from(value: Option<&OsStr>) -> Option<u64> {
-    let value = value?;
-    let bytes = value
-        .to_str()
-        .and_then(|text| text.parse::<u64>().ok())
-        .unwrap_or_else(|| panic!("{TEST_AVAILABLE_SPACE_VAR} must be a whole number of bytes, not {value:?}"));
-    Some(bytes)
-}
-
 #[cfg(debug_assertions)]
 fn milliseconds_from(name: &str, value: Option<&OsStr>) -> Option<Duration> {
     let value = value?;
@@ -176,17 +147,6 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    #[test]
-    fn the_test_available_space_is_read_only_when_set_to_whole_bytes() {
-        assert_eq!(test_available_space_from(None), None);
-        assert_eq!(test_available_space_from(Some(OsStr::new("0"))), Some(0));
-        assert_eq!(test_available_space_from(Some(OsStr::new("4096"))), Some(4096));
-        for refused in ["", "-5", "1.5", "4k", " 10"] {
-            let parsed = std::panic::catch_unwind(|| test_available_space_from(Some(OsStr::new(refused))));
-            assert!(parsed.is_err(), "{TEST_AVAILABLE_SPACE_VAR}={refused:?} was accepted");
-        }
-    }
-
     #[test]
     fn wrapper_is_active_only_for_exact_one() {
         let cases: &[(Option<&str>, bool)] = &[

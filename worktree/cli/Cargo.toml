@@ -41,6 +41,11 @@ sysinfo = "0.38.2"
 tempfile = "3"
 
 # ConPTY for the PowerShell move-first L2 test; already built for unchained-ai.
+# Reads `wt`'s parent process (its PID and name) on Windows, where std has
+# no `parent_id`.
+[target.'cfg(windows)'.dependencies]
+sysinfo = "0.38.2"
+
 [target.'cfg(windows)'.dev-dependencies]
 xpty = "0.3.6"
 

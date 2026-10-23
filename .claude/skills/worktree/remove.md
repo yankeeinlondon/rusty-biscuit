@@ -248,8 +248,7 @@ must call it before any inventory.
   can no longer read is `IndexUninspectable`, also exit 3). **Trap:** nothing
   in Git protects a missing checkout's index, so this final comparison is the
   only thing standing between consent and discarding staged work written after
-  the report; `--force-worktree` approves the reported state, never a newer
-  one. Then it runs plain `git worktree remove <path>`
+  the report; this check belongs to the old lifecycle's record-only path. Then it runs plain `git worktree remove <path>`
   with no `--force`, and deletes the copy record
   only after Git succeeds. Branch steps stay with the caller.
 - Git receives paths as `OsStr` (`git::git_from_output`), never through a
@@ -451,11 +450,9 @@ coverage, and `UsageClearance` keeps the whole report.
   this PID's certain records disagree on their creation token, is never
   excluded. Evidence without a descriptor, such as a loaded module when `wt`
   runs from inside the checkout, always refuses.
-- **The CLI renderer** is `cli/src/commands/remove/usage.rs` (`refusal_markup`,
-  `usage_refusal`, `coverage_note`). Its snapshots are in
-  `cli/tests/remove_usage_refusal.rs`. Until `run` calls it, its module
-  declaration carries `#[allow(dead_code)]`, because the `wt` binary target
-  compiles it unused. Remove the attribute when wiring the call.
+- **No CLI renderer is left for `UsageRefusal`**: `wt remove` shows programs
+  as a warning (`facts::Warning::Processes`, rendered structurally in
+  `cli/src/commands/remove/report.rs` so no name can start a line).
 - **Cost:** the real-query test (two queries of a small temp tree) takes
   about 0.5 s on macOS and about 2 s on native Windows, where Sniff opens each
   path to ask for its holders.

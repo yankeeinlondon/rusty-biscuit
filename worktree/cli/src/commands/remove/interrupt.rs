@@ -2,9 +2,10 @@
 //!
 //! While a [`Window`] is open, an interrupt (`SIGINT`, `SIGTERM`, or `SIGHUP`
 //! on Unix; any console control event on Windows) does not end the process:
-//! it sets a flag that the lifecycle polls before the move and at every
-//! deletion entry boundary, so the removal stops there, saves its report, and
-//! leaves a pending record a retry by the original name continues.
+//! it sets a flag that the lifecycle polls at every deletion entry and in
+//! every wait, so the removal stops there and keeps its compact record and
+//! whatever is left, which the next `wt remove` of that name finishes
+//! without asking.
 //!
 //! The process-wide handler is installed when the first window opens, since
 //! `ctrlc` allows one per process. Before that, an interrupt keeps the
@@ -39,7 +40,7 @@ impl Window {
     }
 
     /// Whether an interrupt arrived since the window opened; the lifecycle's
-    /// [`Environment::interrupted`](worktree::remove::lifecycle::Environment::interrupted).
+    /// [`Env::cancelled`](worktree::remove::confirmed::Env::cancelled).
     pub fn interrupted(&self) -> bool {
         INTERRUPTED.load(Ordering::SeqCst)
     }
