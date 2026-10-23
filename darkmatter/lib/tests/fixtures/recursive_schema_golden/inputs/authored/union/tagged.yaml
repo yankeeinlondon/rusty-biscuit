@@ -1,0 +1,5 @@
+kind: schema
+types:
+  step:
+    - "{ kind: literal(shell; required), run: string(required) }"
+    - "{ kind: literal(say; required), text: string(required) }"

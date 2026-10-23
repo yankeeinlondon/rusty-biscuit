@@ -1,0 +1,533 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "description of this _feature review_"
+        },
+        "feature": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "the **feature** name this review relates to"
+        },
+        "ready": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether the reviewer believed that the code is \"production ready\""
+        },
+        "spec": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "the underlying _specification file_ that this review is based on"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "darkmatter-datetime"
+            }
+          ],
+          "description": "an ISO8601 representation of the date and time this review was created (using host's timezone)"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "a string representation of agent and model: `${agent}/${model}`"
+        },
+        "implemented": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "boolean flag indicating whether this review's suggestions has been implemented"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "the _next_ feature review that was conducted"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "the _prior- feature review that was conducted"
+        },
+        "findings": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
+        },
+        "observations": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle"
+        },
+        "human_in_the_loop": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "only on a first review that stopped for a human, the critical decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; while unresolved, `just fix` opens an interactive session to settle them"
+        },
+        "human_resolved": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "set to `true` once the author's decisions are recorded under `## Human Rulings` (by the interactive decisions session or by hand); the next review will not start while a non-empty `human_in_the_loop` is unresolved"
+        },
+        "human_review": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)"
+        },
+        "human_review_items": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "what the human should review when `human_review` is true"
+        },
+        "has_blocked_findings": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether any finding is blocked on that human review"
+        },
+        "blocked": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether ALL findings are blocked on that human review"
+        },
+        "next_spec": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "in a multi-spec pipeline, the next spec (a path)"
+        },
+        "next_plan": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "in a multi-spec pipeline, the plan beside the next spec"
+        },
+        "refresh": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "refreshed",
+                "needs_human",
+                "not_needed"
+              ]
+            }
+          ],
+          "description": "historical: earlier reviews refreshed the next spec and plan of a multi-spec pipeline; the implementation's final phase does this now"
+        },
+        "refresh_changes": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "what the refresh changed in the next spec and plan, in plain language"
+        },
+        "refresh_human_items": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "the contested refresh decisions a human must make"
+        }
+      },
+      "type": "object",
+      "additionalProperties": true
+    },
+    {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "description of this _fix review_"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "the **fix** name this review related to"
+        },
+        "ready": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether the reviewer believed that the code is \"production ready\""
+        },
+        "created": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "darkmatter-datetime"
+            }
+          ],
+          "description": "an ISO8601 representation of the date and time this review was created (using host's timezone)"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "a string representation of agent and model: `${agent}/${model}`"
+        },
+        "implemented": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "findings": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
+        },
+        "observations": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle"
+        },
+        "human_in_the_loop": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "only on a first review that stopped for a human, the critical decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; while unresolved, `just fix` opens an interactive session to settle them"
+        },
+        "human_resolved": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "set to `true` once the author's decisions are recorded under `## Human Rulings` (by the interactive decisions session or by hand); the next review will not start while a non-empty `human_in_the_loop` is unresolved"
+        },
+        "human_review": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)"
+        },
+        "human_review_items": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "what the human should review when `human_review` is true"
+        },
+        "has_blocked_findings": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether any finding is blocked on that human review"
+        },
+        "blocked": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "whether ALL findings are blocked on that human review"
+        },
+        "next_spec": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "in a multi-spec pipeline, the next spec (a path)"
+        },
+        "next_plan": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "in a multi-spec pipeline, the plan beside the next spec"
+        },
+        "refresh": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "refreshed",
+                "needs_human",
+                "not_needed"
+              ]
+            }
+          ],
+          "description": "historical: earlier reviews refreshed the next spec and plan of a multi-spec pipeline; the implementation's final phase does this now"
+        },
+        "refresh_changes": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "what the refresh changed in the next spec and plan, in plain language"
+        },
+        "refresh_human_items": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "the contested refresh decisions a human must make"
+        }
+      },
+      "type": "object",
+      "additionalProperties": true
+    }
+  ]
+}

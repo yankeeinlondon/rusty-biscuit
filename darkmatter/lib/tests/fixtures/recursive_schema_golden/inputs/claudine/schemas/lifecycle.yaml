@@ -1,0 +1,372 @@
+# Claudine's lifecycle stack types and the `loop:` block type. Named types are
+# inlined, so a conditional's nesting is unrolled one type per level.
+# Hand-maintained; see README.md.
+#
+# The `stack` and `initialize-*` families are typed three conditional levels
+# deep: a `then`/`else` body inside a level-3 conditional is accepted loosely,
+# and the lifecycle parser still checks it. `initialize-*` excludes shells.
+#
+# The `cancelled-*` family permits only stop among flow directives, and is
+# unrolled to the parser's five-level limit, so the restriction holds at every
+# depth the parser accepts and a sixth-level `when`/`then` conditional is a
+# schema error (a guarded bundle there is left to the parser).
+# Its conditionals type `then` and `else` with one pattern key: two literal
+# keys would inline each body twice per level, and five such levels make
+# every validation about ten times slower. The cost of the pattern key is
+# that the parser alone requires `then` beside `else`, and the editor does not
+# complete `then`/`else` or resolve values below them.
+#
+# The sequence container types (`step`, `task`, `group`) that import these
+# stacks live in sequence-types.yaml.
+kind: schema
+types:
+    bare-verb: "enum(stop, skip, error, retry, break, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
+    loose-body:
+        - "unknown[] -> a list of actions, checked only by the lifecycle parser"
+        - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
+    stack:
+        - item-1[]
+        - bundle@./action.yaml
+    item-1:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-1
+        - bare-verb
+    conditional-1:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "stack-2(required) -> the actions to run when the condition holds"
+        else: "stack-2 -> the actions to run when it does not"
+    stack-2:
+        - item-2[]
+        - bundle@./action.yaml
+    item-2:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-2
+        - bare-verb
+    conditional-2:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "stack-3(required) -> the actions to run when the condition holds"
+        else: "stack-3 -> the actions to run when it does not"
+    stack-3:
+        - item-3[]
+        - bundle@./action.yaml
+    item-3:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-3
+        - bare-verb
+    conditional-3:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "loose-body(required) -> the actions to run when the condition holds"
+        else: "loose-body -> the actions to run when it does not"
+    initialize-stack:
+        - initialize-item-1[]
+        - initialize-bundle@./action.yaml
+    initialize-item-1:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-1
+        - bare-verb
+    initialize-conditional-1:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "initialize-stack-2(required) -> the actions to run when the condition holds"
+        else: "initialize-stack-2 -> the actions to run when it does not"
+    initialize-stack-2:
+        - initialize-item-2[]
+        - initialize-bundle@./action.yaml
+    initialize-item-2:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-2
+        - bare-verb
+    initialize-conditional-2:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "initialize-stack-3(required) -> the actions to run when the condition holds"
+        else: "initialize-stack-3 -> the actions to run when it does not"
+    initialize-stack-3:
+        - initialize-item-3[]
+        - initialize-bundle@./action.yaml
+    initialize-item-3:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-3
+        - bare-verb
+    initialize-conditional-3:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "loose-body(required) -> the actions to run when the condition holds"
+        else: "loose-body -> the actions to run when it does not"
+    loop-action: "{ op: enum(increment, decrement, set, append, prepend, merge; required), prop: string(not-empty; required), value: unknown }"
+    loop-action-entry:
+        - string
+        - loop-action
+    loop:
+        while: "expression -> keep iterating while this condition holds"
+        until: "expression -> stop iterating once this condition holds"
+        action:
+            - "string -> an iteration action such as increment(iteration)"
+            - loop-action
+            - "loop-action-entry[]"
+        actions:
+            - "string -> an iteration action such as increment(iteration)"
+            - loop-action
+            - "loop-action-entry[]"
+        max:
+            - "number(integer; min(1)) -> the most iterations to run"
+            - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
+        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
+        gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
+        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        say: say-short@darkmatter:lifecycle
+        speak: speak-short@darkmatter:lifecycle
+        effect: effect-short@darkmatter:lifecycle
+        message: message-short@darkmatter:lifecycle
+        notify: notify-short@darkmatter:lifecycle
+        stderr: stderr-short@darkmatter:lifecycle
+        stdout: stdout-short@darkmatter:lifecycle
+        info: info-short@darkmatter:lifecycle
+        warn: warn-short@darkmatter:lifecycle
+        success: success-short@darkmatter:lifecycle
+        stop: stop-short@darkmatter:lifecycle
+        skip: skip-short@darkmatter:lifecycle
+        error: error-short@darkmatter:lifecycle
+        proxy: proxy-short@darkmatter:lifecycle
+        retry: retry-short@darkmatter:lifecycle
+        resume: resume-short@darkmatter:lifecycle
+        defer: defer-short@darkmatter:lifecycle
+        break: break-short@darkmatter:lifecycle
+        prep: prep-short@darkmatter:lifecycle
+        shell: shell-short@darkmatter:lifecycle
+        set: set-short@darkmatter:lifecycle
+        append_frontmatter: side-effect-verb@darkmatter:lifecycle
+        append_jsonl: side-effect-verb@darkmatter:lifecycle
+        append_line: side-effect-verb@darkmatter:lifecycle
+        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
+        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
+        ensure_dir: side-effect-verb@darkmatter:lifecycle
+        ensure_file: side-effect-verb@darkmatter:lifecycle
+        http_post: side-effect-verb@darkmatter:lifecycle
+        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
+        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
+        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
+        set_frontmatter: side-effect-verb@darkmatter:lifecycle
+        abs: expression-function-verb@darkmatter:lifecycle
+        absolute: expression-function-verb@darkmatter:lifecycle
+        and: expression-function-verb@darkmatter:lifecycle
+        as_csv: expression-function-verb@darkmatter:lifecycle
+        as_json: expression-function-verb@darkmatter:lifecycle
+        as_json5: expression-function-verb@darkmatter:lifecycle
+        as_line_separated: expression-function-verb@darkmatter:lifecycle
+        as_markdown: expression-function-verb@darkmatter:lifecycle
+        as_ordered_list: expression-function-verb@darkmatter:lifecycle
+        as_space_separated: expression-function-verb@darkmatter:lifecycle
+        as_tsv: expression-function-verb@darkmatter:lifecycle
+        as_unordered_list: expression-function-verb@darkmatter:lifecycle
+        basename: expression-function-verb@darkmatter:lifecycle
+        basename_without_index: expression-function-verb@darkmatter:lifecycle
+        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
+        camel_case: expression-function-verb@darkmatter:lifecycle
+        can_execute: expression-function-verb@darkmatter:lifecycle
+        capitalize: expression-function-verb@darkmatter:lifecycle
+        cicd: expression-function-verb@darkmatter:lifecycle
+        cicd_list: expression-function-verb@darkmatter:lifecycle
+        code_link: expression-function-verb@darkmatter:lifecycle
+        contains: expression-function-verb@darkmatter:lifecycle
+        date: expression-function-verb@darkmatter:lifecycle
+        date_delta: expression-function-verb@darkmatter:lifecycle
+        decrement_file_index: expression-function-verb@darkmatter:lifecycle
+        dir_leading: expression-function-verb@darkmatter:lifecycle
+        dirname: expression-function-verb@darkmatter:lifecycle
+        ends_with: expression-function-verb@darkmatter:lifecycle
+        ensure_leading: expression-function-verb@darkmatter:lifecycle
+        ensure_trailing: expression-function-verb@darkmatter:lifecycle
+        ext: expression-function-verb@darkmatter:lifecycle
+        file_exists: expression-function-verb@darkmatter:lifecycle
+        file_index: expression-function-verb@darkmatter:lifecycle
+        file_trailing: expression-function-verb@darkmatter:lifecycle
+        find_files: expression-function-verb@darkmatter:lifecycle
+        find_first_index: expression-function-verb@darkmatter:lifecycle
+        find_last_index: expression-function-verb@darkmatter:lifecycle
+        first: expression-function-verb@darkmatter:lifecycle
+        frontmatter: expression-function-verb@darkmatter:lifecycle
+        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
+        has_alias: expression-function-verb@darkmatter:lifecycle
+        has_binary: expression-function-verb@darkmatter:lifecycle
+        has_builtin_function: expression-function-verb@darkmatter:lifecycle
+        has_command: expression-function-verb@darkmatter:lifecycle
+        has_key: expression-function-verb@darkmatter:lifecycle
+        has_local_skill: expression-function-verb@darkmatter:lifecycle
+        has_skill: expression-function-verb@darkmatter:lifecycle
+        has_user_function: expression-function-verb@darkmatter:lifecycle
+        increment_file_index: expression-function-verb@darkmatter:lifecycle
+        ipv4: expression-function-verb@darkmatter:lifecycle
+        ipv6: expression-function-verb@darkmatter:lifecycle
+        is_array: expression-function-verb@darkmatter:lifecycle
+        is_date: expression-function-verb@darkmatter:lifecycle
+        is_date_time: expression-function-verb@darkmatter:lifecycle
+        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
+        is_date_utc: expression-function-verb@darkmatter:lifecycle
+        is_empty: expression-function-verb@darkmatter:lifecycle
+        is_indexed_file: expression-function-verb@darkmatter:lifecycle
+        is_integer: expression-function-verb@darkmatter:lifecycle
+        is_negative: expression-function-verb@darkmatter:lifecycle
+        is_null: expression-function-verb@darkmatter:lifecycle
+        is_number: expression-function-verb@darkmatter:lifecycle
+        is_object: expression-function-verb@darkmatter:lifecycle
+        is_positive: expression-function-verb@darkmatter:lifecycle
+        is_string: expression-function-verb@darkmatter:lifecycle
+        is_this_month: expression-function-verb@darkmatter:lifecycle
+        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
+        is_this_year: expression-function-verb@darkmatter:lifecycle
+        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
+        is_today: expression-function-verb@darkmatter:lifecycle
+        is_today_utc: expression-function-verb@darkmatter:lifecycle
+        is_tomorrow: expression-function-verb@darkmatter:lifecycle
+        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
+        is_yesterday: expression-function-verb@darkmatter:lifecycle
+        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
+        join: expression-function-verb@darkmatter:lifecycle
+        kebab_case: expression-function-verb@darkmatter:lifecycle
+        keys: expression-function-verb@darkmatter:lifecycle
+        last: expression-function-verb@darkmatter:lifecycle
+        length: expression-function-verb@darkmatter:lifecycle
+        link: expression-function-verb@darkmatter:lifecycle
+        lower: expression-function-verb@darkmatter:lifecycle
+        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
+        markdown_title: expression-function-verb@darkmatter:lifecycle
+        min: expression-function-verb@darkmatter:lifecycle
+        newer_than: expression-function-verb@darkmatter:lifecycle
+        number: expression-function-verb@darkmatter:lifecycle
+        older_than: expression-function-verb@darkmatter:lifecycle
+        or: expression-function-verb@darkmatter:lifecycle
+        package: expression-function-verb@darkmatter:lifecycle
+        package_area: expression-function-verb@darkmatter:lifecycle
+        parent_dir: expression-function-verb@darkmatter:lifecycle
+        pascal_case: expression-function-verb@darkmatter:lifecycle
+        ping: expression-function-verb@darkmatter:lifecycle
+        ping_under: expression-function-verb@darkmatter:lifecycle
+        pr: expression-function-verb@darkmatter:lifecycle
+        pr_list: expression-function-verb@darkmatter:lifecycle
+        predict_conflicts: expression-function-verb@darkmatter:lifecycle
+        recent_commits: expression-function-verb@darkmatter:lifecycle
+        relative: expression-function-verb@darkmatter:lifecycle
+        remote_vendor: expression-function-verb@darkmatter:lifecycle
+        replace: expression-function-verb@darkmatter:lifecycle
+        replace_first: expression-function-verb@darkmatter:lifecycle
+        replace_last: expression-function-verb@darkmatter:lifecycle
+        round: expression-function-verb@darkmatter:lifecycle
+        snake_case: expression-function-verb@darkmatter:lifecycle
+        starts_with: expression-function-verb@darkmatter:lifecycle
+        terminal: expression-function-verb@darkmatter:lifecycle
+        title_case: expression-function-verb@darkmatter:lifecycle
+        trim: expression-function-verb@darkmatter:lifecycle
+        try_frontmatter: expression-function-verb@darkmatter:lifecycle
+        upper: expression-function-verb@darkmatter:lifecycle
+        validate_schema: expression-function-verb@darkmatter:lifecycle
+        values: expression-function-verb@darkmatter:lifecycle
+        without_date: expression-function-verb@darkmatter:lifecycle
+    cancelled-stack:
+        - cancelled-item-1[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-1:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-1
+        - "enum(stop)"
+    cancelled-conditional-1:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-2
+        $constraints:
+            min-keys: 2
+    cancelled-stack-2:
+        - cancelled-item-2[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-2:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-2
+        - "enum(stop)"
+    cancelled-conditional-2:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-3
+        $constraints:
+            min-keys: 2
+    cancelled-stack-3:
+        - cancelled-item-3[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-3:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-3
+        - "enum(stop)"
+    cancelled-conditional-3:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-4
+        $constraints:
+            min-keys: 2
+    cancelled-stack-4:
+        - cancelled-item-4[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-4:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-4
+        - "enum(stop)"
+    cancelled-conditional-4:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-5
+        $constraints:
+            min-keys: 2
+    cancelled-stack-5:
+        - cancelled-item-5[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-5:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-5
+        - "enum(stop)"
+    cancelled-conditional-5:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-6
+        $constraints:
+            min-keys: 2
+    cancelled-stack-6:
+        - cancelled-item-6[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-6:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - "enum(stop)"

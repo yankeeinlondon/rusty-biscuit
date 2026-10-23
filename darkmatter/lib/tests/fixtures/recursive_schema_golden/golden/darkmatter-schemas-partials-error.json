@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "err": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "Deprecated spelling of `category`; a facet-less action failure carries the failure's source type.",
+              "x-darkmatter-generated": true
+            },
+            "variant": {
+              "type": "string",
+              "description": "Deprecated spelling of `code`; a facet-less action failure carries the failing verb.",
+              "x-darkmatter-generated": true
+            },
+            "msg": {
+              "type": "string",
+              "description": "Concise, single-line message for the failure.",
+              "x-darkmatter-generated": true
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "composition.invalid_file_reference",
+                    "cap.plan_limit",
+                    "timeout.step_silence"
+                  ]
+                }
+              ],
+              "description": "A stable dotted code that identifies the error.",
+              "x-darkmatter-generated": true
+            },
+            "category": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "composition",
+                    "cap",
+                    "timeout",
+                    "provider",
+                    "document",
+                    "vcs",
+                    "io",
+                    "config",
+                    "usage",
+                    "runaway",
+                    "auth",
+                    "internal"
+                  ]
+                }
+              ],
+              "description": "Coarse domain: the dotted prefix of `code`.",
+              "x-darkmatter-generated": true
+            },
+            "disposition": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "transient",
+                    "throttled",
+                    "correctable",
+                    "needs_input",
+                    "unrecoverable"
+                  ]
+                }
+              ],
+              "description": "Generic handling strategy.",
+              "x-darkmatter-generated": true
+            },
+            "origin": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "provider",
+                    "author",
+                    "caller",
+                    "environment",
+                    "internal"
+                  ]
+                }
+              ],
+              "description": "Who must remediate.",
+              "x-darkmatter-generated": true
+            },
+            "severity": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "info",
+                    "warning",
+                    "error"
+                  ]
+                }
+              ],
+              "description": "Operator-facing severity.",
+              "x-darkmatter-generated": true
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "The code's instance payload; every field the code declares is present, `null` when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "is_transient": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether `disposition` is `transient`.",
+              "x-darkmatter-generated": true
+            },
+            "is_throttled": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether `disposition` is `throttled`.",
+              "x-darkmatter-generated": true
+            },
+            "is_correctable": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether `disposition` is `correctable`.",
+              "x-darkmatter-generated": true
+            },
+            "reset_at": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "`detail.reset_at`, or null when the code carries no such field.",
+              "x-darkmatter-generated": true
+            },
+            "retry_after_ms": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "`detail.retry_after_ms`, or null when the code carries no such field.",
+              "x-darkmatter-generated": true
+            },
+            "cause": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "The next registered diagnostic below this one, or null when the chain has none.",
+              "x-darkmatter-generated": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

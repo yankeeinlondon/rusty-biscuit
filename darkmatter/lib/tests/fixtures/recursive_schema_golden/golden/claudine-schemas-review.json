@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "ready": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "whether the review deemed the spec to production ready"
+    },
+    "agent": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the `{agent}/{model}` used to perform the review"
+    },
+    "created": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "darkmatter-datetime"
+        }
+      ],
+      "description": "the date and time the review was performed"
+    },
+    "implemented": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "whether the review's suggestions have been _implemented_ yet"
+    }
+  }
+}

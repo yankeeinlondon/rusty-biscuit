@@ -1,0 +1,5 @@
+kind: schema
+types:
+  entry:
+    - "{ name: string(required) }"
+    - "{ name: string(required), size: number }"

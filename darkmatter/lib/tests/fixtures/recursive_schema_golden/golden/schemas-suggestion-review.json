@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "created": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "darkmatter-datetime"
+        }
+      ],
+      "description": "an ISO8601 representation of the date and time this review was created (using host's timezone)"
+    },
+    "agent": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "a string representation of agent and model: `${agent}/${model}`"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "description of the review"
+    },
+    "parent_scope": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the parent of the parent directory (typically something like \"reviews\", \"features\", etc.)"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the parent directory in which this review was saved (_this typically helps to scope the review_)"
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the review file (_including the parent directory for scoping purposes_)"
+    },
+    "implemented": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "whether the suggestions in this review have been implemented"
+    },
+    "follow_up_review": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the filename of the review that followed _this_ review to validate whether the suggestions here we actually implemented"
+    }
+  }
+}

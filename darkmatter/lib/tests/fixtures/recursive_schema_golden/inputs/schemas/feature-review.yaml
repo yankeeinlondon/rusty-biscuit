@@ -1,0 +1,50 @@
+# Provides the shape of metadata provided by a **Feature Review**. This feature
+# review may have been categorized as a "feature" or a "fix" but is always grounded
+# by _specification_ file that defines the target for the implementation.
+#
+# > **Note:** in addition to the specification file, some feature reviews will be given
+# > additional documents that support the specification file in their definition.
+$schema:
+    - description: string -> description of this _feature review_
+      feature: string -> the **feature** name this review relates to
+      ready: boolean -> whether the reviewer believed that the code is "production ready"
+      spec: string -> the underlying _specification file_ that this review is based on
+      created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
+      agent: "string -> a string representation of agent and model: `${agent}/${model}`"
+      implemented: boolean -> boolean flag indicating whether this review's suggestions has been implemented
+      next: string -> the _next_ feature review that was conducted
+      previous: string -> the _prior- feature review that was conducted
+      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
+      observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle
+      human_in_the_loop: string[] -> only on a first review that stopped for a human, the critical decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; while unresolved, `just fix` opens an interactive session to settle them
+      human_resolved: boolean -> set to `true` once the author's decisions are recorded under `## Human Rulings` (by the interactive decisions session or by hand); the next review will not start while a non-empty `human_in_the_loop` is unresolved
+      human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)
+      human_review_items: string[] -> what the human should review when `human_review` is true
+      has_blocked_findings: boolean -> whether any finding is blocked on that human review
+      blocked: boolean -> whether ALL findings are blocked on that human review
+      next_spec: string -> in a multi-spec pipeline, the next spec (a path)
+      next_plan: string -> in a multi-spec pipeline, the plan beside the next spec
+      refresh: "enum(refreshed, needs_human, not_needed) -> historical: earlier reviews refreshed the next spec and plan of a multi-spec pipeline; the implementation's final phase does this now"
+      refresh_changes: string[] -> what the refresh changed in the next spec and plan, in plain language
+      refresh_human_items: string[] -> the contested refresh decisions a human must make
+    - description: string -> description of this _fix review_
+      fix: string -> the **fix** name this review related to
+      ready: boolean -> whether the reviewer believed that the code is "production ready"
+      created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
+      agent: "string -> a string representation of agent and model: `${agent}/${model}`"
+      implemented: boolean
+      next: string
+      previous: string
+      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
+      observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle
+      human_in_the_loop: string[] -> only on a first review that stopped for a human, the critical decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; while unresolved, `just fix` opens an interactive session to settle them
+      human_resolved: boolean -> set to `true` once the author's decisions are recorded under `## Human Rulings` (by the interactive decisions session or by hand); the next review will not start while a non-empty `human_in_the_loop` is unresolved
+      human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)
+      human_review_items: string[] -> what the human should review when `human_review` is true
+      has_blocked_findings: boolean -> whether any finding is blocked on that human review
+      blocked: boolean -> whether ALL findings are blocked on that human review
+      next_spec: string -> in a multi-spec pipeline, the next spec (a path)
+      next_plan: string -> in a multi-spec pipeline, the plan beside the next spec
+      refresh: "enum(refreshed, needs_human, not_needed) -> historical: earlier reviews refreshed the next spec and plan of a multi-spec pipeline; the implementation's final phase does this now"
+      refresh_changes: string[] -> what the refresh changed in the next spec and plan, in plain language
+      refresh_human_items: string[] -> the contested refresh decisions a human must make

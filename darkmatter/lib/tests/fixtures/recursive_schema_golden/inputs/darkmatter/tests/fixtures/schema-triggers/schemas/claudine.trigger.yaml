@@ -1,0 +1,8 @@
+kind: schema-trigger
+match:
+  all:
+    - kind: enum(claudine; required)
+    - none:
+        - prompt: string(required)
+        - steps: unknown[](required)
+$schema: claudine.yaml

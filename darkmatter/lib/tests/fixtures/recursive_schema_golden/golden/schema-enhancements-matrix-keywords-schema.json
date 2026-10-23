@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "dynamic": {
+      "$dynamicAnchor": "dyn",
+      "type": "integer"
+    },
+    "flagged": {
+      "$anchor": "flag",
+      "type": "boolean"
+    },
+    "identified": {
+      "$id": "urn:darkmatter:matrix:identified",
+      "type": "string"
+    },
+    "positive": {
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "$vocabulary": {
+    "https://json-schema.org/draft/2020-12/vocab/core": true
+  },
+  "definitions": {
+    "word": {
+      "pattern": "^[a-z]+$",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "additional": {
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "all_of": {
+      "allOf": [
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "anchored": {
+      "$ref": "#flag"
+    },
+    "conditional": {
+      "else": {
+        "maxLength": 1
+      },
+      "if": {
+        "type": "integer"
+      },
+      "then": {
+        "minimum": 5
+      }
+    },
+    "constant": {
+      "const": "a"
+    },
+    "contained": {
+      "contains": {
+        "type": "integer"
+      },
+      "maxContains": 3,
+      "minContains": 2
+    },
+    "defaulted": {
+      "default": "x",
+      "type": "string"
+    },
+    "dependent_required": {
+      "dependentRequired": {
+        "a": [
+          "b"
+        ]
+      }
+    },
+    "dependent_schemas": {
+      "dependentSchemas": {
+        "a": {
+          "required": [
+            "b"
+          ]
+        }
+      }
+    },
+    "dynamic": {
+      "$dynamicRef": "#dyn"
+    },
+    "enumerated": {
+      "enum": [
+        "a",
+        "b"
+      ]
+    },
+    "exclusive_maximum": {
+      "exclusiveMaximum": 5
+    },
+    "exclusive_minimum": {
+      "exclusiveMinimum": 5
+    },
+    "formatted": {
+      "format": "date"
+    },
+    "identified": {
+      "$ref": "urn:darkmatter:matrix:identified"
+    },
+    "max_items": {
+      "maxItems": 1
+    },
+    "max_length": {
+      "maxLength": 1
+    },
+    "max_properties": {
+      "maxProperties": 1
+    },
+    "maximum": {
+      "maximum": 5
+    },
+    "min_items": {
+      "minItems": 2
+    },
+    "min_length": {
+      "minLength": 3
+    },
+    "min_properties": {
+      "minProperties": 1
+    },
+    "minimum": {
+      "minimum": 5
+    },
+    "multiple_of": {
+      "multipleOf": 2
+    },
+    "negated": {
+      "not": {
+        "type": "integer"
+      }
+    },
+    "one_of": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "pattern_props": {
+      "patternProperties": {
+        "^n_": {
+          "type": "integer"
+        }
+      }
+    },
+    "patterned": {
+      "pattern": "^[a-z]+$"
+    },
+    "prefix": {
+      "prefixItems": [
+        {
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "property_names": {
+      "propertyNames": {
+        "maxLength": 1
+      }
+    },
+    "ref_definitions": {
+      "$ref": "#/definitions/word"
+    },
+    "ref_defs": {
+      "$ref": "#/$defs/positive"
+    },
+    "required_names": {
+      "required": [
+        "a"
+      ],
+      "type": "object"
+    },
+    "unevaluated_items": {
+      "prefixItems": [
+        {
+          "type": "integer"
+        }
+      ],
+      "unevaluatedItems": false
+    },
+    "unevaluated_properties": {
+      "properties": {
+        "a": {}
+      },
+      "unevaluatedProperties": false
+    },
+    "unique": {
+      "uniqueItems": true
+    }
+  },
+  "type": "object"
+}
