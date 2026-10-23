@@ -163,8 +163,8 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   IDs after a later marker (about 1 drain in 15). `wt remove` repeats marker
   rounds (create a marker, flush until it arrives) until a round delivers no
   watched-path event, and treats anything later as arriving in a later drain
-  (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
-  idle, up to ~650 ms under suite load.
+  (`wt remove`'s former watcher did this; it was removed 2026-10-23). A round
+  costs ~11 ms idle, up to ~650 ms under suite load.
 - **Wait without the blocking flush, but keep flushing.** `FlushSync` blocks
   for as long as fseventsd takes, so a wait cannot check a deadline or Ctrl-C
   while inside it. `FSEventStreamFlushAsync` returns at once and may be called
@@ -180,8 +180,9 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   children and renaming or removing it.
 - **fseventsd serializes stream registration:** ~20 ms alone, up to 5 s each
   with ~15 test processes starting together. Run FSEvents tests in a nextest
-  group with `max-threads = 1` (`fsevents-l1`). Events also lag 100–600 ms
-  under load, past any fixed wait.
+  group with `max-threads = 1` (the repository had one, `fsevents-l1`, for
+  `wt remove`'s former watcher). Events also lag 100–600 ms under load, past
+  any fixed wait.
 - **History flags are cumulative.** A created-then-deleted (or renamed) path
   can report `Create` with `Remove` or the rename flag. Match "the
   history includes the expected flag" plus the path's current state, never

@@ -1,9 +1,8 @@
 # Plain deletion engine (`remove::delete`)
 
-The engine that replaces the watcher plus checked deletion
-([observation.md](observation.md), removed later in
-`2026-10-22-confirmed-remove-always-deletes`). Until that plan's Phase 5 the
-lifecycle does not call it; the old engine still runs `wt remove`.
+The only deletion engine: the lifecycle ([lifecycle.md](lifecycle.md))
+deletes every placed checkout with it. There is no watcher and no inventory
+to compare against.
 
 ## Shape
 

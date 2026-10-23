@@ -1,174 +1,92 @@
-# `wt remove` lifecycle, recovery, and retry (`remove::lifecycle`)
+# `wt remove`'s removal lifecycle (`remove::lifecycle`)
 
-Implementation facts for the contention-aware removal. User-facing behavior
-is in `worktree/docs/cli/remove.md` ("Deleting the checkout", "What `wt
-remove` refuses to move", "Recovery records and retry", and the exit-code
-table); a change to an exit class or a refusal updates those sections and the
-README's exit-code table together. The pieces it calls are in
-[remove.md](remove.md) (store, journal, move) and
-[observation.md](observation.md) (observer, inventory, deletion engine).
+After "yes" (or `--force`) the checkout is deleted. `wt remove`
+(`cli/src/commands/remove/mod.rs`) runs this lifecycle; there is no other.
+The journal, the activity observer, the checked deletion engine, the
+free-space gate, and `report.json` are gone (2026-10-23).
 
 ## Entry points
 
 | Call | Use |
-| --- | --- |
-| `remove_checkout(&RemovalRequest, &Environment) -> Removal` | first attempt on a live, linked, healthy checkout |
-| `resolve_target(base, name) -> Target` | `Live`, `Pending`, or `Ambiguous`, from live registrations plus pending records |
-| `inspect(base, &id) -> Inspection` | what a pending operation left, with a `Resolution` |
-| `resume(&ResumeRequest, &Environment) -> Removal` | retry `Quarantined`, `ContentRemoved`, `CheckoutRemoved`; anything else is `Refusal::Recovery` |
-| `release_unstarted(base, &id)` | close a `NotStarted` record, or move a `MovedUnassociated` checkout back first |
-| `consent_state(base, checkout, branch)` | the `(Inventory, fingerprint)` a first attempt's `Approval` binds; runs `git status` |
-| `resume_consent(base, &id) -> ResumeConsent` | a `Quarantined` retry's consent: `raw`, explained `inventory`, `excluded`, bound `fingerprint` |
+| ---- | --- |
+| `lifecycle::remove(&Request, &Env)` | a fresh removal after the question; `Request.facts` is the `facts::gather` result the question showed |
+| `lifecycle::finish_pending(base, &id, &Env)` | a pending operation a name resolved to (R19); asks nothing |
+| `lifecycle::save_approval(&Request, &Env)` | the shell wrapper's first run (R18): saves the approval, changes nothing else, returns the operation id for the `OperationHandoff` |
+| `lifecycle::finish_handoff(base, &OperationHandoff, cwd, &Env)` | the shell wrapper's second run (R18) |
+| `lifecycle::resolve(base, name)` | `Live`, `Pending(id)`, or `Ambiguous`, over compact **and** legacy records. An unreadable record matches no name, so a name that matches nothing while one exists is `ResolveError::Store` with that record's explanation, never a bare not-found |
 
-`Environment` injects the `UsageSource`, the `SpaceSource` that `begin` and
-`reopen` read before writing a journal (`NativeSpace` in the CLI; tests use
-`Space::plenty()` or `Space::reading(..)`, which records each path asked),
-the interrupt poll, the observer starter (`native_observation`, or
-`Observation::injected*` in tests), and `slow_startup: &dyn Fn(Duration)`. `report_slow_startup` calls that hook at
-most once per attempt, right after the observer starts and before the move
-(on a resumed attempt, before further deletion), when
-`ObservationDiagnostics::startup_ms` exceeds `SLOW_STARTUP` (1 s); the CLI
-prints `recovery::slow_startup_markup` and the removal continues. Tests pass
-a no-op or a recording closure.
-`Removal::exit_class()` gives `Success`/`Failure`/`Refused`/`Blocked`
-(0/1/3/4); the CLI maps that, not the outcome.
+`Env` injects the usage source (only to name holders in a deletion wait),
+the mount table, the clock, `FsFaults`, cancellation, `Revalidate` (rechecks
+a conditional branch on a later run), and `Notify` (R16 "another removal is
+running", R22 waits). `Removal::exit_class()` is N5.
+
+## How the CLI drives it
+
+- `run`: `resolve_in` → `Pending(id)` is `finish_pending` with no report;
+  `Live` → `facts::gather` → report → `policy::decide` → `remove`, or for a
+  wrapper caller inside a checkout directory `save_approval` +
+  `OperationHandoff` (only a `Target::Checkout` is handed off; an own link
+  is deleted at once and the run prints a bare `cd:`).
+- `Env` in the CLI: `SniffUsage`, `NativeMounts`, `HostClock`, `NoFaults`,
+  the Ctrl-C `interrupt::Window`, `Reconfirm` (the first run's
+  `reconfirm` proof) and `Stderr` (`Notify`).
+- `Revalidate::still_safe(name, tip, remote_deleted)`: `remote_deleted`
+  says the operation also has a remote step, so the branch's origin copy
+  and its PR are no proof (the first run's `force_remote` rule).
+- A remote step whose lease push fails asks the endpoint once
+  (`remote::remote_branch_absent`); a branch already gone is `AlreadyAbsent`.
 
 ## Order (do not reorder)
 
-`plan_move` → no pending record for this admin name → observer start →
-`DeletionInventory::capture` → `tree_index()` (one `Arc<TreeIndex>` per
-attempt) → `register_handles` + `check_usage(.., Some(&index))` →
-`recheck` (tip, then `consent_state` fingerprint and dirty list; on resume
-`resume_consent`'s) → drain +
-`confirm_unchanged(.., admin_allowed = true)` → `bind_index` → `begin`
-(sizes the journal, then the space check) →
-drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
-→ `moved_to_quarantine()` → drain and explain the move's own events →
-`delete_content` → `unregister_quarantine` → original's copy record → branch
-actions → `Operation::complete`.
+save approval (`store.approve`) → `git worktree unlock` (only when the
+question showed the lock) → place (`placement::place_with`: move, or
+`mark_in_place`) → R14 `git status` (`late::unseen`) → `delete::delete_tree`
+→ `git worktree remove <absent registered path>` + copy record → branch steps
+→ `PendingRemoval::finish`.
 
-- **`check_usage` has one bounded exception to "no retry"** (author decision
-  2026-10-12): when every holder `is_windows_search` (image path, from
-  Sniff's process record, exactly `<system dir>\{SearchProtocolHost,
-  SearchFilterHost,SearchIndexer}.exe`, ASCII-case-insensitive, `\\?\`
-  stripped; no path, an uncertain identity, or the name elsewhere is an
-  ordinary holder), it calls `UsageSource::pause(SEARCH_RECHECK_WAIT)`
-  (500 ms) and queries exactly once more; that query decides. Any other
-  holder refuses without waiting. `UsageSource::system_directory` is
-  `GetSystemDirectoryW` on Windows and `None` elsewhere, so other OSes never
-  recheck. It is the only any-holder decision: the first attempt and the
-  `Quarantined` retry both go through `check_usage`; the `Diagnostic`
-  queries after a stop only name processes. The recheck lands in
-  `UsageClearance::search_recheck` / `InUse::search_recheck`;
-  `preflight_runs` records the first report as a `WindowsSearchHold`
-  discovery run before the `Preflight` one, and the `Discovery` timeline
-  event carries `SearchRecheck::summary` (the retry pushes that event only
-  when it rechecked). `REPORT_VERSION` 4 added the purpose; 5 added the
-  optional `observation` diagnostics on the report and on each
-  `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
-  load).
-- **The recheck runs `git status`, which may rewrite the index**, so its admin
-  events are drained before `bind_index` and allowed; any admin event after
-  the binding refuses (before the move) or stops (after it).
-- **`confirm_unchanged` skips `Original("")`** (the tree root itself); a
-  replaced root is caught by `open_root`'s identity check inside `confirm`.
-- **The move's own events** are `Original("")` with `own_move` kinds and the
-  original absent, `Quarantine("")`/`Tree("")` with the quarantine holding the
-  checkout's identity, and `Admin("gitdir")` with
-  `MovePlan::back_reference_rewritten()`. Everything else is activity.
-- **A refusal after `begin` that changed nothing calls `Operation::discard`**
-  (deletes the operation directory). If that fails, `inspect` resolves the
-  leftover record as `NotStarted`.
-- **Every write failure after the move stops with `cleanup_failed`** and
-  saves what it can; the record keeps its last durable phase.
+- **A checkout Git cannot read is deleted in place.** When the question
+  warned `GitUnreadable` or `Unchecked` (R10, R13), a move refusal about the
+  `.git` link (`Unsupported`, `Uninspectable`, `Association`) binds through
+  the admin record's back-reference (`bind_in_place`) instead of refusing.
+- **`plan_move` skips the lock check at planning** (the unlock comes after
+  the save) and never refuses submodules; the move itself (`move_with`)
+  still refuses a lock, so a lock added after the question is never
+  removed.
+- **`git worktree remove` of the absent checkout deletes `<admin>`,
+  `modules/` included** (R2's module data). Never `prune`, never `--force`.
+- **Nested mounts are re-spelled.** Native tables spell real paths
+  (`/private/var` on macOS); `nested_mounts` resolves the checkout and maps
+  each nested mount back under the spelled root before placement and
+  deletion compare paths.
+- **`Operation::run(from, …)` takes the start step from inspection**, not the
+  record's marker; only the unlock uses the marker (it is idempotent).
 
-## Recovery is decided from the filesystem and Git, never the phase
+## Resume decides from the paths and Git
 
-`inspect` reads `Presence` at both paths (`Absent`, `Checkout` = real
-directory with the recorded identity, `Other`, `Uninspectable`) and the
-registration from the admin `gitdir` (`registration_state`), then:
+`resume::inspect` reads what is at the original and deletion paths (by the
+recorded identity, without following links) and where `<admin>/gitdir`
+points. Moved mode: checkout at the quarantine and registered there →
+delete; registered still at the original (crash between rename and
+association) → `rename_no_replace` back, plan again; quarantine absent →
+unregister; registration gone → branch steps. A different directory at the
+quarantine refuses and **keeps** the record. In place: a replaced root
+**closes** the record (a later run asks afresh). A reused `<admin>` (same
+name, other identity) refuses in `current_binding`.
 
-| Original | Quarantine | Registration | Resolution |
-| --- | --- | --- | --- |
-| `Other` | any | any | `OriginalRecreated` |
-| `Checkout` | `Absent` | at original | `NotStarted` |
-| `Absent` | `Checkout` | at original | `MovedUnassociated` (crash between rename and `gitdir` rewrite) |
-| `Absent` | `Checkout` | at quarantine, `.git` not a file | `PartialCheckout` |
-| `Absent` | `Checkout` | at quarantine | `Quarantined` |
-| `Absent` | `Absent` | at quarantine | `ContentRemoved` |
-| `Absent` | `Absent` | removed | `CheckoutRemoved` |
-| anything else | | | `Unresumable(reason)` |
+The resolver treats a live registration at the original path as the
+operation's own when that path holds the recorded checkout **or nothing**;
+otherwise a crash between rename and association reads as ambiguous.
 
-- **An admin directory with another identity under the recorded name** means
-  Git reused the name for a new worktree: `Unresumable`, and the record's own
-  identity is used for `recover`'s binding check so the record stays
-  readable.
-- **The journal summary is `None` when the quarantine is not the moved
-  checkout**: nothing in a stranger's directory is checked.
+## Targets without a checkout directory
 
-## Retry
-
-- **Resolution dedupes only the same operation's checkout:** a live entry at
-  the record's quarantine (its branch still matches the name), or at the
-  original with the recorded identity (`NotStarted`). Any other double match
-  is `Ambiguous`. Pending records match by `requested_name`, `aliases`, and
-  the original's directory name (dasherized too). Unreadable records match
-  nothing here, but `remove_checkout` refuses while any exists.
-- **`resume` re-collects everything.** `Quarantined` needs an `Approval` of
-  `resume_consent`'s `inventory` and `fingerprint` (never `consent_state` of
-  the quarantine: its fingerprint does not match), starts the
-  observer with `moved = true`, takes a fresh inventory, queries usage of the
-  quarantine, rechecks, binds the index, then `RecoveryStore::reopen`, which
-  copies the old journal to `journal-<n>.jsonl`, builds the new one (fresh
-  inventory) under a hidden name, and renames it over `journal.jsonl`.
-  **Never rename or delete `journal.jsonl` before its replacement is
-  published:** `recover` reads only that file, so that gap once made a
-  pending operation unrecoverable. `store::fault::inject` stops `reopen` at
-  each `ReopenStep` in tests; the `*_stopped_while_replacing_*` lifecycle
-  tests drive every caller through it.
-- **Resume consent: raw versus explained.** `resume_consent` reads and
-  validates every attempt's journal first (an unreadable one is
-  `Refusal::Store`, no exclusion), runs `consent_state` on the quarantine
-  (`raw`), and drops from `inventory` only porcelain-exact ` D` entries whose
-  path (component-equal, so Windows `\` matches Git's `/`) has a durable
-  `Deleted` result and is absent by a no-follow inspection through the
-  verified quarantine handle. Git still reports ` D` for a file replaced by
-  an empty directory, so that inspection is load-bearing. `fingerprint` is
-  `bind_excluded(raw fingerprint, excluded)`; the lifecycle recheck under the
-  operation lock calls the same function (`resume_consent_in`) and compares
-  the explained dirty list and that fingerprint, so a file recreated or a
-  change staged after the report is `Refusal::Changed`. The CLI swaps
-  `Facts::inventory`/`reported` for the explained view and prints
-  `excluded.len()` in `retry_markup`; excluded paths stay `Deleted` in the
-  journal and report. Never filter rows in the CLI alone. Tests:
-  `lifecycle/tests/resume_consent.rs`; a deterministic CLI stop after a real
-  confirmed deletion uses a read-only directory one level above a tracked file
-  (`remove_recovery.rs`, Unix, skipped when the user can write it anyway).
-- `ContentRemoved` needs a `RecordApproval` (the
-  `inspect_missing` result shown to the user) and goes through
-  `remove_missing_record`. `CheckoutRemoved` runs only the branch actions in
-  the request; saved approvals are never reused.
-- **A retry's report covers the whole operation.** `Resumed::attempt`
-  carries the saved `report.json` into `earlier_attempts`
-  (`OperationReport::continue_from`), and `Operation::journal_entries` /
-  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`. An
-  archive keeps only `deleted`, `externally_absent`, and `uncertain` entries,
-  and decides whether an unconfirmed entry was still present from the **next
-  generation's inventory**, never the filesystem now; that is what keeps a
-  retried entry from being counted twice or an uncertain one from turning
-  into a deletion. So registration and branch-only retries reopen with
-  `DeletionInventory::empty`: copying the old inventory would make every
-  unconfirmed entry look present and drop it. `complete(report,
-  journal_reported)` deletes the journals only once `report.journal_entries`
-  lists them all.
-- **A completed record** is `StoreError::Completed` from `inspect`,
-  `resume`, and `reopen`, and `pending()` skips it.
+`Missing`, `Vanished`, `NotADirectory`, `Uninspectable`, and both `Link`
+kinds run `without_record`: unlock if approved, delete the entry (an own
+link's real checkout first, in place), `git worktree remove`, branch steps.
+No compact record is saved: its `checkout_identity` would have nothing to
+bind, and each step is idempotent, so an interrupted run leaves a state the
+next question describes.
 
 ## Compact record and store (`record_version` 2)
-
-These are being built to replace the journal (spec
-`2026-10-22-confirmed-remove-always-deletes`). They exist beside the journal
-path, and the lifecycle above does not call them yet.
 
 - **`recovery::compact::CompactRecord`** is the approval. It has no expiry,
   and `progress` (`Approved` → `Unlocked` → `Placed` → `ContentRemoved` →
@@ -190,97 +108,26 @@ path, and the lifecycle above does not call them yet.
     - `lock_waiting` backs off on a `Clock` and ends in
       `StoreError::Cancelled`.
     - `PendingRemoval::finish` deletes the whole operation directory.
-    - `operations()` lists both formats. The old `pending()` reads v1 only,
-      and refuses any v2 directory as unsupported.
-- **Crash injection:** `store::compact::fault::inject` stops at a `SaveStep`
+    - `operations()` lists both formats.
+- **Owner-only storage (`recovery/storage.rs`).** On Unix the store's
+  directories and files must be the user's with no group/other bits. WSL's
+  drvfs (`/mnt/<drive>`) shows every entry as `0o777` and ignores `chmod`,
+  so open bits there pass (ownership is still checked), as native Windows
+  relies on the inherited ACL. The mount table is read only when the bits
+  are open, so other filesystems pay nothing.
+- **Crash injection:** `store::compact_fault::inject` stops at a `SaveStep`
   (`Staged`, `Migrated`, `MigrationPublished`).
-
-## How `wt remove` drives it (`cli/src/commands/remove/`)
-
-- **Resolution:** `run` calls `resolve_target`, not `find_worktree`. Only-live
-  ambiguity becomes the old `WorktreeError::AmbiguousWorktree` (exit 1); any
-  ambiguity involving a pending record is `recovery::ambiguous_markup`
-  (exit 3). For `Pending`, `inspect` first: `NotStarted`/`MovedUnassociated`
-  → `release_unstarted`, then resolve again as live; `Quarantined`/
-  `ContentRemoved` → the live entry at the record's quarantine (found by
-  `canonical` path) with `Facts::retry` set; `CheckoutRemoved` → a synthetic
-  `WorktreeEntry` at the original (`Facts::branch_only`); anything else →
-  `recovery::inspection_markup` (exit 3). A retry never repairs (an unlinked
-  quarantine refuses before `prepare`) and never hands off (a cwd inside the
-  quarantine is exit 4).
-- **Every existing checkout is fingerprinted** before the report
-  (`Facts::reported`), because `Approval` needs one; `Approval.tip` is
-  `Facts::head`. The old `files_unchanged` recheck is gone: the lifecycle's
-  `recheck` does it after discovery.
-- **`execute`:** a first-attempt missing directory goes to
-  `execute_record_only` (no Sniff, no lifecycle). Everything else builds
-  `BranchActions` (local only for `BranchStep::Delete`, remote only for
-  `RemoteState::Present` with `--force-remote`) and calls `remove_checkout`,
-  or `resume` with `approval` (a quarantine) or `record` (a `Missing`
-  quarantine). A `RemoteState` other than `Present` is still reported by
-  `delete_on_origin(.., already_deleted = true)` after a successful removal
-  (exit 1 for `Unavailable`, as before).
-- **Output:** `Removal::Refused` → `recovery::refusal_error` (usage refusals
-  through `usage::usage_refusal`); `Finished` with `ExitClass::Success` → the
-  old completion lines; anything else → `WorktreeError::RemovalFailed`
-  with `recovery::stopped_markup`. `stopped_markup` and
-  `inspection_markup` reuse `usage::coverage_note` for every limited
-  process check (the latest preflight, falling back to an earlier
-  attempt's, each diagnostic run, and the record's saved `discovery`); a
-  complete check adds no line, and the success path never calls them, so
-  `remove.rs`'s "no `Discovery`" assertion guards the no-chatter rule.
-  Nothing reaches stdout, so no `cd:` or
-  `remove-handoff:` follows a failure. The handoff's second run sets
-  `Facts::reported` from the verified fresh state, then runs the same
-  `execute`, so the decisive usage query is in the second run.
-- **`Environment::interrupted` is the CLI's `interrupt::Window`**
-  (`cli/src/commands/remove/interrupt.rs`), opened in `execute` around
-  `remove_checkout`/`resume` only, so consent prompts keep their own Ctrl-C.
-  `ctrlc` (with `termination`) allows one handler per process: it is
-  installed on the first open, sets a static flag while a window is open, and
-  exits 130 once the window has closed. The lifecycle polls the flag once
-  just before the move (`Refusal::Interrupted`, exit 1, record discarded), at
-  every deletion entry boundary (`Stop::Interrupted`, stopped report), and in
-  every delivery wait. `Refusal::Interrupted` reads "the removal was
-  interrupted before it changed anything". A resumed attempt refuses with it
-  only when the interrupt ends observer startup; the record stays pending,
-  and `refusal_error` (`resumed`) says "stopped before deleting more of
-  worktree …", never "stopped before moving". The resumed pre-deletion
-  drains (`checked_drain`) clear `interrupted`, so a later Ctrl-C reaches the
-  deletion engine's first drain and ends with the stopped report.
-  The handler runs on `ctrlc`'s own thread, so a test cannot assume the flag
-  is set when `kill` returns: `cli/tests/remove_recovery.rs`'s
-  `interrupter` shim waits for the handler's `Interrupted:` line on `wt`'s
-  stderr (redirected to a file) before letting the Git call return.
-- **Binary tests:** `cli/tests/remove_recovery.rs` stops a real removal with a
-  `git` shim on `PATH` that writes once a `.wt-remove-*` sibling exists (Git
-  runs association and verification calls right after the move). A writer at
-  `git worktree remove` or `diff-index` is too late: the last original/
-  quarantine check is at the start of `unregister_quarantine`, so such a write
-  passes as the documented concurrent-write limit. Use
-  `assert_cmd::cargo::cargo_bin("wt")`, not `env!("CARGO_BIN_EXE_wt")`:
-  cross-check and CI run nextest archives, where the compile-time path does
-  not exist.
 
 ## Tests (`lifecycle/tests.rs`)
 
-- Policy cases use `Observers` (injected observer per start; the last
-  `Injector` is reachable) and `Usage` (a fake `UsageSource` with a holder,
-  an outcome, `exhausted`, and `fail_after`; `Usage::search_first(first,
-  then)` answers `then` after the first query, sets a fake system directory,
-  and records `pause` calls instead of sleeping; `indexes()` is the tree index
-  each query got). Its `system_directory`
-  defaults to `None` on every host, so no other case rechecks on Windows.
-  `with_space` runs a case under a scripted free-space reading;
-  `tests/large_checkout.rs` holds the index handoff, the space refusals, and
-  the resume of report versions 4 and 5.
-- **Crash injection:** `run_with(.., hook)` returns `Err(Crashed)` when the
-  hook returns `true` at a `Boundary` (`Begun`, `Moved`, `ContentRemoved`,
-  `Unregistered`, `BranchesDone`). `DeletionBatch(n)` cannot crash in-process;
-  the real-kill test blocks there instead.
-- **Real process kill:** `native_a_killed_removal_…` re-runs the test binary
-  with `remove::lifecycle::tests::lifecycle_child_blocks_mid_deletion --exact
-  --ignored --nocapture` (the sniff precedent for subprocess fixtures), waits
-  for its ready line on stdout, and kills it.
-- The uncertain-entry case drops the journal's last results line by hand; the
-  window between an unlink and its result cannot be reached by a hook.
+- Crash with `Seams { hook, moves }` (`run_with`); `Boundary` is in
+  flowchart order. `DeletionBatch` is passed but cannot crash in process:
+  a crash during deletion is reproduced as a crash at `Moved` plus files
+  removed from the placed checkout
+  (`a_crash_part_way_through_deleting_a_built_checkout_is_finished_by_the_next_run`).
+- Inject a rename failure through `Seams.moves.rename_instead` (`EINVAL` →
+  drvfs in place); a store save failure through
+  `recovery::store::compact_fault::inject`.
+- `test_support::ClearUsage` is a usage source with no holders.
+- Compare record paths with `same_location`: Git's listing spells temp dirs
+  as `/private/var/...` on macOS, the fixture as `/var/...`.

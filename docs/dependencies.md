@@ -317,30 +317,24 @@
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
   `wt remove`'s recovery store (`<common-git-dir>/wt-removal/`) reuses `fs4`
   for its per-worktree operation lock, `getrandom` for its operation IDs, and
-  `sniff`'s `NativeString`, `FileIdentity`, and `PathUsageReport` for lossless
-  paths, native identities, and the saved discovery report. On Unix it adds a
+  `sniff`'s `NativeString` and `FileIdentity` for lossless paths and native
+  identities (and `PathUsageReport` to read an earlier `wt`'s record when it
+  is migrated). On Unix it adds a
   direct `libc` 0.2 dependency (already in the workspace graph) for `geteuid`
   in the store's owner check, `O_NOFOLLOW` when reading a record, and plain
   `fsync` on Apple platforms, where std's `sync_all` issues the much slower
   `F_FULLFSYNC`. The same `libc` supplies the quarantine move's
   no-replacement renames, `renameat2(RENAME_NOREPLACE)` on Linux and
   `renamex_np(RENAME_EXCL)` on macOS. On Windows the move uses `windows-sys`
-  0.61 (the workspace's version; `Win32_Foundation` and
-  `Win32_Storage_FileSystem`) for `SetFileInformationByHandle(FileRenameInfo)`
-  without replacement and `FileIdInfo` directory identities.
-  `std::fs::rename` is not used for it because it may replace an existing
-  destination.
-  `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
-  features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
-  FSEvents and Core Foundation declarations, including
-  `FSEventStreamFlushSync`) on macOS only; both are the crates `notify` builds
-  on. On Windows it calls `ReadDirectoryChangesW` through the same
-  `windows-sys`, adding `Win32_Security`, `Win32_System_IO`, and
-  `Win32_System_Threading` for overlapped reads and their events. The usage
-  check adds `Win32_System_SystemInformation` for `GetSystemDirectoryW`, the
-  directory Windows Search's processes must run from for its one recheck. `notify` itself is not used: it hides overflow and lost watches on
-  Windows, drops the watch on a directory `wt` moves on Linux, and offers no
-  flush on macOS, so it cannot report lost coverage.
+  0.61 (the workspace's version; `Win32_Foundation`,
+  `Win32_Storage_FileSystem`, and `Win32_Security`, which `CreateFileW`
+  needs) for `SetFileInformationByHandle(FileRenameInfo)` without
+  replacement and `FileIdInfo` directory identities; the same features serve
+  the deletion engine's handle-relative deletes and the mount table's volume
+  enumeration. `std::fs::rename` is not used for the move because it may
+  replace an existing destination. `wt remove` watches no filesystem
+  activity, so it depends on no watcher crate (`notify`, `inotify`,
+  `fsevent-sys`).
 - `worktree/lib` uses `chrono` 0.4 (no default features; `clock` and `std`,
   as `worktree/cli` already builds it) to show a process's start time in local
   time in `wt remove`'s warnings (`remove::facts`). Sniff reports the time as a
@@ -1258,18 +1252,6 @@ This is a Rust workspace with the following modules:
 
     _Tags: audio, macos, platform_
 
-- [fsevent-sys](https://github.com/octplane/fsevent-rust) _v4.1_ [📄](https://docs.rs/fsevent-sys)
-
-    _Raw FSEvents and Core Foundation declarations. `worktree` uses it (macOS only) for `wt remove`'s activity observer, including `FSEventStreamFlushSync` for its marker-confirmed checks._
-
-    _Tags: ffi, macos, filesystem, watch_
-
-- [inotify](https://github.com/hannobraun/inotify) _v0.11_ [📄](https://docs.rs/inotify)
-
-    _Linux inotify bindings (default features off, so no tokio stream). `worktree` uses it (Linux only) for `wt remove`'s activity observer, one watch per checkout directory._
-
-    _Tags: linux, filesystem, watch_
-
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
     _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`, and for the quarantine move's no-replacement renames (`renameat2`, `renamex_np`)._
@@ -1284,7 +1266,7 @@ This is a Rust workspace with the following modules:
 
 - [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
 
-    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, and its `ReadDirectoryChangesW` activity observer. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, deletion by handle, and its mount table. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
 
     _Tags: ffi, windows, platform_
 

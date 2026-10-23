@@ -85,8 +85,9 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
 
 ## inotify: watches follow inodes, new directories are not watched
 
-Measured 2026-10-11 on `BUILD_LINUX` (ZFS) and the WSL guest (ext4); the
-adapter that relies on this is `worktree/lib/src/remove/observation/inotify.rs`:
+Measured 2026-10-11 on `BUILD_LINUX` (ZFS) and the WSL guest (ext4) for
+`wt remove`'s former activity watcher (removed 2026-10-23; nothing in the
+repository watches with inotify now):
 
 - A watch descriptor follows its inode, so a renamed directory keeps
   reporting through the same watch. A wrapper that tracks watches by path

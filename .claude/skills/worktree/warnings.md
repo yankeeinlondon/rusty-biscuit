@@ -16,6 +16,14 @@ refuses without `--force` when it is true. User-facing wording is in
   report is kept for later enrichment. A failed query is a
   `UsageIncomplete` warning, except a query that failed because the checkout
   vanished, which is `Target::Vanished` (R17, "already removed").
+- **On a very large checkout the usage query runs out of budget.** No
+  tree index is supplied, so Sniff walks the whole checkout inside its one
+  2 s budget. Measured on macOS: a 500,000-entry checkout needs about 3.5 s,
+  so the walk exhausts the budget, no process is enumerated, and the
+  question always carries `UsageIncomplete` (a non-interactive run then
+  needs `--force`). Raising the deadline or supplying an index changes how
+  long the question takes to appear; it is a product decision, not a test
+  tweak.
 - **Only a real miss warns (`facts::missed`).** Discovery unavailable, the
   budget run out, or a mechanism `Failed`/`NotAttempted` is
   `UsageIncomplete`. A mechanism the platform never supports (macOS FSEvents
