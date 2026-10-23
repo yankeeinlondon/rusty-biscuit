@@ -143,6 +143,13 @@ enum Line<I, R> {
     Results(R),
 }
 
+/// The inventory line as written, borrowing the inventory.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum InventoryLine<'a> {
+    Inventory(&'a DeletionInventory),
+}
+
 /// A first line read only for its header, whatever version follows.
 type HeaderLine = Line<IgnoredAny, IgnoredAny>;
 /// A line this build writes.
@@ -544,7 +551,7 @@ impl<S: JournalSink> JournalWriter<S> {
         limit: u64,
     ) -> Result<Self, JournalWriteError> {
         let header = line(&LineV3::Header { journal_version: JOURNAL_VERSION, operation_id: operation.clone() });
-        let listed = line(&LineV3::Inventory((*inventory).clone()));
+        let listed = line(&InventoryLine::Inventory(&inventory));
         let mut writer = Self::after_header(sink, inventory, limit);
         let mut opening = header;
         opening.extend_from_slice(&listed);
@@ -645,6 +652,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::remove::observation::inventory::InventoryEntry;
 
     fn id() -> OperationId {
         OperationId::parse("0123456789abcdef0123456789abcdef").unwrap()
@@ -862,6 +870,117 @@ mod tests {
         assert_eq!(writer.begin_batch(full).unwrap(), 1);
         assert!(matches!(writer.begin_batch(vec![file("x")]), Err(JournalWriteError::InvalidBatch(_))));
         assert!(matches!(writer.finish_batch(&[ResultState::Deleted]), Err(JournalWriteError::InvalidBatch(_))));
+    }
+
+    /// Version 3 batches name inventory positions and hold bare states:
+    /// no path or kind is repeated after the inventory line.
+    #[test]
+    fn version_3_batches_hold_positions_and_states_only() {
+        let inventory = listed();
+        let sink = MemorySink::default();
+        let mut writer = JournalWriter::start(sink.clone(), &id(), Arc::clone(&inventory), limit_for(&inventory)).unwrap();
+        writer.begin_batch(vec![file("d/b"), file("d/a")]).unwrap();
+        writer.finish_batch(&[ResultState::Deleted, ResultState::ExternallyAbsent]).unwrap();
+        writer.begin_batch(vec![file("e/y")]).unwrap();
+
+        let text = String::from_utf8(sink.contents()).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], format!("{{\"header\":{{\"journal_version\":3,\"operation_id\":\"{}\"}}}}", id()));
+        let at = |path: &str| inventory.position(Path::new(path)).unwrap();
+        // The intent's order, not the inventory's.
+        assert_eq!(lines[2], format!("{{\"intent\":{{\"batch\":1,\"entries\":[{},{}]}}}}", at("d/b"), at("d/a")));
+        assert_eq!(lines[3], r#"{"results":{"batch":1,"states":["deleted","externally_absent"]}}"#);
+        assert_eq!(lines[4], format!("{{\"intent\":{{\"batch\":2,\"entries\":[{}]}}}}", at("e/y")));
+        for batch_line in &lines[2..] {
+            assert!(!batch_line.contains("display") && !batch_line.contains("\"file\""), "{batch_line}");
+        }
+
+        let log = parse(text.as_bytes(), &id()).unwrap();
+        assert_eq!(
+            log.batches,
+            vec![
+                Batch {
+                    number: 1,
+                    entries: vec![file("d/b"), file("d/a")],
+                    results: Some(vec![ResultState::Deleted, ResultState::ExternallyAbsent]),
+                },
+                Batch { number: 2, entries: vec![file("e/y")], results: None },
+            ]
+        );
+    }
+
+    /// The same batches written by a version 2 `wt` (frozen bytes) read back
+    /// as the version 3 writer's do.
+    #[test]
+    fn a_version_2_journal_reads_back_like_its_version_3_equivalent() {
+        let inventory = listed();
+        let sink = MemorySink::default();
+        let mut writer = JournalWriter::start(sink.clone(), &id(), Arc::clone(&inventory), limit_for(&inventory)).unwrap();
+        writer.begin_batch(vec![file("d/b"), file("d/a")]).unwrap();
+        writer.finish_batch(&[ResultState::Deleted, ResultState::Kept]).unwrap();
+        writer.begin_batch(vec![file("e/y")]).unwrap();
+        let v3 = sink.contents();
+        let inventory_line = String::from_utf8(v3.clone()).unwrap().lines().nth(1).unwrap().to_string();
+
+        let v2 = format!(
+            "{{\"header\":{{\"journal_version\":2,\"operation_id\":\"{}\"}}}}\n{inventory_line}\n{}\n{}\n{}\n",
+            id(),
+            r#"{"intent":{"batch":1,"entries":[{"path":{"display":"d/b"},"kind":"file"},{"path":{"display":"d/a"},"kind":"file"}]}}"#,
+            r#"{"results":{"batch":1,"entries":[{"path":{"display":"d/b"},"state":"deleted"},{"path":{"display":"d/a"},"state":"kept"}]}}"#,
+            r#"{"intent":{"batch":2,"entries":[{"path":{"display":"e/y"},"kind":"file"}]}}"#,
+        );
+        let (old, new) = (parse(v2.as_bytes(), &id()).unwrap(), parse(&v3, &id()).unwrap());
+        assert_eq!(old, new);
+        let present = BTreeSet::from(["d/a"]);
+        assert_eq!(states(&old, &present), vec![("d/b".into(), EntryState::Deleted), ("d/a".into(), EntryState::Kept), ("e/y".into(), EntryState::Uncertain)]);
+        assert!(v3.len() < v2.len());
+    }
+
+    /// The limit is exactly the version 3 encoding of every position planned
+    /// alone, with the longest batch number and result, across the places
+    /// where a position gains a digit; an empty inventory allows no batch.
+    #[test]
+    fn the_limit_counts_each_positions_own_digits() {
+        let results = format!("{{\"results\":{{\"batch\":{},\"states\":[\"externally_absent\"]}}}}\n", u64::MAX).len() as u64;
+        let intent = |position: usize| format!("{{\"intent\":{{\"batch\":{},\"entries\":[{position}]}}}}\n", u64::MAX).len() as u64;
+        let root = sniff::filesystem::query::FileIdentity::Unix { device: 1, inode: 1 };
+        for size in [0, 9, 10, 11, 99, 100, 101, 999, 1000, 1001] {
+            let names: Vec<String> = (0..size).map(|n| format!("f{n:04}")).collect();
+            let inventory = DeletionInventory::listing(root, &names.iter().map(String::as_str).collect::<Vec<_>>());
+            assert_eq!(inventory.entries().len(), size);
+            let expected: u64 = (0..size).map(|at| intent(at) + results).sum();
+            assert_eq!(limit_for(&inventory), expected, "{size} entries");
+        }
+        let one_digit_less = intent(9) - intent(8);
+        assert_eq!((one_digit_less, intent(10) - intent(9), intent(100) - intent(99), intent(1000) - intent(999)), (0, 1, 1, 1));
+    }
+
+    /// Full batches and every entry alone both fit an inventory whose
+    /// positions run past three digits.
+    #[test]
+    fn full_batches_and_single_entries_fit_the_limit_past_a_thousand_entries() {
+        let root = sniff::filesystem::query::FileIdentity::Unix { device: 1, inode: 1 };
+        let names: Vec<String> = (0..1001).map(|n| format!("f{n:04}")).collect();
+        let inventory = Arc::new(DeletionInventory::listing(root, &names.iter().map(String::as_str).collect::<Vec<_>>()));
+        let planned = |entries: &[InventoryEntry]| -> Vec<PlannedEntry> {
+            entries.iter().map(|entry| PlannedEntry { path: entry.path.clone(), kind: EntryKind::of(&entry.shape) }).collect()
+        };
+
+        let sink = MemorySink::default();
+        let mut writer = JournalWriter::start(sink.clone(), &id(), Arc::clone(&inventory), limit_for(&inventory)).unwrap();
+        for chunk in inventory.entries().chunks(MAX_BATCH_ENTRIES) {
+            writer.begin_batch(planned(chunk)).unwrap();
+            writer.finish_batch(&vec![ResultState::ExternallyAbsent; chunk.len()]).unwrap();
+        }
+        let log = parse(&sink.contents(), &id()).unwrap();
+        assert_eq!((log.batches.len(), log.batches[0].entries.len()), (4, MAX_BATCH_ENTRIES));
+
+        let mut writer = JournalWriter::start(MemorySink::default(), &id(), Arc::clone(&inventory), limit_for(&inventory)).unwrap();
+        for entry in inventory.entries() {
+            writer.begin_batch(planned(std::slice::from_ref(entry))).unwrap();
+            writer.finish_batch(&[ResultState::ExternallyAbsent]).unwrap();
+        }
+        assert!(writer.written <= writer.limit, "{} of {}", writer.written, writer.limit);
     }
 
     #[test]

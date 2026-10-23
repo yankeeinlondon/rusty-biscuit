@@ -498,148 +498,503 @@ fn record_robustness_matrix() {
     );
 }
 
-#[test]
-fn journal_robustness_matrix() {
-    let f = fixture();
-    let saved = record(&f, "wt1");
-    let id = saved.operation_id.clone();
-    let mut op = begin(&f, saved.clone());
-    op.journal().begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
-    op.journal().finish_batch(&[ResultState::Deleted, ResultState::Kept]).unwrap();
-    op.journal().begin_batch(vec![file("e/x")]).unwrap();
-    drop(op);
-    let path = f.store.operation_dir(&id).join(JOURNAL_FILE);
-    let written = fs::read(&path).unwrap();
-    let lines: Vec<Value> =
-        written.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()).map(|line| serde_json::from_slice(line).unwrap()).collect();
-    assert_eq!(lines.len(), 5, "header, inventory, intent, results, open intent");
-    assert_eq!(lines[1]["inventory"], inventory_value(), "the inventory is persisted as given");
+/// The operation a journal matrix edits: its store and record, its journal
+/// file, and that journal's lines, which each cell edits one at a time.
+///
+/// Inventory positions: 0 `a`, 1 `d`, 2 `d/a`, 3 `d/b`, 4 `e`, 5 `e/x`, 6 `l`.
+struct JournalMatrix {
+    f: Fixture,
+    saved: RecoveryRecord,
+    path: PathBuf,
+    lines: Vec<Value>,
+}
 
-    let join = |lines: &[Vec<u8>]| -> Vec<u8> { lines.iter().flat_map(|line| line.iter().copied().chain(*b"\n")).collect() };
-    let compact = |line: &Value| serde_json::to_vec(line).unwrap();
-    let with_line = |index: usize, replacement: Vec<u8>| -> Vec<u8> {
-        let mut all: Vec<Vec<u8>> = lines.iter().map(compact).collect();
+/// What every unedited matrix journal recovers with only `d/b` present:
+/// batch 1's results, and batch 2 cut short.
+fn journal_control() -> Vec<(&'static str, EntryState)> {
+    vec![("d/a", EntryState::Deleted), ("d/b", EntryState::Kept), ("e/x", EntryState::Uncertain)]
+}
+
+/// The batches of [`JournalMatrix::version_3`] as a version 2 `wt` wrote
+/// them, frozen here because this build writes only version 3.
+fn version_2_lines(id: &OperationId) -> Vec<Value> {
+    vec![
+        json!({"header": {"journal_version": 2, "operation_id": id.as_str()}}),
+        json!({"inventory": inventory_value()}),
+        json!({"intent": {"batch": 1, "entries": [{"path": {"display": "d/a"}, "kind": "file"}, {"path": {"display": "d/b"}, "kind": "file"}]}}),
+        json!({"results": {"batch": 1, "entries": [{"path": {"display": "d/a"}, "state": "deleted"}, {"path": {"display": "d/b"}, "state": "kept"}]}}),
+        json!({"intent": {"batch": 2, "entries": [{"path": {"display": "e/x"}, "kind": "file"}]}}),
+    ]
+}
+
+/// A journal line's field: its name, line index, pointer, wrong-type value,
+/// empty value, and named invalid contents.
+type JournalField<'a> = (&'a str, usize, &'a str, Value, Value, Vec<(&'a str, Value)>);
+
+fn compact(line: &Value) -> Vec<u8> {
+    serde_json::to_vec(line).unwrap()
+}
+
+fn join_lines(lines: &[Vec<u8>]) -> Vec<u8> {
+    lines.iter().flat_map(|line| line.iter().copied().chain(*b"\n")).collect()
+}
+
+impl JournalMatrix {
+    /// The journal the writer leaves when batch 1 planned `d/a` and `d/b`
+    /// (deleted, kept) and batch 2 planned `e/x` and was cut short.
+    fn version_3() -> Self {
+        let f = fixture();
+        let saved = record(&f, "wt1");
+        let mut op = begin(&f, saved.clone());
+        op.journal().begin_batch(vec![file("d/a"), file("d/b")]).unwrap();
+        op.journal().finish_batch(&[ResultState::Deleted, ResultState::Kept]).unwrap();
+        op.journal().begin_batch(vec![file("e/x")]).unwrap();
+        drop(op);
+        let path = f.store.operation_dir(&saved.operation_id).join(JOURNAL_FILE);
+        let written = fs::read(&path).unwrap();
+        let lines: Vec<Value> =
+            written.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()).map(|line| serde_json::from_slice(line).unwrap()).collect();
+        assert_eq!(lines.len(), 5, "header, inventory, intent, results, open intent");
+        assert_eq!(lines[0]["header"]["journal_version"], json!(3));
+        assert_eq!(lines[1]["inventory"], inventory_value(), "the inventory is persisted as given");
+        assert_eq!(lines[2], json!({"intent": {"batch": 1, "entries": [2, 3]}}));
+        assert_eq!(lines[3], json!({"results": {"batch": 1, "states": ["deleted", "kept"]}}));
+        assert_eq!(lines[4], json!({"intent": {"batch": 2, "entries": [5]}}));
+        Self { f, saved, path, lines }
+    }
+
+    /// The same operation with its journal replaced by [`version_2_lines`].
+    fn version_2() -> Self {
+        let f = fixture();
+        let saved = record(&f, "wt1");
+        drop(begin(&f, saved.clone()));
+        let path = f.store.operation_dir(&saved.operation_id).join(JOURNAL_FILE);
+        let lines = version_2_lines(&saved.operation_id);
+        Self { f, saved, path, lines }
+    }
+
+    fn line(&self, index: usize) -> Vec<u8> {
+        compact(&self.lines[index])
+    }
+
+    /// The journal holding only the lines at `indices`, in that order.
+    fn only(&self, indices: &[usize]) -> Vec<u8> {
+        join_lines(&indices.iter().map(|&index| self.line(index)).collect::<Vec<_>>())
+    }
+
+    fn all(&self) -> Vec<u8> {
+        self.only(&(0..self.lines.len()).collect::<Vec<_>>())
+    }
+
+    fn with_line(&self, index: usize, replacement: Vec<u8>) -> Vec<u8> {
+        let mut all: Vec<Vec<u8>> = (0..self.lines.len()).map(|at| self.line(at)).collect();
         all[index] = replacement;
-        join(&all)
-    };
+        join_lines(&all)
+    }
+
+    /// The whole journal and one more terminated line.
+    fn appended(&self, extra: &[u8]) -> Vec<u8> {
+        let mut bytes = self.all();
+        bytes.extend_from_slice(extra);
+        bytes.push(b'\n');
+        bytes
+    }
+
+    /// The lines at `indices`, then `torn` without a newline.
+    fn torn(&self, indices: &[usize], torn: &[u8]) -> Vec<u8> {
+        let mut bytes = self.only(indices);
+        bytes.extend_from_slice(torn);
+        bytes
+    }
+
+    /// Recovers the operation with `bytes` as its journal and only `d/b`
+    /// present.
+    fn recover(&self, bytes: &[u8]) -> Result<Recovered, StoreError> {
+        fs::write(&self.path, bytes).unwrap();
+        let present = BTreeSet::from(["d/b"]);
+        self.f.store.recover(&self.saved.operation_id, &self.saved.repository, |path| Ok(present.contains(path.to_str().unwrap())))
+    }
+
+    /// Why the journal `bytes` is refused.
+    fn refusal(&self, bytes: &[u8]) -> JournalInvalid {
+        match self.recover(bytes) {
+            Err(StoreError::Journal { reason, .. }) => reason,
+            other => panic!("expected a journal refusal, got {:?}", other.map(|recovered| recovered.entries)),
+        }
+    }
+
+    /// The 1-based line a refused journal reports, and why.
+    fn malformed_at(&self, bytes: &[u8]) -> (usize, String) {
+        match self.refusal(bytes) {
+            JournalInvalid::Malformed { line, reason } => (line, reason),
+            other => panic!("expected a malformed line, got {other:?}"),
+        }
+    }
+
+    /// A valid cell recovers exactly its states, the matrix inventory, and a
+    /// torn tail when its name starts with "torn"; an invalid one is refused
+    /// as a journal or inventory problem.
+    fn assert_cells(&self, cells: Vec<JournalCell>) {
+        let mut failures = Vec::new();
+        for (cell, bytes, expect, states) in cells {
+            let outcome = self.recover(&bytes);
+            let ok = match (&outcome, expect) {
+                (Ok(recovered), Expect::Valid) => {
+                    let got: Vec<_> = recovered.entries.iter().map(|entry| (entry.path.display().into_owned(), entry.state)).collect();
+                    let want: Vec<_> = states.iter().map(|(path, state)| (path.to_string(), *state)).collect();
+                    got == want && recovered.torn_tail == cell.starts_with("torn") && recovered.inventory == *inventory()
+                }
+                (Err(StoreError::Journal { .. } | StoreError::InventoryMismatch), Expect::Invalid) => true,
+                _ => false,
+            };
+            if !ok {
+                failures.push(format!("{cell}: expected {expect:?}, got {:?}", outcome.map(|r| (r.entries, r.torn_tail))));
+            }
+        }
+        assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
+    }
+}
+
+/// Version 3 batch lines, the header, and the document shape, against the
+/// writer's own output. Inventory fields are in
+/// `journal_robustness_matrix_shared_inventory`.
+#[test]
+fn journal_robustness_matrix_version_3() {
+    let m = JournalMatrix::version_3();
+    let lines = &m.lines;
+    let id = m.saved.operation_id.clone();
     let other_id = "ffffffffffffffffffffffffffffffff";
 
     use EntryState::*;
     use Expect::*;
-    let control = vec![("d/a", Deleted), ("d/b", Kept), ("e/x", Uncertain)];
-    let mut cells: Vec<JournalCell> = vec![("control".into(), written.clone(), Valid, control.clone())];
+    let control = journal_control();
+    let mut cells: Vec<JournalCell> = vec![
+        ("control: as written".into(), fs::read(&m.path).unwrap(), Valid, control.clone()),
+        ("control: re-encoded".into(), m.all(), Valid, control.clone()),
+        ("header and inventory only".into(), m.only(&[0, 1]), Valid, Vec::new()),
+        (
+            "results: closing the open batch".into(),
+            m.appended(br#"{"results":{"batch":2,"states":["deleted"]}}"#),
+            Valid,
+            vec![("d/a", Deleted), ("d/b", Kept), ("e/x", Deleted)],
+        ),
+    ];
+
+    // Positions, in the open batch 2 so they are planned alone.
+    let open = |entries: Value| m.with_line(4, set(&lines[4], "/intent/entries", entries));
+    let open_text = |entries: &str| m.with_line(4, format!("{{\"intent\":{{\"batch\":2,\"entries\":{entries}}}}}").into_bytes());
+    cells.push(("index: zero".into(), open(json!([0])), Valid, vec![("d/a", Deleted), ("d/b", Kept), ("a", Uncertain)]));
+    cells.push(("index: a directory".into(), open(json!([1])), Valid, vec![("d/a", Deleted), ("d/b", Kept), ("d", Uncertain)]));
+    cells.push(("index: the last".into(), open(json!([6])), Valid, vec![("d/a", Deleted), ("d/b", Kept), ("l", Uncertain)]));
+    for (state, recovered) in [("deleted", Deleted), ("externally_absent", ExternallyAbsent), ("kept", Kept)] {
+        cells.push((
+            format!("results states: {state}"),
+            m.with_line(3, set(&lines[3], "/results/states/0", json!(state))),
+            Valid,
+            vec![("d/a", recovered), ("d/b", Kept), ("e/x", Uncertain)],
+        ));
+    }
+
     let mut invalid = |cell: &str, bytes: Vec<u8>| cells.push((cell.to_string(), bytes, Invalid, Vec::new()));
 
-    // (column, line, pointer, wrong type, empty, invalid content). Every
-    // inventory pointer names the first entry (the hashed file "a") or the
-    // only link, so `duplicate`'s first-occurrence edit lands on the same
-    // member.
+    // (field, line, pointer, wrong type, empty, invalid contents). Each is also
+    // absent, null, and repeated; no field of these lines may be empty.
+    let fields: Vec<JournalField> = vec![
+        (
+            "header journal_version",
+            0,
+            "/header/journal_version",
+            json!("3"),
+            json!(""),
+            vec![
+                ("version 1", json!(1)),
+                ("version 4", json!(4)),
+                ("version 0", json!(0)),
+                ("negative", json!(-3)),
+                ("fractional", json!(3.5)),
+                ("past u32", json!(u64::from(u32::MAX) + 4)),
+            ],
+        ),
+        (
+            "header operation_id",
+            0,
+            "/header/operation_id",
+            json!(123),
+            json!(""),
+            vec![("another operation", json!(other_id)), ("upper case", json!(id.as_str().to_uppercase())), ("too long", json!(format!("{id}0")))],
+        ),
+        (
+            "intent batch",
+            2,
+            "/intent/batch",
+            json!("1"),
+            json!(""),
+            vec![("zero", json!(0)), ("second", json!(2)), ("negative", json!(-1)), ("fractional", json!(1.5))],
+        ),
+        (
+            "intent entries",
+            2,
+            "/intent/entries",
+            json!(2),
+            json!([]),
+            vec![("one element wrong type", json!([2, "3"])), ("every element wrong type", json!(["2", "3"]))],
+        ),
+        (
+            "results batch",
+            3,
+            "/results/batch",
+            json!("1"),
+            json!(""),
+            vec![("zero", json!(0)), ("a batch that is not open", json!(2)), ("fractional", json!(1.5))],
+        ),
+        (
+            "results states",
+            3,
+            "/results/states",
+            json!("deleted"),
+            json!([]),
+            vec![
+                ("one element wrong type", json!(["deleted", 3])),
+                ("every element wrong type", json!([1, 2])),
+                ("too few", json!(["deleted"])),
+                ("too many", json!(["deleted", "kept", "kept"])),
+            ],
+        ),
+    ];
+    for (field, line, pointer, wrong_type, empty, contents) in fields {
+        let key = pointer.rsplit('/').next().unwrap();
+        invalid(&format!("{field}: absent"), m.with_line(line, remove(&lines[line], pointer)));
+        invalid(&format!("{field}: null"), m.with_line(line, set(&lines[line], pointer, Value::Null)));
+        invalid(&format!("{field}: wrong type"), m.with_line(line, set(&lines[line], pointer, wrong_type)));
+        invalid(&format!("{field}: empty"), m.with_line(line, set(&lines[line], pointer, empty)));
+        invalid(&format!("{field}: duplicate key"), m.with_line(line, duplicate(&lines[line], key)));
+        for (content, value) in contents {
+            invalid(&format!("{field}: {content}"), m.with_line(line, set(&lines[line], pointer, value)));
+        }
+    }
+
+    for (state, value) in
+        [("unknown", json!("vanished")), ("capitalized", json!("Deleted")), ("numeric", json!(0)), ("null", Value::Null), ("empty", json!(""))]
+    {
+        invalid(&format!("results states: {state}"), m.with_line(3, set(&lines[3], "/results/states/0", value)));
+    }
+
+    invalid("index: first out of range", open(json!([7])));
+    invalid("index: negative", open(json!([-1])));
+    invalid("index: fractional", open(json!([5.5])));
+    invalid("index: string", open(json!(["5"])));
+    invalid("index: u64::MAX", open(json!([u64::MAX])));
+    invalid("index: past u64", open_text("[18446744073709551616]"));
+    invalid("index: exponent form", open_text("[5e0]"));
+    // Every position is valid; the batch is one entry over the bound.
+    invalid("index: more than 256 entries", open(json!(vec![5; 257])));
+    invalid("intent: mixed parents", m.with_line(2, set(&lines[2], "/intent/entries", json!([2, 5]))));
+    invalid("intent: duplicate within a batch", m.with_line(2, set(&lines[2], "/intent/entries", json!([2, 2]))));
+    invalid("intent: duplicate across batches", open(json!([3])));
+    invalid("intent: batch numbers skip one", m.with_line(4, set(&lines[4], "/intent/batch", json!(3))));
+    invalid("intent: batch 1 again", m.with_line(4, set(&lines[4], "/intent/batch", json!(1))));
+    invalid("intent: before the previous results", m.only(&[0, 1, 2, 4]));
+    invalid("results: with no open intent", m.only(&[0, 1, 3]));
+    invalid("results: repeated", m.only(&[0, 1, 2, 3, 3]));
+
+    for (line, outer) in [(0, "header"), (2, "intent"), (3, "results")] {
+        invalid(&format!("{outer}: duplicate line key"), m.with_line(line, duplicate(&lines[line], outer)));
+        invalid(&format!("{outer}: extra member"), m.with_line(line, set(&lines[line], &format!("/{outer}/extra"), json!(1))));
+        invalid(&format!("{outer}: extra line member"), m.with_line(line, set(&lines[line], "/extra", json!(1))));
+    }
+    let version_2 = version_2_lines(&id);
+    invalid("intent: version 2 shape", m.with_line(2, compact(&version_2[2])));
+    invalid("results: version 2 shape", m.with_line(3, compact(&version_2[3])));
+    invalid("header: version 2 over version 3 batches", m.with_line(0, compact(&version_2[0])));
+
+    let mut garbage = m.line(2);
+    garbage.extend_from_slice(b" junk");
+    invalid("line: trailing garbage", m.with_line(2, garbage));
+    invalid("line: two values on one line", m.with_line(2, [m.line(2), m.line(2)].concat()));
+    let mut garbage = m.line(0);
+    garbage.extend_from_slice(b"{}");
+    invalid("header: trailing garbage", m.with_line(0, garbage));
+    invalid("line: not JSON", m.with_line(2, b"intent".to_vec()));
+    invalid("line: blank", m.with_line(2, Vec::new()));
+    invalid("line: blank at the end", m.appended(b""));
+    invalid("document: empty", Vec::new());
+    invalid("document: a newline only", b"\n".to_vec());
+    invalid("header: absent", m.only(&[1, 2, 3, 4]));
+    invalid("header: repeated", m.with_line(2, m.line(0)));
+    invalid("inventory: absent", m.only(&[0, 2, 3, 4]));
+    invalid("inventory: header only", m.only(&[0]));
+    invalid("inventory: repeated", m.with_line(2, m.line(1)));
+    invalid("inventory: after an intent", m.only(&[0, 2, 1, 3, 4]));
+
+    // A crash can cut short only the final line; the same bytes terminated
+    // are a malformed line, and the opening lines are never optional.
+    let torn_intent = &m.line(4)[..10];
+    let torn_results = &m.line(3)[..10];
+    invalid("intent: truncated but terminated", m.torn(&[0, 1, 2, 3], &[torn_intent, b"\n"].concat()));
+    invalid("results: truncated but terminated", m.torn(&[0, 1, 2], &[torn_results, b"\n"].concat()));
+    invalid("inventory: torn", m.torn(&[0], &m.line(1)[..10]));
+    invalid("header: torn", m.line(0)[..10].to_vec());
+
+    cells.push(("torn intent".into(), m.torn(&[0, 1, 2, 3], torn_intent), Valid, vec![("d/a", Deleted), ("d/b", Kept)]));
+    cells.push(("torn results".into(), m.torn(&[0, 1, 2], torn_results), Valid, vec![("d/a", Uncertain), ("d/b", Planned)]));
+    cells.push((
+        "torn: a whole intent without its newline".into(),
+        m.torn(&[0, 1, 2, 3], &m.line(4)),
+        Valid,
+        vec![("d/a", Deleted), ("d/b", Kept)],
+    ));
+
+    m.assert_cells(cells);
+
+    // The refusal names the edited line: the header is line 1, the inventory
+    // line 2, and the first intent line 3.
+    assert_eq!(m.malformed_at(&m.with_line(0, set(&lines[0], "/header/journal_version", json!("3")))).0, 1);
+    assert_eq!(m.malformed_at(&m.only(&[0])).0, 2);
+    assert_eq!(m.malformed_at(&m.with_line(2, set(&lines[2], "/intent/entries", json!([])))).0, 3);
+    assert_eq!(m.malformed_at(&m.with_line(2, set(&lines[2], "/intent/entries", json!([2, 5])))).0, 3);
+    assert_eq!(m.malformed_at(&m.with_line(3, set(&lines[3], "/results/states/0", json!("vanished")))).0, 4);
+    assert_eq!(m.malformed_at(&open(json!([7]))).0, 5);
+    assert_eq!(m.malformed_at(&m.torn(&[0, 1, 2, 3], &[torn_intent, b"\n"].concat())).0, 5);
+    // The bound itself refuses 257 valid positions, not a later check.
+    let (line, reason) = m.malformed_at(&open(json!(vec![5; 257])));
+    assert_eq!(line, 5);
+    assert!(reason.contains("bound"), "{reason}");
+    assert_eq!(m.refusal(&m.with_line(0, set(&lines[0], "/header/journal_version", json!(1)))), JournalInvalid::UnsupportedVersion(1));
+    assert_eq!(m.refusal(&m.with_line(0, set(&lines[0], "/header/journal_version", json!(4)))), JournalInvalid::UnsupportedVersion(4));
+    assert_eq!(m.refusal(&m.with_line(0, set(&lines[0], "/header/operation_id", json!(other_id)))), JournalInvalid::OperationMismatch);
+
+    // Recovery only reads: a refused journal leaves the operation as it was.
+    let dir = m.f.store.operation_dir(&id);
+    let snapshot = || -> Vec<(std::ffi::OsString, Vec<u8>)> {
+        let mut files: Vec<_> = fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().path()).map(|path| (path.file_name().unwrap().to_owned(), fs::read(&path).unwrap())).collect();
+        files.sort();
+        files
+    };
+    let refused = open(json!([7]));
+    fs::write(&m.path, &refused).unwrap();
+    let before = snapshot();
+    assert!(m.recover(&refused).is_err());
+    assert_eq!(snapshot(), before, "a refused recovery changed the operation directory");
+    assert_eq!(fs::read(&m.path).unwrap(), refused);
+}
+
+/// Version 2 batch lines, from frozen bytes, each file read by its own
+/// header.
+#[test]
+fn journal_robustness_matrix_version_2() {
+    let m = JournalMatrix::version_2();
+    let lines = &m.lines;
+
+    use EntryState::*;
+    use Expect::*;
+    let mut cells: Vec<JournalCell> = vec![
+        ("control".into(), m.all(), Valid, journal_control()),
+        ("torn intent".into(), m.torn(&[0, 1, 2, 3], &m.line(4)[..10]), Valid, vec![("d/a", Deleted), ("d/b", Kept)]),
+    ];
+    let mut invalid = |cell: &str, bytes: Vec<u8>| cells.push((cell.to_string(), bytes, Invalid, Vec::new()));
+
+    // (column, line, pointer, wrong type, empty, invalid content).
     let columns: Vec<(&str, usize, &str, Value, Value, Value)> = vec![
         ("path", 2, "/intent/entries/0/path", json!(123), json!({}), json!({"display": "../d/a"})),
         ("kind", 2, "/intent/entries/0/kind", json!(123), json!(""), json!("socket")),
         ("state", 3, "/results/entries/0/state", json!(123), json!(""), json!("vanished")),
-        ("inventory root", 1, "/inventory/root", json!(123), json!({}), json!({"kind": "unix", "device": "x", "inode": "3"})),
-        ("inventory entries", 1, "/inventory/entries", json!(123), json!({}), json!([{"path": {"display": "a"}}])),
-        ("inventory path", 1, "/inventory/entries/0/path", json!(123), json!({}), json!({"display": "/a"})),
-        ("inventory identity", 1, "/inventory/entries/0/identity", json!(123), json!({}), json!({"kind": "plan9", "qid": "1"})),
-        ("inventory shape", 1, "/inventory/entries/0/shape", json!(123), json!({}), json!({"socket": {}})),
-        ("file size", 1, "/inventory/entries/0/shape/file/size", json!("5"), json!(""), json!(-1)),
-        ("file modified", 1, "/inventory/entries/0/shape/file/modified", json!(123), json!({}), json!({"secs": 1, "nanos": -1})),
-        ("file mode", 1, "/inventory/entries/0/shape/file/mode", json!("644"), json!(""), json!(-1)),
-        ("file content", 1, "/inventory/entries/0/shape/file/content", json!(123), json!(""), json!({"blake3": "zz"})),
-        ("link target", 1, "/inventory/entries/6/shape/link/target", json!(123), json!({}), json!({"display": "a\u{0}b"})),
     ];
     for (column, line, pointer, wrong_type, empty, bad) in columns {
         let key = pointer.rsplit('/').next().unwrap();
-        invalid(&format!("{column}: absent"), with_line(line, remove(&lines[line], pointer)));
-        invalid(&format!("{column}: null"), with_line(line, set(&lines[line], pointer, Value::Null)));
-        invalid(&format!("{column}: wrong type"), with_line(line, set(&lines[line], pointer, wrong_type)));
-        invalid(&format!("{column}: empty"), with_line(line, set(&lines[line], pointer, empty)));
-        invalid(&format!("{column}: duplicate key"), with_line(line, duplicate(&lines[line], key)));
-        invalid(&format!("{column}: invalid content"), with_line(line, set(&lines[line], pointer, bad)));
+        invalid(&format!("{column}: absent"), m.with_line(line, remove(&lines[line], pointer)));
+        invalid(&format!("{column}: null"), m.with_line(line, set(&lines[line], pointer, Value::Null)));
+        invalid(&format!("{column}: wrong type"), m.with_line(line, set(&lines[line], pointer, wrong_type)));
+        invalid(&format!("{column}: empty"), m.with_line(line, set(&lines[line], pointer, empty)));
+        invalid(&format!("{column}: duplicate key"), m.with_line(line, duplicate(&lines[line], key)));
+        invalid(&format!("{column}: invalid content"), m.with_line(line, set(&lines[line], pointer, bad)));
     }
     let entry = lines[2].pointer("/intent/entries/0").unwrap().clone();
-    invalid("entries: one element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([entry, 123]))));
-    invalid("entries: every element wrong type", with_line(2, set(&lines[2], "/intent/entries", json!([123]))));
-    invalid("entries: empty batch", with_line(2, set(&lines[2], "/intent/entries", json!([]))));
-    invalid("path: unknown member", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/a", "extra": 1}))));
-    let listed = lines[1].pointer("/inventory/entries/0").unwrap().clone();
-    invalid("inventory entries: one element wrong type", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().push(json!(123));
-    })));
-    invalid("inventory entries: every element wrong type", with_line(1, set(&lines[1], "/inventory/entries", json!([123]))));
-    // An empty inventory is a valid line, but the batches then plan entries it
-    // does not list.
-    invalid("inventory entries: empty", with_line(1, set(&lines[1], "/inventory/entries", json!([]))));
-    invalid("inventory: unknown member", with_line(1, set(&lines[1], "/inventory/extra", json!(1))));
-    invalid("inventory entry: unknown member", with_line(1, set(&lines[1], "/inventory/entries/0/extra", json!(1))));
-    invalid("inventory entries: a path twice", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().push(listed.clone());
-    })));
-    invalid("inventory entries: a child before its directory", with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
-        parent[key].as_array_mut().unwrap().swap(1, 2);
-    })));
-    invalid("inventory root: another checkout", with_line(1, set(&lines[1], "/inventory/root", json!({"kind": "unix", "device": "7", "inode": "4"}))));
-    invalid("intent: an entry the inventory does not list", with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/new"}))));
-    invalid("intent: a kind other than the inventory's", with_line(2, set(&lines[2], "/intent/entries/0/kind", json!("directory"))));
-    let mut garbage = compact(&lines[2]);
-    garbage.extend_from_slice(b" junk");
-    invalid("line: trailing content", with_line(2, garbage));
-    let mut garbage = compact(&lines[1]);
-    garbage.extend_from_slice(b" junk");
-    invalid("inventory line: trailing content", with_line(1, garbage));
-    invalid("line: blank line", with_line(2, Vec::new()));
-    invalid("header: absent", join(&lines[1..].iter().map(compact).collect::<Vec<_>>()));
-    invalid("header: repeated", with_line(2, compact(&lines[0])));
-    invalid("header: other version", with_line(0, set(&lines[0], "/header/journal_version", json!(1))));
-    invalid("header: other operation", with_line(0, set(&lines[0], "/header/operation_id", json!(other_id))));
-    let without_inventory: Vec<Vec<u8>> = lines.iter().enumerate().filter(|(at, _)| *at != 1).map(|(_, line)| compact(line)).collect();
-    invalid("inventory: absent", join(&without_inventory));
-    invalid("inventory: header only", join(&[compact(&lines[0])]));
-    invalid("inventory: repeated", with_line(2, compact(&lines[1])));
-    let mut after_intent: Vec<Vec<u8>> = lines.iter().map(compact).collect();
-    after_intent.swap(1, 2);
-    invalid("inventory: after an intent", join(&after_intent));
-    invalid("results: wrong batch", with_line(3, set(&lines[3], "/results/batch", json!(2))));
+    invalid("entries: one element wrong type", m.with_line(2, set(&lines[2], "/intent/entries", json!([entry, 123]))));
+    invalid("entries: every element wrong type", m.with_line(2, set(&lines[2], "/intent/entries", json!([123]))));
+    invalid("entries: empty batch", m.with_line(2, set(&lines[2], "/intent/entries", json!([]))));
+    invalid("path: unknown member", m.with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/a", "extra": 1}))));
+    invalid("intent entry: unknown member", m.with_line(2, set(&lines[2], "/intent/entries/0/extra", json!(1))));
+    invalid("results entry: unknown member", m.with_line(3, set(&lines[3], "/results/entries/0/extra", json!(1))));
+    invalid("intent: an entry the inventory does not list", m.with_line(2, set(&lines[2], "/intent/entries/0/path", json!({"display": "d/new"}))));
+    invalid("intent: a kind other than the inventory's", m.with_line(2, set(&lines[2], "/intent/entries/0/kind", json!("directory"))));
+    invalid("intent: duplicate within a batch", m.with_line(2, set(&lines[2], "/intent/entries/1", entry.clone())));
+    invalid("intent: duplicate across batches", m.with_line(4, set(&lines[4], "/intent/entries/0/path", json!({"display": "d/b"}))));
+    invalid("intent: version 3 shape", m.with_line(2, set(&lines[2], "/intent/entries", json!([2, 3]))));
+    invalid("results: version 3 shape", m.with_line(3, br#"{"results":{"batch":1,"states":["deleted","kept"]}}"#.to_vec()));
+    invalid("results: wrong batch", m.with_line(3, set(&lines[3], "/results/batch", json!(2))));
     let mut swapped = lines[3].clone();
     swapped.pointer_mut("/results/entries").unwrap().as_array_mut().unwrap().reverse();
-    invalid("results: misaligned entries", with_line(3, compact(&swapped)));
+    invalid("results: misaligned entries", m.with_line(3, compact(&swapped)));
+    // The inventory line goes through the validator version 3 uses.
+    invalid("inventory entries: wrong type", m.with_line(1, set(&lines[1], "/inventory/entries", json!(123))));
 
-    let mut torn_inventory = join(&lines[..1].iter().map(compact).collect::<Vec<_>>());
-    torn_inventory.extend_from_slice(&compact(&lines[1])[..10]);
-    invalid("inventory: torn", torn_inventory);
+    m.assert_cells(cells);
+    assert_eq!(m.malformed_at(&m.with_line(1, set(&lines[1], "/inventory/entries", json!(123)))).0, 2);
+    assert_eq!(m.malformed_at(&m.with_line(4, set(&lines[4], "/intent/entries/0/path", json!({"display": "d/b"})))).0, 5);
+}
 
-    // Valid: no batches, the two places a crash can tear a line, and the
-    // unchanged inventory written with different but equivalent spacing.
-    cells.push(("empty: header and inventory only".into(), join(&lines[..2].iter().map(compact).collect::<Vec<_>>()), Valid, Vec::new()));
-    let mut torn_intent = join(&lines[..4].iter().map(compact).collect::<Vec<_>>());
-    torn_intent.extend_from_slice(&compact(&lines[4])[..10]);
-    cells.push(("torn intent".into(), torn_intent, Valid, vec![("d/a", Deleted), ("d/b", Kept)]));
-    let mut torn_results = join(&lines[..3].iter().map(compact).collect::<Vec<_>>());
-    torn_results.extend_from_slice(&compact(&lines[3])[..10]);
-    cells.push(("torn results".into(), torn_results, Valid, vec![("d/a", Uncertain), ("d/b", Planned)]));
-    let pretty_spaces = with_line(1, serde_json::to_string(&lines[1]).unwrap().replace("\":", "\": ").into_bytes());
-    cells.push(("inventory: spaced".into(), pretty_spaces, Valid, control));
+/// The inventory line, which both versions read with the same code; its
+/// version 2 wiring is checked in `journal_robustness_matrix_version_2`.
+#[test]
+fn journal_robustness_matrix_shared_inventory() {
+    let m = JournalMatrix::version_3();
+    let lines = &m.lines;
 
-    let present = BTreeSet::from(["d/b"]);
-    let mut failures = Vec::new();
-    for (cell, bytes, expect, states) in cells {
-        fs::write(&path, &bytes).unwrap();
-        let outcome = f.store.recover(&id, &saved.repository, |path| Ok(present.contains(path.to_str().unwrap())));
-        let ok = match (&outcome, expect) {
-            (Ok(recovered), Valid) => {
-                let got: Vec<_> = recovered.entries.iter().map(|entry| (entry.path.display().into_owned(), entry.state)).collect();
-                let want: Vec<_> = states.iter().map(|(path, state)| (path.to_string(), *state)).collect();
-                got == want && recovered.torn_tail == cell.starts_with("torn") && recovered.inventory == *inventory()
-            }
-            (Err(StoreError::Journal { .. } | StoreError::InventoryMismatch), Invalid) => true,
-            _ => false,
-        };
-        if !ok {
-            failures.push(format!("{cell}: expected {expect:?}, got {:?}", outcome.map(|r| (r.entries, r.torn_tail))));
-        }
+    use Expect::*;
+    let mut cells: Vec<JournalCell> = vec![("control".into(), m.all(), Valid, journal_control())];
+    // The same inventory with different but equivalent spacing.
+    let spaced = m.with_line(1, serde_json::to_string(&lines[1]).unwrap().replace("\":", "\": ").into_bytes());
+    cells.push(("inventory: spaced".into(), spaced, Valid, journal_control()));
+    let mut invalid = |cell: &str, bytes: Vec<u8>| cells.push((cell.to_string(), bytes, Invalid, Vec::new()));
+
+    // (column, pointer, wrong type, empty, invalid content). Every pointer
+    // names the first entry (the hashed file "a") or the only link, so
+    // `duplicate`'s first-occurrence edit lands on the same member.
+    let columns: Vec<(&str, &str, Value, Value, Value)> = vec![
+        ("inventory root", "/inventory/root", json!(123), json!({}), json!({"kind": "unix", "device": "x", "inode": "3"})),
+        ("inventory entries", "/inventory/entries", json!(123), json!({}), json!([{"path": {"display": "a"}}])),
+        ("inventory path", "/inventory/entries/0/path", json!(123), json!({}), json!({"display": "/a"})),
+        ("inventory identity", "/inventory/entries/0/identity", json!(123), json!({}), json!({"kind": "plan9", "qid": "1"})),
+        ("inventory shape", "/inventory/entries/0/shape", json!(123), json!({}), json!({"socket": {}})),
+        ("file size", "/inventory/entries/0/shape/file/size", json!("5"), json!(""), json!(-1)),
+        ("file modified", "/inventory/entries/0/shape/file/modified", json!(123), json!({}), json!({"secs": 1, "nanos": -1})),
+        ("file mode", "/inventory/entries/0/shape/file/mode", json!("644"), json!(""), json!(-1)),
+        ("file content", "/inventory/entries/0/shape/file/content", json!(123), json!(""), json!({"blake3": "zz"})),
+        ("link target", "/inventory/entries/6/shape/link/target", json!(123), json!({}), json!({"display": "a\u{0}b"})),
+    ];
+    for (column, pointer, wrong_type, empty, bad) in columns {
+        let key = pointer.rsplit('/').next().unwrap();
+        invalid(&format!("{column}: absent"), m.with_line(1, remove(&lines[1], pointer)));
+        invalid(&format!("{column}: null"), m.with_line(1, set(&lines[1], pointer, Value::Null)));
+        invalid(&format!("{column}: wrong type"), m.with_line(1, set(&lines[1], pointer, wrong_type)));
+        invalid(&format!("{column}: empty"), m.with_line(1, set(&lines[1], pointer, empty)));
+        invalid(&format!("{column}: duplicate key"), m.with_line(1, duplicate(&lines[1], key)));
+        invalid(&format!("{column}: invalid content"), m.with_line(1, set(&lines[1], pointer, bad)));
     }
-    assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
+    let listed = lines[1].pointer("/inventory/entries/0").unwrap().clone();
+    invalid("inventory entries: one element wrong type", m.with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().push(json!(123));
+    })));
+    invalid("inventory entries: every element wrong type", m.with_line(1, set(&lines[1], "/inventory/entries", json!([123]))));
+    // An empty inventory is a valid line, but the batches then plan
+    // positions it does not have.
+    invalid("inventory entries: empty", m.with_line(1, set(&lines[1], "/inventory/entries", json!([]))));
+    invalid("inventory: unknown member", m.with_line(1, set(&lines[1], "/inventory/extra", json!(1))));
+    invalid("inventory entry: unknown member", m.with_line(1, set(&lines[1], "/inventory/entries/0/extra", json!(1))));
+    invalid("inventory entries: a path twice", m.with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().push(listed.clone());
+    })));
+    invalid("inventory entries: a child before its directory", m.with_line(1, edited(&lines[1], "/inventory/entries", |parent, key| {
+        parent[key].as_array_mut().unwrap().swap(1, 2);
+    })));
+    invalid("inventory root: another checkout", m.with_line(1, set(&lines[1], "/inventory/root", json!({"kind": "unix", "device": "7", "inode": "4"}))));
+    invalid("inventory: duplicate line key", m.with_line(1, duplicate(&lines[1], "inventory")));
+    let mut garbage = m.line(1);
+    garbage.extend_from_slice(b" junk");
+    invalid("inventory line: trailing content", m.with_line(1, garbage));
+
+    m.assert_cells(cells);
+    assert_eq!(m.malformed_at(&m.with_line(1, set(&lines[1], "/inventory/entries", json!(123)))).0, 2);
 }
 
 #[test]
@@ -1098,3 +1453,5 @@ fn a_failed_deletion_is_skipped_and_finished_on_the_next_run() {
 }
 
 mod saved_report;
+
+mod journal_size;

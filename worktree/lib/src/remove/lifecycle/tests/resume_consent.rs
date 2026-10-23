@@ -129,27 +129,34 @@ fn confirmed_deletions_from_several_attempts_are_all_excluded() {
     assert_eq!((attempt_of(SRC_FILES[0]), attempt_of(README)), (Some(1), Some(2)));
 }
 
-/// Rewrites the result of `path` in the current journal: `None` cuts the
-/// journal before its results line, as a crash before those results were
-/// durable leaves it.
+/// Rewrites the result of `path` in the current (version 3) journal: `None`
+/// cuts the journal before its results line, as a crash before those results
+/// were durable leaves it. A batch names entries by inventory position, so
+/// the path is found through the inventory line.
 fn rewrite_result(journal: &Path, path: &str, state: Option<&str>) {
     let text = fs::read_to_string(journal).unwrap();
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let holds = |line: &Value| {
-        line["results"]["entries"].as_array().is_some_and(|entries| {
-            entries.iter().any(|entry| serde_json::from_value::<NativeString>(entry["path"].clone()).is_ok_and(|named| named.as_path() == Path::new(path)))
+    let parsed: Vec<Value> = lines.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let position = parsed[1]["inventory"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|entry| serde_json::from_value::<NativeString>(entry["path"].clone()).is_ok_and(|named| named.as_path() == Path::new(path)))
+        .expect("the inventory lists the path") as u64;
+    let (batch, slot) = parsed
+        .iter()
+        .find_map(|line| {
+            let entries = line["intent"]["entries"].as_array()?;
+            let slot = entries.iter().position(|entry| entry.as_u64() == Some(position))?;
+            Some((line["intent"]["batch"].clone(), slot))
         })
-    };
-    let index = lines.iter().position(|line| holds(&serde_json::from_str(line).unwrap())).expect("a results line names the path");
+        .expect("an intent plans the path");
+    let index = parsed.iter().position(|line| line["results"]["batch"] == batch).expect("a results line closes the batch");
     match state {
         None => lines.truncate(index),
         Some(state) => {
-            let mut line: Value = serde_json::from_str(&lines[index]).unwrap();
-            for entry in line["results"]["entries"].as_array_mut().unwrap() {
-                if serde_json::from_value::<NativeString>(entry["path"].clone()).unwrap().as_path() == Path::new(path) {
-                    entry["state"] = Value::from(state);
-                }
-            }
+            let mut line = parsed[index].clone();
+            line["results"]["states"][slot] = Value::from(state);
             lines[index] = line.to_string();
         }
     }

@@ -488,6 +488,93 @@ fn a_retry_with_new_work_beside_files_the_removal_already_deleted_refuses() {
     assert_eq!(fixture.pending(), 1);
 }
 
+// A retry reads the stopped removal's journal before it deletes anything; a
+// journal it cannot read refuses the retry with the journal's problem.
+
+/// A removal of `feat-x` stopped by an interrupt after the move. Returns its
+/// moved checkout and its current journal.
+fn stopped_after_the_move() -> (Fixture, PathBuf, PathBuf) {
+    let (fixture, _) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.interrupter("bin", &moved_condition(&fixture.wts()));
+    let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
+    let [dir] = operation_dirs(&fixture.repo().join(".git").join("wt-removal")).try_into().expect("one operation");
+    let journal = dir.join("journal.jsonl");
+    assert!(fs::read_to_string(&journal).unwrap().starts_with("{\"header\":{\"journal_version\":3,"));
+    (fixture, quarantine, journal)
+}
+
+/// Retries the stopped removal and asserts it refused before deleting
+/// anything: the moved checkout, the branch, and the pending operation are
+/// all kept. Returns the retry's stderr.
+fn assert_retry_refused_by_the_journal(fixture: &Fixture, quarantine: &Path) -> String {
+    let refused = fixture.remove(&["feat-x"], None);
+    let stderr = stderr_of(&refused);
+    // Reading the pending removal's record fails before any retry starts,
+    // which `wt` reports as an unreadable store (exit 1), not as a refused
+    // retry (exit 3).
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    let prefix = "Nothing was removed. The record of an earlier removal could not be read: the deletion journal of removal ";
+    assert!(stderr.contains(prefix), "{stderr}");
+    assert!(!stderr.contains("Removed worktree"), "{stderr}");
+    assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "nothing was deleted");
+    assert!(quarantine.join(".git").is_file());
+    assert!(fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 1);
+    stderr
+}
+
+/// The control for the invalid-journal retries: the stopped removal's
+/// journal rewritten with its own bytes, as they rewrite it with others, and
+/// the retry finishes.
+#[test]
+fn a_retry_with_its_journal_rewritten_unchanged_finishes() {
+    let (fixture, quarantine, journal) = stopped_after_the_move();
+    // Overwriting keeps the file owner-only.
+    fs::write(&journal, fs::read(&journal).unwrap()).unwrap();
+
+    let finished = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(!quarantine.exists() && !fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 0);
+}
+
+/// A complete intent line naming a position past the journal's inventory:
+/// the retry names that line and refuses.
+#[test]
+fn a_retry_refuses_a_journal_batch_naming_a_position_the_inventory_lacks() {
+    let (fixture, quarantine, journal) = stopped_after_the_move();
+    let text = fs::read_to_string(&journal).unwrap();
+    let batches = text.lines().filter(|line| line.starts_with("{\"intent\"")).count();
+    let line = text.lines().count() + 1;
+    fs::write(&journal, format!("{text}{{\"intent\":{{\"batch\":{},\"entries\":[999999]}}}}\n", batches + 1)).unwrap();
+
+    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine);
+
+    let expected = format!("deletion journal line {line} is malformed: a batch plans a position the inventory does not have");
+    assert!(stderr.contains(&expected), "expected {expected:?} in {stderr}");
+}
+
+/// A journal whose header names a version this `wt` does not read: the
+/// retry says so and refuses.
+#[test]
+fn a_retry_refuses_a_journal_of_an_unsupported_version() {
+    let (fixture, quarantine, journal) = stopped_after_the_move();
+    let text = fs::read_to_string(&journal).unwrap();
+    let newer = text.replacen("{\"header\":{\"journal_version\":3,", "{\"header\":{\"journal_version\":4,", 1);
+    assert_ne!(newer, text);
+    fs::write(&journal, newer).unwrap();
+
+    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine);
+
+    let expected = "the deletion journal has version 4, which this wt does not read";
+    assert!(stderr.contains(expected), "expected {expected:?} in {stderr}");
+}
+
 // Retention of finished removals: the cleanup runs at the start of both
 // `wt remove` entry points, prints nothing, and `wt list` never runs it.
 

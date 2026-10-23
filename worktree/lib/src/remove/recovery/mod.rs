@@ -6,7 +6,7 @@
 //! | File | Written | Kept after completion |
 //! | --- | --- | --- |
 //! | `record.json` ([`record`]) | before any mutation; rewritten as phases finish | yes, marked completed |
-//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | only when the final entries file could not list its entries |
+//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after, both naming entries by inventory position | only when the final entries file could not list its entries |
 //! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, a copy of the journal so far is kept under the next free `<n>` | as `journal.jsonl` |
 //! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes; a retry carries the earlier attempt's report into its own | yes |
 //! | `entries.jsonl.gz` ([`store::ENTRIES_FILE`]) | just before each `report.json` that names it: every journal entry, gzip-compressed JSON Lines | yes |

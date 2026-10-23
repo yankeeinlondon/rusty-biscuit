@@ -128,6 +128,18 @@ opt-level = 3
 [profile.test.package.serde_json]
 opt-level = 3
 
+# `wt remove` gzip-compresses every entry of a removal (`entries.jsonl.gz`).
+# Unoptimized, compressing its 100,000-entry storage-size fixture kept that L1
+# test near its 5 s budget (2.9 s alone, against 2.1 s with these).
+[profile.test.package.miniz_oxide]
+opt-level = 3
+
+[profile.test.package.crc32fast]
+opt-level = 3
+
+[profile.test.package.adler2]
+opt-level = 3
+
 [profile.profiling]
 inherits = "release"
 debug = true

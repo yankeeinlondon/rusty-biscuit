@@ -992,6 +992,220 @@ fn a_removal_stopped_by_a_version_5_wt_resumes_and_completes() {
     assert_eq!((earlier.timeline[0].at_ms, earlier.observation.as_ref()), (5, None));
 }
 
+/// Stops a retry of pending operation `id` once `batches` deletion batches
+/// of its new journal are done.
+fn resume_interrupted_after(fixture: &Fixture, id: &OperationId, batches: u64) -> Finished {
+    let fresh = fixture.resume_approval(id);
+    let (base, branches) = (fixture.base(), fixture.delete_branch());
+    let request = ResumeRequest { base: &base, id, approval: Some(&fresh), record: None, branches: &branches };
+    let interrupted = std::sync::atomic::AtomicBool::new(false);
+    let mut hook = |boundary: Boundary| {
+        if boundary == Boundary::DeletionBatch(batches + 1) {
+            interrupted.store(true, Ordering::SeqCst);
+        }
+        false
+    };
+    let stop = || interrupted.load(Ordering::SeqCst);
+    let finished = finished(with_env(&Usage::clear(), &Observers::default(), &stop, |env| resume::resume_with(&request, env, &mut hook)).unwrap());
+    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
+    finished
+}
+
+/// Rewrites the version 3 journal at `path` as the frozen version 2 bytes an
+/// older `wt` wrote for the same batches: each position becomes the path and
+/// kind the inventory line lists there, and each state the path it is for.
+/// Built with `json!`, never the production writer.
+fn rewrite_as_version_2(path: &Path) {
+    let text = fs::read_to_string(path).unwrap();
+    let mut lines = text.lines();
+    let mut header: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!(header["header"]["journal_version"], 3, "{header}");
+    header["header"]["journal_version"] = json!(2);
+    let inventory_line = lines.next().unwrap();
+    let inventory: serde_json::Value = serde_json::from_str(inventory_line).unwrap();
+    let listed = inventory["inventory"]["entries"].as_array().unwrap();
+    let planned_at = |position: &serde_json::Value| {
+        let entry = &listed[usize::try_from(position.as_u64().unwrap()).unwrap()];
+        let kind = entry["shape"].as_object().unwrap().keys().next().unwrap().clone();
+        json!({"path": entry["path"], "kind": kind})
+    };
+    let mut out = vec![header.to_string(), inventory_line.to_string()];
+    let mut open: Vec<serde_json::Value> = Vec::new();
+    for line in lines {
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        if let Some(intent) = value.get("intent") {
+            open = intent["entries"].as_array().unwrap().iter().map(planned_at).collect();
+            out.push(json!({"intent": {"batch": intent["batch"], "entries": open}}).to_string());
+        } else {
+            let results = &value["results"];
+            let states = results["states"].as_array().unwrap();
+            assert_eq!(states.len(), open.len(), "{line}");
+            let entries: Vec<_> = open.iter().zip(states).map(|(planned, state)| json!({"path": planned["path"], "state": state})).collect();
+            out.push(json!({"results": {"batch": results["batch"], "entries": entries}}).to_string());
+        }
+    }
+    // Overwriting keeps the file's owner-only mode.
+    fs::write(path, format!("{}\n", out.join("\n"))).unwrap();
+}
+
+/// What a version 5 `wt` saved for one earlier attempt, inside a report's
+/// `earlier_attempts`.
+fn version_5_earlier_attempt(errors: &str) -> serde_json::Value {
+    json!({
+        "outcome": "cleanup_failed",
+        "original_state": "moved",
+        "quarantine": null,
+        "registration": "at_quarantine",
+        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
+        "discovery": [],
+        "activity": [],
+        "activity_omitted": 0,
+        "branches": [],
+        "errors": [errors],
+        "observation": null
+    })
+}
+
+/// Replaces the saved report of operation `id` with the frozen version 5
+/// bytes a stopped older `wt` saved: entries inline, no entries file.
+fn save_version_5_report(fixture: &Fixture, id: &OperationId, report_path: &Path, errors: &str, earlier: Vec<serde_json::Value>) {
+    let original = serde_json::to_value(NativeString::from(fixture.gone.as_path())).unwrap();
+    let zero = json!({"files": 0, "directories": 0, "links": 0});
+    let legacy = json!({
+        "report_version": 5,
+        "operation_id": id.as_str(),
+        "outcome": "cleanup_failed",
+        "original": original,
+        "original_state": "moved",
+        "quarantine": null,
+        "registration": "at_quarantine",
+        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
+        "discovery": [],
+        "activity": [],
+        "journal": {"deleted": zero, "externally_absent": zero, "kept": zero, "planned": zero, "uncertain": zero},
+        "journal_entries": [],
+        "deleted": [],
+        "notes": [],
+        "branches": [],
+        "errors": [errors],
+        "truncation": {"activity_omitted": 0, "retained_omitted": 0, "deleted_omitted": 0},
+        "earlier_attempts": earlier,
+        "observation": null
+    });
+    fs::write(report_path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+    let _ = fs::remove_file(report_path.with_file_name(ENTRIES_FILE));
+    assert_eq!(fixture.store().read_report(id).unwrap().expect("read").report_version, 5);
+}
+
+/// The `journal_version` the first line of the journal at `path` declares.
+fn journal_version_of(path: &Path) -> u64 {
+    let text = fs::read_to_string(path).unwrap();
+    let header: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    header["header"]["journal_version"].as_u64().unwrap()
+}
+
+/// Two attempts an older `wt` stopped, each leaving a version 2 journal and
+/// a version 5 report, resume with this build: its attempt writes a version
+/// 3 journal beside the two version 2 archives, and the completed report
+/// lists every attempt's entries once, in attempt order, keeps the first
+/// attempt's unconfirmed batch uncertain, and carries both earlier reports.
+#[test]
+fn a_removal_stopped_twice_by_an_older_wt_resumes_with_version_3_journals() {
+    use crate::remove::recovery::journal::JournalEntry;
+
+    let fixture = fixture();
+    let first = interrupted_after(&fixture, 2, |_| {});
+    let id = fixture.pending();
+    let dir = fixture.store().operation_dir(&id);
+    let quarantine = fixture.quarantine_of(&id);
+    let journal = dir.join(JOURNAL_FILE);
+    rewrite_as_version_2(&journal);
+    // The older `wt` crashed in the window of its last deleting batch: the
+    // unlinks happened, the results line never became durable, and nothing
+    // after it was written. The stop's own batch, which kept its entries, is
+    // dropped with it.
+    let last_batch = first.report.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).map(|entry| entry.batch).max().unwrap();
+    assert!(last_batch >= 2, "{:?}", first.report.journal_entries);
+    let text = fs::read_to_string(&journal).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    // Header, inventory, then an intent and a results line per batch.
+    let through_intent = 2 + 2 * usize::try_from(last_batch).unwrap() - 1;
+    assert!(lines[through_intent].starts_with("{\"results\""), "{text}");
+    fs::write(&journal, format!("{}\n", lines[..through_intent].join("\n"))).unwrap();
+    save_version_5_report(&fixture, &id, &first.report_path, "stopped by version 5 (attempt 1)", Vec::new());
+    let expected_first: Vec<JournalEntry> = first
+        .report
+        .journal_entries
+        .iter()
+        .filter(|entry| entry.batch <= last_batch)
+        .map(|entry| JournalEntry {
+            state: if entry.batch == last_batch { EntryState::Uncertain } else { entry.state },
+            ..entry.clone()
+        })
+        .collect();
+    assert!(expected_first.iter().all(|entry| entry.attempt == 1 && matches!(entry.state, EntryState::Deleted | EntryState::Uncertain)));
+
+    // Attempt 2, also an older `wt`'s: stopped again after one batch.
+    let second = resume_interrupted_after(&fixture, &id, 1);
+    assert!(fixture.branch_exists());
+    assert_eq!(journal_version_of(&dir.join("journal-1.jsonl")), 2, "attempt 1's journal is archived as written");
+    // An archived attempt's entries it kept are planned again by the next.
+    let expected_second: Vec<JournalEntry> =
+        second.report.journal_entries.iter().filter(|entry| entry.attempt == 2 && entry.state == EntryState::Deleted).cloned().collect();
+    assert!(!expected_second.is_empty(), "{:?}", second.report.journal_entries);
+    rewrite_as_version_2(&journal);
+    save_version_5_report(
+        &fixture,
+        &id,
+        &second.report_path,
+        "stopped by version 5 (attempt 2)",
+        vec![version_5_earlier_attempt("stopped by version 5 (attempt 1)")],
+    );
+
+    // Attempt 3, this build's: checked at its first batch, before anything
+    // more is deleted.
+    let fresh = fixture.resume_approval(&id);
+    let (base, branches) = (fixture.base(), fixture.delete_branch());
+    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &branches };
+    let versions = Mutex::new(None);
+    let mut hook = |boundary: Boundary| {
+        if boundary == Boundary::DeletionBatch(1) {
+            let read = |name: &str| journal_version_of(&dir.join(name));
+            *versions.lock().unwrap() = Some([read("journal-1.jsonl"), read("journal-2.jsonl"), read(JOURNAL_FILE)]);
+            assert!(!dir.join("journal-3.jsonl").exists());
+        }
+        false
+    };
+    let resumed = finished(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume::resume_with(&request, env, &mut hook)).unwrap());
+    assert_eq!(versions.into_inner().unwrap(), Some([2, 2, 3]), "two version 2 archives and this build's version 3 journal");
+    assert_removed(&fixture, &resumed);
+    assert!(!quarantine.exists() && !fixture.branch_exists());
+    assert!(!dir.join("journal-2.jsonl").exists(), "every journal is deleted after completion");
+
+    let saved = saved_report(&resumed);
+    assert_eq!(saved, resumed.report, "the entries file holds the complete list");
+    assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
+    assert_accounted_once(&saved, FIXTURE_ENTRIES);
+    let attempts: Vec<u32> = saved.journal_entries.iter().map(|entry| entry.attempt).collect();
+    assert!(attempts.is_sorted(), "{attempts:?}");
+    assert_eq!(attempts.first().zip(attempts.last()), Some((&1, &3)), "{attempts:?}");
+    let of = |attempt| saved.journal_entries.iter().filter(|entry| entry.attempt == attempt).cloned().collect::<Vec<_>>();
+    assert_eq!(of(1), expected_first, "attempt 1's version 2 journal, its last batch uncertain");
+    assert_eq!(of(2), expected_second, "attempt 2's version 2 journal");
+    assert!(of(3).iter().all(|entry| entry.state == EntryState::Deleted) && !of(3).is_empty());
+    let uncertain = expected_first.iter().filter(|entry| entry.state == EntryState::Uncertain).count() as u64;
+    assert!(uncertain >= 1);
+    assert_eq!(saved.journal.uncertain.total(), uncertain, "{:?}", saved.journal);
+    assert_eq!(saved.journal.deleted.total() + uncertain, FIXTURE_ENTRIES.total());
+    let errors: Vec<_> = saved.earlier_attempts.iter().map(|earlier| earlier.errors.as_slice()).collect();
+    assert_eq!(
+        errors,
+        [["stopped by version 5 (attempt 1)".to_string()].as_slice(), ["stopped by version 5 (attempt 2)".to_string()].as_slice()],
+        "both older reports are carried, oldest first"
+    );
+    assert!(saved.errors.is_empty(), "{:?}", saved.errors);
+}
+
 /// A stopped retry whose earlier report cannot be read warns, naming the
 /// file, and still resumes from the journals.
 #[test]

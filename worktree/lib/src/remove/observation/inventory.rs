@@ -127,8 +127,8 @@ pub enum InventoryRefusal {
 }
 
 /// The approved content of one checkout.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "InventoryRecord", into = "InventoryRecord")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "InventoryRecord")]
 pub struct DeletionInventory {
     root: FileIdentity,
     /// Parents before children; each directory's children in byte order.
@@ -137,7 +137,7 @@ pub struct DeletionInventory {
 }
 
 /// The persisted form, validated by [`DeletionInventory::try_from`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InventoryRecord {
     root: FileIdentity,
@@ -183,9 +183,16 @@ impl TryFrom<InventoryRecord> for DeletionInventory {
     }
 }
 
-impl From<DeletionInventory> for InventoryRecord {
-    fn from(inventory: DeletionInventory) -> Self {
-        Self { root: inventory.root, entries: inventory.entries }
+/// Written as an [`InventoryRecord`], borrowing rather than copying what
+/// can be millions of entries.
+impl Serialize for DeletionInventory {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Record<'a> {
+            root: &'a FileIdentity,
+            entries: &'a [InventoryEntry],
+        }
+        Record { root: &self.root, entries: &self.entries }.serialize(serializer)
     }
 }
 
