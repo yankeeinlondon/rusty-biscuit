@@ -4,6 +4,14 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/lib.rs.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/setup_tests.rs.txt
+    - schematic/features/2026-10-17-schematic-websocket/setup-spike/Cargo.toml.txt
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Schematic WebSocket Implementation Plan
@@ -38,15 +46,15 @@ At every phase that changes generator output, regenerate through the generator, 
 
 ### Wave 1 — Contract Inventory (parallel reads)
 
-- [ ] **Refresh Contracts**
+- [x] **Refresh Contracts**
   - Verify review outcomes and prerequisite readiness; read the relevant shared definitions/runtime/generation code after the refresh.
   - Create `implementation-log.md` when implementation begins, recording authorization evidence, chosen interfaces, all adopted defaults, deviations, and unresolved prerequisites as they occur.
   - Identify existing user changes and preserve them. Use the `sniff` skill for repository/host discovery and the `os` skill for eventual environment evidence.
-- [ ] **Map Protocols**
+- [x] **Map Protocols**
   - Inventory Core, Dock, integration, Samsung, and ElevenLabs endpoints, lifecycle payloads, selectors/fallbacks, wire framing, auth fields, hints, roles, and consumers in a per-endpoint expected table.
   - Use the already verified Core origin and `/ws`, `/intg`, `/profiles` paths; do not schedule another discovery spike for that known defect.
   - Read Samsung protocol notes for correlation evidence and inspect the current TLS adapter; record the ordinary-Serde ElevenLabs payload finding.
-- [ ] **Map Verification**
+- [x] **Map Verification**
   - Read `rust-testing`, `just`, Test Toolkit, existing `schema/tests/ws_runtime.rs`, consolidated generator targets, importer fixtures, and predecessor compile-check support.
   - Inventory exact affected packages and executable checks, including schema's separate manifest and ignored drift tests. Establish baseline results without starting device or terminal tests.
   - Finalize the input matrix below against the refreshed shapes; add a separate column for each newly discovered load-bearing leaf before touching its reader.
@@ -130,7 +138,7 @@ The existing AsyncAPI reader supports JSON and YAML. Its parsing/field interpret
 
 ### Wave 2 — Setup Spike (sequential, once)
 
-- [ ] **Prove Setup**
+- [x] **Prove Setup**
   - Build a disposable, local prototype of a reusable typed callback factory, exclusive per-attempt session ownership, stream transfer, and cancellation during setup/backoff. Use existing Tokio/tungstenite dependencies and a minimal fixture type.
   - Prove a deadline covers opening plus callback, callback rejection is distinguishable from transient failure, and closing cannot leave a task owning the stream. Check the required `Send`/lifetime bounds against current consumer patterns.
   - Output the callback/session signatures and ownership decision in the log; retain only a useful regression test. Do not repeat this spike in later phases or turn it into an architectural rewrite.
