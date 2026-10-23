@@ -74,7 +74,6 @@ pub(crate) struct FontQuery {
     pub(crate) stretch: fontdb::Stretch,
 }
 
-#[allow(dead_code, reason = "the Mermaid text measurer builds queries from CSS values")]
 impl FontQuery {
     /// A regular (400, upright, normal-width) query for `families`.
     pub(crate) fn new(families: Vec<FamilyName>) -> Self {
@@ -143,7 +142,6 @@ impl FontQuery {
 /// Generic keywords are recognized ignoring case (see
 /// [`FamilyName::from_name`]). Empty entries are dropped, so malformed input
 /// never fails, it only yields fewer families.
-#[allow(dead_code, reason = "the Mermaid text measurer builds queries from CSS values")]
 pub(crate) fn parse_font_family_list(list: &str) -> Vec<FamilyName> {
     let mut families = Vec::new();
     let mut chars = list.chars().peekable();

@@ -1533,7 +1533,6 @@ dependencies = [
  "image",
  "insta",
  "layout-rs",
- "mermaid-rs-renderer",
  "merman",
  "png 0.18.1",
  "renderable",
@@ -8298,23 +8297,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "mermaid-rs-renderer"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb5b469222ce6b9896edf0a969cf68464f5a028ef394fd6643f00bd943df117"
-dependencies = [
- "anyhow",
- "fontdb",
- "json5",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "ttf-parser",
 ]
 
 [[package]]

@@ -31,7 +31,7 @@ pub(super) const MERMAID_STACK: &str = r#""trebuchet ms", verdana, arial, sans-s
 
 // ------------------------------------------------------------------ helpers
 
-fn table(font: &[u8], tag: &[u8; 4]) -> Range<usize> {
+pub(super) fn table(font: &[u8], tag: &[u8; 4]) -> Range<usize> {
     let count = u16::from_be_bytes([font[4], font[5]]) as usize;
     (0..count)
         .map(|i| &font[12 + 16 * i..28 + 16 * i])
@@ -616,9 +616,9 @@ fn no_noto_emoji_face_is_registered_off_linux() {
 
 // -------------------------------------------------- D63: face identities
 
-/// D63: a face's identity is its file's content hash and face index, the
-/// same for the same bytes in another chain, and a different `MERMAID_FONT`
-/// changes the resolved identity.
+/// D63: a face's identity is its content hash and face index, the same for
+/// the same bytes in another chain, and a different `MERMAID_FONT` changes
+/// the resolved identity.
 #[test]
 fn face_identities_follow_content_and_resolution() {
     let anter = renamed(INTER_REGULAR, "Inter", "Anter");
@@ -629,31 +629,42 @@ fn face_identities_follow_content_and_resolution() {
     let plain_ids = plain.query_identities(&queries);
     let pinned_ids = pinned.query_identities(&queries);
 
-    let anter_identity = plain_ids[0].resolved.expect("resolved");
-    assert_eq!(anter_identity.content_hash, biscuit_hash::xx_hash_bytes(&anter));
-    assert_eq!(anter_identity.index, 0);
-    let inter_identity = pinned_ids[0].resolved.expect("resolved");
-    assert_eq!(inter_identity.content_hash, biscuit_hash::xx_hash_bytes(INTER_REGULAR));
+    let anter_identity = plain_ids[0].resolved.clone().expect("resolved");
+    assert_eq!(
+        anter_identity,
+        FaceIdentity::Contents {
+            hash: biscuit_hash::xx_hash_bytes(&anter),
+            index: 0
+        }
+    );
+    assert_eq!(
+        pinned_ids[0].resolved,
+        Some(FaceIdentity::Contents {
+            hash: biscuit_hash::xx_hash_bytes(INTER_REGULAR),
+            index: 0
+        })
+    );
     let mut expected_fallbacks = vec![anter_identity];
     if cfg!(target_os = "linux") {
-        expected_fallbacks.push(FaceIdentity {
-            content_hash: biscuit_hash::xx_hash_bytes(NOTO_EMOJI_FILE),
+        expected_fallbacks.push(FaceIdentity::Contents {
+            hash: biscuit_hash::xx_hash_bytes(NOTO_EMOJI_FILE),
             index: 0,
         });
     }
     assert_eq!(pinned_ids[0].fallbacks, expected_fallbacks);
-    assert_eq!(plain.font_set_hash(), pinned.font_set_hash());
+    assert_eq!(plain.font_set_hash(&queries), pinned.font_set_hash(&queries));
 }
 
-/// D41: the font-set hash depends on the files, not on their order.
+/// D41: the font-set hash depends on the faces, not on their loading order.
 #[test]
 fn font_set_hash_ignores_loading_order_and_follows_content() {
     let anter = renamed(INTER_REGULAR, "Inter", "Anter");
     let bnter = renamed(INTER_REGULAR, "Inter", "Bnter");
+    let queries = [stack(MERMAID_STACK)];
 
-    let forward = FontChain::injected(&[&anter, &bnter], &[], None).font_set_hash();
-    let backward = FontChain::injected(&[&bnter, &anter], &[], None).font_set_hash();
-    let fewer = FontChain::injected(&[&anter], &[], None).font_set_hash();
+    let forward = FontChain::injected(&[&anter, &bnter], &[], None).font_set_hash(&queries);
+    let backward = FontChain::injected(&[&bnter, &anter], &[], None).font_set_hash(&queries);
+    let fewer = FontChain::injected(&[&anter], &[], None).font_set_hash(&queries);
 
     assert_eq!(forward, backward);
     assert_ne!(forward, fewer);

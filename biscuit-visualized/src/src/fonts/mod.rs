@@ -19,14 +19,13 @@
 pub(crate) mod bundled;
 pub(crate) mod chain;
 pub(crate) mod matching;
-#[allow(dead_code, reason = "the Merman render path takes the measurer when it replaces mermaid-rs-renderer")]
 pub(crate) mod measure;
 pub(crate) mod metadata;
 pub(crate) mod query;
 pub(crate) mod shaper;
 
 pub(crate) use chain::{FontChain, default_chain};
-#[allow(unused_imports)]
 pub(crate) use measure::LabelMeasurer;
-#[allow(unused_imports)]
-pub(crate) use query::{FamilyName, FontQuery, GenericFamily, parse_font_family_list};
+pub(crate) use query::FontQuery;
+#[cfg(test)]
+pub(crate) use query::GenericFamily;

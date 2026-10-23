@@ -22,6 +22,7 @@
 //! ```
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -37,7 +38,7 @@ use crate::artifact::{Background, OutputFormat, RenderRequest};
 use renderable::tree::{RenderNode, TreeRenderable};
 
 // Re-export types from biscuit-visualized
-pub use crate::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
+pub use crate::mermaid::{MermaidConfig, MermaidTarget, MermaidTheme, QuadrantTheme};
 
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
@@ -271,6 +272,20 @@ impl MermaidRenderer {
         self
     }
 
+    /// Sets how long Merman may work on each request for this diagram; see
+    /// [`crate::mermaid::MermaidDiagram::with_time_budget`].
+    pub fn with_time_budget(mut self, budget: Duration) -> Self {
+        self.diagram = self.diagram.with_time_budget(budget);
+        self
+    }
+
+    /// Selects who [`render_to_svg`](Self::render_to_svg)'s SVG is for; see
+    /// [`crate::mermaid::MermaidDiagram::with_target`].
+    pub fn with_target(mut self, target: MermaidTarget) -> Self {
+        self.diagram = self.diagram.with_target(target);
+        self
+    }
+
     /// Returns the diagram instructions.
     pub fn instructions(&self) -> &str {
         self.diagram.instructions()
@@ -409,9 +424,10 @@ impl From<&str> for MermaidRenderer {
 /// 2. Hand those PNG bytes to a [`TerminalImage`] unchanged
 /// 3. Render the image inline using the terminal's image protocol
 ///
-/// When image rendering is unavailable (no terminal support, render
-/// failure, etc.) the component falls back to a fenced code block
-/// of the Mermaid source.
+/// When image rendering is unavailable (no terminal support, a parse error,
+/// an unsupported family such as ZenUML, a render over its
+/// [time budget](MermaidDiagram::with_time_budget), etc.) the component falls
+/// back to a fenced code block of the Mermaid source.
 ///
 /// ## Examples
 ///
@@ -516,6 +532,40 @@ impl MermaidDiagram {
     /// Sets what paints behind the diagram.
     pub fn with_background(mut self, background: Background) -> Self {
         self.renderer = self.renderer.with_background(background);
+        self
+    }
+
+    /// Sets how long Merman may work on each request for this diagram
+    /// (default 2 s). The value is passed to the library-level
+    /// [`crate::mermaid::MermaidDiagram::with_time_budget`]; a render that
+    /// exceeds it shows the fallback code block and logs a warning.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// use biscuit_visualized::components::mermaid::MermaidDiagram;
+    ///
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+    ///     .with_time_budget(Duration::from_millis(500));
+    /// assert_eq!(diagram.time_budget(), Duration::from_millis(500));
+    /// ```
+    pub fn with_time_budget(mut self, budget: Duration) -> Self {
+        self.renderer = self.renderer.with_time_budget(budget);
+        self
+    }
+
+    /// The time budget of each Merman request for this diagram.
+    pub fn time_budget(&self) -> Duration {
+        self.renderer.diagram.time_budget()
+    }
+
+    /// Selects who [`render_to_svg`](Self::render_to_svg)'s SVG is for:
+    /// [`MermaidTarget::HtmlStatic`] for a static SVG embedded in HTML. The
+    /// terminal's PNG is unaffected; see
+    /// [`crate::mermaid::MermaidDiagram::with_target`].
+    pub fn with_target(mut self, target: MermaidTarget) -> Self {
+        self.renderer = self.renderer.with_target(target);
         self
     }
 
@@ -814,14 +864,14 @@ mod tests {
 
     #[test]
     fn diagram_from_string() {
-        let diagram = MermaidDiagram::from("pie\n    Dogs: 50".to_string());
-        assert_eq!(diagram.instructions(), "pie\n    Dogs: 50");
+        let diagram = MermaidDiagram::from("pie\n    \"Dogs\" : 50".to_string());
+        assert_eq!(diagram.instructions(), "pie\n    \"Dogs\" : 50");
     }
 
     #[test]
     fn diagram_from_str() {
-        let diagram = MermaidDiagram::from("pie\n    Dogs: 50");
-        assert_eq!(diagram.instructions(), "pie\n    Dogs: 50");
+        let diagram = MermaidDiagram::from("pie\n    \"Dogs\" : 50");
+        assert_eq!(diagram.instructions(), "pie\n    \"Dogs\" : 50");
     }
 
     #[test]
@@ -857,7 +907,7 @@ mod tests {
     fn diagram_try_render_populates_width_cells() {
         use biscuit_terminal::components::terminal_image::ImageWidth;
 
-        let diagram = MermaidDiagram::new("pie\n    A: 1").with_width(ImageWidth::Percent(0.5));
+        let diagram = MermaidDiagram::new("pie\n    \"A\" : 1").with_width(ImageWidth::Percent(0.5));
         let term = biscuit_terminal::terminal::Terminal::new_optimistic(80);
 
         match diagram.try_render(&term) {
@@ -945,5 +995,105 @@ mod tests {
         // Other widths never parse while resolving.
         let fixed = diagram.with_width(ImageWidth::Characters(30));
         assert_eq!(fixed.resolve_dimensions(80, None).unwrap().image_width, 30);
+    }
+
+    // ── Fallbacks and the time budget (AC-C9, AC-C10) ─────────
+
+    use std::time::Duration;
+
+    use serial_test::serial;
+
+    use crate::mermaid::render::take_merman_calls;
+    use crate::tests::{capture_warnings, isolated_cache_dir};
+
+    /// How far past its budget a cancelled Merman call may return.
+    const BUDGET_MARGIN: Duration = Duration::from_millis(250);
+
+    fn rendered(diagram: &MermaidDiagram) -> String {
+        diagram.render(&biscuit_terminal::terminal::Terminal::new_optimistic(80))
+    }
+
+    #[test]
+    fn the_time_budget_defaults_to_two_seconds_and_reaches_the_library_type() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+        assert_eq!(diagram.time_budget(), Duration::from_secs(2));
+
+        let bounded = diagram.with_time_budget(Duration::from_millis(40));
+
+        assert_eq!(bounded.time_budget(), Duration::from_millis(40));
+        assert_eq!(bounded.renderer.diagram.time_budget(), Duration::from_millis(40));
+    }
+
+    #[test]
+    #[serial]
+    fn a_render_over_its_time_budget_shows_the_code_block_with_a_warning() {
+        let _cache = isolated_cache_dir();
+        let mut source = String::from("flowchart LR\n");
+        for index in 0..15 {
+            source.push_str(&format!("    N{index}[Node number {index}] --> N{}\n", index + 1));
+        }
+        let budget = Duration::from_millis(2);
+        // An uncancelled twin (another cache key) first: it warms the font
+        // chain, whose first-use face resolution would otherwise run, and be
+        // timed, inside the budgeted Merman call.
+        take_merman_calls();
+        crate::mermaid::MermaidDiagram::new(format!("{source}\n%% warm-up twin\n"))
+            .render(&crate::artifact::RenderRequest::default())
+            .expect("the twin fits 2 s");
+        let full: Duration = take_merman_calls().into_iter().sum();
+        let diagram = MermaidDiagram::new(source).with_time_budget(budget);
+
+        let (output, warnings) = capture_warnings(|| rendered(&diagram));
+
+        assert_eq!(output, diagram.fallback_code_block());
+        assert!(
+            warnings.iter().any(|warning| warning.contains("time budget")),
+            "{warnings:?}"
+        );
+        let calls = take_merman_calls();
+        let merman = calls.first().expect("a Merman call");
+        assert!(
+            *merman <= budget + BUDGET_MARGIN && *merman < full,
+            "Merman ran {merman:?} on a {budget:?} budget; uncancelled {full:?}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn a_parse_error_shows_the_code_block() {
+        let _cache = isolated_cache_dir();
+        let diagram = MermaidDiagram::new("graph TD; A to B");
+
+        assert_eq!(rendered(&diagram), diagram.fallback_code_block());
+    }
+
+    #[test]
+    #[serial]
+    fn an_unknown_diagram_type_shows_the_code_block() {
+        let _cache = isolated_cache_dir();
+        let diagram = MermaidDiagram::new("notADiagram\n    A --> B");
+
+        assert_eq!(rendered(&diagram), diagram.fallback_code_block());
+    }
+
+    #[test]
+    #[serial]
+    fn zenuml_shows_the_code_block() {
+        let _cache = isolated_cache_dir();
+        let diagram = MermaidDiagram::new("zenuml\n    title Demo\n    Alice->Bob: Hello");
+
+        assert_eq!(rendered(&diagram), diagram.fallback_code_block());
+    }
+
+    #[test]
+    #[serial]
+    fn a_math_label_shows_its_source_text() {
+        let _cache = isolated_cache_dir();
+        let diagram = MermaidDiagram::new("flowchart LR\n    A[\"$$x^2$$\"] --> B");
+
+        let output = rendered(&diagram);
+
+        assert_eq!(output, diagram.fallback_code_block());
+        assert!(output.contains("$$x^2$$"));
     }
 }

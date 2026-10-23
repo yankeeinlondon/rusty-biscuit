@@ -234,7 +234,7 @@ fn environment(measurer: Arc<dyn TextMeasurer + Send + Sync>) -> SvgEnvironment 
     ))
 }
 
-fn render(source: &str, measurer: Arc<dyn TextMeasurer + Send + Sync>) -> String {
+pub(super) fn render(source: &str, measurer: Arc<dyn TextMeasurer + Send + Sync>) -> String {
     let mut request = SvgRequest {
         environment: environment(measurer),
         ..SvgRequest::default()
@@ -254,7 +254,7 @@ fn render(source: &str, measurer: Arc<dyn TextMeasurer + Send + Sync>) -> String
 }
 
 /// Every `<text>` in `tree`, depth first.
-fn texts(group: &usvg::Group, into: &mut Vec<usvg::Text>) {
+pub(super) fn texts(group: &usvg::Group, into: &mut Vec<usvg::Text>) {
     for node in group.children() {
         match node {
             Node::Group(child) => texts(child, into),
@@ -491,21 +491,21 @@ fn compare_faces(chain: &Arc<FontChain>, source: &str, name: &str) -> (Vec<Strin
 /// A label whose glyph box overflows an ancestor clip or the smallest filled
 /// shape behind it, by more than [`CLIP_TOLERANCE_PX`].
 #[derive(Debug, Clone, PartialEq)]
-struct Overflow {
-    label: String,
-    kind: &'static str,
-    px: f32,
+pub(super) struct Overflow {
+    pub(super) label: String,
+    pub(super) kind: &'static str,
+    pub(super) px: f32,
 }
 
 /// The clip and backing parts of S2's defect survey, over usvg's own parse.
-struct Survey {
+pub(super) struct Survey {
     clips: Vec<Rect>,
     backing: Vec<Vec<Rect>>,
     found: Vec<Overflow>,
 }
 
 impl Survey {
-    fn run(svg: &str, chain: &Arc<FontChain>) -> Vec<Overflow> {
+    pub(super) fn run(svg: &str, chain: &Arc<FontChain>) -> Vec<Overflow> {
         let tree = usvg::Tree::from_str(svg, &usvg_options(chain)).expect("Merman SVG parses");
         let mut survey = Survey {
             clips: Vec::new(),

@@ -96,6 +96,7 @@ impl LabelMeasurer {
 
     /// The face of each glyph `text` shapes to in `style`, in visual order:
     /// the faces the rasterizer draws it with.
+    #[cfg(test)]
     pub(crate) fn faces(&self, text: &str, style: &TextStyle) -> Vec<ID> {
         self.shape(text, style)
             .glyphs
@@ -120,10 +121,7 @@ impl LabelMeasurer {
             return Arc::clone(hit);
         }
         let query = self.query(style);
-        let face = *lock(&self.faces)
-            .entry(key.1.clone())
-            .or_insert_with(|| self.chain.resolve(&query));
-        let shaped = Arc::new(face.map_or_else(Shaped::default, |face| {
+        let shaped = Arc::new(self.face_for(&key.1, &query).map_or_else(Shaped::default, |face| {
             shaper::shape(
                 &self.chain,
                 face,
@@ -133,6 +131,31 @@ impl LabelMeasurer {
         }));
         lock(&self.shaped).insert(key, Arc::clone(&shaped));
         shaped
+    }
+
+    /// The family name of the face labels in `style` are measured in (and
+    /// drawn in), as the font database records it; `None` when no face
+    /// resolves. Font size does not take part in resolution.
+    pub(crate) fn measured_family(&self, style: &TextStyle) -> Option<String> {
+        let key: FaceKey = (
+            style.font_family.clone(),
+            style.font_weight.clone(),
+            style.font_style.clone(),
+        );
+        let face = self.face_for(&key, &self.query(style))?;
+        self.chain
+            .database()
+            .face(face)
+            .and_then(|face| face.families.first())
+            .map(|(name, _)| name.clone())
+    }
+
+    /// The face `query` (built from the style `key` names) resolves to,
+    /// cached per key.
+    fn face_for(&self, key: &FaceKey, query: &FontQuery) -> Option<ID> {
+        *lock(&self.faces)
+            .entry(key.clone())
+            .or_insert_with(|| self.chain.resolve(query))
     }
 
     /// `text` shaped for `query` with explicit `params` (spacing, small caps,

@@ -173,8 +173,8 @@ fn header_is_the_first_statement_line() {
 #[test]
 fn escaped_backslash_before_n_is_kept() {
     assert_eq!(
-        rewritten("classDiagram\n  A --> B : path C:\\\\new and a\\nb\n"),
-        "classDiagram\n  A --> B : path C:\\\\new and a<br/>b\n"
+        rewritten("classDiagram\n  A --> B : path C\\\\new and a\\nb\n"),
+        "classDiagram\n  A --> B : path C\\\\new and a<br/>b\n"
     );
 }
 
@@ -191,4 +191,117 @@ fn crlf_line_endings_are_preserved() {
         rewritten("mindmap\r\n  root\r\n    a\\nb\r\n"),
         "mindmap\r\n  root\r\n    a<br/>b\r\n"
     );
+}
+
+// ------------------------------------------------------------------ end to end
+//
+// AC-M6's "fitting box" half: through `mermaid::MermaidDiagram`, each listed
+// family draws a `\n` label on two lines in a box that holds them (the clip
+// survey of `measure_tests`), measured and drawn with the bundled Inter.
+
+mod rendered {
+    use serial_test::serial;
+
+    use super::super::measure_tests::{Survey, render, texts};
+    use crate::artifact::{Background, OutputFormat, RenderRequest};
+    use crate::fonts::{FontChain, LabelMeasurer, default_chain};
+    use crate::mermaid::MermaidDiagram;
+    use crate::raster::usvg_options;
+    use crate::tests::isolated_cache_dir;
+    use resvg::usvg;
+
+    const CLASS: &str = "classDiagram\n  class Animal {\n    +name String\n  }\n  note for Animal \"Alpha one\\nBravo two is longer\"\n";
+    const ER: &str = "erDiagram\n  CUSTOMER ||--o{ ORDER : \"Alpha one\\nBravo two is longer\"\n";
+    const MINDMAP: &str = "mindmap\n  root((Root))\n    [\"Alpha one\\nBravo two is longer\"]\n";
+    const REQUIREMENT: &str = "requirementDiagram\n  requirement req1 {\n    id: 1\n    text: \"Alpha one\\nBravo two is longer\"\n    risk: high\n    verifymethod: test\n  }\n";
+
+    /// The SVG `render` draws for `source`.
+    fn svg_of(source: &str) -> String {
+        let artifact = MermaidDiagram::new(source)
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                background: Background::Transparent,
+                ..RenderRequest::default()
+            })
+            .unwrap_or_else(|error| panic!("{error}: {source}"));
+        std::fs::read_to_string(artifact.path).unwrap()
+    }
+
+    /// Every drawn text line (chunk) with its baseline, in document order.
+    fn drawn_lines(svg: &str) -> Vec<(String, Option<i64>)> {
+        let tree = usvg::Tree::from_str(svg, &usvg_options(default_chain())).unwrap();
+        let mut found = Vec::new();
+        texts(tree.root(), &mut found);
+        found
+            .iter()
+            .flat_map(|text| {
+                text.chunks()
+                    .iter()
+                    .map(|chunk| (chunk.text().trim().to_string(), chunk.y().map(|y| (y * 10.0) as i64)))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn assert_two_fitting_lines(family: &str, source: &str) {
+        let svg = svg_of(source);
+        let lines = drawn_lines(&svg);
+
+        assert!(
+            lines.iter().all(|(line, _)| !line.contains("\\n")),
+            "{family}: a literal \\n is drawn: {lines:?}"
+        );
+        let first = lines.iter().find(|(line, _)| line.ends_with("Alpha one"));
+        let second = lines.iter().find(|(line, _)| line == "Bravo two is longer");
+        assert!(first.is_some() && second.is_some(), "{family}: two lines expected: {lines:?}");
+        let overflows = Survey::run(&svg, default_chain());
+        assert!(overflows.is_empty(), "{family}: {overflows:?}");
+    }
+
+    #[test]
+    #[serial]
+    fn class_note_breaks_into_a_fitting_two_line_box() {
+        let _cache = isolated_cache_dir();
+        assert_two_fitting_lines("class", CLASS);
+    }
+
+    #[test]
+    #[serial]
+    fn er_relationship_label_breaks_into_a_fitting_two_line_box() {
+        let _cache = isolated_cache_dir();
+        assert_two_fitting_lines("er", ER);
+    }
+
+    #[test]
+    #[serial]
+    fn mindmap_node_breaks_into_a_fitting_two_line_box() {
+        let _cache = isolated_cache_dir();
+        assert_two_fitting_lines("mindmap", MINDMAP);
+    }
+
+    #[test]
+    #[serial]
+    fn requirement_text_breaks_into_a_fitting_two_line_box() {
+        let _cache = isolated_cache_dir();
+        assert_two_fitting_lines("requirement", REQUIREMENT);
+    }
+
+    /// Control: without the rewrite Merman sizes the class note for one line
+    /// and the survey sees its second line overflow, so the survey above can
+    /// fail.
+    #[test]
+    fn without_the_rewrite_the_class_note_overflows() {
+        let chain = std::sync::Arc::new(FontChain::injected(&[], &[], Some("Inter")));
+        let svg = render(CLASS, LabelMeasurer::text_measurer(&chain));
+
+        assert!(!Survey::run(&svg, &chain).is_empty());
+    }
+
+    /// A family that is not rewritten reaches Merman unchanged.
+    #[test]
+    fn a_sequence_label_is_not_rewritten() {
+        let source = "sequenceDiagram\n  A->>B: Alpha one\\nBravo two is longer\n";
+
+        assert_eq!(MermaidDiagram::new(source).rewritten_source().unwrap(), source);
+    }
 }

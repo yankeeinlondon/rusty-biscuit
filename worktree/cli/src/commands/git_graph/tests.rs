@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_visualized::components::git_graph::{GitGraphPlan, GraphViewport, NaturalSize};
+use biscuit_visualized::components::git_graph::{DEFAULT_GIT_GRAPH_SCALE, GitGraphPlan, GraphViewport, NaturalSize};
 use biscuit_visualized::components::mermaid::MermaidTheme;
 use biscuit_terminal::discovery::fonts::CellSize;
 use biscuit_visualized::mermaid::{CommitGeometry, GitGraphGeometry, MermaidDiagram};
@@ -1806,7 +1806,8 @@ struct Evidence<'a> {
     post_merge: Vec<(&'a str, &'a str)>,
     /// The plan's notice: some fork, merge, or tagged commit is not drawn.
     incomplete: bool,
-    /// Lanes the height cap leaves out at 120×40 and at 56×60.
+    /// Lanes the height cap leaves out at 120 and at 56 columns. Zero plans
+    /// with rows that fit the whole graph; more plans one row short of it.
     hidden_lanes: [usize; 2],
 }
 
@@ -1835,7 +1836,7 @@ fn viewport(columns: u32, rows: u32) -> GraphViewport {
     }
 }
 
-/// Plans `facts` at 120×40 and 56×60 with the real measurement and checks the
+/// Plans `facts` at 120 and 56 columns with the real measurement and checks the
 /// layout that renders: no two tags intersect, every expected tag is on its
 /// SHA's emitted ID, merge parents are exact (a first parent may be a `+N`
 /// square once trimmed), no tag text changes with the viewport, and a graph
@@ -1846,7 +1847,13 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
     let mut report = Vec::new();
     let mut tag_texts: Option<Vec<String>> = None;
     let mut ordinary_columns = None;
-    for (vp, hidden_lanes) in [viewport(120, 40), viewport(56, 60)].into_iter().zip(expected.hidden_lanes) {
+    // Rows come from the renderer's own measurement: the height cap is half
+    // the viewport's rows, so twice the whole graph's rows hides no lane, and
+    // one row fewer than that budget hides the least active lanes.
+    let whole_rows = graph.plan(viewport(10_000, 10_000)).expect("a plan").rows;
+    let rows_for = |hidden_lanes: usize| if hidden_lanes == 0 { 2 * whole_rows } else { 2 * (whole_rows - 1) };
+    let viewports = [viewport(120, rows_for(expected.hidden_lanes[0])), viewport(56, rows_for(expected.hidden_lanes[1]))];
+    for (vp, hidden_lanes) in viewports.into_iter().zip(expected.hidden_lanes) {
         let planned = graph.plan(vp).expect("a plan");
         let context = format!("{name} {}x{}:\n{}", vp.columns, vp.rows, planned.mermaid);
         assert_eq!(planned.incomplete, expected.incomplete, "{context}");
@@ -1914,10 +1921,9 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
         ));
     }
 
-    // 60 rows: tall enough that the height cap hides no lane of any fixture.
     let explicit = to_git_graph(facts, prs, Some(ImageWidth::Characters(40)))
         .with_theme(MermaidTheme::Default)
-        .plan(viewport(120, 60))
+        .plan(viewport(120, rows_for(0)))
         .expect("a plan");
     assert_eq!(explicit.hidden_lanes, 0, "{name}");
     assert_eq!(explicit.columns, 40, "{name}");
@@ -2010,9 +2016,9 @@ fn gathered_graph_lays_out_long_labels() {
 fn gathered_graph_lays_out_sparse_lanes() {
     let mut report = Vec::new();
     // Every connection is drawn: `fix/wt-ux` merges into `M103` from `W1`,
-    // where `fix/sniff` forks. At 40 rows the height cap leaves out the least
-    // active lane, `feat/schema-enhancement` (its tip is the oldest; see
-    // `commit_on`).
+    // where `fix/sniff` forks. One row short of the whole graph, the height cap
+    // leaves out the least active lane, `feat/schema-enhancement` (its tip is
+    // the oldest; see `commit_on`).
     let repo = observed_sparse_lanes();
     {
         let (graph, _) = gather(&input(&repo.path, "main", &repo.branches(), repo.forks.clone()), true, false);
@@ -2170,10 +2176,10 @@ fn after_square<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> Vec<&'g Commi
 }
 
 /// The observed history at 200×60 with the real measurement: an isolated
-/// `main`/`origin/main` stack no longer widens the step, so every long lane
-/// keeps more than its tip after its last `+N` square; `fix/wt-ux` merges
-/// into `main` at `M103` from `W1`, where `fix/sniff` forks, and `fix/sniff`
-/// merges into `main` at `M104`.
+/// `main`/`origin/main` stack does not widen the step, and a long lane keeps
+/// more than its tip after its last `+N` square whenever another commit step
+/// fits the width; `fix/wt-ux` merges into `main` at `M103` from `W1`, where
+/// `fix/sniff` forks, and `fix/sniff` merges into `main` at `M104`.
 #[test]
 #[serial_test::serial]
 fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
@@ -2194,9 +2200,15 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     assert!(plan.columns <= 200, "{plan:?}");
     assert_eq!(plan.hidden_lanes, 0, "{context}");
 
+    // Width trimming stops once the graph fits, so a lane keeps a second
+    // commit after its square unless one more commit step would not fit.
+    let one_more_step = ImageWidth::scaled_columns(DEFAULT_GIT_GRAPH_SCALE, geometry.width + geometry.commit_step, CellSize::FALLBACK);
     for lane in ["feat/schema-enhancement", "fix/sniff"] {
         let kept = after_square(&geometry, lane);
-        assert!(kept.len() >= 2, "{lane} keeps more than its tip after its +N square: {kept:?}\n{context}");
+        assert!(
+            kept.len() >= 2 || one_more_step > 200,
+            "{lane} keeps more than its tip after its +N square when another step fits ({one_more_step} columns): {kept:?}\n{context}"
+        );
     }
     // `fix/wt-ux` has an anchor, `W1`, between its squares. Width trimming
     // folds commits beside a square first, so its recent run folds into the

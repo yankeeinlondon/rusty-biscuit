@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source, Stretch, Style};
@@ -47,25 +49,97 @@ enum GenericSource {
     Fixed(Vec<(GenericFamily, String)>),
 }
 
-/// A face's identity for cache keys: its file's content hash and its index
-/// within that file. Two hosts holding the same file at different paths give
-/// the same identity.
-#[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct FaceIdentity {
-    pub(crate) content_hash: u64,
-    pub(crate) index: u32,
+/// A face's identity for the Mermaid cache key (D63, D70).
+///
+/// Only the faces a key's stacks can draw with (see
+/// [`FontChain::cache_identity`]) and the bundled faces are identified by
+/// contents; any other file-backed face is identified by file metadata, so a
+/// file replaced in place with the same size and modification time is not
+/// detected (the residual risk D70 accepts).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum FaceIdentity {
+    /// The content hash of the face's font data and the face's index in it.
+    /// Two hosts holding the same file at different paths give the same
+    /// identity. In-memory installed faces are always identified this way:
+    /// their data is already in memory and they have no file metadata.
+    Contents { hash: u64, index: u32 },
+    /// The face's file, never read. `size` and `modified` are `None` when the
+    /// file's metadata cannot be read.
+    File {
+        path: PathBuf,
+        size: Option<u64>,
+        modified: Option<SystemTime>,
+        index: u32,
+    },
+}
+
+impl FaceIdentity {
+    /// Appends an unambiguous byte encoding, for hashing.
+    fn encode(&self, out: &mut Vec<u8>) {
+        match self {
+            FaceIdentity::Contents { hash, index } => {
+                out.push(0);
+                out.extend(hash.to_le_bytes());
+                out.extend(index.to_le_bytes());
+            }
+            FaceIdentity::File {
+                path,
+                size,
+                modified,
+                index,
+            } => {
+                out.push(1);
+                let path = path.as_os_str().as_encoded_bytes();
+                out.extend((path.len() as u64).to_le_bytes());
+                out.extend(path);
+                match size {
+                    Some(size) => {
+                        out.push(1);
+                        out.extend(size.to_le_bytes());
+                    }
+                    None => out.push(0),
+                }
+                match modified.map(|time| time.duration_since(UNIX_EPOCH)) {
+                    Some(Ok(after)) => {
+                        out.push(1);
+                        out.extend(after.as_nanos().to_le_bytes());
+                    }
+                    Some(Err(before)) => {
+                        out.push(2);
+                        out.extend(before.duration().as_nanos().to_le_bytes());
+                    }
+                    None => out.push(0),
+                }
+                out.extend(index.to_le_bytes());
+            }
+        }
+    }
 }
 
 /// The faces one query actually reaches: the resolved face and, in order,
 /// every face a missing character falls back to.
-#[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QueryIdentity {
     /// `None` when the chain resolves no face (the text is not drawn).
     pub(crate) resolved: Option<FaceIdentity>,
     /// The fallback order after the resolved face; empty when `resolved` is.
     pub(crate) fallbacks: Vec<FaceIdentity>,
+}
+
+impl QueryIdentity {
+    fn encode(&self, out: &mut Vec<u8>) {
+        match &self.resolved {
+            Some(identity) => {
+                out.push(1);
+                identity.encode(out);
+            }
+            None => out.push(0),
+        }
+        out.extend((self.fallbacks.len() as u64).to_le_bytes());
+        for identity in &self.fallbacks {
+            identity.encode(out);
+        }
+    }
 }
 
 /// A face that can be matched by family name (installed, or bundled Inter).
@@ -113,10 +187,11 @@ pub(crate) struct FontChain {
     generic_answers: OnceLock<HashMap<GenericFamily, String>>,
     sans_serif_family: OnceLock<Option<String>>,
     fallback_orders: Mutex<HashMap<FaceAttributes, Arc<[ID]>>>,
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    face_hashes: OnceLock<HashMap<ID, u64>>,
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    font_set_hash: OnceLock<u64>,
+    /// Content hash per font file (or in-memory font), each hashed once.
+    content_hashes: Mutex<HashMap<FileKey, u64>>,
+    /// How many font files' contents have been hashed.
+    contents_hashed: AtomicUsize,
+    cache_identities: Mutex<HashMap<Vec<FontQuery>, u64>>,
 }
 
 /// The process's chain over the host's installed fonts, built on first use;
@@ -146,6 +221,30 @@ impl FontChain {
         for bytes in installed {
             db.load_font_source(Source::Binary(Arc::new(bytes.to_vec())));
         }
+        FontChain::injected_db(db, generic_answers, mermaid_font)
+    }
+
+    /// [`injected`](Self::injected), with the installed faces loaded from the
+    /// font files at `installed` (file-backed faces, as on a real host).
+    #[cfg(test)]
+    pub(crate) fn injected_files(
+        installed: &[&Path],
+        generic_answers: &[(GenericFamily, &str)],
+        mermaid_font: Option<&str>,
+    ) -> Self {
+        let mut db = Database::new();
+        for path in installed {
+            db.load_font_file(path).expect("an injected font file loads");
+        }
+        FontChain::injected_db(db, generic_answers, mermaid_font)
+    }
+
+    #[cfg(test)]
+    fn injected_db(
+        db: Database,
+        generic_answers: &[(GenericFamily, &str)],
+        mermaid_font: Option<&str>,
+    ) -> Self {
         let generics = GenericSource::Fixed(
             generic_answers
                 .iter()
@@ -190,8 +289,9 @@ impl FontChain {
             generic_answers: OnceLock::new(),
             sans_serif_family: OnceLock::new(),
             fallback_orders: Mutex::new(HashMap::new()),
-            face_hashes: OnceLock::new(),
-            font_set_hash: OnceLock::new(),
+            content_hashes: Mutex::new(HashMap::new()),
+            contents_hashed: AtomicUsize::new(0),
+            cache_identities: Mutex::new(HashMap::new()),
         };
         chain.mermaid_font = chain.check_mermaid_font(mermaid_font);
         chain
@@ -450,33 +550,56 @@ impl FontChain {
             .unwrap_or(false)
     }
 
-    /// The identity of face `id`. The first call hashes every font file in
-    /// the database (see [`font_set_hash`](Self::font_set_hash)).
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    pub(crate) fn face_identity(&self, id: ID) -> Option<FaceIdentity> {
-        let content_hash = *self.face_hashes().get(&id)?;
-        let index = self.db.face(id)?.index;
-        Some(FaceIdentity {
-            content_hash,
-            index,
-        })
+    /// The font part of the Mermaid cache key for a design whose font stacks
+    /// are `stacks`: the [`font_set_hash`](Self::font_set_hash) combined with
+    /// the [`query_identities`](Self::query_identities) of `stacks`.
+    ///
+    /// Memoized per chain and stack list, so for the default chain each
+    /// distinct `stacks` is computed once per process; font files' metadata
+    /// is read at that time and not again.
+    pub(crate) fn cache_identity(&self, stacks: &[FontQuery]) -> u64 {
+        let mut identities = self.cache_identities.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(identity) = identities.get(stacks) {
+            return *identity;
+        }
+        let started = std::time::Instant::now();
+        let contents = self.content_faces(stacks);
+        let mut bytes = self.font_set_hash_over(&contents).to_le_bytes().to_vec();
+        for identity in self.query_identities_over(stacks, &contents) {
+            identity.encode(&mut bytes);
+        }
+        let identity = biscuit_hash::xx_hash_bytes(&bytes);
+        tracing::debug!(
+            stacks = stacks.len(),
+            files_hashed = self.contents_hashed.load(Ordering::Relaxed),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "font cache identity"
+        );
+        identities.insert(stacks.to_vec(), identity);
+        identity
     }
 
-    /// For each query, the identity of its resolved face and of every face in
-    /// its fallback order, so a cache key changes when `MERMAID_FONT`, the
-    /// installed fonts, or the fallback order change which faces are used.
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    pub(crate) fn query_identities(&self, queries: &[FontQuery]) -> Vec<QueryIdentity> {
-        queries
+    /// For each of `stacks`, the identity of its resolved face and of every
+    /// face in its fallback order, so a cache key changes when `MERMAID_FONT`,
+    /// the installed fonts, or the fallback order change which faces are used.
+    /// Faces are identified as in [`FaceIdentity`], with `stacks` deciding
+    /// which faces are hashed by contents.
+    #[cfg(test)]
+    pub(crate) fn query_identities(&self, stacks: &[FontQuery]) -> Vec<QueryIdentity> {
+        self.query_identities_over(stacks, &self.content_faces(stacks))
+    }
+
+    fn query_identities_over(&self, stacks: &[FontQuery], contents: &HashSet<ID>) -> Vec<QueryIdentity> {
+        stacks
             .iter()
             .map(|query| match self.resolve(query) {
                 Some(id) => QueryIdentity {
-                    resolved: self.face_identity(id),
+                    resolved: self.face_identity(id, contents),
                     fallbacks: self
                         .fallback_order(Some(id))
                         .iter()
                         .filter(|fallback| **fallback != id)
-                        .filter_map(|fallback| self.face_identity(*fallback))
+                        .filter_map(|fallback| self.face_identity(*fallback, contents))
                         .collect(),
                 },
                 None => QueryIdentity {
@@ -487,60 +610,111 @@ impl FontChain {
             .collect()
     }
 
-    /// One hash over the contents of every font file the chain can return
-    /// (installed and bundled), independent of paths and loading order.
-    /// Computed once per chain, and so once per process for the default
-    /// chain.
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    pub(crate) fn font_set_hash(&self) -> u64 {
-        *self.font_set_hash.get_or_init(|| {
-            let mut hashes: Vec<u64> = self.face_hashes().values().copied().collect();
-            hashes.sort_unstable();
-            hashes.dedup();
-            let bytes: Vec<u8> = hashes.iter().flat_map(|hash| hash.to_le_bytes()).collect();
-            biscuit_hash::xx_hash_bytes(&bytes)
-        })
+    /// One hash over the [`FaceIdentity`] of every face in the database
+    /// (installed and bundled), independent of loading order, with `stacks`
+    /// deciding which faces are hashed by contents. This is the set of faces
+    /// fallback can reach, so it also covers a family's own CSS asking for a
+    /// font its stack does not name.
+    #[cfg(test)]
+    pub(crate) fn font_set_hash(&self, stacks: &[FontQuery]) -> u64 {
+        self.font_set_hash_over(&self.content_faces(stacks))
     }
 
-    /// The content hash of each face's file, hashing each file once. fontdb
-    /// memory-maps a file face while it is read, so files are hashed one at a
-    /// time without being held in memory together.
-    #[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
-    fn face_hashes(&self) -> &HashMap<ID, u64> {
-        self.face_hashes.get_or_init(|| {
-            let started = std::time::Instant::now();
-            let mut by_file: HashMap<FileKey, u64> = HashMap::new();
-            let mut hashes = HashMap::new();
-            let mut bytes_hashed: u64 = 0;
-            for face in self.db.faces() {
-                let key = match &face.source {
-                    Source::Binary(data) => FileKey::Memory(data_address((**data).as_ref())),
-                    Source::File(path) | Source::SharedFile(path, _) => FileKey::Path(path.clone()),
-                };
-                let hash = match by_file.get(&key) {
-                    Some(hash) => Some(*hash),
-                    None => self
-                        .db
-                        .with_face_data(face.id, |data, _| {
-                            bytes_hashed += data.len() as u64;
-                            biscuit_hash::xx_hash_bytes(data)
-                        })
-                        .inspect(|hash| {
-                            by_file.insert(key, *hash);
-                        }),
-                };
-                if let Some(hash) = hash {
-                    hashes.insert(face.id, hash);
-                }
+    fn font_set_hash_over(&self, contents: &HashSet<ID>) -> u64 {
+        let mut entries: Vec<Vec<u8>> = self
+            .db
+            .faces()
+            .filter_map(|face| self.face_identity(face.id, contents))
+            .map(|identity| {
+                let mut bytes = Vec::new();
+                identity.encode(&mut bytes);
+                bytes
+            })
+            .collect();
+        entries.sort_unstable();
+        entries.dedup();
+        biscuit_hash::xx_hash_bytes(&entries.concat())
+    }
+
+    /// The faces D70 hashes by contents for `stacks`: the faces the chain
+    /// resolves for each stack and for each generic family (at regular and at
+    /// every weight, style, and stretch `stacks` ask for), and the bundled
+    /// faces.
+    fn content_faces(&self, stacks: &[FontQuery]) -> HashSet<ID> {
+        let mut attributes: Vec<FaceAttributes> = vec![(400, Style::Normal, Stretch::Normal)];
+        for query in stacks {
+            let attribute = (query.weight, query.style, query.stretch);
+            if !attributes.contains(&attribute) {
+                attributes.push(attribute);
             }
-            tracing::debug!(
-                files = by_file.len(),
-                bytes_hashed,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "hashed font files"
-            );
-            hashes
-        })
+        }
+        let generics = attributes.iter().flat_map(|(weight, style, stretch)| {
+            GenericFamily::ALL.into_iter().map(|generic| {
+                FontQuery::new(vec![FamilyName::Generic(generic)])
+                    .with_weight(*weight)
+                    .with_style(*style)
+                    .with_stretch(*stretch)
+            })
+        });
+        let resolved: Vec<ID> = stacks
+            .iter()
+            .cloned()
+            .chain(generics)
+            .filter_map(|query| self.resolve(&query))
+            .collect();
+        self.named
+            .iter()
+            .filter(|face| !face.installed)
+            .map(|face| face.id)
+            .chain(self.last_resort.iter().copied())
+            .chain(resolved)
+            .collect()
+    }
+
+    /// The [`FaceIdentity`] of face `id`, hashing its contents when it is in
+    /// `contents` or held in memory.
+    fn face_identity(&self, id: ID, contents: &HashSet<ID>) -> Option<FaceIdentity> {
+        let face = self.db.face(id)?;
+        let index = face.index;
+        match source_path(&face.source) {
+            Some(path) if !contents.contains(&id) => {
+                let metadata = std::fs::metadata(path).ok();
+                Some(FaceIdentity::File {
+                    path: path.to_path_buf(),
+                    size: metadata.as_ref().map(std::fs::Metadata::len),
+                    modified: metadata.and_then(|metadata| metadata.modified().ok()),
+                    index,
+                })
+            }
+            _ => Some(FaceIdentity::Contents {
+                hash: self.content_hash(face)?,
+                index,
+            }),
+        }
+    }
+
+    /// The content hash of `face`'s font data, hashing each file once per
+    /// chain. fontdb memory-maps a file face only while it is read.
+    fn content_hash(&self, face: &FaceInfo) -> Option<u64> {
+        let key = match &face.source {
+            Source::Binary(data) => FileKey::Memory(data_address((**data).as_ref())),
+            Source::File(path) | Source::SharedFile(path, _) => FileKey::Path(path.clone()),
+        };
+        let mut hashes = self.content_hashes.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hash) = hashes.get(&key) {
+            return Some(*hash);
+        }
+        let hash = self.db.with_face_data(face.id, |data, _| biscuit_hash::xx_hash_bytes(data))?;
+        self.contents_hashed.fetch_add(1, Ordering::Relaxed);
+        hashes.insert(key, hash);
+        Some(hash)
+    }
+
+    /// How many font files' (or in-memory fonts') contents this chain has
+    /// hashed.
+    #[cfg(test)]
+    pub(crate) fn contents_hashed(&self) -> usize {
+        self.contents_hashed.load(Ordering::Relaxed)
     }
 
     /// Every family name (each language fontdb read) that resolution can
@@ -570,14 +744,12 @@ impl FontChain {
     }
 }
 
-#[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
 #[derive(PartialEq, Eq, Hash)]
 enum FileKey {
     Path(PathBuf),
     Memory(usize),
 }
 
-#[allow(dead_code, reason = "the Mermaid cache key (D63) consumes face identities")]
 fn data_address(data: &[u8]) -> usize {
     data.as_ptr() as usize
 }
