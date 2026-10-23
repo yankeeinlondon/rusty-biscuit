@@ -406,6 +406,300 @@ docs_updated_during_phase_11:
 docs_created_during_phase_11: []
 skills_files_updated_during_phase_11:
     - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_12:
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/reconcile.rs
+    - schematic/definitions/src/naming.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/export/asyncapi/mod.rs
+    - schematic/gen/src/export/postman/auth.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/item.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/request.rs
+    - schematic/gen/src/export/postman/responses.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/src/validation.rs
+docs_updated_during_phase_12:
+    - schematic/README.md
+    - schematic/gen/README.md
+    - schematic/definitions/README.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/docs/generation/workflow.md
+    - schematic/docs/io/crates-openapi.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/io/openapi-extensions.md
+    - schematic/docs/typed-registration.md
+    - .claude/commands/create-schematic-api.md
+docs_created_during_phase_12: []
+skills_files_updated_during_phase_12:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_13:
+    - schematic/gen/tests/l1/asyncapi_persist.rs
+docs_updated_during_phase_13: []
+docs_created_during_phase_13: []
+skills_files_updated_during_phase_13: []
+source_code:
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/extension_reimport.rs
+    - schematic/gen/tests/l1/upstream_hygiene.rs
+    - schematic/definitions/tests/schema_fidelity_baseline.rs
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/components.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/components.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/tests/schema_closure.rs
+    - schematic/define/tests/openapi_tests.rs
+    - schematic/gen/src/validation.rs
+    - schematic/definitions/Cargo.toml
+    - schematic/definitions/tests/schema_fidelity.rs
+    - schematic/definitions/tests/schema_values.rs
+    - Cargo.lock
+    - schematic/openapi/anthropic.json
+    - schematic/openapi/artificial_analysis.json
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/elevenlabs.json
+    - schematic/openapi/emqx.json
+    - schematic/openapi/eversolo.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/huggingface.json
+    - schematic/openapi/lmstudio.json
+    - schematic/openapi/ollama.json
+    - schematic/openapi/openai.json
+    - schematic/openapi/samsung_smart_tv.json
+    - schematic/openapi/unfolded_circle_core_rest.json
+    - schematic/define/src/openapi/export/headers.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/mod.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/vocabulary.rs
+    - schematic/gen/tests/l1/fixed_header_export.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/define/src/types.rs
+    - schematic/define/src/openapi/extensions.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/export/responses.rs
+    - schematic/define/src/openapi/export/security.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/auth.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/extension.rs
+    - schematic/define/src/openapi/import/reconcile.rs
+    - schematic/define/src/openapi/import/query_paths.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/openapi/import/mappings/discriminator.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/response_openapi.rs
+    - schematic/define/tests/openapi_import_parameters.rs
+    - schematic/define/tests/openapi_multipart_import.rs
+    - schematic/define/tests/openapi_extension_matrix.rs
+    - schematic/define/tests/openapi_standard_matrix.rs
+    - schematic/define/tests/matrix_support/mod.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/vocabulary_exports.rs
+    - schematic/definitions/src/registry/inventory.rs
+    - schematic/definitions/src/registry/lookup.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/tests/api_inventory.rs
+    - schematic/definitions/tests/ws_conformance.rs
+    - schematic/definitions/tests/ws_definition_json.rs
+    - schematic/gen/src/pipeline.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/inventory.rs
+    - schematic/gen/src/output/ws_modules.rs
+    - schematic/gen/src/output/assemble/helpers.rs
+    - schematic/gen/src/output/assemble/lib_rs.rs
+    - schematic/gen/src/output/assemble/mod.rs
+    - schematic/gen/src/output/assemble/prelude.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/api_inventory.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/l1/ws_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/definitions/src/naming.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/gen/src/inference.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/mod.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/tests/l1/definition_bundles.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/module_naming.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/module_features.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/prelude.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/justfile
+    - schematic/schema/src/anthropic.rs
+    - schematic/schema/src/artificial_analysis.rs
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/mod.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/emqx/mod.rs
+    - schematic/schema/src/emqx/requests.rs
+    - schematic/schema/src/eversolo/mod.rs
+    - schematic/schema/src/eversolo/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/huggingface/mod.rs
+    - schematic/schema/src/huggingface/requests.rs
+    - schematic/schema/src/lmstudio.rs
+    - schematic/schema/src/ollama/mod.rs
+    - schematic/schema/src/ollama/requests.rs
+    - schematic/schema/src/openai/mod.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/src/samsung_smart_tv.rs
+    - schematic/schema/src/unfolded_circle_core_rest.rs
+    - schematic/gen/tests/l1/generated_docs.rs
+    - schematic/gen/Cargo.toml
+    - schematic/gen/src/export/auth.rs
+    - schematic/gen/src/export/body.rs
+    - schematic/gen/src/export/examples.rs
+    - schematic/gen/src/export/examples/tests.rs
+    - schematic/gen/src/export/postman/auth.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/environment.rs
+    - schematic/gen/src/export/postman/examples.rs
+    - schematic/gen/src/export/postman/graphql.rs
+    - schematic/gen/src/export/postman/item.rs
+    - schematic/gen/src/export/postman/request.rs
+    - schematic/gen/src/export/postman/responses.rs
+    - schematic/gen/src/export/postman/types.rs
+    - schematic/gen/src/export/postman/variables.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json
+    - schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json
+    - schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json
+    - schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json
+    - schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json
+    - schematic/gen/tests/fixtures/postman/golden/oauth2_grants.json
+    - schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/response_adapters.rs
+    - schematic/postman/anthropic.postman_collection.json
+    - schematic/postman/anthropic.postman_environment.json
+    - schematic/postman/artificial_analysis.postman_collection.json
+    - schematic/postman/artificial_analysis.postman_environment.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/bitbucket.postman_environment.json
+    - schematic/postman/elevenlabs.postman_collection.json
+    - schematic/postman/elevenlabs.postman_environment.json
+    - schematic/postman/emqx.postman_collection.json
+    - schematic/postman/emqx.postman_environment.json
+    - schematic/postman/eversolo.postman_collection.json
+    - schematic/postman/eversolo.postman_environment.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/gitea.postman_environment.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/github.postman_environment.json
+    - schematic/postman/gitlab.postman_collection.json
+    - schematic/postman/gitlab.postman_environment.json
+    - schematic/postman/huggingface.postman_collection.json
+    - schematic/postman/huggingface.postman_environment.json
+    - schematic/postman/lmstudio.postman_collection.json
+    - schematic/postman/lmstudio.postman_environment.json
+    - schematic/postman/ollama.postman_collection.json
+    - schematic/postman/ollama.postman_environment.json
+    - schematic/postman/openai.postman_collection.json
+    - schematic/postman/openai.postman_environment.json
+    - schematic/postman/samsung_smart_tv.postman_collection.json
+    - schematic/postman/samsung_smart_tv.postman_environment.json
+    - schematic/postman/unfolded_circle_core_rest.postman_collection.json
+    - schematic/postman/unfolded_circle_core_rest.postman_environment.json
+    - schematic/gen/src/asyncapi_import.rs
+    - schematic/gen/src/asyncapi_import/extensions.rs
+    - schematic/gen/src/asyncapi_import/reader.rs
+    - schematic/gen/src/asyncapi_import/v3.rs
+    - schematic/gen/src/commands.rs
+    - schematic/gen/src/export/asyncapi/mod.rs
+    - schematic/gen/tests/common/asyncapi.rs
+    - schematic/gen/tests/common/mod.rs
+    - schematic/gen/tests/l1/asyncapi_export.rs
+    - schematic/gen/tests/l1/asyncapi_import_matrix.rs
+    - schematic/gen/tests/l1/asyncapi_persist.rs
+    - schematic/gen/tests/l1/asyncapi_round_trip.rs
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/LICENSE
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/NOTICE
+    - schematic/asyncapi/elevenlabs_ws.json
+    - schematic/asyncapi/samsung_smart_tv_remote_ws.json
+    - schematic/asyncapi/unfolded_circle_core_ws.json
+    - schematic/asyncapi/unfolded_circle_dock_ws.json
+    - schematic/asyncapi/unfolded_circle_integration_ws.json
+documentation:
+    - schematic/features/2026-10-18-schematic-fidelity-polish/contracts.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/dependencies.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+    - schematic/docs/io/openapi-extensions.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/generation/generated-clients.md
+    - schematic/docs/definition-builders.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - schematic/docs/generation/workflow.md
+    - schematic/definitions/README.md
+    - .claude/skills/schematic-define/schematic/definitions.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/schema/README.md
+    - schematic/docs/graphql.md
+    - schematic/docs/io/export-postman.md
+    - .claude/skills/schematic-define/schematic/responses.md
+    - schematic/docs/websocket-definitions.md
+    - schematic/docs/io/asyncapi.md
+    - schematic/gen/tests/fixtures/asyncapi/spec-json-schemas/PROVENANCE.md
+    - .claude/skills/schematic-define/schematic/websocket.md
+    - schematic/define/README.md
+    - schematic/README.md
+    - schematic/gen/README.md
+    - schematic/docs/io/crates-openapi.md
+    - .claude/commands/create-schematic-api.md
+completed_phase: 13
+implemented: true
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -1026,7 +1320,7 @@ are final correctness checks, not reruns of exploratory spikes.
 
 ### Wave 25: Independent documentation audits
 
-- [ ] **Audit guidance**
+- [x] **Audit guidance**
   - R48: audit schematic/README, define/gen/schema READMEs, and docs/io pages:
     openapi-extensions, export-openapi, import-openapi, export-postman,
     crates-openapi, plus AsyncAPI export and feature/inventory guidance.
@@ -1034,7 +1328,7 @@ are final correctness checks, not reruns of exploratory spikes.
     for generation and round-trip flows. Topic pages never name/link feature/fix
     snapshots. Ownership: README/topic docs.
 
-- [ ] **Audit contracts**
+- [x] **Audit contracts**
   - R49: review changed symbols' rustdoc/inline comments against code, record
     drift corrected, and verify subset, strict-mode, auth, feature, and example
     guarantees agree across docs and tests.
@@ -1045,7 +1339,7 @@ are final correctness checks, not reruns of exploratory spikes.
 
 ### Wave 26: Determinism checkpoint
 
-- [ ] **Check regeneration**
+- [x] **Check regeneration**
   - Regenerate Rust/OpenAPI/Postman/environments/AsyncAPI through recipes twice;
     second outputs must be identical with no unintended diff. Review renamed
     files, shared-module siblings, full/partial manifests, and artifact drift.
@@ -1059,7 +1353,7 @@ symbol received a drift pass, and deterministic artifacts have no stale files.
 
 ### Wave 27: Final acceptance run
 
-- [ ] **Verify acceptance**
+- [x] **Verify acceptance**
   - Run from schematic/: `just test`, `just doctest`, `just lint`,
     `just lint-schema`, and `just test-schema`; include recipe-driven selected
     feature/doc compile checks and all artifact/input-matrix coverage.
@@ -1079,7 +1373,7 @@ symbol received a drift pass, and deterministic artifacts have no stale files.
 
 ### Wave 28: Ledger and review handoff
 
-- [ ] **Close ledger**
+- [x] **Close ledger**
   - R44, R45: create one disposition table with all 22 ledger rows and 14
     recommendations, each linked to actual child implementation evidence or a
     reasoned accepted gap. Verify 36 nonblank entries with a one-shot check;
@@ -1093,7 +1387,7 @@ symbol received a drift pass, and deterministic artifacts have no stale files.
     and typed convenience methods. Retrieve reasons from predecessor evidence;
     absent evidence stays open, never invented.
 
-- [ ] **Report closure**
+- [x] **Report closure**
   - R46, R47: evaluate D20's four parts independently: landing acceptance,
     dependent checks, dispositions, and sniff migration. Refresh sniff symbol
     search/spec status read-only; any reference or incomplete migration makes
