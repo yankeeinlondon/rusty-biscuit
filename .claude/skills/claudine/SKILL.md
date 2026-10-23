@@ -508,6 +508,20 @@ handoff, and the live value is always checked again at the command. User docs:
 [Lifecycle → What a guard proves](topics/flow-control/lifecycle.md#what-a-guard-proves-to-the-actions-it-selects)
 and [Sequences → Task guards](topics/flow-control/sequences.md#task-guards-when).
 
+Darkmatter's design-time call check rejects any composed prompt (compose,
+inline-compose, sequence task) whose authored call is proven wrong, before
+any expression or shell runs, including dead branches. Claudine adds no rule:
+the rejection is Darkmatter's `MarkdownError` carrying
+`ExpressionError::CallCheck` (`rejected_call()`). A shipped prompt or fixture
+that trips it holds a real bug, so fix the call; never work around the check.
+The function catalog (`darkmatter/schemas/partials/functions.yaml`, read
+through `expression_function_catalog()`) and the argument categories are
+Darkmatter's library; `claudine context --expressions` renders that catalog
+and states no conversion rule. DMLS shows the same verdict while editing
+(`dm.expression.incompatible_call`), plus `dm.expression.uncertain_call`
+warnings that `[expressions] strict` widens; see the darkmatter skill's
+`dmls.md`.
+
 Late roots are `seq`, `loop`, and `group`; sequence and container terminal
 event shells participate in the same closed graph audit. Both group schedulers
 validate all members before member start, retaining `LateValues`, prompt

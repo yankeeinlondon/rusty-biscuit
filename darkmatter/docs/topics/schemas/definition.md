@@ -84,10 +84,10 @@ $schema:
 | `date`       | ISO-8601 date `YYYY-MM-DD`.                                                                            | JSON Schema `format: date`.                                                                                                                                                     |
 | `datetime`   | An RFC 3339 datetime `YYYY-MM-DDThh:mm:ss[.ms]` with a **required** offset (`Z` or `±HH:MM`).          | JSON Schema `format: date-time`.                                                                                                                                                |
 | `time`       | An RFC 3339 time `hh:mm:ss` or `hh:mm:ss.ms` with a **required** offset (`Z` or `±HH:MM`); seconds are required (`14:30Z` is invalid). | JSON Schema `format: time`.                                                                                                                       |
-| `number`     | Any JSON number.                                                                                       | Constraints: `min`, `max`, `integer`, `suggest`, `default`, `required`.                                                                                                         |
-| `numberlike` | A JSON number **or** text `number` would accept (`"4"`, `" 4 "`, `"+4"`, `"1e3"`, `"1_000"`).          | Compiles to `{ "type": ["number", "string"], "format": "darkmatter-numberlike" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
-| `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
-| `boolish`    | A JSON boolean **or** a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case).      | Compiles to `{ "type": ["boolean", "string"], "format": "darkmatter-boolish" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
+| `number`     | Any JSON number; numeric text converts to one ([Type Coercion](#conversion-rules)). | Constraints: `min`, `max`, `integer`, `suggest`, `default`, `required`.                                                                                                         |
+| `numberlike` | What `number` accepts: a JSON number **or** numeric text (`"4"`, `" 4 "`, `"+4"`, `"1e3"`, `"1_000"`).          | Compiles to `{ "type": ["number", "string"], "format": "darkmatter-numberlike" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
+| `boolean`    | Any JSON boolean; a boolean word converts to one ([Type Coercion](#conversion-rules)). | Constraints: `default`, `required`.                                                                                                                                             |
+| `boolish`    | What `boolean` accepts: a JSON boolean **or** a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case). | Compiles to `{ "type": ["boolean", "string"], "format": "darkmatter-boolish" }`. The value is validated and kept **exactly as written** (see [Type Coercion](#numberlike-and-boolish-keep-what-was-written)). |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
 | `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)` (each glob a prefixed glob reference such as `^**/*spec*.md`), `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
@@ -411,7 +411,7 @@ while `md schema validate` reports it.
 |--------------|---------------------------------|-------------------------|
 | `min(n)`     | Inclusive minimum.              | `minimum`               |
 | `max(n)`     | Inclusive maximum.              | `maximum`               |
-| `integer`    | Whole numbers only.             | `type: integer`         |
+| `integer`    | Whole numbers below 2^64 in magnitude. | `type: integer` and `x-darkmatter-integer: true` |
 | `default(n)` | Default value.                  | `default`               |
 | `required`   | Property is required.           | parent `required` entry |
 
@@ -1513,9 +1513,9 @@ $schema:
 ```
 
 - They compile to `{ "type": "string", "format": "darkmatter-yaml" }` / `"darkmatter-json"`, with validators that parse the value through biscuit-file's YAML / strict-JSON facilities. A parse failure is a validation error.
-- **String or native, with coercion.** The value may be a YAML/JSON **string** *or* a **native** mapping/sequence/scalar. A native value is coerced to its YAML/JSON string serialization (the same write-back model as scalar coercion) before validation; a native value that cannot be represented in the target format is a validation error. So `frontmatter: yaml` accepts both `"title: Foo"` and a native `{ title: Foo }`.
+- **String or native.** The value may be a YAML/JSON **string** *or* a **native** mapping, sequence, number, or boolean, so `frontmatter: yaml` accepts both `"title: Foo"` and a native `{ title: Foo }`. How a native value becomes text, and why text is kept as written, is part of [Type Coercion](#conversion-rules).
 - **`json` is strict; `yaml` is a superset.** JSON is valid YAML, so `yaml` accepts JSON; `json` rejects YAML-only syntax.
-- Validation-only APIs stay **non-mutating** — they validate against a transient coerced copy and leave the caller's frontmatter untouched. Only the composing/write-back path exposes the serialized value.
+- Validation-only APIs stay **non-mutating** — they validate against a transient converted copy and leave the caller's frontmatter untouched. Only the composing/write-back path exposes the serialized value.
 - Embedded sub-schema constraints (`yaml(schema(<ref>))`) are deferred to a future extension.
 
 ## Unions
@@ -1618,7 +1618,7 @@ Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
 | `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |
 | `returns(T)` | The value returned on success; any type, including a union. |
 | `category(Name)` | The documentation category (see [Categories](#categories)). |
-| `fallible` | The function can fail even when its arguments are valid. |
+| `fallible` | The function can fail even when its arguments are valid. A function whose only failure is a wrong argument is not fallible: such a call never reaches it (see [Type Coercion](#function-calls-bind-then-compute)). |
 | `example(call => result)` | An inline example; repeatable (see below). |
 | `example(./file.yaml)` | An example file, as on any type. |
 
@@ -1633,8 +1633,42 @@ out but rejects `null`, while `age?: number | null` allows both.
 **Inline examples.** `example(CALL => RESULT)` shows a call and its expected
 result. `CALL` is a Darkmatter function-call expression. `RESULT` is a
 literal (`3`, `"3"`, `[1, 2]`, `{a: 1}`, `null`, `true`) or the word `error`.
-Add `; display-only: REASON` for an example that cannot run reliably in a
-test, such as one that needs the network.
+An inline example is executable: tests run the call and compare the result
+structurally, so `3` is not `"3"` and the key order of an object does not
+matter. Add `; display-only: REASON` for an example that cannot run reliably
+in a test, such as one that needs the network or the clock; it is shown in
+documentation and never run. A result that spans several lines uses the file
+form instead, whose file holds the call as `invocation` and the result as
+`returns`:
+
+```yaml
+types:
+    ping: |-
+        function(
+            parameters(address: string, timeout?: number);
+            returns(boolean | null);
+            category(Network);
+            fallible;
+            example(ping("192.168.1.1", 250) => true; display-only: needs network);
+        ) -> Sends one ICMP echo to an IP address.
+    as_line_separated: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(./function-examples/as_line_separated.yaml);
+        ) -> Joins a list into newline-separated text.
+```
+
+```yaml
+# function-examples/as_line_separated.yaml
+kind: example
+invocation: 'as_line_separated(["a", "b", "c"])'
+returns: |-
+    a
+    b
+    c
+```
 
 **Overloads.** A function with several signatures is a union of `function(...)`
 types, written as a YAML list or with `|`. Two overloads whose parameters bind
@@ -1932,7 +1966,7 @@ flowchart TD
 |---|---|---|
 | Validation | It never needs to: the value is valid when any arm accepts it. | — |
 | Problem reporting | A literal tag selects one arm ([Discriminated Unions](#discriminated-unions)). A root union also reports its closest arm. | The ordinary union report. |
-| Conversion (validation and compose) | An arm accepts the value as written; otherwise exactly one arm is reachable, or the number-over-boolean or JSON-over-YAML tie-breaker settles it ([Unions](#unions)). Arm order never matters. | The value is left as written; a tie no tie-breaker settles is an error naming each reading. |
+| Conversion (validation and compose) | An arm accepts the value as written; otherwise exactly one arm is reachable, or the number-over-boolean or JSON-over-YAML tie-breaker settles it ([Choosing a Union Option](#choosing-a-union-option)). Arm order never matters. | The value is left as written; a tie no tie-breaker settles is an error naming each reading. |
 | Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](#files)). | The value is left unchanged. |
 | Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
 | Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
@@ -2378,7 +2412,30 @@ accepts it. Function arguments go through the same conversion engine with the
 same rules, so a type means the same thing in `$schema` and in a function
 signature. Conversion is always on; there is no opt-in or strict flag. It
 covers inline `$schema`, baseline-merged fields, trigger payloads, and raw
-JSON Schema documents.
+JSON Schema documents. This section is the one description of that engine;
+other pages link here.
+
+The rule behind every conversion: a value is converted only when the
+conversion cannot change what the author meant. `"4"` given to a `number`
+means 4, so it converts; `"pear"` does not, so it is an error.
+
+### Two Interfaces of a Type
+
+A type answers two questions, and they are worth keeping apart:
+
+| Interface | Question | Example for `number` |
+|---|---|---|
+| **Accepts** | Which values may an author or caller supply? | `4`, `"4"`, `" 4 "` |
+| **Delivers** | What does the document, or the function, end up holding? | the number `4`, always |
+
+For most types the two differ only by conversion: a `number` property
+accepts numeric text but always holds a real number afterward, so a later
+reader never has to ask whether it was written `4` or `"4"`.
+[`numberlike` and `boolish`](#numberlike-and-boolish-keep-what-was-written)
+exist for the case where that difference matters: they accept exactly what
+`number` and `boolean` accept but deliver the value as written.
+
+### Three Actions per Value
 
 For each value the engine takes exactly one of three actions:
 
@@ -2387,11 +2444,14 @@ flowchart TD
     V[value + declared type] --> K{Already matches the type<br/>and its constraints?}
     K -->|yes| KEEP[keep it unchanged]
     K -->|no| C{One direct conversion<br/>into the type?}
-    C -->|no| ERR[validation error with the reason]
+    C -->|no| ERR[error with the reason]
     C -->|yes| CHECK{Converted value meets<br/>the constraints?}
-    CHECK -->|yes| CONV[write back the converted copy]
+    CHECK -->|yes| CONV[use the converted copy]
     CHECK -->|no| ERR
 ```
+
+In frontmatter the error is a validation error on the property; in a function
+call it is a type error and the function does not run.
 
 Constraints are enforced, never repaired: `"2.5"` against `number(integer)`
 is an error, not `2`, and `"ABCD"` against `string(max(3))` is never
@@ -2450,27 +2510,36 @@ formats use the same parser as the engine.
 
 Conversion follows the declared structure at every depth: lists, tuples,
 inline objects, unions inside them, `numberlike`/`boolish` fields, and the
-values under pattern keys (`<string>: number`). A list or object is converted
-all or nothing, and an error names the failing path (`meta.inner.count`,
-`values[2]`). A missing optional tuple position stays missing.
+values under pattern keys (`<string>: number`). The container rules:
+
+- a list or object is converted all or nothing, and an error names the
+  failing path (`meta.inner.count`, `values[2]`);
+- a missing optional tuple position stays missing, never `null`, and a
+  missing required position is an error at its path;
+- a single value is never wrapped into a list;
+- a plain `object` or `unknown` declares no structure, so its contents are
+  kept as written.
 
 ```yaml
 $schema:
     meta: "{ inner: { count: number }, scores: { <string>: number } }"
+    pair: "tuple([string, number])"
 meta:
     inner: { count: "3" }
     scores: { a: "4" }
+pair: ["Ada", "36"]
 # composes as
 meta:
     inner: { count: 3 }
     scores: { a: 4 }
+pair: ["Ada", 36]
 ```
 
 Each top-level property is its own value. When one property fails, the
 others still convert, and a missing required property never stops a sibling
 from converting: presence is reported by validation, not by conversion.
 
-### Unions
+### Choosing a Union Option
 
 A union chooses its option the same way everywhere, and the order the
 options are written in never matters:
@@ -2496,7 +2565,85 @@ options are written in never matters:
 A root-level union picks its arm by the same rule; an arm's conversions are
 written back only when the converted document satisfies that arm.
 
-### Raw JSON Schema
+### Function Calls: Bind, Then Compute
+
+An [expression function](../darkmatter-expressions.md#functions) declares
+its parameters with the same types (see
+[Function Signatures](#function-signatures)), and every call runs in two
+steps:
+
+1. **Bind.** The engine checks every argument against its parameter, keeping
+   or converting it by the rules above. A call whose arguments do not all
+   bind is a **type error**, and the function never runs.
+2. **Compute.** The function receives values of exactly its declared types
+   and does its work. Only a function marked `fallible` can fail here, with
+   a domain error such as a failed network request.
+
+```md
+{{ min("4", 5) }}      ⇒ 4         "4" binds as the number 4
+{{ upper(2026) }}      ⇒ 2026      a number binds as text
+{{ min("pear", 5) }}   ⇒ type error; min never runs
+```
+
+No function converts its own arguments, so the declared signature is a
+complete statement of what a function accepts. Parameters follow the
+property rules with two differences: a parameter is required unless it is
+written `name?: T`, and it accepts `null` only when its type says so
+(`number | null`). Omitting an optional argument is not the same as passing
+`null`.
+
+A function with several signatures (overloads) binds to one of them. A
+signature that accepts every argument without conversion wins over one that
+needs conversion; otherwise exactly one signature must bind. Two equally
+good signatures are an ambiguity error, none binding is a type error that
+lists every signature, and the order they are written in never matters.
+
+Before a document is composed, Darkmatter also checks its calls against the
+declared types without running anything, and rejects a call no value could
+ever bind. See [Call Check](../../inline/call-check.md).
+
+### Type Errors
+
+The engine checks every value before it reports, so one error names every
+value that failed, not just the first. A type error carries:
+
+- for a call, the function and its signature (every signature, for an
+  overload), and each failing parameter's name and position;
+- for frontmatter, the property's path and its line and column;
+- the expected type with its constraints, the value received, and the reason:
+  no conversion from that type, the conversion failed, a constraint is not
+  met, the number cannot be represented exactly, or a union or overload is
+  ambiguous.
+
+With `low: number` unset and `high: string` set to `pear`,
+`{{ min(low, high) }}` fails on both arguments:
+
+```text
+min: invalid arguments for min(a: number, b: number): number a (argument
+1): expected number; received null; the parameter does not declare |
+null b (argument 2): expected number; received text "pear"; conversion
+failed: not a number
+```
+
+A frontmatter failure names the path inside the value:
+
+```yaml
+---
+$schema:
+    values: number[]
+    tags: string[]
+values: ["1", "2", "x"]
+tags: "a"
+---
+```
+
+```text
+- ✗ the document doc.md failed schema validation:
+    - values/2 "x" is not of type "number" (at line 5, column 20)
+    - tags "a" is not of type "array" (at line 6, column 7)
+```
+
+### Converting Through Raw JSON Schema
 
 A raw JSON Schema converts through `type` (including type arrays), `const`,
 `enum`, `properties`, `patternProperties`, `additionalProperties`, `items`,
@@ -2516,6 +2663,30 @@ both. Remote references are never fetched.
 A value that still holds `$(...)` or an unresolved `{{ ... }}` is not
 converted or judged yet; it is checked after shell expansion and
 interpolation, while its resolved siblings convert now.
+
+### Changes for Existing Documents
+
+Frontmatter conversion now uses the same engine as function calls, which
+changes some results on purpose. There is no compatibility mode. A document
+written for the earlier rules may see:
+
+| Value | Before | Now |
+|---|---|---|
+| `"yes"`, `"no"`, `"on"`, `"off"`, `"1"`, `"0"` against `boolean` | rejected as ambiguous | converted |
+| boolean words in mixed case (`"tRuE"`) | only `true`/`True`/`TRUE` and the `false` equivalents | any letter case |
+| `" 4 "`, `"+4"`, `"1e3"`, `".5"`, `"1_000"` against `number` | rejected | converted |
+| a number `f64` cannot hold exactly (`9007199254740993`, `"1e400"`) | silently rounded | an error; see [Numbers](../numbers.md) |
+| a root-level union | the first arm, in written order, that validated | the [union rule](#choosing-a-union-option), whatever the order |
+| a property-level union | converted only when exactly one option validated | the union rule |
+| unions, `numberlike`/`boolish`, and pattern-key values inside a nested object | not converted | converted at every declared depth |
+| a number or boolean against `enum(...)` or a string literal | rejected | converted to text, then checked (`2` against `enum("1", "2")` becomes `"2"`) |
+| a raw JSON Schema | converted through a few keywords | converted through every keyword listed in [Converting Through Raw JSON Schema](#converting-through-raw-json-schema) |
+| a mapping serialized into `json`/`yaml` | keys sorted alphabetically | keys in written order |
+| `numberlike` and `boolish` values | numeric text became a number, `"true"`/`"false"` a boolean | validated, then kept exactly as written |
+| text `numberlike` / `boolish` accepts | only `-?digits(.digits)` / only `true`/`false` spellings | the same spellings as `number` / `boolean` |
+
+Validation-only calls still write nothing, and compose still writes
+converted values back in the same shape.
 
 ## CLI: `md schema validate`
 
@@ -3135,11 +3306,15 @@ Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It
 ```
 Load markdown
   └─ Apply --set / --state overrides
-      └─ Frontmatter Interpolation   ({{ var }})
-          └─ Schema Validation  ──► fails fast on violation
-              └─ Frontmatter Shell Expansion ($(cmd))
-                  └─ …remaining stages…
+      └─ Call Check  ──► rejects a call no value could bind; nothing has run yet
+          └─ Frontmatter Interpolation   ({{ var }})
+              └─ Schema Validation  ──► fails fast on violation
+                  └─ Frontmatter Shell Expansion ($(cmd))
+                      └─ …remaining stages…
 ```
+
+The [call check](../../inline/call-check.md) reads only the schema's declared
+types, so it runs before any value is computed.
 
 The stage is **not** part of the `ComposeOperation` enum — it cannot be excluded via `ComposeOptions::only(...)` or `disable(...)`.
 
@@ -3151,7 +3326,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - `--baseline-schema <path>` replaces the default Darkmatter base schema with a custom SimplifiedSchema YAML baseline.
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
-- The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
+- The stage **mutates** the document: it converts values to their declared types, at every declared depth (see [Type Coercion](#type-coercion)), and **writes the converted values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
 - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper.
 - Problems on a whole-value frontmatter shell expression (`$(...)`), or on a key whose `{{ }}` template reads one, are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing, so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
@@ -3224,9 +3399,8 @@ written. See [Selecting the Baseline](#selecting-the-baseline).
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
-- **No arrays of anonymous unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form; there is no `(A | B)[]` spelling. Name the union and reference it as `U[]` instead (see [Named Union References](#named-union-references)). This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays).
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
-- **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
+- **No conversions beyond the rule list.** Only the [conversion rules](#conversion-rules) apply: no text parsed into a list or object, no value wrapped into a list, and no cross-property conversions.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.
 - **No constraint inference in detection.** Patterns, `min` / `max`, and enum members are never synthesised from values.
 - **No `additionalProperties: false` opt-in at the root.** Root schemas always allow extra keys; a `strict` mode may land later. Inline objects always set `additionalProperties: false`.

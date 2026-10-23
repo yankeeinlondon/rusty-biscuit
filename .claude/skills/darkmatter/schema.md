@@ -10,6 +10,7 @@ and DMLS schema behavior.
 - [Runtime baseline](#runtime-baseline)
 - [Imports and dictionaries](#imports-and-dictionaries)
 - [Named union references](#named-union-references)
+- [Conversion engine](#conversion-engine)
 - [Tuples, functions, `|`, and categories](#tuples-functions--and-categories)
 - [Special types](#special-types)
 - [Core types](#core-types-unknown-null-alphanumeric-shell)
@@ -358,7 +359,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   eager-file rewriting needs exactly one validating arm containing an eager
   `file`; cleanup never repairs inside a union.
 
-## Conversion engine (`2026-10-28-schema-enhancements`)
+## Conversion engine
 
 - One rule core, `markdown::coercion` (`Shape`, `bind`, `bind_with`,
   `check_exact`, `accepts_exactly`, `content_error`), serves frontmatter and
@@ -381,6 +382,10 @@ References; Choosing an Arm: Reporting versus Changing Data).
   2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
   `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
   formats and are kept as written.
+- User docs: the one rule list is `topics/schemas/definition.md` "Type
+  Coercion" (interfaces, actions, conversions, unions, containers, function
+  binding, type errors, changes for existing documents); other pages link
+  there. Change it there, not in a second copy.
 
 ## Tuples, functions, `|`, and categories
 

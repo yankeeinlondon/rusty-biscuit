@@ -10,6 +10,7 @@ workspace, completion, hover, and diagnostic work.
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
+- [Call diagnostics](#call-diagnostics)
 - [Rollout chronology](#rollout-chronology)
 - [Verification](#verification)
 
@@ -545,6 +546,49 @@ branch, even without frontmatter. It comes from the library's passive
   The fix rides in `Diagnostic.data` as `KeyReferenceFix`. The code action
   reads `data`, or recomputes the producing provider's diagnostics when a
   client drops `data`, and never parses the message.
+
+## Call diagnostics
+
+`dm.expression.incompatible_call` (**Error**) and
+`dm.expression.uncertain_call` (**Warning**) show Darkmatter's design-time
+argument categories. Darkmatter's library owns every rule: DMLS calls
+`expression::check_expression_calls(expr, &TypeScope)` and maps each
+`CallFinding.category` to a severity in `diagnostics/call_check.rs::severity`
+(5 → error, 3 → warning, 2 and 4 → warning only under `expressions.strict`,
+1 never). Never add a conversion, union, or category rule in DMLS; fix the
+library's `call_check.rs` instead, so composition's precheck and the editor
+keep agreeing. User docs:
+[`dmls/docs/diagnostics.md#call-diagnostics`](../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).
+
+- **Types.** Every site's `TypeScope` is built over
+  `DeclaredTypes::new(effective.simplified)` (declaration-only), never the
+  static-frontmatter layer (which hover's `with_site_scope` uses): a set
+  `maybe: 3` does not remove `null`. Enclosing `::block` guards narrow
+  through `BodyGuards::scope_at`; ternary and `&&` branches narrow inside the
+  library walk.
+- **Sites.** `providers/dsl.rs` checks body `{{ … }}` and every directive
+  `when=` (false `::block` bodies included); `diagnostics/frontmatter.rs`
+  checks expression-typed values, lifecycle stacks and guards, and plain
+  frontmatter `{{ … }}` values. Fenced code and `{{{ … }}}` are skipped.
+  Composition finds its own expressions (`compose/call_precheck.rs`); the two
+  walks must cover the same surfaces.
+- **Ranges.** The argument's span, or the call's for arity, ambiguity, or no
+  matching overload. The message is the library's `CallFinding.message`.
+- **Setting.** `ExpressionsConfig { strict }` in `config/mod.rs`:
+  `[expressions] strict` in `.dmls.toml`, `dmls.expressions.strict` from
+  `didChangeConfiguration` (DMLS never pulls `workspace/configuration`).
+  Same serde validation and layering as `schema.strict`: editor over file
+  over default; an invalid merge falls back to the file layer, not the
+  previous effective config; a whole-settings `null` clears the overlay. It
+  is the only call setting; no function-specific setting exists.
+- **Tests.** `tests/l1/expression_call_diagnostics.rs` (worked-example rows
+  under both settings, from the file and the editor, reloaded at runtime;
+  ranges; verdicts), `tests/l1/call_check_agreement.rs` (a shared corpus
+  composed by `md` and diagnosed by DMLS must reject the same documents),
+  `config::tests::expressions_strict::*` (the input matrix), and the
+  in-source `diagnostics::call_check::tests::diagnostics_never_enter_a_handler`
+  (runs on the test thread because test function registration is
+  thread-local).
 
 ## Rollout chronology
 

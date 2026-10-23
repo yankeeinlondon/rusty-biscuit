@@ -1,9 +1,3 @@
----
-features:
-  - 2026-07-04-dmls
-  - 2026-07-08-modal-and-autocomplete
-  - 2026-07-09-suggest-constraint
----
 # DMLS Autocomplete
 
 Autocomplete (the LSP `textDocument/completion` capability) offers context-aware
@@ -226,8 +220,9 @@ library's semantics.
 
 ## Configuration
 
-Via `.dmls.toml` (layered under LSP `workspace/configuration`, reloadable without
-restart):
+Via `.dmls.toml`, overridden by the editor's `workspace/didChangeConfiguration`
+settings and reloadable without restart (see
+[DMLS Configuration](../../docs/lsp/configuration.md)):
 
 - **`wiki.path_style`** — `shortest` / `relative` / `root-relative`: how an
   inserted wiki target is spelled.

@@ -9,6 +9,7 @@ these you can:
   (`[wiki]`)
 - make frontmatter validation strict, and add schema baselines for parts of
   the tree (`[schema]`)
+- make function-call diagnostics strict (`[expressions]`)
 - set workspace defaults for `textDocument/formatting` (`[formatting]`)
 - toggle code-action categories, frontmatter outline symbols, and semantic
   tokens
@@ -220,6 +221,7 @@ these; see [Who wins](../topics/markdown-formatting.md#who-wins-precedence).
 | `schema.extensions.<name>.path` | (required per entry) | yes |
 | `schema.extensions.<name>.globs` | `[]` | yes |
 | `style.strict` | `false` | **parsed only** |
+| `expressions.strict` | `false` | yes |
 | `shell.policy_path` | unset | yes |
 | `hints.inlay` | `true` | **parsed only** |
 | `code_actions.categories.<category>` | every category enabled | yes |
@@ -406,6 +408,40 @@ strict = false
 `strict` (default `false`) is **parsed only**. Unknown and deprecated
 `style:` keys are reported (`dm.style.unknown_key`,
 `dm.style.deprecated_key`) whatever its value.
+
+## `[expressions]`
+
+Function-call diagnostics.
+
+```toml
+[expressions]
+strict = true
+```
+
+`strict` (default `false`) decides which call arguments warn. Off: an argument
+that might not convert to its parameter's type warns
+(`dm.expression.uncertain_call`), and one that can never bind is an error
+(`dm.expression.incompatible_call`). On: an argument that may be `null` where
+the parameter does not accept `null`, or whose type is unknown, warns as well.
+
+```markdown
+---
+$schema:
+  maybe: number   # optional: a number or null
+maybe: 3
+untyped_var: 1    # not in $schema: its type is unknown
+---
+{{ min(maybe, 5) }}
+{{ min(untyped_var, 5) }}
+```
+
+Both calls are silent by default and warn in strict mode: `maybe` may be
+`null`, and `untyped_var` has no declared type.
+
+It is the only call-diagnostic setting; no function has one of its own. The
+editor key is `expressions.strict` under `dmls`, and it overrides the file
+both ways. See [DMLS Diagnostics](../../dmls/docs/diagnostics.md#expressionsstrict)
+for the categories, the fix for each warning, and what an invalid value does.
 
 ## `[shell]`
 

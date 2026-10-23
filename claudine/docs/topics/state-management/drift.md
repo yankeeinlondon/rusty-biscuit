@@ -62,10 +62,11 @@ Function descriptions and executable handlers are maintained separately, then
 joined by canonical name in the registry. Registry checks reject duplicate
 names, alias collisions, and names missing from either side.
 
-Behavior tests go further: they call documented signatures with the declared
-number of arguments and evaluate function examples against their expected
-results. Language-rule tests also compare operator precedence with the parser
-and evaluate examples for rules such as truthiness and missing-value handling.
+Behavior tests go further: every registered function has a binding row that
+calls it with accepted, rejected, and converted arguments, and every
+executable function example is evaluated against its expected result.
+Language-rule tests also compare operator precedence with the parser and
+evaluate examples for rules such as truthiness and missing-value handling.
 
 This catches a missing handler or a broken example. It does not automatically
 catch a misleading sentence whose associated example still passes.
@@ -155,8 +156,8 @@ omissions cannot be found by the current two-table comparison.
 |---|---|
 | Context schema projection | `projected_descriptors_match_base_schema`, `grouping_map_is_total` |
 | Context capture | `every_descriptor_has_a_captured_runtime_key`, `capture_shape_matches_projected_type` |
-| Expression registration and calls | Registry invariants; `every_descriptor_overload_is_dispatchable_at_its_declared_arity` |
-| Function examples | `every_example_evaluates_to_its_declared_result` |
+| Expression registration and calls | Registry invariants; `the_embedded_catalog_and_the_registry_have_the_same_functions`, `every_registered_function_has_a_row` |
+| Function examples | `every_executable_example_evaluates_to_its_declared_result`, `every_embedded_example_file_evaluates_to_its_returns` |
 | Language rules | `operator_precedence_matches_parser`; semantics `*_examples_evaluate_correctly` tests |
 | Side-effect catalog and calls | `verb_signature_set_equals_descriptor_signature_set`, `every_verb_maps_to_a_reachable_method` |
 | Generated function table | `narrative_doc_function_table_matches_catalog` |

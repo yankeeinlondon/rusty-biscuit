@@ -198,6 +198,8 @@ Expression diagnostics follow one severity policy:
 | `dm.expression.unknown_function` | Error | The function catalog is closed, so compose fails on the call. |
 | `dm.expression.unavailable_global` | Error | Inside an md lifecycle stack, the event declares the global unavailable (`err` in `composed`), so the read fails when the stack runs. |
 | `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
+| `dm.expression.incompatible_call` | Error | Darkmatter's design-time call check proves no value of the argument's type can bind (or the argument count is wrong), so `md compose` rejects the document. |
+| `dm.expression.uncertain_call` | Warning | The argument may not convert to the parameter's type for some values; with `expressions.strict`, also an argument that may be `null` or whose type is unknown. |
 
 The authoritative per-code list is [DMLS diagnostics — Severity](../../dmls/docs/diagnostics.md#severity). A new diagnostic takes its severity from this policy rather than from a neighboring code.
 

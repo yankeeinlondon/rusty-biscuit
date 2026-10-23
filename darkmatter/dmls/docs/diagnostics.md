@@ -1,10 +1,3 @@
----
-features:
-  - 2026-07-04-dmls
-  - 2026-07-09-suggest-constraint
-  - 2026-07-10-interpolation-literal
-  - 2026-07-10-schema-triggers
----
 # DMLS Diagnostics
 
 Diagnostics are how DMLS reports problems in a document — broken links, missing
@@ -59,13 +52,14 @@ open / change / save / config-reload
 
 - Every provider in the registry contributes diagnostics for the document; the
   results are merged.
-- The scheduler debounces rapid edits (configurable — see
-  [Configuration](#configuration)) and stamps each batch with the document
-  version so stale results are ignored.
+- The scheduler publishes as soon as each change is applied and stamps each
+  batch with the document version so stale results are ignored. (A debounce
+  setting is accepted but not yet applied; see
+  [Configuration](#configuration).)
 - The publisher emits `publishDiagnostics` — including an **empty** array when a
   document becomes clean, so the editor clears old markers.
-- A `didChangeConfiguration` reload re-publishes diagnostics for all open
-  documents without a restart.
+- A configuration reload (new editor settings, or an edited `.dmls.toml`)
+  re-publishes diagnostics for all open documents without a restart.
 
 ## Sources and codes
 
@@ -193,6 +187,8 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. A root is classified against the binding view of its site: inside an md lifecycle stack (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) that event's view, which declares `err` and `timing`; elsewhere Darkmatter's baseline view, where `err` and `timing` are document properties like any other. A global a host catalog in the document's schema roots declares (Claudine's `seq`, `loop`, and `group`) is never reported, inside a stack or not. `current` is a reserved namespace and is never reported. |
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. Also checked in every `{{ … }}` span and `when` condition inside an md lifecycle stack. |
 | `dm.expression.unavailable_global` | **Error.** A read, inside an md lifecycle stack, of a global the event's binding view declares unavailable: `err` in `initialize` or `composed`, which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A host-catalog global is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
+| `dm.expression.incompatible_call` | **Error.** A function call Darkmatter's design-time check proves wrong, so `md compose` rejects the document: an argument that can never bind (`min(flag, 5)` with `flag: boolean(required)`), a wrong argument count, or an ambiguous overload. Ranged on the argument, or on the whole call for a count or overload problem. Checked in every branch, including ones that never run. Emitted on Expression-typed values, every frontmatter `{{ … }}` span, and `when` conditions inside md lifecycle stacks. |
+| `dm.expression.uncertain_call` | **Warning.** A call argument that might not bind, such as typed text passed to a number (`min(count, 5)` with `count: string`). With `expressions.strict`, also an argument that may be `null` where the parameter rejects it, or whose type is unknown. |
 | `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked where the Claudine extension types it as an expression: an event's or `loop.gate`'s list items and the items of their `then`/`else` bodies; deeper guards are accepted loosely, and Claudine itself checks them before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Every schema-validation diagnostic (`dm.schema.type_mismatch`,
@@ -255,6 +251,8 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
 | `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`fm`, `ctx`, `env`, `current`) or the `null` literal. `doc` and `current_env` are ordinary property names. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition, a direct `is_null`/`is_empty` argument, and a read an enclosing branch proves present — the true branch of its ternary condition (`x ? x : "none"`) or a later `&&` operand (`x && x.name`). The false branch does not inherit the condition's proof (`x ? "some" : x` still warns), and a proof of `x.a` covers neither `x` nor `x.b`. The branch facts are Darkmatter's own, shared with compose. Unlike compose, both ternary branches are checked, each with its own side's facts. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
 | `dm.expression.unknown_function` | **Error**, matching `md compose`, which fails on the call. A call to a function outside Darkmatter's closed catalog, ranged on the function name and reported in every branch. Unlike the advisory, it is reported on a document without frontmatter too. |
+| `dm.expression.incompatible_call` | **Error**, matching `md compose`, which rejects the document. As in frontmatter: a call argument that can never bind, a wrong argument count, or an ambiguous overload, in every branch of every body `{{ … }}` span and every directive `when=` condition, including the body of a `::block` whose condition is false. Types come from the document's `$schema` alone, narrowed by guards (`is_number(foo) ? min(foo, 5) : 0` is silent); a frontmatter value never narrows a type. Fenced code and `{{{ … }}}` literals are not checked. |
+| `dm.expression.uncertain_call` | **Warning.** As in frontmatter; see [Severity](#severity). |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
 | `dm.shell.invalid_suffix` | A frontmatter `$()` suffix `md compose` would reject, ranged at the suffix: an unrecognized suffix or text after a suffix (the message lists all five: `::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), an empty `::`, a repeated suffix, a second result suffix (the message names both), or an invalid timeout. Source `darkmatter.compose`. |
@@ -289,6 +287,112 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.unknown_function` | Error (the function catalog is closed) |
 | `dm.expression.unavailable_global` | Error (the read fails when the stack runs) |
 | `dm.expression.nested_span_in_literal` | Error |
+| `dm.expression.incompatible_call` | Error (`md compose` rejects the document) |
+| `dm.expression.uncertain_call` | Warning (the call may fail for some values) |
+
+### Call diagnostics
+
+Every function parameter has a declared type: `min(a: number, b: number)`
+takes two numbers. As you type, DMLS compares the type of each argument with
+the type of its parameter and places the pair in one of five **argument-type
+categories**. The category decides whether you see an error, a warning, or
+nothing.
+
+This document has one call per category:
+
+```markdown
+---
+$schema:
+  size: number(required)    # always a number
+  maybe: number             # optional, so a number or null
+  count: string             # optional, so text or null
+  flag: boolean(required)   # always true or false
+size: 2
+maybe: 3
+count: "4"
+flag: true
+untyped_var: 1              # not in $schema, so its type is unknown
+---
+{{ min(size, 5) }}
+{{ min(maybe, 5) }}
+{{ min(count, 5) }}
+{{ min(untyped_var, 5) }}
+{{ min(flag, 5) }}
+```
+
+| Category | Call above | Non-strict (default) | Strict |
+|----------|------------|----------------------|--------|
+| 1, always binds | `min(size, 5)` | *not emitted* | *not emitted* |
+| 2, fits but may be `null` | `min(maybe, 5)` | *not emitted* | Warning (`uncertain_call`) |
+| 3, might not bind | `min(count, 5)`: text converts to a number only when it is numeric | Warning (`uncertain_call`) | Warning (`uncertain_call`) |
+| 4, type unknown | `min(untyped_var, 5)` | *not emitted* | Warning (`uncertain_call`) |
+| 5, never binds | `min(flag, 5)`: no boolean is a number | Error (`incompatible_call`) | Error (`incompatible_call`) |
+
+Category 5 is always an error and category 1 is always silent. Strict mode
+(`expressions.strict`, see [Configuration](#configuration)) adds warnings for
+categories 2 and 4. The default reflects one principle: an untyped value gets
+the benefit of the doubt, and an optional value is not flagged for being
+optional, since nearly every typed property is. As soon as a declared type
+might not fit, DMLS warns.
+
+**An error is proven; a warning is possible.** An `incompatible_call` error
+means no value of the argument's type can ever bind, so the call fails on
+every run. Wrong argument counts (`min(1)`) and calls that match more than one
+signature are errors too. An `uncertain_call` warning means the call works for
+some values and fails for others; the document still composes, and the value
+is checked when the call runs. Silence means "not proven wrong", not "proven
+right": a silent call can still fail at runtime, for example when a value
+breaks a constraint.
+
+**Types come from `$schema` alone.** DMLS reads each variable's declared type,
+never its frontmatter value: `maybe: 3` above does not make `maybe` required,
+because a `--set` value, a caller, or interpolation can replace it at compose
+time. A variable the schema does not declare, a path below a top-level
+property (`meta.count`), and the result of another call or operator
+(`maybe || 0`) all have an unknown type (category 4). A guard narrows a type
+inside the branch it protects, so `is_number(foo) ? min(foo, 5) : 0` is silent
+when `foo` is declared as text or a number.
+
+**Every branch is checked**, including one that never runs: the false side of
+a ternary, both operands of `||` and `&&`, and the body of a `::block` whose
+condition is false. `true ? 'ok' : min(flag, 5)` is still an error, because
+`md compose` rejects it. Fenced code and `{{{ … }}}` literals are not
+expressions, so they are never checked.
+
+**Darkmatter decides, DMLS displays.** The categories come from Darkmatter's
+library, from the same design-time [call check](../../docs/inline/call-check.md)
+that `md compose` runs before it evaluates anything. DMLS has no type,
+conversion, or category rule of its own; it only maps a category to a
+severity. That is why the editor and composition agree: an
+`incompatible_call` error appears on exactly the calls that make `md compose`
+reject the document, and composition rejects nothing the editor shows as a
+warning or leaves silent. How each type converts to another is described in
+[Type Coercion](../../docs/topics/schemas/definition.md#type-coercion).
+
+The message names the function, the parameter, both types, and the category
+with its reason:
+
+```text
+min: argument 1 (`a`) is boolean, expected number (category 5: no value of that type can bind)
+min: argument 1 (`a`) is string | null, expected number (category 3: some values of that type convert and others do not)
+min: no signature takes 1 argument; expected min(a: number, b: number): number
+```
+
+An argument problem ranges the argument (`flag`); a wrong argument count or an
+ambiguous call ranges the whole call. To hide one kind in your editor,
+suppress its code; the category number stays visible in the message.
+
+#### Fixing a call diagnostic
+
+| You see | Example | Fix |
+|---------|---------|-----|
+| Error, category 5 | `min(flag, 5)` with `flag: boolean(required)` | Pass a value of the parameter's type, or correct the schema if the declared type is wrong (`flag: number(required)`). |
+| Error, a literal that cannot convert | `number("pear")` | Fix the literal, or give a fallback the function returns instead: `number("pear", 7)` is silent and returns `7`. |
+| Error, wrong argument count | `min(1)` | Supply the arguments the signature in the message lists: `min(1, 5)`. |
+| Warning, category 3 | `min(count, 5)` with `count: string` | Declare the type the function needs: `count: number`, or `count: numberlike` to keep numeric text as written. Or convert with a fallback, `min(number(count, 0), 5)`, which is silent by default (in strict mode the result of `number(…)` has an unknown type, category 4). |
+| Warning, category 3, a union | `min(foo, 5)` with `foo` declared as `[string(required), number(required)]` | Narrow it with a guard: `is_number(foo) ? min(foo, 5) : 0`. |
+| Strict warning, category 2 | `min(maybe, 5)` with `maybe: number` | Make the property required (`maybe: number(required)`), or guard the call: `maybe != null ? min(maybe, 5) : 5`. |
+| Strict warning, category 4 | `min(untyped_var, 5)` | Declare the variable in `$schema`: `untyped_var: number(required)`. |
 
 ## Ranging
 
@@ -358,13 +462,80 @@ Some diagnostics attach secondary locations:
 
 ## Configuration
 
-Via `.dmls.toml` (layered under LSP `workspace/configuration`, reloadable without
-restart):
+DMLS reads its settings from a `.dmls.toml` file at the workspace root and
+from the editor's settings, which the editor sends with
+`workspace/didChangeConfiguration` (DMLS never requests them with
+`workspace/configuration`). Editor settings override the file, and the file
+overrides the built-in defaults. A change to either takes effect without a
+restart. [DMLS Configuration](../../docs/lsp/configuration.md) lists every
+key; these change diagnostics:
 
 - **`schema.strict`** — when `true`, `unknown_key` and `missing_required` become
   errors (see [Severity](#severity)).
-- **Diagnostics debounce** — how long the scheduler coalesces rapid edits before
-  recomputing, to keep typing responsive on large documents.
+- **`expressions.strict`** — when `true`, call arguments that may be `null`
+  (category 2) or whose type is unknown (category 4) also warn (see
+  [Call diagnostics](#call-diagnostics)). Described below.
+- **`diagnostics.debounce_ms`** — accepted and type-checked, but not applied
+  yet: diagnostics are published as soon as each change is applied.
+
+### `expressions.strict`
+
+A boolean, `false` by default. It is the only setting for call diagnostics;
+no function has a setting of its own. Errors (category 5) and category 3
+warnings appear whatever its value.
+
+Set it for the whole workspace in `.dmls.toml`:
+
+```toml
+# .dmls.toml
+[expressions]
+strict = true
+```
+
+Or set it from the editor, with the same key under `dmls` (how you enter
+LSP settings depends on the editor; see [Editor setup](./editors/README.md)):
+
+```json
+{ "dmls": { "expressions": { "strict": true } } }
+```
+
+Which value applies:
+
+| Editor settings | `.dmls.toml` | Effective |
+|-----------------|--------------|-----------|
+| `"strict": true` or `false` | anything | the editor's value |
+| no `expressions.strict` key (or `"expressions": {}`) | `strict = true` or `false` | the file's value |
+| cleared: the editor sends `null` (or `{ "dmls": null }`) as its whole settings | `strict = true` or `false` | the file's value |
+| neither sets it | no `[expressions]` table | `false` |
+
+An invalid value does not stop the server:
+
+- **In the editor** (`"strict": null`, `"strict": "yes"`, `"strict": 1`,
+  `"expressions": null`, or `"expressions": 5`): DMLS shows an error message
+  and ignores the editor's settings until they are fixed. The file's value
+  applies, not the last valid editor value:
+
+  ```text
+  dmls: editor settings: settings produced an invalid config (invalid type: string "yes", expected a boolean); the file and default settings remain
+  ```
+
+  The editor's other sections are ignored too, except `formatting`, which is
+  validated on its own.
+- **In `.dmls.toml`** (`strict = "yes"`, a duplicate key): the whole file is
+  rejected with an error message and the defaults apply (strict off) until the
+  file is fixed.
+
+A change applies without a restart, and DMLS re-publishes the diagnostics of
+every open document:
+
+- **Editor settings** apply as soon as the editor sends them.
+- **An edit to `.dmls.toml`** applies when the editor reports the file change
+  (DMLS asks editors that support dynamic file watching to watch
+  `**/.dmls.toml`), or else at the next settings change. Every settings change
+  re-reads the file.
+
+See [Changes apply without a restart](../../docs/lsp/configuration.md#changes-apply-without-a-restart)
+for what else a reload recomputes.
 
 ## See also
 

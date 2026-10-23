@@ -795,7 +795,7 @@ repository root to refresh it after changing the catalog.
 | Date Arithmetic | `older_than(date1, date2, diff)` | Returns true when date1 is at least the given duration older (earlier) than date2. | `older_than("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
 | Logical | `and(...)` | Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one. | `and(true, true)` ⇒ `true` |
 | Logical | `or(...)` | Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one. | `or(false, true)` ⇒ `true` |
-| Type Conversion | `number(x, [fallback])` | Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number. | `number("42")` ⇒ `42`<br>`number("4")` ⇒ `4`<br>`number(" 4 ")` ⇒ `4`<br>`number("pear", 7)` ⇒ `7`<br>`number(null, 7)` ⇒ `7`<br>`number(true, 7)` ⇒ `7`<br>`number([], 7)` ⇒ `7`<br>`number("9007199254740993", 7)` ⇒ `7`<br>`number("pear")` ⇒ `error`<br>`number("4", "x")` ⇒ `error` |
+| Type Conversion | `number(x, [fallback])` | Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number. | `number("42")` ⇒ `42`<br>`number("4")` ⇒ `4`<br>`number(" 4 ")` ⇒ `4`<br>`number("pear", 7)` ⇒ `7`<br>`number(null, 7)` ⇒ `7`<br>`number(true, 7)` ⇒ `7`<br>`number([], 7)` ⇒ `7`<br>`number("9007199254740993", 7)` ⇒ `7`<br>`number("pear")` ⇒ `error`<br>`number("4", "x")` ⇒ `error`<br>`number()` ⇒ `error` |
 | Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through. | `absolute("fixture.md")` ⇒ `"/path/to/fixture.md"` (display only: resolves to an absolute path of the resolution context, which is not portable) |
 | Filesystem | `basename(file)` | Returns the final path component, including its extension; null passes through. | `basename("sub/note.md")` ⇒ `"note.md"` |
 | Filesystem | `basename_without_index(file)` | Returns the basename with any index suffix (`-NNN`) removed from its stem; null passes through. | `basename_without_index("review-1.md")` ⇒ `"review.md"` |
@@ -1175,6 +1175,13 @@ received; the function never runs.
 {{ upper(2026) }}       → 2026     (a number converts to text)
 {{ min("pear", 5) }}    → type error: a: expected number, received text "pear"
 ```
+
+The conversions, the union and overload rules, and what a type error
+reports are the same engine frontmatter uses, described once in
+[Type Coercion](./schemas/definition.md#type-coercion). Before a document
+composes, a call that no value could ever bind, such as `min(flag, 5)` with
+`flag: boolean(required)`, rejects the document even in a branch that never
+runs; see [Call Check](../inline/call-check.md).
 
 `null` is a type like any other, and a parameter admits it only when its
 signature says so:
@@ -1743,6 +1750,7 @@ Executable expressions fail closed on real defects, and only on those:
 | malformed syntax (`{{ 1 + }}`) | an absent document property (`null`) |
 | an unknown function (`{{ no_such_fn(x) }}`) | a missing member or index (`null`) |
 | a function that rejects its arguments, or a failed file read | `null` inside text (renders empty) |
+| a call no value could bind, in any branch ([Call Check](../inline/call-check.md)) | |
 | a read of a host global the host marked unavailable | an escaped span (`{{{ x }}}` renders `{{ x }}`) |
 
 Inserted values are data: text an expression returns is never scanned for

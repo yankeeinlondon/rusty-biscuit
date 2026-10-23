@@ -66,7 +66,7 @@ Then there the more esoteric or "meta" types like:
 
 - `schema` and `expression`
 
-The full list of _types_ can be found at: [`SimplifiedSchema` Types](./schemas/schema-types.md) but for now here's a simple example of using _types_ to define a schema:
+The full list of _types_ can be found at: [`SimplifiedSchema` Types](./definition.md#types) but for now here's a simple example of using _types_ to define a schema:
 
 ```yaml
 $schema:
@@ -84,7 +84,7 @@ A **constraint** is the a way to further _constrain_ a base type. There are some
 - `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
-For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schema-constraints.md) but here's an update of our example that takes advantage of constraints:
+For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./definition.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
 
 ```yaml
 $schema:
@@ -414,6 +414,31 @@ There is a _variant_ of an enumeration which we will call a "suggestion" which p
 
 ### Union Types
 
+A union says a property may hold one of several types. Write it with `|`, as
+in TypeScript, or as a YAML list; both mean the same thing:
+
+```yaml
+$schema:
+    id: "string | number"
+    width:
+      - literal(auto)
+      - number(min(1))
+```
+
+`[]` binds tighter than `|`, so `string | number[]` is a string or a list of
+numbers; group with parentheses for a list whose items may be either:
+`(string | number)[]`. A list whose positions each have their own type is a
+`tuple`, such as `point: "tuple([number, number])"`.
+
+A value that already matches an option is kept as written: `"4"` against
+`string | number` stays the text `"4"`. Otherwise Darkmatter converts it into
+the one option it can reach: `"1"` against `number(min(5)) | boolean` becomes
+`true`, because `1` fails `min(5)`. The order of the options never matters.
+The full rule, including how ties are settled, is in
+[Choosing a Union Option](./definition.md#choosing-a-union-option); the
+grammar is in [The `|` Operator and Grouping](./definition.md#the--operator-and-grouping)
+and [Tuples](./definition.md#tuples).
+
 ### Examples: using Inline Syntax
 
 #### The Basics
@@ -452,7 +477,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has exactly two keys, `kind: schema` and a `types` mapping; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema

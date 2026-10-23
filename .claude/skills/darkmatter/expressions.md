@@ -27,6 +27,43 @@ rather than add `-` to a character class, which would merge `foo--bar`.
 A `{{ … }}` that cannot be parsed or evaluated fails full-document
 composition regardless of `fail_fast`.
 
+**Design-time call check** (`expression/call_check.rs`). One classifier gives
+every call argument one of five `ArgumentCategory` values, and composition
+and DMLS both read it.
+- Composition (`compose/call_precheck.rs`) rejects a document whose surface
+  holds a category 5 call before anything evaluates, dead branches included.
+  The error is `ExpressionError::CallCheck`; find it with
+  `MarkdownError::rejected_call()`.
+- DMLS maps categories to `dm.expression.incompatible_call` (5) and
+  `dm.expression.uncertain_call` (3; also 2 and 4 under `[expressions] strict`).
+- Build the site over `DeclaredTypes::new(schema)` without static frontmatter:
+  a set value is runtime data.
+- An all-literal call is classified by the real `bind_call`, which runs no
+  handler.
+- New authored-expression surfaces must be added to both consumers.
+  `dmls/tests/l1/call_check_agreement.rs` pins their agreement on one corpus.
+- Projection limits are intended, not gaps to patch locally: paths below a
+  top-level property, raw JSON Schema, and root unions with a raw arm or
+  disagreeing arms are `unknown`; `replace` insertions, `::shell` `{{ }}`
+  with body interpolation off, and unparsable expressions are not prechecked.
+  User docs: `darkmatter/docs/inline/call-check.md`.
+
+**Function binding** (`expression/call_binding/`). Every call binds through
+the shared coercion engine before its handler runs; handlers are
+`PureFn = fn(&BoundCall) -> Result<Value, String>` and
+`ContextFn = fn(&BoundCall, &ResolutionContext)`, and read only `BoundArgs`
+accessors and `overload()`. Never re-check types, parse, or convert inside a
+handler: the catalog signature in `schemas/partials/functions.yaml` is the
+whole contract, and a handler that needs the caller's original form declares
+`numberlike`/`boolish`/`any` instead. A binding failure is
+`ExpressionError::Call(CallBindingError)`; only `ImplementationContract` (a
+handler returning a value outside its declared `returns`, checked by
+`check_return` without conversion) is authoring-fatal. Null reaches a
+parameter only through an explicit `| null`. `and`/`or` are lazy
+(`LazyCall`): the precheck visits every argument, the runtime binds only the
+ones it evaluates. User docs: "Function Calls: Bind, Then Compute" in
+`darkmatter/docs/topics/schemas/definition.md`.
+
 **Inserted text is data.** Every authored span is scanned once. Produced text
 is never scanned again. This covers expression results, file reads, shell
 output, `{{{ }}}` results, data overrides, decoded tokens, and values a parent

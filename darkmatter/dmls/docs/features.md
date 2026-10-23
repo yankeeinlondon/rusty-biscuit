@@ -1,11 +1,3 @@
----
-features:
-  - 2026-07-04-dmls
-  - 2026-07-09-suggest-constraint
-  - 2026-07-10-interpolation-literal
-  - 2026-07-10-schema-triggers
-  - 2026-07-11-semantic-tokens
----
 # DMLS Features
 
 The Darkmatter Language Server (`dmls`) brings IDE-grade intelligence to
@@ -150,7 +142,11 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   effective-schema property description for a declared-but-unset key),
   variable → frontmatter-key definition, malformed-expression and
   unknown-function diagnostics, and the undeclared-property advisory (every
-  operand is checked; a schema-declared property is declared). Bare names are
+  operand is checked; a schema-declared property is declared). Function calls
+  are checked against their parameter types: a call `md compose` would reject,
+  such as `min(flag, 5)` with `flag: boolean(required)`, is an error, and one
+  that might fail for some values is a warning (see
+  [Call diagnostics](./diagnostics.md#call-diagnostics)). Bare names are
   document properties: only `ctx.`-qualified names get context-variable
   completion and hover.
 - **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
@@ -290,8 +286,10 @@ For the full, source-cited capability matrix behind these gates, see
 - **Per-editor setup guides** (VS Code, Zed, Neovim, Helix) and a manual smoke
   checklist live in [`docs/editors/`](./editors/).
 - **Configuration** is a `.dmls.toml` file at the workspace root (which also
-  serves as the editor root marker), layered under LSP
-  `workspace/configuration` and reloadable without a restart. Keys cover wiki
-  behavior, baseline schema extensions, strict schema/style modes, shell-policy
-  discovery, code-action categories, formatting, semantic tokens
-  (`[semantic_tokens] enable`), and diagnostics debounce.
+  serves as the editor root marker), overridden by the editor's
+  `workspace/didChangeConfiguration` settings and reloadable without a
+  restart. Keys cover wiki behavior, baseline schema extensions, strict
+  schema/style modes, strict function-call diagnostics
+  (`[expressions] strict`), shell-policy discovery, code-action categories,
+  formatting, semantic tokens (`[semantic_tokens] enable`), and diagnostics
+  debounce. See [DMLS Configuration](../../docs/lsp/configuration.md).

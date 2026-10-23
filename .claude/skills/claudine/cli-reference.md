@@ -611,7 +611,7 @@ Lists every context variable exposed by Darkmatter, grouped by category and subs
 | Column | Content |
 |--------|---------|
 | `Property` | Canonical variable name prefixed with `ctx.` |
-| `Type` | Display type (`String`, `DateTime`, `Boolean`, etc.) |
+| `Type` | The variable's schema type in keyword form (`string`, `datetime`, `boolean`, `number(integer)`, `string[]`, etc.) |
 | `Description` | Short description of the variable |
 
 Context variable categories include date/time, repository metadata, file changes, languages, documents, operating system, and hardware. The `Property` and `Type` column widths are computed once across the entire catalog and reused for every section.
@@ -642,6 +642,8 @@ The function catalog comes from Darkmatter's library API (`expression_function_c
 | `Example` | Every example, one per line: inline `call ⇒ result` (display-only ones marked with their reason) and file-form examples (`invocation ⇒ returns (from function-examples/<name>.yaml)`) |
 
 `cli/tests/l1/context_command.rs::context_expressions_function_order_snapshot` pins the category and signature order.
+
+The `Function` column is the catalog's display key (parameter names, optional ones bracketed), not the typed signature; DMLS completion and hover show the typed form (`typed_signature()`). The report states no conversion rules of its own: argument conversion and the design-time call check that rejects a proven-bad call before composition are Darkmatter's (`darkmatter/docs/topics/schemas/definition.md#type-coercion`, `darkmatter/docs/inline/call-check.md`).
 
 ### `--side-effects` report
 

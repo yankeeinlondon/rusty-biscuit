@@ -25,7 +25,9 @@ last_updated: 2026-10-22
       - start/0/then/1 Additional properties are not allowed ('sya' was unexpected) (at line 5, column 9)
   ```
 
-  Schemas are written in the compact [SimplifiedSchema](./docs/topics/schemas/definition.md#types) grammar. Its types cover text (`string`, `email`, `url`, dates and times), numbers and booleans, files, `enum` and `literal` values, objects and unions, content formats (`yaml`, `json`, `expression`, and `shell` for a shell command that is never run), `alphanumeric` for ASCII identifiers with options such as `allow-dashes`, and `unknown` (alias `any`) and `null` for values that may be anything or must be absent. `md schema about` prints the full vocabulary.
+  Schemas are written in the compact [SimplifiedSchema](./docs/topics/schemas/definition.md#types) grammar. Its types cover text (`string`, `email`, `url`, dates and times), numbers and booleans, files, `enum` and `literal` values, objects, tuples, and unions (`string | number`), content formats (`yaml`, `json`, `expression`, and `shell` for a shell command that is never run), `alphanumeric` for ASCII identifiers with options such as `allow-dashes`, and `unknown` (alias `any`) and `null` for values that may be anything or must be absent. `md schema about` prints the full vocabulary.
+
+  A value that converts to its declared type without changing its meaning is converted (`"4"` against `number` becomes `4`), and [expression functions](./docs/topics/darkmatter-expressions.md#functions) bind their arguments by the same [rules](./docs/topics/schemas/definition.md#type-coercion). Before composing, Darkmatter rejects a document whose calls its declared types prove can never work, such as `min(flag, 5)` with `flag: boolean(required)`; see [Call Check](./docs/inline/call-check.md).
 
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.

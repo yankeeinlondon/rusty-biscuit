@@ -14,8 +14,12 @@
   `biscuit-speaks-cli`), so `serde_json` maps there keep insertion order.
   Outputs with an alphabetical-key contract sort explicitly (`sniff`'s JSON
   output, `md schema validate --format json`, the `md hash` frontmatter hash,
-  Claudine's OpenCode/Kilo inline config). No crate is added. See
-  `darkmatter/docs/dependencies.md`.
+  Claudine's OpenCode/Kilo inline config); any new consumer that needs a
+  stable order must sort too. Written order is intended elsewhere:
+  `md schema detect --format json` and JSON text produced for `json`-typed
+  values keep the order the author wrote. No crate is added. See
+  `darkmatter/docs/dependencies.md`, which also covers how Darkmatter's
+  custom JSON Schema formats read in other validators.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no

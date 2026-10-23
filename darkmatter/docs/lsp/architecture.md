@@ -5,8 +5,8 @@ DMLS (`darkmatter/dmls`) is a stdio language server. `run_server` in
 then dispatches every request and notification against one `ServerState`:
 
 - the open documents (the editor's buffers are authoritative over disk)
-- the layered configuration (`.dmls.toml` under `workspace/configuration`;
-  see [DMLS Configuration](./configuration.md))
+- the layered configuration (editor `didChangeConfiguration` settings over
+  `.dmls.toml`; see [DMLS Configuration](./configuration.md))
 - the workspace index and the graph snapshot that readers load: the
   workspace file list and the documents parsed so far (open buffers and the
   targets they reference)

@@ -1,9 +1,11 @@
 # Numbers
 
 Every Darkmatter number is a finite `f64`: frontmatter values, raw schema
-bounds, expression literals, text converted to a number, and every
-calculation. There is no separate integer type; `number(integer)` is a
-constraint on the value.
+bounds, expression literals, text converted to a number, function arguments
+and results, and every calculation. There is no separate integer type;
+`number(integer)` is a constraint on the value: a whole number below 2^64 in
+magnitude. This page is the one description of the numeric model; schema and
+expression pages link here.
 
 A number enters that model only when it can be held without silently
 changing it. Darkmatter decides this from the number **as written**:
@@ -19,6 +21,7 @@ changing it. Darkmatter decides this from the number **as written**:
 | --- | --- | --- |
 | `9007199254740992` (2^53), `-9007199254740992` | accepted | held exactly |
 | `9007199254740993`, `9007199254740993.0`, `9.007199254740993e15` | "cannot be represented exactly" | the same whole number in three spellings; `f64` would store `…992` |
+| `18446744073709551615` (`u64::MAX`) | "cannot be represented exactly" | `f64` would store 2^64 |
 | `99999999999999999999`, `1e308` | "cannot be represented exactly" | whole numbers no `f64` holds |
 | `0.1`, `1e3`, `.5`, `4.0` | accepted | the nearest `f64` (`0.1`, `1000`, `0.5`, `4`) |
 | `1e-400` | "cannot be represented exactly: a non-zero value would become 0" | underflow |

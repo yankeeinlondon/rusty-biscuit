@@ -278,11 +278,15 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 ```
 Apply --set / --state overrides
   └─ Materialize schema-selected caller files (captured per-property origin)
-      └─ Frontmatter Interpolation ({{ var }})
-          └─ Schema Validation      ◄── here (bind + coerce + validate)
-              └─ Frontmatter Shell Expansion ($(cmd))
-                  └─ … rest of pipeline
+      └─ Call Check (declared types only; nothing evaluated)
+          └─ Frontmatter Interpolation ({{ var }})
+              └─ Schema Validation      ◄── here (bind + coerce + validate)
+                  └─ Frontmatter Shell Expansion ($(cmd))
+                      └─ … rest of pipeline
 ```
+
+The [call check](./call-check.md) rejects a document whose calls its declared
+types prove wrong before any of these stages computes a value.
 
 This placement is deliberate:
 
@@ -373,20 +377,13 @@ Each bullet carries the YAML `line:col` when available, and root-union failures 
 Strict JSON Schema rejects a string where a boolean is declared — but many value sources can only ever produce strings. Shell expansion always yields a string; a ternary like `"{{ spec ? true : false }}"` renders the literal into a **quoted** scalar, so the stored value is the string `"true"`, not a real boolean. Coercion fixes this class of mismatch.
 
 When a frontmatter value is not the declared type but converts to it without
-changing its meaning, Darkmatter converts the stored value and accepts it.
-Conversion is always on. Function arguments use the same engine and rules.
-The full rule list, with unions, nested values, and raw JSON Schema, is
+changing its meaning, Darkmatter converts the stored value and accepts it:
+`"yes"` against `boolean` becomes `true`, `"4"` against `number` becomes `4`,
+and `"pear"` against `number` is an error. Conversion is always on, and
+function arguments use the same engine. The rules (what converts, what never
+converts, unions, nested values, raw JSON Schema, and the changes from
+earlier releases) are described once, in
 [Type Coercion](../topics/schemas/definition.md#type-coercion).
-
-| Declared type | Incoming value | Result |
-|---------------|----------------|--------|
-| `boolean` | a boolean word as text: `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any case | real boolean |
-| `number` | numeric text: `"42"`, `" 4 "`, `"+4"`, `"1e3"`, `".5"`, `"1_000"` | real number; a whole number no `f64` holds exactly is an error |
-| `numberlike` / `boolish` | what `number` / `boolean` accept | validated, then kept **exactly as written** (`"02134"` stays text) |
-| `string` (incl. `date`/`url`/`email`/`file`, `enum`, string `literal`) | a number or boolean | its text (`42` → `"42"`), then the type's own check |
-| `json` / `yaml` | a mapping, list, number, or boolean | its JSON (written key order) or YAML text |
-| lists, tuples, inline objects, pattern-key values | a value of that structure | each part converted by its declared type, at every depth |
-| `object`, `unknown`, `alphanumeric`, `null` | anything else | kept as written (`3` against `alphanumeric` is a type mismatch) |
 
 Two consequences matter:
 
@@ -397,17 +394,6 @@ Two consequences matter:
   logic bug.
 - **`numberlike` and `boolish` do not normalize.** They exist for values whose
   written form matters, such as a ZIP code.
-
-### What is never converted
-
-- a boolean into a number, or a native number into a boolean;
-- `null` into anything;
-- text that is not a number (`"pear"`, `"NaN"`, `"1,000"`) into a number;
-- a single value into a list, or text into an object or list.
-
-Constraints are enforced, never repaired: `"2.5"` against `number(integer)`
-is an error, and a number given to `date` becomes text and then fails the
-date check.
 
 ### Where conversion runs
 

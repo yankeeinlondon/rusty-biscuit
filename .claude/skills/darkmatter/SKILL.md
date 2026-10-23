@@ -78,7 +78,9 @@ against a context derived from that one. User-facing docs:
 `topics/file-referencing.md` (forms and tree rule), and
 `errors/file-reference-failures.md` (the `failure:` row).
 
-The root compose pipeline is ordered: frontmatter interpolation pass 1;
+The root compose pipeline is ordered: the passive call check (a proven-bad
+call in any branch rejects the document before anything runs); frontmatter
+interpolation pass 1;
 schema validation and coercion; frontmatter shell expansion; frontmatter
 interpolation pass 2; literal replacement; conditional page blocks; body
 interpolation; shell directives and blocks; link resolution; concurrent
@@ -127,6 +129,10 @@ Important contracts:
   `const`; quoted and native YAML forms are observably different.
 - `expression`, `yaml`, and `json` are passive content formats. They parse or
   coerce but never execute.
+- One coercion engine (`markdown::coercion`) converts frontmatter and binds
+  function arguments; numbers enter only through `markdown::numeric` as exact
+  `f64`s. See [schema.md](schema.md#conversion-engine) and
+  [expressions.md](expressions.md).
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a

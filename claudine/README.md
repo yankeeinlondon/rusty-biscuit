@@ -304,6 +304,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [MCP Catalog](./docs/topics/mcp-catalog.md) and [MCP Mode](./docs/topics/mcp-mode.md) - Catalog storage, `claudine mcp`, provider support, wrapper runtime behavior
 - [Composition](./docs/topics/composition.md) - `compose`, `inline-compose`, `sequence` commands and harness
 - [Schemas](./docs/topics/schemas.md) - Claudine's frontmatter schemas: what the editor and the launch verdict check, and how a document reaches them
+- [Context, Expressions, and Side Effects](./docs/topics/state-management/index.md) - `ctx.*` variables, Darkmatter expressions and their argument types, side effects, and the `claudine context` reports that document them
 - [System Prompt](./docs/topics/system-prompt.md) - Discovery and CLI switch resolution
 - [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Lifecycle](./docs/topics/flow-control/lifecycle.md) - Pre-flight shell audit/schema validation and the lifecycle stack (gating, verification, recovery)
 - [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
