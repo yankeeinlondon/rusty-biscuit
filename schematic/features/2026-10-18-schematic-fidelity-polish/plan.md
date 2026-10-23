@@ -4,6 +4,18 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1:
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/extension_reimport.rs
+    - schematic/gen/tests/l1/upstream_hygiene.rs
+    - schematic/definitions/tests/schema_fidelity_baseline.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - schematic/features/2026-10-18-schematic-fidelity-polish/contracts.md
+skills_files_updated_during_phase_1: []
+packages:
+    - schematic-gen
+    - schematic-definitions
 ---
 
 # Schematic fidelity and polish implementation plan
@@ -94,7 +106,7 @@ remain authoritative even when extensions preserve additional semantics.
 
 ### Wave 1: Dependency gate
 
-- [ ] **Confirm prerequisites**
+- [x] **Confirm prerequisites**
   - Read prerequisite implementation logs and review outcomes; verify typed send,
     serializable definitions/snapshots, response v2/GraphQL, WebSocket selectors,
     roles/hints, partial generation, staged import outputs, and isolated compile
@@ -107,7 +119,7 @@ remain authoritative even when extensions preserve additional semantics.
 
 ### Wave 2: Independent baseline investigations
 
-- [ ] **Measure fidelity**
+- [x] **Measure fidelity**
   - R5, R6, R14: collect per-API untyped-property counts and paths; distinguish
     legitimate free-form from lost constraints, including typed losses. Inventory
     current artifacts and exact request/response schemas.
@@ -117,7 +129,7 @@ remain authoritative even when extensions preserve additional semantics.
     reproduction as a regression test whether it fails or not.
   - Ownership: registry baseline helpers and extension reproduction tests only.
 
-- [ ] **Inventory consumers**
+- [x] **Inventory consumers**
   - R33: enumerate the six starting runtime lists in `definitions/src/lib.rs`,
     `definitions/src/registry/lookup.rs`, and `gen/src/pipeline.rs`, plus strict
     completeness/registry test tables; search for additional WebSocket lists.
@@ -128,7 +140,7 @@ remain authoritative even when extensions preserve additional semantics.
     filenames before resolver-driven renames.
   - Ownership: inventory/log notes, no registration edits yet.
 
-- [ ] **Verify hygiene**
+- [x] **Verify hygiene**
   - R43, R50–R52: verify the stale tree is absent, vendor constructors/shared
     preset layer are absent, and `?` paths are rejected and absent from the
     registered endpoints. Measure emqx combined-doc loss and retain its fixture.
@@ -139,7 +151,7 @@ remain authoritative even when extensions preserve additional semantics.
 
 ### Wave 3: Contract freeze and bounded spikes
 
-- [ ] **Freeze contracts**
+- [x] **Freeze contracts**
   - Integrate baseline notes; finalize the extension field mapping above from
     real upstream types. Expand the input matrices below to one column per
     actual load-bearing field, including nested fields newly introduced upstream.
@@ -147,7 +159,7 @@ remain authoritative even when extensions preserve additional semantics.
   - Record all adopted P10-a–P10-l defaults, extension subset exclusions,
     artifact naming, schema dialects, feature groups, and deviations for review 1.
 
-- [ ] **Check validators**
+- [x] **Check validators**
   - One bounded spike on the current host: validate a small registered recursive
     request schema and inspect local-reference/dialect behavior of the existing
     validator. Inspect whether a small vendored AsyncAPI 3.0 schema plus its
@@ -159,6 +171,19 @@ remain authoritative even when extensions preserve additional semantics.
   - If needed, one small emitted nullable-ref/enum fixture identifies a legal
     OpenAPI 3.0 representation accepting null and preserving non-null constraints.
     Record the representation for Phase 2; this is not a new benchmark.
+
+**Phase 1 refresh (2026-10-23).** The frozen mapping, real matrix columns and
+discrepancies D1–D25 live in `contracts.md`; the log's "Adopted defaults and
+plan discrepancies" lists what later phases act on. Corrections to this plan:
+the bridge is `define/src/openapi/export/conversion.rs` (Phase 2); the strict
+option is `OpenApiImportOptions::strict` (Phase 4); R33's inventory is four
+REST plus two WebSocket runtime lists, the strict-completeness skip is already
+gone, and endpoint literals number 503 (Phase 5); P10-g is satisfied upstream
+by generated endpoint methods, so no wrapper accepted gap is recorded; WebSocket
+payloads have no JSON schemas and the AsyncAPI exporter emits placeholder
+components (D12, a review-1 item); `retry_guidance`, `env_auth`,
+`secret_names`, parameter `secret`/`rust_name`, `path_template` and operation
+`env_mapping` join the v1 extension subset; pagination stays outside it.
 
 **Checkpoint:** all prerequisites verified, public reproduction retained,
 baseline/log inventory complete, field mapping and matrices frozen, spike
