@@ -17,6 +17,7 @@ skills_files_updated_during_phase_1:
 packages:
     - worktree
     - sniff
+    - worktree-cli
 source_files_during_phase_2:
     - worktree/lib/src/remove/recovery/compact.rs
     - worktree/lib/src/remove/recovery/compact/tests.rs
@@ -168,6 +169,77 @@ skills_files_updated_during_phase_6:
     - .claude/skills/worktree/remove.md
     - .claude/skills/worktree/testing.md
     - .claude/skills/os/macos.md
+source_files_during_phase_7:
+    - worktree/lib/Cargo.toml
+    - Cargo.lock
+    - .config/nextest.toml
+    - worktree/lib/src/test_support.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/branches.rs
+    - worktree/lib/src/remove/lifecycle/late.rs
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/confirmed.rs
+    - worktree/lib/src/remove/confirmed/*.rs
+    - worktree/lib/src/remove/lifecycle/tests/*.rs
+    - worktree/lib/src/remove/observation/**
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/space.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/record.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/recovery/store/compact/tests.rs
+    - worktree/lib/src/remove/quarantine/mod.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/association/tests.rs
+    - worktree/lib/src/remove/quarantine/placement.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+    - worktree/lib/src/remove/quarantine/unregister.rs
+    - worktree/lib/src/remove/quarantine/unregister/tests.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/delete/wait.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/missing.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/outcome.rs
+    - worktree/cli/src/commands/remove/interrupt.rs
+docs_updated_during_phase_7:
+    - docs/dependencies.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/confirmed.md
+    - .claude/skills/worktree/observation.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/deletion.md
+    - .claude/skills/os/linux.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_8:
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/cli/tests/remove_recovery.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/warnings.md
+    - .claude/skills/os/wsl.md
+    - .claude/skills/os/SKILL.md
 ---
 
 # Plan: a confirmed `wt remove` always deletes
@@ -808,18 +880,18 @@ Goal: no dead code, no dormant gates, no unused dependencies.
 
 #### Wave 12 (sequential, then parallel clean-up)
 
-- [ ] **Delete code** — `lib/src/remove/observation/` (all adapters, `wait`,
+- [x] **Delete code** — `lib/src/remove/observation/` (all adapters, `wait`,
   `injected`, `diagnostics`, `inventory`, tests), `recovery/journal.rs`,
   `recovery/space.rs`, free-space paths in `storage.rs`, `Stop`/`CoverageLost`,
   the Windows Search recheck gate in `usage.rs`, and leftover old `Refusal`
   variants. Keep `admin_entry.rs` and `quarantine/*` logic.
-- [ ] **Dependencies** — after confirming no other consumer (Wave 1 map), remove
+- [x] **Dependencies** — after confirming no other consumer (Wave 1 map), remove
   `inotify` and `fsevent-sys`, prune unused `windows-sys` features; update
   `worktree/docs/dependencies.md` and the root dependency docs.
-- [ ] **Recipes and perf gates** — remove watcher-specific `just` recipes and
+- [x] **Recipes and perf gates** — remove watcher-specific `just` recipes and
   perf gates; keep large-checkout coverage that still applies
   (`lifecycle/tests/large_checkout.rs` rewritten, not deleted blindly).
-- [ ] **Drift sweep** — for each remaining symbol whose behavior changed, fix or
+- [x] **Drift sweep** — for each remaining symbol whose behavior changed, fix or
   delete its `///`/`//!`/`//` comments (project comment-quality rules);
   report any drift found and how it was resolved.
 
@@ -834,32 +906,32 @@ Goal: every Verification bullet in the spec has evidence.
 
 #### Wave 13 (parallel; L1 gap filling)
 
-- [ ] **Ruling coverage audit** — a table R1–R29 → test names; fill gaps.
-- [ ] **Submodules, locks, links, mounts** — the spec's L1 cases (submodule with
+- [x] **Ruling coverage audit** — a table R1–R29 → test names; fill gaps.
+- [x] **Submodules, locks, links, mounts** — the spec's L1 cases (submodule with
   uncommitted + unpushed work deleted incl. `modules/<name>`; clean submodule
   adds no warning; locked worktree reason shown and unlocked; own-link vs foreign
   link; nested mount incl. same-device bind mount, second `wt remove` finishes
   without a question).
-- [ ] **Change-during-question and permanent failures** — files changed/created/
+- [x] **Change-during-question and permanent failures** — files changed/created/
   staged while the question is open are deleted; final line names unseen
   uncommitted file; injected read-only/access-denied: one sentence, exit 1, no
   retry, later run finishes without a question; unsaveable record deletes nothing.
-- [ ] **Recovery and branch regressions** — legacy v1+report v6 finishes without a
+- [x] **Recovery and branch regressions** — legacy v1+report v6 finishes without a
   checkout question; malformed/unknown-version records; concurrent removals and
   stale locks; `--force` alone keeps an unsafe branch; moved tips and endpoint/
   lease changes cannot delete the wrong branch.
-- [ ] **Non-interactive** — refusal without `--force`, deletion with it, clean
+- [x] **Non-interactive** — refusal without `--force`, deletion with it, clean
   checkout removes silently, `CI` nonempty treated as non-interactive.
 
 #### Wave 14 (sequential; environment-specific)
 
-- [ ] **L2** — interactive question with a process warning, answered yes, in a tmux
+- [x] **L2** — interactive question with a process warning, answered yes, in a tmux
   pane; no window takes focus (`just test-l2`).
-- [ ] **Large-checkout acceptance** — one disposable 500,000-entry checkout on
+- [x] **Large-checkout acceptance** — one disposable 500,000-entry checkout on
   macOS: single run, no retry, only the question and final line; record elapsed
   time and compact-record size once in the implementation log. No new
   thresholds, no multi-host campaign (see N12).
-- [ ] **WSL2 and Windows** — WSL2 `/mnt/<drive>` warns and deletes, hidden-name
+- [x] **WSL2 and Windows** — WSL2 `/mnt/<drive>` warns and deletes, hidden-name
   collision still detected and nothing replaced; Windows held-open file is waited
   on, named, and finishes after release. Load the `os` skill first; use
   `just ci-seed` / `just ci-local --plan` per the repo's evidence rules rather

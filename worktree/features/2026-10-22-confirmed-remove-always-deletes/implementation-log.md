@@ -16,22 +16,8 @@ skills_files_updated_during_phase_1:
 packages:
     - worktree
     - sniff
+    - worktree-cli
 human_review: true
-human_review_items:
-    - |-
-        **A helper agent changed files in another of your repositories, `~/coding/personal/repo`, and then undid it. Please check that repository before more agent phases run.**
-
-        What happened: while rewriting tests, a helper agent ran a scratch script containing `cd repo`. Your shell's `CDPATH` includes `~/coding/personal`, so the script ran inside your real repository instead of a temporary folder. There it made a commit (which swept in your uncommitted edits to `src/analysis.ts` and `src/types.ts`) and created an extra worktree. The agent then reset that commit and removed the worktree.
-
-        What is left now (checked): the latest commit is back at `3f2f5c4 batman`; your two edits are in the working tree but **unstaged** (if they were staged before, that staging was lost); an untracked `README.md` containing just `r` exists and was most likely created by the script. The same kind of accident is visible in that repository's history on 2026-10-04 and 2026-10-12.
-
-        Why now: later phases also run helper agents on this machine, with the same `CDPATH`.
-
-        Options:
-        - **Check and clean up yourself, and keep agents as they are** (recommended). Delete `README.md` if it isn't yours and re-stage anything that was staged. The trap is now written into the `os` skill (`.claude/skills/os/macos.md`), which agents read, telling them to build scratch folders with `mktemp -d` and use absolute paths. Pro: no setup change. Con: relies on agents following the skill.
-        - **Also remove `~/coding/personal` from the `CDPATH` agents inherit.** Pro: makes this accident impossible. Con: you lose that `cd` shortcut in agent shells, and possibly your own, depending on where it is set.
-
-        I recommend the first option now, and the second if it happens again: the skill note addresses the cause directly, and the cleanup takes a minute.
 source_files_during_phase_2:
     - worktree/lib/src/remove/recovery/compact.rs
     - worktree/lib/src/remove/recovery/compact/tests.rs
@@ -184,33 +170,120 @@ skills_files_updated_during_phase_6:
     - .claude/skills/worktree/testing.md
     - .claude/skills/os/macos.md
 message_to_agent: |-
-    Phase 6 wired the CLI to remove::confirmed. Nothing in production calls
-    remove::lifecycle, remove::observation, the journal, recovery/space, or
-    usage::{check_usage, UsageRefusal, OwnedHandles} any more; Phase 7 can
-    delete them (and may rename confirmed -> lifecycle).
-    - Gone already: cli/src/commands/remove/{recovery,usage}.rs,
-      cli/tests/{remove_recovery_report,remove_usage_refusal}.rs and their
-      snapshots, env::TEST_AVAILABLE_SPACE_VAR. Still to delete in Phase 7:
-      the lib's report.json path (recovery/store.rs REPORT_FILE etc.),
-      outcome::OperationReport, plan_move (old), the old resolver.
-    - Library changes made here that Phase 7 must keep:
-      Revalidate::still_safe(name, tip, remote_deleted);
-      remote::remote_branch_absent (a failed lease push asks once);
-      confirmed::unreadable_by_git (R10/R13 checkout -> in place);
-      rename::classify Stage::Open sharing violation -> Sharing (Windows);
-      facts::missed (only a real usage miss warns; Unsupported/Partial do
-      not); facts Warning::IncludedFiles/IncludedUnchecked and
-      Note::IncludedCheck; Caller::parent (own shell not listed).
-    - docs/cli/remove.md: the top half (through "Standing in the worktree
-      you remove", plus "A link in place" and "Exit codes") describes the
-      new behavior; everything from "## Deleting the checkout" through
-      "## Worktrees Git can't read" still describes the watcher, journal,
-      stop reports, retry, and the old refusals. Phase 7 deletes that machinery; Phase 9 owns
-      the rewrite. lib/src/remove/usage.rs's module doc is stale too.
-    - Known, not fixed: biscuit-terminal hyphenates paths wider than the
-      terminal; Sniff's 2 s usage budget has no test override, so a
-      no-`--force` binary test on a loaded host can exit 3 ("the time
-      allowed for the check ran out") — rerun it alone first.
+    Phase 8 (verification) changed two behaviors Phase 9's docs must state:
+    - An unreadable pending record (corrupt, unknown version, another
+      operation's) is now explained: `wt remove <name>` that matches
+      nothing while such a record exists exits 1 with "Nothing was removed.
+      The record of an earlier removal could not be read: removal record
+      <id> cannot be used: <reason>." (lifecycle/resolve.rs).
+    - On WSL drvfs (/mnt/<drive>) the removal store skips the owner-only
+      mode-bit check (bits are always 0o777 there and chmod is ignored);
+      ownership is still checked. Before this, every --force removal on
+      /mnt/c failed with "other users can access it" (recovery/storage.rs).
+      Verified on build-win: warns, deletes, exit 0, nothing left.
+    - Open decision (human_review_items): on a ~500k-entry checkout Sniff's
+      2 s usage budget is spent walking the tree, so the question always
+      shows "Some programs could not be checked". Do not describe the
+      process warning as reliable on very large checkouts until that is
+      decided; check the log's Phase 8 "Large-checkout acceptance" section.
+    - worktree/docs/cli/remove.md below "Deleting the checkout" is still the
+      old watcher/journal text (Phase 9 owns it). Code names: the plan's
+      `confirmed` is `remove::lifecycle` since Phase 7.
+source_files_during_phase_7:
+    - worktree/lib/Cargo.toml
+    - Cargo.lock
+    - .config/nextest.toml
+    - worktree/lib/src/test_support.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/branches.rs
+    - worktree/lib/src/remove/lifecycle/late.rs
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/confirmed.rs
+    - worktree/lib/src/remove/confirmed/*.rs
+    - worktree/lib/src/remove/lifecycle/tests/*.rs
+    - worktree/lib/src/remove/observation/**
+    - worktree/lib/src/remove/outcome.rs
+    - worktree/lib/src/remove/recovery/journal.rs
+    - worktree/lib/src/remove/recovery/space.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/record.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/recovery/store/compact/tests.rs
+    - worktree/lib/src/remove/quarantine/mod.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/association/tests.rs
+    - worktree/lib/src/remove/quarantine/placement.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+    - worktree/lib/src/remove/quarantine/unregister.rs
+    - worktree/lib/src/remove/quarantine/unregister/tests.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/delete/wait.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/missing.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/outcome.rs
+    - worktree/cli/src/commands/remove/interrupt.rs
+docs_updated_during_phase_7:
+    - docs/dependencies.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/confirmed.md
+    - .claude/skills/worktree/observation.md
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/worktree/deletion.md
+    - .claude/skills/os/linux.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_8:
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/cli/tests/remove_recovery.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/worktree/lifecycle.md
+    - .claude/skills/worktree/warnings.md
+    - .claude/skills/os/wsl.md
+    - .claude/skills/os/SKILL.md
+human_review_items:
+    - |-
+      **Should `wt remove` give its "which programs are using this worktree" check more time on very large checkouts?**
+
+      Why now: the next phase writes the user documentation for the removal question. What it says about the program warning depends on this choice.
+
+      What happened: before it asks "Delete it?", `wt` asks the system which programs are using files in the worktree. That check has a fixed 2-second allowance and has to look at every file in the worktree first. On a test worktree with 500,000 files (a large Rust or Node build folder is in this range) just looking at the files took about 3.5 seconds. The allowance ran out before any program was checked, so the question always says "Some programs could not be checked". A script that runs `wt remove` without a terminal is then refused unless it adds `--force`. Deleting still works.
+
+      - **A. Leave it as it is.** Pros: the question appears after at most about 2 seconds, and nothing changes. Cons: on big worktrees the program check never runs, and scripts always need `--force` there.
+      - **B. Give the check a longer allowance, for example 10 seconds.** Pros: a one-line change, and the program check works on big worktrees. Cons: on very big worktrees the question takes a few seconds longer to appear (about 3.5 seconds at 500,000 files).
+      - **C. Change Sniff (the library that does the check) so that listing programs does not depend on first looking at every file**, for example by giving the two steps separate time allowances or by matching open files by folder. Pros: fast and complete. Cons: a larger change to a shared library, with its own tests on all four operating systems.
+
+      Recommendation: **B now, C later if it is ever needed.** It removes the misleading warning for a small, predictable wait, and it keeps the rule of asking the system only once.
+    - |-
+      **Please confirm a security trade-off made for WSL drives (`/mnt/c` and similar).**
+
+      Why now: it changes what `wt` trusts, and the next phase documents it.
+
+      What happened: `wt` keeps a small recovery file for an unfinished removal and refuses to use it if other users could change it, judged by Unix permission bits. On Windows drives opened from WSL those bits are always "everyone can do everything" and cannot be changed, so every removal there failed with "other users can access it". The spec says such worktrees must be removable. I changed the check so that on these drives only the owner is checked, not the bits. Native Windows already works this way (it relies on the folder's Windows permissions).
+
+      - **A. Keep the change** (owner is checked, bits are ignored on WSL Windows drives only). Pros: the feature works on WSL Windows drives and matches native Windows. Cons: on that one kind of drive, protection relies on Windows permissions, which `wt` cannot see from WSL.
+      - **B. Refuse removals on WSL Windows drives with a clear message** to run `wt` from Windows instead. Pros: no reliance on permissions `wt` cannot see. Cons: goes against the spec's decision that these worktrees are supported.
+
+      Recommendation: **A.** It is the behavior the spec asked for, it matches native Windows, and the recovery file only ever lets `wt` finish deleting the same worktree it already recorded.
 ---
 
 # Implementation Log for 2026-10-22-confirmed-remove-always-deletes (9 phases)
@@ -1338,3 +1411,358 @@ changes before is unknown. The trap is now in `.claude/skills/os/macos.md`.
 - **Not run:** Linux and WSL2 cross-checks. No Linux-specific branch was
   added; `Caller::parent` uses the same Unix call on macOS and Linux.
 
+
+## Phase 7
+
+### What was removed
+
+- **The activity watcher and checked deletion** (R23): all of
+  `lib/src/remove/observation/` (FSEvents, inotify, `ReadDirectoryChangesW`
+  adapters, `wait`, `injected`, `diagnostics`, the deletion inventory and
+  checked engine, ~140 tests).
+- **The journal-based lifecycle**: the old `lib/src/remove/lifecycle.rs`,
+  `lifecycle/{resolve,resume}.rs`, and `lifecycle/tests/{large_checkout,
+  resume_consent,startup_warning}.rs`.
+- **The journal, the free-space gate, and `report.json`** (R25, R26):
+  `recovery/{journal,space}.rs`, `outcome.rs` (`OperationReport`), and
+  everything in `recovery/store.rs` that served them (`begin`, `reopen`,
+  `recover`, `pending`, `read_report`, `Operation`, `ensure_space`,
+  `StoreError::{InsufficientSpace, SpaceUnknown, Journal, JournalWrite,
+  JournalSize, InventoryMismatch}`, the reopen fault seam). `store.rs` now
+  opens the store and takes locks; `store/compact.rs` does the rest.
+  `REPORT_FILE` stays only so a legacy operation's report is read for
+  migration. `storage::open_append` went; `temp_beside`, `publish`,
+  `create_private_file` became private to `write_durable`.
+- **The usage refusal**: `usage::{check_usage, assess, UsageRefusal, InUse,
+  UsageClearance, OwnedHandles, SearchRecheck, SEARCH_RECHECK_WAIT,
+  WINDOWS_SEARCH_IMAGES, is_windows_search}` and
+  `UsageSource::{system_directory, pause}`. `UsageSource::query` lost its
+  tree-index argument. New `usage::holders(&report)` lists every process
+  with evidence; `facts::gather` uses it.
+- **Content comparison between handoff runs** (R18): the version 4
+  `HandoffRecord`/`HandoffState`/`Approvals`/`write_record`/`consume`/
+  `verify`/`checkout_git_dir`, `Inventory::fingerprint`,
+  `inventory::bind_excluded`, `Inventory::{needs_consent,
+  consent_sensitive_paths, has_source}`, and `included::BaselineBinding`
+  plus the rules' content digest. An earlier `wt`'s v4 handoff now reads as
+  missing (test below).
+- **The old checked unregister**: `quarantine/unregister.rs` (+ tests),
+  `missing::{remove_missing_record, remove_listed_record, IndexBinding,
+  bind_index}` and the index digests on `MissingCheckout`, and
+  `MissingRefusal::{IndexChanged, HeadChanged, Changed, Reappeared,
+  PathUninspectable, RecordRemoval}`. Inspection (`inspect_missing`) stays.
+- **The old move planner**: `association::{plan_move (old), move_to_quarantine,
+  verify_quarantined, MovePlan::back_reference_rewritten,
+  check_no_submodules}`, `MoveRefusal::Submodules`, the `confirmed` flag,
+  and the `activity_observed` argument of `move_with`, `roll_back`,
+  `placement::{place, place_with}` (its rollback guard was the watcher's).
+  `plan_confirmed_move` is now `plan_move`. `RegistrationState` moved from
+  `outcome.rs` to `association.rs`.
+- **Dependencies**: `inotify` (with `inotify-sys`) and `fsevent-sys` left
+  `worktree/lib/Cargo.toml` and `Cargo.lock`; `windows-sys` keeps
+  `Win32_Foundation`, `Win32_Security`, `Win32_Storage_FileSystem` and drops
+  `Win32_System_IO`, `Win32_System_Threading`,
+  `Win32_System_SystemInformation`. `docs/dependencies.md` updated (both
+  entries removed, the `worktree` paragraph rewritten). No per-area
+  `worktree/docs/dependencies.md` exists.
+- **Recipes and perf gates**: no `worktree/justfile` recipe or `perf_` test
+  was watcher-specific (Phase 1 audit, re-checked). `.config/nextest.toml`
+  lost the `fsevents-l1` group and its `remove::.*::native_` /
+  `remove::observation::fsevents::` override (no such test remains).
+- `crate::test_support::package_dir` (used only by watcher tests).
+
+### Rename: `remove::confirmed` → `remove::lifecycle`
+
+With the old lifecycle gone, the only lifecycle took its name
+(`lib/src/remove/lifecycle.rs`, `lifecycle/{branches,late,resolve,resume,
+tests}.rs`). CLI imports and doc links follow. The skill page
+`confirmed.md` became `lifecycle.md` (old `lifecycle.md` and
+`observation.md` deleted). This is a departure from the plan's wording,
+which still says `confirmed`; the previous phase's agent suggested it.
+
+### Drift found and resolved
+
+Code is assumed correct; each comment below was fixed or deleted:
+
+- `remove/mod.rs` module doc described the watcher, the outcome report, and
+  "the lifecycle that replaces it" → rewritten for what exists.
+- `recovery/mod.rs` described the journal layout "still written by the
+  journal-based lifecycle" and its crash guarantees → rewritten for the
+  compact record only, with legacy migration.
+- `recovery/record.rs`: `RECORD_VERSION` "the only version this build reads
+  or writes" and `consent_fingerprint` linking to the deleted
+  `Inventory::fingerprint` → legacy-only wording; `to_json` is now
+  `#[cfg(test)]`.
+- `usage.rs` module doc (stale since Phase 6) → rewritten.
+- `handoff.rs` module doc described the content-comparing handoff and the
+  60 s TTL → the operation handoff, 10 min.
+- `inventory.rs`, `included.rs`, `missing.rs` module docs spoke of consent
+  bindings and removal re-reads → inspection only.
+- `association.rs` module and item docs named `plan_confirmed_move`,
+  `move_to_quarantine`, and the activity guard → updated.
+- `quarantine/mod.rs` named `unregister` → removed.
+- CLI `commands/remove/mod.rs` "confirmed lifecycle" → "removal lifecycle".
+
+### Success-criteria grep
+
+`grep -ri "fsevent\|inotify\|ReadDirectoryChanges\|CoverageLost\|journal"
+worktree/` (excluding `features/`, `fixes/`): code hits remain only where
+they are correct, which the plan's "finds only docs" did not foresee:
+
+- legacy migration deletes `journal.jsonl`/`journal-<n>.jsonl` unread, so
+  its docs and tests name them (`recovery/store/compact.rs`, its tests,
+  `lifecycle/tests.rs`'s legacy case, `recovery/legacy/tests.rs`);
+- `facts.rs` labels Sniff's own coverage mechanisms (`Mechanism::Fsevents`,
+  `Mechanism::Inotify`) when describing a missed usage query, and
+  `usage/tests.rs` builds such reports.
+- `worktree/docs/cli/remove.md` still describes the watcher; its rewrite is
+  Phase 9's (unchanged here).
+
+### Tests (requirement → test)
+
+All L1, `worktree` library (F2: real repositories in temp dirs, injected
+usage/mounts/clock).
+
+| Requirement | Test |
+|---|---|
+| Large-checkout coverage that still applies: a crash part-way through deleting a multi-batch checkout is finished by the next run, asking nothing, counting only its own deletions | `remove::lifecycle::tests::a_crash_part_way_through_deleting_a_built_checkout_is_finished_by_the_next_run` (new; 2,148 built files, > 2 batches) |
+| Legacy (v1) record loader keeps its full robustness matrix after `recover` was deleted | `remove::recovery::store::tests::record_robustness_matrix` (ported to assert through `RecoveryStore::resume`; unknown version is now 99 since 2 is the compact version) |
+| A linked operation directory is never read | `remove::recovery::store::tests::a_linked_operation_directory_is_never_read` (ported to `operations()` + `resume`) |
+| R25/R26: journals and a report beside a record are deleted unread; legacy v1 + report v6 finishes without a question | existing `store::compact::tests::{resuming_a_compact_record_deletes_leftover_journals_and_reports_without_reading_them, a_legacy_operation_migrates_to_a_compact_record_and_drops_its_journals_and_report}`, `lifecycle::tests::a_legacy_operation_is_finished_and_its_unbound_remote_step_left_undone` |
+| Usage is facts, not a refusal | `remove::usage::tests::{every_evidence_kind_makes_a_holder, no_match_has_no_holders_whatever_the_coverage, a_match_in_a_partial_report_is_a_holder_and_its_gaps_are_summarized, locations_report_aliases_and_identity_only_evidence_as_facts, a_real_query_names_a_process_working_in_the_checkout, a_real_query_of_a_vanished_checkout_is_an_error}` (rewritten) |
+| R18: an earlier `wt`'s content-comparing handoff (v4) is never used | `remove::handoff::tests::only_the_operation_format_is_an_operation_handoff` (now writes raw v4 JSON); `paths_compare_canonical` ported to `verify_operation` |
+| A lock does not refuse planning but the move still refuses and keeps it | `remove::quarantine::association::tests::a_locked_worktree_plans_but_refuses_the_move` (rewritten) |
+| Submodules never refuse the move (R2) | `remove::quarantine::association::tests::a_checkout_with_a_submodule_moves` (rewritten from the refusal test) |
+| Missing checkout inspection unchanged; split index read by Git | `remove::missing::tests::{a_record_without_staged_work_needs_no_consent, staged_work_in_a_split_index_is_reported, a_split_index_whose_shared_file_is_corrupt_cannot_be_inspected}` (rewritten from removal tests) |
+
+Deleted with the code they tested (no behavior left to test): the observer
+suites, journal/space/report tests, `store/tests.rs`'s journal matrix and
+begin/reopen tests, usage exclusion and Windows Search tests,
+`quarantine/unregister/tests.rs`, `missing.rs`'s removal and split-index
+re-read tests, `inventory.rs`'s 12 fingerprint tests, the old handoff's
+record tests, `association`'s observed-activity rollback test, and the old
+lifecycle's tests (whose surviving behaviors Phase 5 re-covered in
+`lifecycle/tests.rs`).
+
+Input robustness: no loader was added or changed. The legacy record
+loader's matrix is preserved (ported, all cells kept, control row
+included); the handoff loader is unchanged.
+
+### Gates
+
+- `just lint` (`worktree/`): clean.
+- `just test` (`worktree/`): 1,524 run, 1,524 passed, 14 skipped (was 1,782;
+  the difference is the deleted suites).
+- Targeted run before the full suite: 67 of 67 (`store::tests`, `usage`,
+  `handoff`, `missing`, `inventory`, `quarantine`, `included`, the new
+  crash test).
+- `just check-tier-coverage worktree`: 0 stranded.
+- `cargo check -p worktree -p worktree-cli --target x86_64-pc-windows-gnu
+  --all-targets`: clean (Windows-only tests compile after the
+  `move_with`/`place` signature change).
+- rustdoc intra-doc links in `lib/src/remove/`: no new broken link (one
+  pre-existing in `association.rs`'s module doc, `rename_no_replace`).
+- Dependents: only `worktree-cli` depends on `worktree`; `just test` covers
+  it.
+- Windows (`build-win-native`), attempt 1, final code (before a comment-only
+  rewrap in `association.rs`):
+    - `just cross-check worktree --os windows`: 816 of 816 passed.
+    - `just cross-check worktree-cli --os windows`: 642 of 642 passed
+      (44 skipped).
+    - `spec.md`'s `os_failing` is not set.
+- **Not run:** Linux and WSL2 cross-checks. No Linux-specific code was
+  changed; the removed `inotify` adapter was self-contained, and the
+  remaining `cfg(target_os = "linux")` code (`rename`, `delete/platform`,
+  `mounts/linux`, `include`) is untouched. No local Linux cross toolchain
+  exists for `cargo check --target x86_64-unknown-linux-gnu` (`aws-lc-sys`
+  needs `x86_64-linux-gnu-gcc`).
+- CI scope calculator after all edits
+  (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+  python3 scripts/ci/affected_scope.py`): `packages` = `worktree`,
+  `worktree-cli`, `test-toolkit`, `darkmatter`, `sniff`; `change_class` =
+  `package`. The last three come from the shared `.config/nextest.toml` and
+  `Cargo.lock` edits (a `worktree`-only nextest group and two
+  `worktree`-only crates removed), so their suites were not run locally;
+  the gates for `worktree` were run.
+
+## Phase 8
+
+### What was done
+
+- **Ruling coverage audit** (table below): every ruling R1–R29 maps to at
+  least one L1 test. Phases 1–7 had already covered almost all of them; this
+  phase filled three gaps and found one product defect.
+- **Defect found and fixed: an unreadable pending record was never
+  explained.** Name resolution (`remove::lifecycle::resolve_in`) skipped a
+  record it could not read, so `wt remove feat-x` after an interrupted
+  removal whose record was later corrupted, of an unknown version, or
+  another operation's said only that no worktree is named `feat-x`. The
+  spec asks for "a plain explanation and no speculative deletion". Now,
+  when a name matches nothing and the store holds an unreadable record,
+  resolution returns that record's `ResolveError::Store`, which the CLI
+  already renders as `Nothing was removed. The record of an earlier removal
+  could not be read: removal record <id> cannot be used: …` (exit 1).
+  A name that matches a live worktree or a readable operation still
+  resolves as before (an unreadable record still blocks a new approval, as
+  it did). Doc comments of `resolve` and `pending_operations` updated.
+- **Gaps filled:** a submodule with an uncommitted file *and* a commit on
+  no remote, asserted end to end (warning content, then deletion with
+  `modules/<name>`); files *changed* and *staged* while the question is open
+  (only *created* was covered), including that a file the question already
+  showed is not named again; the unreadable-record case above, in the
+  library and through the binary.
+- **L2** (`just test-l2`, macOS, tmux, detached): 42 of 42, including
+  `level2_a_process_warning_in_the_question_answered_yes_deletes_the_worktree`.
+  No window took focus (tmux panes only).
+- **Defect found by the WSL2 run and fixed: removal on drvfs always failed.**
+  On `/mnt/c`, `wt remove a --force` showed the drvfs warning and then
+  exited 1 with `Nothing was removed: …/.git/wt-removal cannot be used:
+  other users can access it`. drvfs (mounted `9p`, `aname=drvfs`, no
+  `metadata` option) reports every entry as `0o777` and ignores `chmod`,
+  so the store's owner-only check could never pass and R4 was unreachable.
+  `recovery/storage.rs`'s Unix `check_owner` now skips the open-bits
+  refusal only when the path's containing mount is drvfs
+  (`mounts::Mount::is_drvfs`), still checking ownership; the mount table is
+  read only on that failing branch. This mirrors native Windows, which
+  relies on the inherited ACL. Flagged for human confirmation
+  (`human_review_items`).
+- **Departure from the spec, not fixed here (human decision): on a very
+  large checkout the question always says "Some programs could not be
+  checked".** Since Phase 7 no tree index is supplied to Sniff, so its usage
+  query walks the checkout inside its one 2 s budget. On the 500,000-entry
+  checkout the walk exhausted the budget before any process was
+  enumerated (reproduced three times; `sniff filesystem query` of the same
+  tree: 2.06 s with the default budget, `budget_exhausted`, `unavailable`;
+  3.52 s and `usable` with a 60 s budget). Deletion is unaffected; a
+  non-interactive run needs `--force` there. Options and a recommendation
+  are in `human_review_items`.
+
+### Ruling coverage audit (R1–R29 → tests)
+
+L1 unless marked. Library tests are F2 (real repositories in temp dirs;
+usage, mounts, clock, faults injected); `cli/tests/*` are F3 (the real `wt`
+binary). New or changed in this phase: **bold**.
+
+| Ruling | Tests |
+|---|---|
+| R1 process warning; yes deletes; non-interactive refuses without `--force` | `facts::tests::each_process_is_named_with_what_it_is_doing`; `cli/tests/remove.rs::a_process_standing_in_the_worktree_is_a_warning_and_force_deletes_it`; L2 `level2_remove::level2_a_process_warning_in_the_question_answered_yes_deletes_the_worktree` |
+| R2 submodules: work only there warns (uncommitted + unpushed), deleted with `modules/<name>`; clean adds no warning | **`lifecycle::tests::a_worktree_with_a_submodule_is_deleted_with_its_module_data`** (now with an unpushed commit and the warning asserted); `facts::tests::{a_submodule_with_work_only_there_warns_and_a_clean_one_does_not, a_worktree_whose_submodules_are_clean_has_no_warnings}`; `submodules::tests::*` |
+| R3 lock reason first; yes unlocks and deletes; missing + locked | `facts::tests::{a_lock_reason_is_shown_first, a_lock_is_warned_about_when_the_directory_is_gone}`; `lifecycle::tests::{a_locked_worktree_is_unlocked_and_deleted, a_lock_added_after_the_question_is_never_removed, a_missing_locked_worktree_has_its_record_removed}`; `remove.rs::a_locked_worktree_shows_its_reason_and_force_unlocks_and_deletes_it` |
+| R4 drvfs: warning; in place when no exclusive rename; collision never replaced | `facts::tests::a_checkout_on_drvfs_warns_and_suggests_windows`; `lifecycle::tests::a_filesystem_without_exclusive_rename_deletes_in_place`; `placement::tests::a_collision_at_the_hidden_name_stays_an_error_and_replaces_nothing`; **`storage::tests::open_permissions_are_accepted_only_on_drvfs`**; manual WSL2 run below |
+| R5 FIFOs/sockets unlinked unopened | `delete::tests::fifos_and_sockets_are_unlinked_without_being_opened` |
+| R6 reparse points deleted, never traversed; synced-folder warning | `delete::tests::links_inside_the_checkout_are_removed_and_their_targets_never_touched` (junctions on Windows take the same reparse-point branch as placeholders); `facts::tests::a_checkout_inside_a_synced_folder_warns_about_cloud_copies`. A real cloud placeholder cannot be made without a sync provider: not tested |
+| R7 nested mount kept (incl. same-device bind), exit 1, later run finishes | `lifecycle::tests::a_nested_mount_is_kept_until_unmounted_and_then_finished`; `mounts::tests::a_same_device_bind_mount_is_nested`; `mountinfo::tests::a_same_device_bind_mount_is_listed`; `delete::tests::a_nested_mount_is_never_crossed_and_everything_else_is_deleted` |
+| R8 relative `.git` link rewritten for the move | `association::tests::{a_link_through_the_checkout_is_rewritten_for_the_move, a_rewritten_link_is_restored_when_the_move_is_rolled_back, a_relative_record_keeps_its_format}` |
+| R9 own link deletes both; foreign link only link + record | `lifecycle::tests::{a_link_to_the_own_checkout_deletes_both, a_link_to_another_directory_deletes_only_the_link_and_the_record}`; `remove.rs` own/foreign link cases |
+| R10–R13 unreadable Git, file at path, index gone, unchecked files | `facts::tests::{an_unverifiable_repair_warns_that_git_cannot_read_it, a_file_at_the_path_says_what_is_there, a_missing_directory_without_its_index_cannot_check_staged_changes, a_failed_status_is_unchecked_with_its_reason}`; `lifecycle::tests::a_file_at_the_path_is_deleted_with_the_record`; `remove.rs` R10–R13 `--force` cases; read-only entries: `delete::tests::read_only_*` |
+| R14 created/changed/staged after the question deleted and named | `lifecycle::tests::a_file_created_after_the_question_is_deleted_and_named`, **`files_changed_and_staged_while_the_question_was_open_are_deleted_and_named`**; `remove_recovery.rs::a_file_created_after_the_report_is_deleted_and_named_in_the_final_line` |
+| R15 shell inside: Unix warning, Windows exit 4 | `facts::tests::a_shell_inside_without_the_wrapper_{warns_on_unix,refuses_on_windows}`; `lifecycle::tests::the_shell_inside_blocker_refuses_with_exit_4`; `remove.rs` R15 cases |
+| R16 concurrent removal waits, continues; cancellable; stale lock | `lifecycle::tests::{a_second_run_waits_for_the_running_removal_and_continues_it, the_wait_for_a_running_removal_honors_cancellation}`; `store::compact::tests::a_stale_lock_file_and_a_crashed_owners_record_are_taken_over_at_once` |
+| R17 vanished checkout is already removed | `facts::tests::a_checkout_that_vanishes_during_the_usage_query_is_already_removed` |
+| R18 handoff second run: no content comparison, 10 min, single use | `lifecycle::tests::the_handoff_second_run_finishes_once_the_caller_left`; `handoff::tests::*`; `remove.rs` R18 cases |
+| R19 crash at every edge finished silently; legacy v1 + report v6; unbound remote step undone; replaced roots/records/recreated originals never deleted; malformed/unknown records explained | `lifecycle::tests::{a_crash_at_every_step_is_finished_by_the_next_run, a_crash_part_way_through_deleting_a_built_checkout_is_finished_by_the_next_run, a_crash_between_the_rename_and_the_registration_is_finished, a_recreated_original_is_kept_and_the_moved_checkout_deleted, a_replaced_quarantine_is_never_deleted, a_replaced_in_place_root_is_kept_and_the_operation_closed, a_replaced_worktree_record_is_never_resumed, a_legacy_operation_is_finished_and_its_unbound_remote_step_left_undone}`, **`an_unreadable_record_of_a_pending_removal_is_explained_and_nothing_is_deleted`**; **`remove_recovery.rs::an_unreadable_record_of_an_interrupted_removal_is_explained_and_nothing_is_deleted`**; `store::compact::tests::{corrupt_foreign_and_unknown_version_records_are_explained_and_kept, a_migration_stopped_before_publishing_leaves_the_legacy_files_and_can_run_again, …}`; `legacy::tests::*` |
+| R20 activity during deletion: continues | `remove_recovery.rs::a_write_into_the_moved_checkout_just_before_deletion_is_deleted` |
+| R21 / R23 watcher gone | deleted with the code in Phase 7 (no test remains to keep) |
+| R22 held file waited on, named, finished in the same run; cancellable | `lifecycle::tests::a_held_file_is_waited_on_and_the_removal_finishes_in_the_same_run`; `delete::tests::{a_held_file_is_waited_on_after_everything_else_is_deleted, a_windows_denial_with_a_named_holder_is_waited_on, cancelling_a_wait_ends_deletion_and_names_what_it_waited_on}`; Windows L2 `level2_powershell_with_force_deletes_a_worktree_another_program_holds_once_it_exits` |
+| R24 refilling directory relisted, then waited on with its writer named | `delete::tests::{a_directory_that_refills_a_few_times_is_relisted_and_deleted_without_waiting, a_directory_that_keeps_refilling_is_waited_on_and_its_writer_named}` |
+| R25 / R26 compact record only; nothing left after completion | `lifecycle::tests::a_confirmed_checkout_is_deleted_in_one_run_and_leaves_nothing`; `store::compact::tests::a_finished_operation_leaves_nothing_in_the_store`; `compact::tests::*` |
+| R27 process context | `facts::tests::{a_process_is_named_with_its_start_and_the_known_program_it_was_run_from, sniffs_process_context_reaches_the_warning}` |
+| R28 `--force` only; `--force-worktree` exit 2; `--force` keeps an unsafe branch | `remove.rs::{retired_flags_are_clap_errors, help_lists_the_three_force_flags_and_hides_handoff, force_alone_keeps_a_branch_whose_commits_exist_nowhere_else}`; `policy::tests::*` |
+| R29 permanent failure: rest deleted, one sentence, exit 1, no retry, later run finishes; unsaveable approval deletes nothing | `lifecycle::tests::{a_permanent_failure_deletes_the_rest_and_a_later_run_finishes, an_approval_that_cannot_be_saved_changes_nothing}`; `delete::tests::{a_permanent_failure_deletes_everything_else_and_is_never_retried, a_denial_nobody_explains_is_permanent_after_one_fix}` |
+| Non-interactive: refusal without `--force`, `CI` set, clean removes silently | `wrapper_protocol::exit_3_when_removal_would_lose_files_and_nobody_can_confirm` (`CI` unset and `true`); `remove.rs::{example_dirty_files_without_a_terminal_refuse_with_nothing_removed, example_clean_and_merged_removes_worktree_and_branch}` |
+| Branch regressions: moved tip, endpoint, lease | `lifecycle::tests::{a_branch_that_moved_is_kept_after_the_checkout_is_deleted, a_conditional_branch_is_rechecked_by_a_later_run}`; `remove.rs` origin-moved/URL-changed/lease cases; `remote::tests::*` |
+
+Each new test fails against the code it guards: the two unreadable-record
+tests got `NotFound` before the `resolve` fix (checked); the drvfs storage
+test's accepted cells returned `OpenPermissions` before the
+`storage.rs` fix; the R14 test asserts names the previous test set never
+produced (changed and staged paths).
+
+**Input robustness.** No loader changed. The unreadable-record tests drive
+three record shapes (malformed JSON, `record_version` 3, another
+operation's id) through the public lifecycle and CLI path; the loader's
+full matrix stays in `store::compact::tests` and `compact::tests`.
+
+### Large-checkout acceptance (macOS, once)
+
+Release `wt`, a disposable repository in `/tmp`, one worktree with
+500,000 ignored entries under `target/` (500 directories × 999 files, built
+in 25 s) plus one untracked file so the question is asked. Run in a
+detached tmux pane (no window), answered `y`:
+
+- One run, exit 0, no retry, no wait. The pane showed only the question and
+  `Removed big (500,007 entries) and deleted branch feat/big.` (no hidden
+  name, `Retry:`, report path, watcher, or journal text).
+- Question shown 2.1 s after start; **18.9 s** from "yes" to exit.
+- **Compact record: 1,202 bytes** (largest size seen while polling the
+  store every 5 ms). After the run: no checkout, no hidden directory, an
+  empty store, no branch, only the main worktree registered.
+- The question also carried the "Some programs could not be checked"
+  warning described above (the budget finding).
+- A first attempt under `script(1)` with "y" piped in hung at the prompt:
+  the terminal capability queries consumed the input. It was killed (nothing
+  changed) and the tmux run above replaced it.
+
+### Windows and WSL2
+
+- **Windows (`build-win-native`):** `just cross-check worktree --os windows`
+  (before the `storage.rs` change, whose Windows branch only gained an
+  unused path parameter): 819 of 819. `./scripts/cross-check.sh --os windows
+  worktree-cli --all-features level2_powershell` (native mode, PowerShell 5.1
+  in ConPTY): 4 of 4, 6.4–7.2 s each (they ran), including
+  `level2_powershell_with_force_deletes_a_worktree_another_program_holds_once_it_exits`
+  (a held directory is waited on, the program named, and the removal
+  finishes after it exits). `cargo check -p worktree -p worktree-cli
+  --all-targets --target x86_64-pc-windows-gnu` clean after the last
+  change. `os_failing` not set.
+- **WSL2 (`build-win`):** `just cross-check worktree --os wsl remove::recovery
+  remove::lifecycle`: first attempt 76 of 77. The failure was this phase's
+  submodule test committing without an identity (the rig runs with no
+  global Git config); fixed with `append_config` on the module's config, as
+  `facts::tests` does. Second attempt: 77 of 77.
+- **WSL2 drvfs, manual** (`wt` built in the guest from this tree, repository
+  under `/mnt/c/Users/Public`):
+    - without `--force`, no terminal: the uncommitted-files and drvfs
+      warnings, exit 3, nothing changed;
+    - with `--force`: first attempt exit 1 "other users can access it"
+      (the defect above); after the fix `Removed a (54 entries) and deleted
+      branch feat/a.`, exit 0, 4.2 s, no hidden directory, registration and
+      branch gone;
+    - `renameat2(RENAME_NOREPLACE)` on drvfs onto an occupied name: `EEXIST`,
+      the occupant intact; onto an absent name: `EINVAL` (so `wt` deletes in
+      place there and never creates a hidden name). A collision through `wt`
+      itself cannot be staged on drvfs: the hidden name carries a fresh
+      token. The collision rule is covered by the L1 placement test.
+- **Not run:** a full `worktree-cli` L1 cross-check on Windows (this
+  phase's CLI change is a Unix-only test file) and a Linux cross-check
+  (`storage.rs`'s new branch is Linux-reachable only on drvfs, exercised on
+  the WSL2 guest).
+
+### Gates
+
+- `just test` (`worktree/`), final code: 1,528 of 1,528 passed, 14
+  skipped. An earlier full run (before the `storage.rs` fix) had one
+  timeout, `worktree-cli::list_prs::a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_the_fixture_goes`
+  (the `wt list` PR worker, not touched here); it passed alone in 0.6 s,
+  load average 11 at the time. Recorded as load-sensitive.
+- `just lint` (`worktree/`): clean (one `type_complexity` in a new test,
+  fixed).
+- `just test-l2` (`worktree/`): 42 of 42.
+- `just check-tier-coverage worktree`: 0 stranded.
+- Dependents: only `worktree-cli` depends on `worktree`; `just test` runs it.
+- Release build warnings seen, pre-existing and outside this feature:
+  `TEST_WAIT_BUDGET_VAR` and `TEST_REFRESH_DEADLINE_VAR` unused in
+  `cli/src/env.rs` (`wt list` test seams; used only under `debug_assertions`).
+- Windows durations to watch (5 s L1 budget): pre-existing
+  `facts::tests::a_submodule_with_work_only_there_warns_and_a_clean_one_does_not`
+  took 5.1 s in the full Windows run. This phase's first version of the R2
+  test (two submodules) took 5.9 s there; it was folded into the existing
+  one-submodule test instead (3.2 s there before the fold).
+- CI scope calculator after all edits (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages` = `worktree`, `worktree-cli`,
+  `test-toolkit`, `darkmatter`, `sniff`; `change_class` = `package`, so the
+  gates were run. The working tree still holds Phase 7's uncommitted
+  `Cargo.lock` and `.config/nextest.toml` edits, which bring in the last
+  three; this phase changed only `worktree` and `worktree-cli` files, and
+  their suites were not run locally.
