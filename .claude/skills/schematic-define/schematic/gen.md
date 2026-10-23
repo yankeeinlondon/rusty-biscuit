@@ -115,7 +115,18 @@ schema/src/
 APIs that share a `module_path` (e.g., Ollama Native + OpenAI, EMQX Basic + Bearer)
 are combined into a single module file. Each API gets its own client struct, tag
 type, and request suffix to avoid naming collisions. Stale `.rs` files from previous
-generations are automatically cleaned up.
+generations are automatically cleaned up. The combined module's docs open with a
+sentence naming every API, then give each a `## {Api}` section with the docs its
+own module would have (`ModuleDocBuilder::markdown`, headings one level deeper).
+
+Every code example the generator writes is a `no_run` doctest (request types,
+module docs, crate Quick Start, prelude); never emit a `text` fence for Rust. The
+module, Quick Start, and prelude examples come from
+`codegen::module_docs::client_example_lines` (endpoint method, then
+`client.send({Name}Request::new(..))`, async wrapper in hidden `#` lines); the
+crate-root and prelude copies are gated on the example API's module feature.
+`just doctest-schema` compiles them with default features and with `emqx`
+alone; `generated_docs::slow_*` does the same in a fresh crate.
 
 ## Generated Code Components
 
@@ -278,6 +289,32 @@ rename list for shipped definitions is pinned by
 `schematic/gen/src/codegen/endpoint_methods/names.rs` and
 `schematic/docs/generation/validation.md`; calling them:
 `schematic/docs/runtime/calling-an-api.md`.
+
+## Postman export
+
+Topic page: `schematic/docs/io/export-postman.md`. Non-obvious facts:
+- Examples come from `export::examples::ExampleSource` over
+  `RestApi::schemas` (the registered schemas, never the OpenAPI conversion),
+  with `nullable: true` read as a `null` type and every candidate validated
+  by `jsonschema` 0.55 (a normal dependency of `schematic-gen`) through one
+  prepared `Registry` per API. Cost: all 644 shipped references in ~0.7 s
+  debug; do not compile a validator per reference from the full document
+  (OpenAI took >5 s that way).
+- A value that cannot be built is never emitted: the body stays empty and
+  `validate_postman` reports `example-value` (built by
+  `export::postman::export_diagnostics`, i.e. a second collection build).
+  Shipped APIs report none; `postman_runnable::every_shipped_example_validates`
+  validates every body, saved response, and stream frame independently.
+- Parameter variables are location-prefixed (`path_owner`, `query_page`,
+  `header_X-Id`, `cookie_session`) and declared on the collection;
+  cookies merge into one `Cookie` header. Shared-module members get their
+  own `baseUrl{N}` and API-name-suffixed credentials
+  (`bearerToken_EmqxBearer`), so a shared module with any auth has
+  request-level auth.
+- Environments (`{module}.postman_environment.json`) are written only with
+  `--postman-environment` (the `just` recipes pass it) and are drift-checked;
+  without the flag a complete run neither writes nor deletes them.
+- Golden fixtures: `BLESS_POSTMAN_GOLDEN=1` with the `postman_golden` filter.
 
 ## Validation
 

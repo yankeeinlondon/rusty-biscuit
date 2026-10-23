@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod body;
+pub mod examples;
 pub mod http;
 pub mod openapi;
 pub mod path_params;

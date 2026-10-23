@@ -16,7 +16,7 @@ use schematic_definitions::registry::{ApiRegistration, registrations};
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
 use crate::export::openapi::{build_openapi_grouped, render_openapi_document};
-use crate::export::postman::render_postman_module;
+use crate::export::postman::{render_postman_environment, render_postman_module};
 use crate::output::{
     MutationPlan, PublicationReport, RustOutputRequest, Selection, expand_selection,
     prepare_export_output, prepare_rust_output,
@@ -119,6 +119,9 @@ pub struct GenerateOpts<'a> {
     pub postman_out: Option<&'a str>,
     pub no_openapi: bool,
     pub no_postman: bool,
+    /// Also write each Postman collection's environment,
+    /// `<module>.postman_environment.json`, beside it.
+    pub postman_environment: bool,
 }
 
 
@@ -507,9 +510,18 @@ fn publish_postman(
                 format!("{module_name}.postman_collection.json"),
                 render_postman_module(&members, &module_name)?,
             ));
+            if opts.postman_environment {
+                files.push((
+                    format!("{module_name}.postman_environment.json"),
+                    render_postman_environment(&members, &module_name)?,
+                ));
+            }
         }
+        // Environment files are generator-owned only when requested, so a
+        // run without them never deletes environments another run wrote.
         let plan = prepare_export_output(Path::new(postman_dir), files, complete, |name| {
             name.ends_with(".postman_collection.json")
+                || (opts.postman_environment && name.ends_with(".postman_environment.json"))
         })?;
         publish_export(&plan, opts)
     })

@@ -14,6 +14,111 @@
       "key": "apiKey",
       "value": "",
       "description": "API key value"
+    },
+    {
+      "key": "path_id",
+      "value": "",
+      "description": "Value of the `id` path parameter"
+    },
+    {
+      "key": "query_page",
+      "value": "",
+      "description": "Value of the `page` query parameter"
+    },
+    {
+      "key": "query_per_page",
+      "value": "",
+      "description": "Value of the `per_page` query parameter"
+    },
+    {
+      "key": "query_recursive",
+      "value": "",
+      "description": "Value of the `recursive` query parameter"
+    },
+    {
+      "key": "query_git_ref",
+      "value": "",
+      "description": "Value of the `git_ref` query parameter"
+    },
+    {
+      "key": "query_path",
+      "value": "",
+      "description": "Value of the `path` query parameter"
+    },
+    {
+      "key": "path_file_path",
+      "value": "",
+      "description": "Value of the `file_path` path parameter"
+    },
+    {
+      "key": "query_ref",
+      "value": "",
+      "description": "Value of the `ref` query parameter"
+    },
+    {
+      "key": "query_archived",
+      "value": "",
+      "description": "Value of the `archived` query parameter"
+    },
+    {
+      "key": "query_visibility",
+      "value": "",
+      "description": "Value of the `visibility` query parameter"
+    },
+    {
+      "key": "query_order_by",
+      "value": "",
+      "description": "Value of the `order_by` query parameter"
+    },
+    {
+      "key": "query_sort",
+      "value": "",
+      "description": "Value of the `sort` query parameter"
+    },
+    {
+      "key": "query_include_subgroups",
+      "value": "",
+      "description": "Value of the `include_subgroups` query parameter"
+    },
+    {
+      "key": "path_branch",
+      "value": "",
+      "description": "Value of the `branch` path parameter"
+    },
+    {
+      "key": "query_state",
+      "value": "",
+      "description": "Value of the `state` query parameter"
+    },
+    {
+      "key": "path_merge_request_iid",
+      "value": "",
+      "description": "Value of the `merge_request_iid` path parameter"
+    },
+    {
+      "key": "path_issue_iid",
+      "value": "",
+      "description": "Value of the `issue_iid` path parameter"
+    },
+    {
+      "key": "path_tag_name",
+      "value": "",
+      "description": "Value of the `tag_name` path parameter"
+    },
+    {
+      "key": "query_status",
+      "value": "",
+      "description": "Value of the `status` query parameter"
+    },
+    {
+      "key": "query_source",
+      "value": "",
+      "description": "Value of the `source` query parameter"
+    },
+    {
+      "key": "query_sha",
+      "value": "",
+      "description": "Value of the `sha` query parameter"
     }
   ],
   "auth": {
@@ -54,37 +159,51 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "archived",
+                  "value": "{{query_archived}}",
+                  "disabled": true,
                   "description": "Filter by archived status"
                 },
                 {
                   "key": "visibility",
+                  "value": "{{query_visibility}}",
+                  "disabled": true,
                   "description": "Filter by visibility level"
                 },
                 {
                   "key": "order_by",
+                  "value": "{{query_order_by}}",
+                  "disabled": true,
                   "description": "Sort field"
                 },
                 {
                   "key": "sort",
+                  "value": "{{query_sort}}",
+                  "disabled": true,
                   "description": "Sort direction"
                 },
                 {
                   "key": "include_subgroups",
+                  "value": "{{query_include_subgroups}}",
+                  "disabled": true,
                   "description": "Include projects from subgroups"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -95,7 +214,21 @@
               }
             ],
             "description": "List projects in a group"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     },
@@ -120,29 +253,39 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "recursive",
+                  "value": "{{query_recursive}}",
+                  "disabled": true,
                   "description": "Include files from subdirectories recursively"
                 },
                 {
                   "key": "git_ref",
+                  "value": "{{query_git_ref}}",
+                  "disabled": true,
                   "description": "Branch, tag, or commit SHA to list tree for"
                 },
                 {
                   "key": "path",
+                  "value": "{{query_path}}",
+                  "disabled": true,
                   "description": "Subdirectory path to list"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -153,7 +296,21 @@
               }
             ],
             "description": "List repository tree recursively (files and directories)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetRepositoryFile",
@@ -173,17 +330,18 @@
               ],
               "query": [
                 {
-                  "key": "ref"
+                  "key": "ref",
+                  "value": "{{query_ref}}"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "file_path",
-                  "value": "<file_path>"
+                  "value": "{{path_file_path}}"
                 }
               ]
             },
@@ -194,7 +352,21 @@
               }
             ],
             "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"blob_id\": \"string\",\n  \"commit_id\": \"string\",\n  \"content\": \"string\",\n  \"content_sha256\": null,\n  \"encoding\": \"string\",\n  \"file_name\": \"string\",\n  \"file_path\": \"string\",\n  \"last_commit_id\": null,\n  \"ref\": \"string\",\n  \"size\": 0\n}"
+            }
+          ]
         },
         {
           "name": "GetProject",
@@ -212,7 +384,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -223,7 +395,21 @@
               }
             ],
             "description": "Get project metadata (use URL-encoded path or numeric ID)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"archived\": false,\n  \"avatar_url\": null,\n  \"created_at\": null,\n  \"default_branch\": null,\n  \"description\": null,\n  \"empty_repo\": null,\n  \"forks_count\": null,\n  \"http_url_to_repo\": null,\n  \"id\": 0,\n  \"issues_enabled\": null,\n  \"last_activity_at\": null,\n  \"merge_requests_enabled\": null,\n  \"name\": \"string\",\n  \"namespace\": null,\n  \"open_issues_count\": null,\n  \"owner\": null,\n  \"path\": null,\n  \"path_with_namespace\": null,\n  \"ssh_url_to_repo\": null,\n  \"star_count\": null,\n  \"topics\": [],\n  \"visibility\": null,\n  \"web_url\": null,\n  \"wiki_enabled\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetBranch",
@@ -244,11 +430,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "branch",
-                  "value": "<branch>"
+                  "value": "{{path_branch}}"
                 }
               ]
             },
@@ -259,7 +445,21 @@
               }
             ],
             "description": "Get a single branch (commit.id is the branch head commit)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"commit\": {\n    \"author_email\": \"string\",\n    \"author_name\": \"string\",\n    \"authored_date\": null,\n    \"committed_date\": null,\n    \"committer_email\": null,\n    \"committer_name\": null,\n    \"created_at\": \"string\",\n    \"id\": \"string\",\n    \"message\": null,\n    \"parent_ids\": [],\n    \"short_id\": \"string\",\n    \"title\": \"string\",\n    \"web_url\": null\n  },\n  \"default\": false,\n  \"merged\": false,\n  \"name\": \"string\",\n  \"protected\": false,\n  \"web_url\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListMergeRequests",
@@ -278,21 +478,27 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by merge request state"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -303,7 +509,21 @@
               }
             ],
             "description": "List merge requests with metadata"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetMergeRequest",
@@ -323,11 +543,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "merge_request_iid",
-                  "value": "<merge_request_iid>"
+                  "value": "{{path_merge_request_iid}}"
                 }
               ]
             },
@@ -338,7 +558,21 @@
               }
             ],
             "description": "Get a single merge request by IID"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"assignee\": null,\n  \"assignees\": [],\n  \"author\": {\n    \"avatar_url\": null,\n    \"id\": 0,\n    \"name\": null,\n    \"state\": null,\n    \"username\": \"string\",\n    \"web_url\": null\n  },\n  \"changes_count\": null,\n  \"closed_at\": null,\n  \"closed_by\": null,\n  \"created_at\": \"string\",\n  \"description\": null,\n  \"downvotes\": 0,\n  \"draft\": false,\n  \"id\": 0,\n  \"iid\": 0,\n  \"labels\": [],\n  \"merge_commit_sha\": null,\n  \"merge_status\": null,\n  \"merge_when_pipeline_succeeds\": false,\n  \"merged_at\": null,\n  \"merged_by\": null,\n  \"milestone\": null,\n  \"project_id\": 0,\n  \"references\": null,\n  \"reviewers\": [],\n  \"sha\": null,\n  \"source_branch\": \"string\",\n  \"source_project_id\": null,\n  \"squash\": false,\n  \"squash_commit_sha\": null,\n  \"state\": \"string\",\n  \"target_branch\": \"string\",\n  \"target_project_id\": null,\n  \"time_stats\": null,\n  \"title\": \"string\",\n  \"updated_at\": \"string\",\n  \"upvotes\": 0,\n  \"user_notes_count\": 0,\n  \"web_url\": null,\n  \"work_in_progress\": false\n}"
+            }
+          ]
         },
         {
           "name": "ListMergeRequestCommits",
@@ -359,21 +593,25 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "merge_request_iid",
-                  "value": "<merge_request_iid>"
+                  "value": "{{path_merge_request_iid}}"
                 }
               ]
             },
@@ -384,7 +622,21 @@
               }
             ],
             "description": "List commits in a merge request"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListMergeRequestChanges",
@@ -405,11 +657,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "merge_request_iid",
-                  "value": "<merge_request_iid>"
+                  "value": "{{path_merge_request_iid}}"
                 }
               ]
             },
@@ -420,7 +672,21 @@
               }
             ],
             "description": "Get merge request with file changes/diffs"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"changes\": [],\n  \"closed_at\": null,\n  \"description\": null,\n  \"id\": 0,\n  \"iid\": 0,\n  \"merged_at\": null,\n  \"project_id\": 0,\n  \"source_branch\": \"string\",\n  \"state\": \"string\",\n  \"target_branch\": \"string\",\n  \"title\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListIssues",
@@ -439,21 +705,27 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by issue state"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -464,7 +736,21 @@
               }
             ],
             "description": "List issues"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetIssue",
@@ -484,11 +770,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "issue_iid",
-                  "value": "<issue_iid>"
+                  "value": "{{path_issue_iid}}"
                 }
               ]
             },
@@ -499,7 +785,21 @@
               }
             ],
             "description": "Get a single issue by IID"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"assignee\": null,\n  \"assignees\": [],\n  \"author\": {\n    \"avatar_url\": null,\n    \"id\": 0,\n    \"name\": null,\n    \"state\": null,\n    \"username\": \"string\",\n    \"web_url\": null\n  },\n  \"closed_at\": null,\n  \"closed_by\": null,\n  \"confidential\": false,\n  \"created_at\": \"string\",\n  \"description\": null,\n  \"discussion_locked\": null,\n  \"downvotes\": 0,\n  \"due_date\": null,\n  \"has_tasks\": null,\n  \"id\": 0,\n  \"iid\": 0,\n  \"issue_type\": null,\n  \"labels\": [],\n  \"milestone\": null,\n  \"moved_to_id\": null,\n  \"project_id\": 0,\n  \"references\": null,\n  \"severity\": null,\n  \"state\": \"string\",\n  \"task_completion_status\": null,\n  \"task_status\": null,\n  \"time_stats\": null,\n  \"title\": \"string\",\n  \"updated_at\": \"string\",\n  \"upvotes\": 0,\n  \"user_notes_count\": 0,\n  \"web_url\": null,\n  \"weight\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListIssueNotes",
@@ -520,21 +820,25 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "issue_iid",
-                  "value": "<issue_iid>"
+                  "value": "{{path_issue_iid}}"
                 }
               ]
             },
@@ -545,7 +849,21 @@
               }
             ],
             "description": "List comments/notes on an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListIssueParticipants",
@@ -566,11 +884,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "issue_iid",
-                  "value": "<issue_iid>"
+                  "value": "{{path_issue_iid}}"
                 }
               ]
             },
@@ -581,7 +899,21 @@
               }
             ],
             "description": "List participants on an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListTags",
@@ -601,17 +933,21 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -622,7 +958,21 @@
               }
             ],
             "description": "List repository tags (check `release` field for release tags)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetTag",
@@ -643,11 +993,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "tag_name",
-                  "value": "<tag_name>"
+                  "value": "{{path_tag_name}}"
                 }
               ]
             },
@@ -658,7 +1008,21 @@
               }
             ],
             "description": "Get a single tag by name"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"commit\": {\n    \"author_email\": null,\n    \"author_name\": null,\n    \"authored_date\": null,\n    \"committed_date\": null,\n    \"committer_email\": null,\n    \"committer_name\": null,\n    \"created_at\": null,\n    \"id\": \"string\",\n    \"message\": null,\n    \"parent_ids\": [],\n    \"short_id\": \"string\",\n    \"title\": \"string\"\n  },\n  \"created_at\": null,\n  \"message\": null,\n  \"name\": \"string\",\n  \"protected\": false,\n  \"release\": null,\n  \"target\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListReleases",
@@ -677,17 +1041,21 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -698,7 +1066,21 @@
               }
             ],
             "description": "List releases"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetRelease",
@@ -718,11 +1100,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "tag_name",
-                  "value": "<tag_name>"
+                  "value": "{{path_tag_name}}"
                 }
               ]
             },
@@ -733,7 +1115,21 @@
               }
             ],
             "description": "Get a single release by tag name"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"_links\": null,\n  \"assets\": {\n    \"count\": 0,\n    \"links\": [],\n    \"sources\": []\n  },\n  \"author\": {\n    \"avatar_url\": null,\n    \"id\": 0,\n    \"name\": null,\n    \"state\": null,\n    \"username\": \"string\",\n    \"web_url\": null\n  },\n  \"commit\": {\n    \"author_email\": null,\n    \"author_name\": null,\n    \"authored_date\": null,\n    \"committed_date\": null,\n    \"committer_email\": null,\n    \"committer_name\": null,\n    \"created_at\": \"string\",\n    \"id\": \"string\",\n    \"message\": null,\n    \"parent_ids\": [],\n    \"short_id\": \"string\",\n    \"title\": \"string\"\n  },\n  \"commit_path\": null,\n  \"created_at\": \"string\",\n  \"description\": null,\n  \"description_html\": null,\n  \"evidences\": [],\n  \"milestones\": [],\n  \"name\": \"string\",\n  \"released_at\": \"string\",\n  \"tag_name\": \"string\",\n  \"tag_path\": null,\n  \"upcoming_release\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetLatestRelease",
@@ -754,7 +1150,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -765,7 +1161,21 @@
               }
             ],
             "description": "Get the latest release"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"_links\": null,\n  \"assets\": {\n    \"count\": 0,\n    \"links\": [],\n    \"sources\": []\n  },\n  \"author\": {\n    \"avatar_url\": null,\n    \"id\": 0,\n    \"name\": null,\n    \"state\": null,\n    \"username\": \"string\",\n    \"web_url\": null\n  },\n  \"commit\": {\n    \"author_email\": null,\n    \"author_name\": null,\n    \"authored_date\": null,\n    \"committed_date\": null,\n    \"committer_email\": null,\n    \"committer_name\": null,\n    \"created_at\": \"string\",\n    \"id\": \"string\",\n    \"message\": null,\n    \"parent_ids\": [],\n    \"short_id\": \"string\",\n    \"title\": \"string\"\n  },\n  \"commit_path\": null,\n  \"created_at\": \"string\",\n  \"description\": null,\n  \"description_html\": null,\n  \"evidences\": [],\n  \"milestones\": [],\n  \"name\": \"string\",\n  \"released_at\": \"string\",\n  \"tag_name\": \"string\",\n  \"tag_path\": null,\n  \"upcoming_release\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListProjectPipelines",
@@ -784,33 +1194,45 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "status",
+                  "value": "{{query_status}}",
+                  "disabled": true,
                   "description": "Filter by pipeline status"
                 },
                 {
                   "key": "source",
+                  "value": "{{query_source}}",
+                  "disabled": true,
                   "description": "Filter by pipeline source (e.g., push, merge_request_event, schedule)"
                 },
                 {
                   "key": "git_ref",
+                  "value": "{{query_git_ref}}",
+                  "disabled": true,
                   "description": "Filter by branch or tag name"
                 },
                 {
                   "key": "sha",
+                  "value": "{{query_sha}}",
+                  "disabled": true,
                   "description": "Filter by commit SHA"
                 }
               ],
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -821,7 +1243,21 @@
               }
             ],
             "description": "List CI/CD pipelines for a project"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     }

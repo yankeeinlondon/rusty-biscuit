@@ -26,7 +26,10 @@ pub enum ExportBody {
         content_type: String,
     },
     /// Binary body.
-    Binary,
+    Binary {
+        /// Content type.
+        content_type: String,
+    },
 }
 
 /// A form field for export.
@@ -100,9 +103,13 @@ pub fn map_body(request: &ApiRequest) -> ExportBody {
         ApiRequest::Text { content_type } => ExportBody::Text {
             content_type: content_type.clone(),
         },
-        ApiRequest::Binary { .. } => ExportBody::Binary,
+        ApiRequest::Binary { content_type } => ExportBody::Binary {
+            content_type: content_type.clone(),
+        },
         // Handle any future variants by defaulting to binary
-        _ => ExportBody::Binary,
+        _ => ExportBody::Binary {
+            content_type: "application/octet-stream".to_string(),
+        },
     }
 }
 
@@ -167,7 +174,9 @@ mod tests {
             map_body(&ApiRequest::Binary {
                 content_type: "application/octet-stream".to_string()
             }),
-            ExportBody::Binary
+            ExportBody::Binary {
+                content_type: "application/octet-stream".to_string()
+            }
         );
     }
 

@@ -1,6 +1,7 @@
 //! Artifact drift detection tests.
 //!
-//! These tests verify that committed Rust, OpenAPI, and Postman artifacts match
+//! These tests verify that committed Rust, OpenAPI, and Postman artifacts
+//! (collections and environments) match
 //! what the generator would produce. They iterate every module reported by
 //! [`apis_by_module`] and compare the in-memory regeneration against the
 //! files committed under `schematic/schema/`, `schematic/openapi/`, and
@@ -25,7 +26,7 @@ use std::path::{Path, PathBuf};
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
 use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
-use schematic_gen::export::postman::{write_postman, write_postman_grouped};
+use schematic_gen::export::postman::{write_postman, write_postman_environment, write_postman_grouped};
 use schematic_gen::pipeline::{
     BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
 };
@@ -111,29 +112,37 @@ fn generated_postman_artifacts_are_up_to_date() {
             )
         };
 
-        let generated = fs::read_to_string(&generated_path).unwrap();
+        // `just generate` requests environments, so each committed collection
+        // has its environment beside it.
+        let api_refs: Vec<&_> = apis.iter().collect();
+        let environment_path = write_postman_environment(&api_refs, module_name, temp_dir.path(), false)
+            .unwrap_or_else(|e| panic!("Failed to generate the Postman environment of module {module_name}: {e}"));
 
-        let committed_path = postman_committed.join(generated_path.file_name().unwrap());
-        assert!(
-            committed_path.exists(),
-            "Missing committed Postman artifact for module '{module_name}' at {}",
-            committed_path.display()
-        );
+        for generated_path in [generated_path, environment_path] {
+            let generated = fs::read_to_string(&generated_path).unwrap();
 
-        let committed = fs::read_to_string(&committed_path).unwrap_or_else(|e| {
-            panic!("Failed to read committed Postman for module {module_name}: {e}")
-        });
+            let committed_path = postman_committed.join(generated_path.file_name().unwrap());
+            assert!(
+                committed_path.exists(),
+                "Missing committed Postman artifact for module '{module_name}' at {}",
+                committed_path.display()
+            );
 
-        assert_eq!(
-            generated,
-            committed,
-            "\nPostman artifact drift detected for module '{}'.\n\
-             Run `just -f schematic/justfile generate` to update the committed artifacts.\n\
-             Diff: {} vs {}",
-            module_name,
-            generated_path.display(),
-            committed_path.display(),
-        );
+            let committed = fs::read_to_string(&committed_path).unwrap_or_else(|e| {
+                panic!("Failed to read committed Postman for module {module_name}: {e}")
+            });
+
+            assert_eq!(
+                generated,
+                committed,
+                "\nPostman artifact drift detected for module '{}'.\n\
+                 Run `just -f schematic/justfile generate` to update the committed artifacts.\n\
+                 Diff: {} vs {}",
+                module_name,
+                generated_path.display(),
+                committed_path.display(),
+            );
+        }
     }
 
     let generated = source_files(temp_dir.path());
@@ -371,6 +380,7 @@ fn generated_rust_artifacts_are_up_to_date() {
         postman_out: None,
         no_openapi: true,
         no_postman: true,
+        postman_environment: false,
     };
     generate_batch(&resolve_all_apis(), &BatchScope::Complete, &opts)
     .into_result()

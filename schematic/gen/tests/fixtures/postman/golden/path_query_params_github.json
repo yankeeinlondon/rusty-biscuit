@@ -34,22 +34,38 @@
               "query": [
                 {
                   "description": "Issue state filter",
-                  "key": "state"
+                  "disabled": true,
+                  "key": "state",
+                  "value": "{{query_state}}"
                 }
               ],
               "raw": "{{baseUrl}}/repos/:owner/:repo/issues",
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Repos"
@@ -64,6 +80,21 @@
     {
       "description": "Bearer token for Authorization header",
       "key": "bearerToken",
+      "value": ""
+    },
+    {
+      "description": "Value of the `owner` path parameter",
+      "key": "path_owner",
+      "value": ""
+    },
+    {
+      "description": "Value of the `repo` path parameter",
+      "key": "path_repo",
+      "value": ""
+    },
+    {
+      "description": "Value of the `state` query parameter",
+      "key": "query_state",
       "value": ""
     }
   ]

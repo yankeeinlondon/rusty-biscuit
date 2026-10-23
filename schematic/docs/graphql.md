@@ -304,7 +304,10 @@ sequenceDiagram
 `graphql` is omitted when the API has no GraphQL surface, `operations` when it
 is empty, and an operation's `errors`, `no_declared_errors`, `operation_name`,
 and `pagination` when unset. `"variables": "Unit"` means no variables.
-The OpenAPI and Postman exporters leave every operation
-out and report each as a `graphql-operation` warning,
-`<API> operation <id>: GraphQL operation skipped in <OpenAPI|Postman> output`;
-the document or collection is still written.
+The OpenAPI exporter leaves every operation out and reports each as a
+`graphql-operation` warning,
+`<API> operation <id>: GraphQL operation skipped in OpenAPI output`; the
+document is still written. The Postman exporter carries every operation as a
+runnable `POST` to the derived GraphQL address, with `query`,
+`operationName`, and example `variables` in its body (see
+[Postman GraphQL operations](io/export-postman.md#graphql-operations)).

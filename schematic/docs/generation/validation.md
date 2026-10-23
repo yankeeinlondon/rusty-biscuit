@@ -144,10 +144,12 @@ The same fields are available to code as
 | `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
 | `oauth2-grant`: the API, or an endpoint's replacement policy, uses an OAuth2 device-code grant, which OpenAPI 3.0 has no flow for; the scheme is left out | | ✓ | | warning |
+| `oauth2-grant`: the API, or an endpoint's exported replacement method, uses an OAuth2 device-code grant, which Postman has no grant for; the auth carries the token URL, scopes, and an access-token variable for a token obtained outside Postman | | | ✓ | warning |
 | `fixed-header`: an operation does not carry a header as a header parameter: a fixed or explicit header its effective security already sends, an `Accept` or `Content-Type` value its success responses or request body do not declare, an `Authorization` header no scheme sends, an explicit `Accept`/`Content-Type`/`Authorization` parameter, or a fixed header whose explicit parameter's schema rejects the value (see [Fixed headers](../io/export-openapi.md#fixed-headers)) | | ✓ | | warning |
 | `endpoint-auth`: an endpoint's replacement policy accepts more than one authentication alternative, but a Postman request holds one auth; only the first is exported | | | ✓ | warning |
-| `schema-composition`: an endpoint's JSON body or response names a composed (`oneOf`/`anyOf`/`allOf`) component, which a Postman collection cannot declare; the existing example is kept and none is invented | | | ✓ | warning |
-| `graphql-operation`: the API declares a GraphQL operation, which neither output carries; the endpoint field names the operation, and the message reads `<API> operation <id>: GraphQL operation skipped in <OpenAPI\|Postman> output` | | ✓ | ✓ | warning |
+| `example-value`: no value validating against its registered schema could be built for a JSON request body, saved response (or stream item or terminator), or GraphQL `variables`; the body is left empty and the message names the role and the schema path (see [Postman example values](../io/export-postman.md#example-values)) | | | ✓ | warning |
+| `graphql-operation`: the API declares a GraphQL operation, which OpenAPI does not carry; the endpoint field names the operation, and the message reads `<API> operation <id>: GraphQL operation skipped in OpenAPI output` | | ✓ | | warning |
+| `graphql-operation`: no GraphQL address rule matches the API's base URL, so its operations are left out of the collection | | | ✓ | warning |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features
@@ -155,8 +157,8 @@ check only that the declared names and content types can go on the wire.
 How each one is sent is described in
 [request-side inputs](./request-side.md#text-and-binary-bodies).
 OpenAPI declares header and cookie parameters in their own locations, and a
-Postman collection carries each one as a request header, disabled when the
-parameter is optional (see
+Postman collection carries a header parameter as a request header and merges
+cookies into one `Cookie` header, disabled when optional (see
 [Postman parameter mapping](../io/export-postman.md#parameter-mapping)), so
 neither export checks their names; OpenAPI reports only the headers it leaves
 out (`fixed-header`).

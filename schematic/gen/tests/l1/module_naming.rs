@@ -42,6 +42,7 @@ fn opts<'a>(rust: &'a str, openapi: &'a str, postman: &'a str) -> GenerateOpts<'
         postman_out: Some(postman),
         no_openapi: false,
         no_postman: false,
+        postman_environment: false,
     }
 }
 
@@ -192,7 +193,11 @@ fn every_shipped_artifact_is_named_by_the_resolver() {
     let openapi = file_names(&biscuit_test_harness::manifest_dir!().join("../openapi"));
     assert_eq!(openapi, rest_modules.iter().map(|stem| format!("{stem}.json")).collect());
     let postman = file_names(&biscuit_test_harness::manifest_dir!().join("../postman"));
-    assert_eq!(postman, rest_modules.iter().map(|stem| format!("{stem}.postman_collection.json")).collect());
+    let collections_and_environments = rest_modules
+        .iter()
+        .flat_map(|stem| [format!("{stem}.postman_collection.json"), format!("{stem}.postman_environment.json")])
+        .collect();
+    assert_eq!(postman, collections_and_environments);
 
     let ws_modules = registrations().iter().filter(|entry| entry.websocket().is_some()).map(|entry| entry.module.to_owned());
     let mut modules: BTreeSet<String> = rest_modules.iter().cloned().chain(ws_modules).collect();

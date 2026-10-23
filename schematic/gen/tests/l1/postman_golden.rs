@@ -8,6 +8,7 @@
 //! 3. Multipart `type: "file"` for file-upload form fields (Phase 1, Finding 3).
 //! 4. Path + query parameter shapes for a `GET` endpoint.
 //! 5. Grouped-module base-URL aliasing (`baseUrl`, `baseUrl2`).
+//! 6. OAuth2 grants with their URLs and scopes (R22).
 //!
 //! The expected JSON for each scenario lives in
 //! `tests/fixtures/postman/golden/`. The fixture files are committed; this
@@ -29,7 +30,9 @@ use jsonschema::Validator;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
-    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EnvList, FormField, RestApi, RestMethod,
+    ApiRequest, AuthMethod, AuthPolicy, AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, EndpointAuth,
+    OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EnvList,
+    FormField, RestApi, RestMethod,
 };
 use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
@@ -324,6 +327,54 @@ fn build_api_key_query_auth() -> Value {
     serde_json::to_value(&collection).expect("serialize collection")
 }
 
+/// An API whose OAuth2 authorization-code grant keeps its URLs and scopes,
+/// with one endpoint replacing it by a client-credentials grant (its own
+/// credential, so endpoint-suffixed variables) and one by a public-client
+/// device-code grant, which Postman cannot run.
+fn build_oauth2_grants() -> Value {
+    let pkce = OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+        authorization_url: "https://auth.example.com/authorize".to_string(),
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: Some("https://auth.example.com/revoke".to_string()),
+        default_scopes: vec!["repo".to_string(), "read:user".to_string()],
+        pkce: PkceRequirement::Required,
+        client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+    });
+    let service = OAuth2Config::ClientCredentials(ClientCredentialsGrant {
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: None,
+        default_scopes: vec!["admin".to_string()],
+        client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
+    });
+    let device = OAuth2Config::DeviceCode(DeviceCodeGrant {
+        device_authorization_url: "https://auth.example.com/device".to_string(),
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: None,
+        default_scopes: vec![],
+        client_auth: OAuth2ClientAuthMethod::None,
+    });
+    let policy = |config: OAuth2Config| AuthPolicy { explicit: vec![AuthMethod::OAuth2(config)], env_fallback: None };
+    let mut admin = endpoint("GetAdmin", RestMethod::Get, "/admin", "Service access", None, vec![SuccessShape::empty()], None);
+    admin.auth = Some(EndpointAuth::Policy {
+        policy: policy(service),
+        env_mapping: Some(schematic_define::EnvMapping::default()),
+    });
+    let mut tv = endpoint("PairDevice", RestMethod::Post, "/devices", "Device sign-in", None, vec![SuccessShape::empty()], None);
+    tv.auth = Some(EndpointAuth::Policy { policy: policy(device), env_mapping: None });
+    let api = rest_api(
+        "OAuthHub",
+        "https://api.example.com",
+        AuthStrategy::OAuth2(pkce),
+        None,
+        vec![
+            endpoint("GetUser", RestMethod::Get, "/user", "The signed-in user", None, vec![SuccessShape::empty()], None),
+            admin,
+            tv,
+        ],
+    );
+    serde_json::to_value(build_postman_collection(&api)).expect("serialize collection")
+}
+
 /// Two APIs grouped under one Ollama module sharing a base URL prefix
 /// but with distinct hosts: native (`/`) and OpenAI-compatible (`/v1`).
 /// Verifies grouped base-URL aliasing (`baseUrl`, `baseUrl2`) and merged
@@ -512,6 +563,45 @@ fn golden_api_key_query_auth() {
     );
 
     assert_golden("api_key_query_auth", &value);
+}
+
+#[test]
+fn golden_oauth2_grants() {
+    let value = build_oauth2_grants();
+    let attributes = |auth: &Value| -> Vec<(String, String)> {
+        auth["oauth2"].as_array().expect("oauth2 attributes").iter()
+            .map(|a| (a["key"].as_str().unwrap().to_string(), a["value"].as_str().unwrap().to_string())).collect()
+    };
+    let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
+    // The API's grant is an `oauth2` auth, not a bearer token.
+    assert_eq!(value["auth"]["type"], "oauth2");
+    assert_eq!(attributes(&value["auth"]), [
+        pair("grant_type", "authorization_code_with_pkce"),
+        pair("authUrl", "https://auth.example.com/authorize"),
+        pair("accessTokenUrl", "https://auth.example.com/token"),
+        pair("challengeAlgorithm", "S256"),
+        pair("scope", "repo read:user"),
+        pair("clientId", "{{oauth2ClientId}}"),
+        pair("clientSecret", "{{oauth2ClientSecret}}"),
+        pair("client_authentication", "body"),
+        pair("addTokenTo", "header"),
+    ]);
+    let admin = find_request_by_name(&value, "GetAdmin").expect("GetAdmin");
+    assert_eq!(attributes(&admin["auth"])[0], pair("grant_type", "client_credentials"));
+    assert!(attributes(&admin["auth"]).contains(&pair("clientSecret", "{{oauth2ClientSecret_GetAdmin}}")));
+    assert!(attributes(&admin["auth"]).contains(&pair("client_authentication", "header")));
+    let device = find_request_by_name(&value, "PairDevice").expect("PairDevice");
+    assert_eq!(attributes(&device["auth"]), [
+        pair("accessTokenUrl", "https://auth.example.com/token"),
+        pair("accessToken", "{{oauth2AccessToken}}"),
+        pair("clientId", "{{oauth2ClientId}}"),
+        pair("client_authentication", "body"),
+        pair("addTokenTo", "header"),
+    ]);
+    let keys: Vec<&str> = value["variable"].as_array().unwrap().iter().map(|v| v["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["baseUrl", "oauth2ClientId", "oauth2ClientSecret", "oauth2ClientId_GetAdmin", "oauth2ClientSecret_GetAdmin", "oauth2AccessToken"]);
+
+    assert_golden("oauth2_grants", &value);
 }
 
 #[test]

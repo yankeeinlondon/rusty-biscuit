@@ -14,6 +14,106 @@
       "key": "bearerToken",
       "value": "",
       "description": "Bearer token for Authorization header"
+    },
+    {
+      "key": "path_owner",
+      "value": "",
+      "description": "Value of the `owner` path parameter"
+    },
+    {
+      "key": "path_repo",
+      "value": "",
+      "description": "Value of the `repo` path parameter"
+    },
+    {
+      "key": "path_tree_sha",
+      "value": "",
+      "description": "Value of the `tree_sha` path parameter"
+    },
+    {
+      "key": "query_recursive",
+      "value": "",
+      "description": "Value of the `recursive` query parameter"
+    },
+    {
+      "key": "path_path",
+      "value": "",
+      "description": "Value of the `path` path parameter"
+    },
+    {
+      "key": "query_page",
+      "value": "",
+      "description": "Value of the `page` query parameter"
+    },
+    {
+      "key": "query_per_page",
+      "value": "",
+      "description": "Value of the `per_page` query parameter"
+    },
+    {
+      "key": "query_state",
+      "value": "",
+      "description": "Value of the `state` query parameter"
+    },
+    {
+      "key": "query_sort",
+      "value": "",
+      "description": "Value of the `sort` query parameter"
+    },
+    {
+      "key": "query_direction",
+      "value": "",
+      "description": "Value of the `direction` query parameter"
+    },
+    {
+      "key": "path_pull_number",
+      "value": "",
+      "description": "Value of the `pull_number` path parameter"
+    },
+    {
+      "key": "path_issue_number",
+      "value": "",
+      "description": "Value of the `issue_number` path parameter"
+    },
+    {
+      "key": "path_tag",
+      "value": "",
+      "description": "Value of the `tag` path parameter"
+    },
+    {
+      "key": "path_branch",
+      "value": "",
+      "description": "Value of the `branch` path parameter"
+    },
+    {
+      "key": "path_tag_sha",
+      "value": "",
+      "description": "Value of the `tag_sha` path parameter"
+    },
+    {
+      "key": "query_status",
+      "value": "",
+      "description": "Value of the `status` query parameter"
+    },
+    {
+      "key": "query_branch",
+      "value": "",
+      "description": "Value of the `branch` query parameter"
+    },
+    {
+      "key": "query_event",
+      "value": "",
+      "description": "Value of the `event` query parameter"
+    },
+    {
+      "key": "path_org",
+      "value": "",
+      "description": "Value of the `org` path parameter"
+    },
+    {
+      "key": "query_repo_type",
+      "value": "",
+      "description": "Value of the `repo_type` query parameter"
     }
   ],
   "auth": {
@@ -46,29 +146,39 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "repo_type",
+                  "value": "{{query_repo_type}}",
+                  "disabled": true,
                   "description": "Filter by repository type (API param: type)"
                 },
                 {
                   "key": "sort",
+                  "value": "{{query_sort}}",
+                  "disabled": true,
                   "description": "Sort field"
                 },
                 {
                   "key": "direction",
+                  "value": "{{query_direction}}",
+                  "disabled": true,
                   "description": "Sort direction"
                 }
               ],
               "variable": [
                 {
                   "key": "org",
-                  "value": "<org>"
+                  "value": "{{path_org}}"
                 }
               ]
             },
@@ -87,7 +197,21 @@
               }
             ],
             "description": "List repositories for an organization\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     },
@@ -111,11 +235,11 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -134,7 +258,21 @@
               }
             ],
             "description": "Get repository metadata including default branch\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"archived\": false,\n  \"created_at\": null,\n  \"default_branch\": \"string\",\n  \"description\": null,\n  \"disabled\": false,\n  \"forks_count\": null,\n  \"full_name\": \"string\",\n  \"has_issues\": null,\n  \"has_wiki\": null,\n  \"html_url\": \"string\",\n  \"id\": 0,\n  \"language\": null,\n  \"license\": null,\n  \"name\": \"string\",\n  \"open_issues_count\": null,\n  \"owner\": {\n    \"avatar_url\": null,\n    \"html_url\": null,\n    \"id\": null,\n    \"login\": \"string\",\n    \"type\": null,\n    \"url\": null\n  },\n  \"private\": false,\n  \"pushed_at\": null,\n  \"stargazers_count\": null,\n  \"topics\": [],\n  \"updated_at\": null,\n  \"url\": \"string\",\n  \"watchers_count\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetGitTree",
@@ -156,21 +294,23 @@
               "query": [
                 {
                   "key": "recursive",
+                  "value": "{{query_recursive}}",
+                  "disabled": true,
                   "description": "Fetch the tree recursively instead of a single level"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "tree_sha",
-                  "value": "<tree_sha>"
+                  "value": "{{path_tree_sha}}"
                 }
               ]
             },
@@ -189,7 +329,21 @@
               }
             ],
             "description": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"sha\": \"string\",\n  \"tree\": [],\n  \"truncated\": false,\n  \"url\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetRepositoryContentRaw",
@@ -210,15 +364,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "path",
-                  "value": "<path>"
+                  "value": "{{path_path}}"
                 }
               ]
             },
@@ -237,7 +391,21 @@
               }
             ],
             "description": "Get raw file content from repository\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         },
         {
           "name": "ListPullRequests",
@@ -257,33 +425,43 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by PR state"
                 },
                 {
                   "key": "sort",
+                  "value": "{{query_sort}}",
+                  "disabled": true,
                   "description": "Sort field"
                 },
                 {
                   "key": "direction",
+                  "value": "{{query_direction}}",
+                  "disabled": true,
                   "description": "Sort direction"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -302,7 +480,21 @@
               }
             ],
             "description": "List pull requests with metadata\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListPullRequestFiles",
@@ -324,25 +516,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "pull_number",
-                  "value": "<pull_number>"
+                  "value": "{{path_pull_number}}"
                 }
               ]
             },
@@ -361,7 +557,21 @@
               }
             ],
             "description": "List files changed in a pull request\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListIssues",
@@ -381,33 +591,43 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by issue state"
                 },
                 {
                   "key": "sort",
+                  "value": "{{query_sort}}",
+                  "disabled": true,
                   "description": "Sort field"
                 },
                 {
                   "key": "direction",
+                  "value": "{{query_direction}}",
+                  "disabled": true,
                   "description": "Sort direction"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -426,7 +646,21 @@
               }
             ],
             "description": "List issues (includes PRs; filter by pull_request field)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetIssue",
@@ -447,15 +681,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "issue_number",
-                  "value": "<issue_number>"
+                  "value": "{{path_issue_number}}"
                 }
               ]
             },
@@ -474,7 +708,21 @@
               }
             ],
             "description": "Get a single issue by number\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"assignees\": [],\n  \"body\": null,\n  \"closed_at\": null,\n  \"comments\": 0,\n  \"comments_url\": null,\n  \"created_at\": \"string\",\n  \"events_url\": null,\n  \"html_url\": \"string\",\n  \"id\": 0,\n  \"labels\": [],\n  \"milestone\": null,\n  \"number\": 0,\n  \"pull_request\": null,\n  \"state\": \"string\",\n  \"title\": \"string\",\n  \"updated_at\": \"string\",\n  \"url\": \"string\",\n  \"user\": {\n    \"avatar_url\": null,\n    \"html_url\": null,\n    \"id\": null,\n    \"login\": \"string\",\n    \"type\": null,\n    \"url\": null\n  }\n}"
+            }
+          ]
         },
         {
           "name": "ListIssueComments",
@@ -496,25 +744,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "issue_number",
-                  "value": "<issue_number>"
+                  "value": "{{path_issue_number}}"
                 }
               ]
             },
@@ -533,7 +785,21 @@
               }
             ],
             "description": "List comments on an issue\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListIssueTimeline",
@@ -555,25 +821,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "issue_number",
-                  "value": "<issue_number>"
+                  "value": "{{path_issue_number}}"
                 }
               ]
             },
@@ -592,7 +862,21 @@
               }
             ],
             "description": "List timeline events for an issue\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListTags",
@@ -612,21 +896,25 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -645,7 +933,21 @@
               }
             ],
             "description": "List repository tags\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListReleases",
@@ -665,21 +967,25 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -698,7 +1004,21 @@
               }
             ],
             "description": "List releases (linked to tags via tag_name)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetTagReference",
@@ -721,15 +1041,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "tag",
-                  "value": "<tag>"
+                  "value": "{{path_tag}}"
                 }
               ]
             },
@@ -748,7 +1068,21 @@
               }
             ],
             "description": "Get tag reference (check object.type: 'commit' vs 'tag')\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"node_id\": null,\n  \"object\": {\n    \"sha\": \"string\",\n    \"type\": \"string\",\n    \"url\": \"string\"\n  },\n  \"ref\": \"string\",\n  \"url\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetBranchReference",
@@ -771,15 +1105,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "branch",
-                  "value": "<branch>"
+                  "value": "{{path_branch}}"
                 }
               ]
             },
@@ -798,7 +1132,21 @@
               }
             ],
             "description": "Get branch reference (object.sha is the branch head commit)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"node_id\": null,\n  \"object\": {\n    \"sha\": \"string\",\n    \"type\": \"string\",\n    \"url\": \"string\"\n  },\n  \"ref\": \"string\",\n  \"url\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetAnnotatedTag",
@@ -820,15 +1168,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "tag_sha",
-                  "value": "<tag_sha>"
+                  "value": "{{path_tag_sha}}"
                 }
               ]
             },
@@ -847,7 +1195,21 @@
               }
             ],
             "description": "Get annotated tag object details (message, tagger, verification)\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"message\": \"string\",\n  \"node_id\": null,\n  \"object\": {\n    \"sha\": \"string\",\n    \"type\": \"string\",\n    \"url\": \"string\"\n  },\n  \"sha\": \"string\",\n  \"tag\": \"string\",\n  \"tagger\": null,\n  \"url\": null,\n  \"verification\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListWorkflowRuns",
@@ -868,33 +1230,43 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "per_page",
+                  "value": "{{query_per_page}}",
+                  "disabled": true,
                   "description": "Items per page (default: 100, max: 100)"
                 },
                 {
                   "key": "status",
+                  "value": "{{query_status}}",
+                  "disabled": true,
                   "description": "Filter by workflow run status"
                 },
                 {
                   "key": "branch",
+                  "value": "{{query_branch}}",
+                  "disabled": true,
                   "description": "Filter by branch name"
                 },
                 {
                   "key": "event",
+                  "value": "{{query_event}}",
+                  "disabled": true,
                   "description": "Filter by event type (e.g., push, pull_request)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -913,7 +1285,21 @@
               }
             ],
             "description": "List workflow runs for a repository\n\nRate limit headers: limit `x-ratelimit-limit`, remaining `x-ratelimit-remaining`, reset `x-ratelimit-reset` (epoch seconds), retry after `retry-after`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"total_count\": null,\n  \"workflow_runs\": []\n}"
+            }
+          ]
         }
       ]
     }

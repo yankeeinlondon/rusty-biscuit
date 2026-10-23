@@ -172,13 +172,16 @@ pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
 /// Validates a batch of APIs for Postman export.
 ///
 /// Checks route identity, the `query-in-path` error, and the collection
-/// file name.
+/// file name, and warns about vocabulary Postman cannot express and every
+/// example the collection leaves out because none validating against its
+/// schema could be built ([`Feature::ExampleValue`]).
 pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::Postman, &mut diagnostics);
         check_export_filename(api, Output::Postman, &mut diagnostics);
         diagnostics.extend(crate::export::vocabulary::diagnostics(api, Output::Postman));
+        diagnostics.extend(crate::export::postman::export_diagnostics(api));
     }
     check_stem_case_collisions(apis, Output::Postman, &mut diagnostics);
     diagnostics
@@ -2284,7 +2287,11 @@ mod tests {
             assert_eq!(diagnostic.endpoint.as_deref(), Some("ListModels"));
             assert!(diagnostic.message.contains("`Response`"), "{diagnostic}");
         }
-        assert!(validate_postman(&[&api]).is_empty());
+        // Postman is not blocked; the response it cannot exemplify is named.
+        let postman = validate_postman(&[&api]);
+        assert_eq!(features(&postman), [(Severity::Warning, Feature::ExampleValue)]);
+        assert_eq!(postman[0].endpoint.as_deref(), Some("ListModels"));
+        assert!(postman[0].message.contains("Response"), "{}", postman[0]);
     }
 
     #[test]

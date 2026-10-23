@@ -1,6 +1,6 @@
 //! Normalized authentication metadata for export.
 
-use schematic_define::{AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EndpointAuth, EnvAuthStrategy};
+use schematic_define::{AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EndpointAuth, EnvAuthStrategy, OAuth2Config};
 
 /// Location where an API key is sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +37,28 @@ pub enum ExportAuth {
         /// Postman variable for password.
         password_var: String,
     },
+    /// OAuth2 with the definition's grant, URLs, and scopes.
+    OAuth2 {
+        /// The grant and its provider endpoints.
+        config: OAuth2Config,
+        /// Postman variable for the OAuth2 client id.
+        client_id_var: String,
+        /// Postman variable for the OAuth2 client secret.
+        client_secret_var: String,
+    },
     /// No authentication.
     None,
+}
+
+impl ExportAuth {
+    /// An OAuth2 auth using the default client variables.
+    fn oauth2(config: &OAuth2Config) -> Self {
+        Self::OAuth2 {
+            config: config.clone(),
+            client_id_var: "oauth2ClientId".to_string(),
+            client_secret_var: "oauth2ClientSecret".to_string(),
+        }
+    }
 }
 
 /// Maps a schematic `AuthStrategy` to an `ExportAuth`.
@@ -90,16 +110,14 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
                 _ => ApiKeyLocation::Header,
             },
         },
-        AuthStrategy::OAuth2(_) => ExportAuth::Bearer {
-            variable: "bearerToken".to_string(),
-        },
+        AuthStrategy::OAuth2(config) => ExportAuth::oauth2(config),
         // Handle any future variants by defaulting to no auth
         _ => ExportAuth::None,
     }
 }
 
 /// Maps one accepted method of an [`AuthPolicy`] the way [`map_auth`] maps
-/// the matching strategy (OAuth2 is a bearer token).
+/// the matching strategy.
 fn map_method(method: &AuthMethod) -> ExportAuth {
     match method {
         AuthMethod::BearerToken { header } => map_auth(&AuthStrategy::BearerToken { header: header.clone() }),
@@ -115,7 +133,7 @@ fn map_method(method: &AuthMethod) -> ExportAuth {
             username_var: "username".to_string(),
             password_var: "password".to_string(),
         },
-        AuthMethod::OAuth2(_) => ExportAuth::Bearer { variable: "bearerToken".to_string() },
+        AuthMethod::OAuth2(config) => ExportAuth::oauth2(config),
         _ => ExportAuth::None,
     }
 }
@@ -179,7 +197,7 @@ pub fn endpoint_auth_override(endpoint: &Endpoint) -> Option<ExportAuth> {
     }
 }
 
-fn with_variable_suffix(auth: ExportAuth, id: &str) -> ExportAuth {
+pub(crate) fn with_variable_suffix(auth: ExportAuth, id: &str) -> ExportAuth {
     let suffixed = |name: String| format!("{name}_{id}");
     match auth {
         ExportAuth::Bearer { variable } => ExportAuth::Bearer { variable: suffixed(variable) },
@@ -187,6 +205,11 @@ fn with_variable_suffix(auth: ExportAuth, id: &str) -> ExportAuth {
         ExportAuth::Basic { username_var, password_var } => ExportAuth::Basic {
             username_var: suffixed(username_var),
             password_var: suffixed(password_var),
+        },
+        ExportAuth::OAuth2 { config, client_id_var, client_secret_var } => ExportAuth::OAuth2 {
+            config,
+            client_id_var: suffixed(client_id_var),
+            client_secret_var: suffixed(client_secret_var),
         },
         ExportAuth::None => ExportAuth::None,
     }

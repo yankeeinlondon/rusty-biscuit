@@ -206,6 +206,7 @@ fn a_pagination_error_blocks_only_the_rust_client() {
         postman_out: Some(&postman),
         no_openapi: false,
         no_postman: false,
+        postman_environment: false,
     };
     let mut ctx = schematic_define::DefinitionContext::types_in("::fixture");
     let releases = Endpoint::get("ListReleases", "/releases").describes("List releases")
@@ -255,6 +256,7 @@ fn partitioned_first_page_sessions_report_a_strategy_error() {
         postman_out: None,
         no_openapi: true,
         no_postman: true,
+        postman_environment: false,
     };
     let report = generate_batch(&[search], &BatchScope::Complete, &opts);
     assert_eq!(report.failed(), vec![Output::Rust]);

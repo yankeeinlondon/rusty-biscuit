@@ -190,11 +190,12 @@ Endpoint::post("Adopt", "/pets").request_json::<Pet>(&mut ctx) // references Pet
 - OpenAPI export writes a composed component as `oneOf`, `anyOf`, or `allOf`
   over `$ref`s to its members, for example
   `Pet: {oneOf: [{$ref: '#/components/schemas/Cat'}, {$ref: '#/components/schemas/Dog'}]}`.
-- Postman has no schema-composition declaration. An endpoint whose JSON body
-  or response names a composed component reports a `schema-composition`
-  warning for the Postman output; the collection is still written, keeping
-  the request's existing example and inventing none. See
-  [Generation Validation](generation/validation.md#what-each-output-checks).
+- Postman has no schema-composition declaration, but its examples honor
+  compositions: `allOf` members are merged and `oneOf`/`anyOf` branches are
+  tried in order until one value validates against the whole composition.
+  When none does (two `oneOf` branches accepting the same value, for
+  example), the body is left empty with an `example-value` warning. See
+  [Postman example values](io/export-postman.md#example-values).
 
 ## References in transferred definitions
 

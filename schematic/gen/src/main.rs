@@ -82,6 +82,11 @@ enum Commands {
 
         #[arg(long)]
         no_postman: bool,
+
+        /// Also write each collection's Postman environment
+        /// (`<module>.postman_environment.json`) beside it
+        #[arg(long)]
+        postman_environment: bool,
     },
 
     /// Validate an API definition without generating code
@@ -192,6 +197,7 @@ fn main() -> ExitCode {
             postman_out,
             no_openapi,
             no_postman,
+            postman_environment,
         }) => pipeline::run_generate(
             &api,
             &GenerateOpts {
@@ -204,6 +210,7 @@ fn main() -> ExitCode {
                 postman_out: postman_out.as_deref(),
                 no_openapi,
                 no_postman,
+                postman_environment,
             },
         ),
         Some(Commands::Validate { api }) => pipeline::run_validate(&api, cli.verbose),
@@ -225,6 +232,7 @@ fn main() -> ExitCode {
                 postman_out: postman_out.as_deref(),
                 no_openapi: false,
                 no_postman: false,
+                postman_environment: false,
             },
         ),
         Some(Commands::Import {
@@ -286,6 +294,7 @@ fn main() -> ExitCode {
                         postman_out: None,
                         no_openapi: false,
                         no_postman: false,
+                        postman_environment: false,
                     },
                 )
             } else {

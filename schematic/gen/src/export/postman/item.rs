@@ -1,57 +1,91 @@
 //! Request item builder.
 
 use schematic_define::response::ResponseShape;
-use schematic_define::{Backoff, Endpoint, ResetUnit, RestApi, StatusSelector};
+use schematic_define::{ApiRequest, Backoff, Endpoint, ResetUnit, RestApi, StatusSelector};
 
-use crate::export::auth::{ExportAuth, endpoint_auth_override};
+use crate::export::auth::{ExportAuth, endpoint_auth_override, with_variable_suffix};
 use crate::export::body::map_body;
+use crate::export::examples::ExampleSource;
 use crate::export::path_params::strip_reserved_markers;
 use crate::parser::extract_path_params;
 
 use super::auth::build_collection_auth;
-use super::request::{build_headers, build_url, rest_method_to_string};
+use super::request::{build_body, build_headers, build_url, rest_method_to_string};
+use super::responses::saved_responses;
 use super::types::*;
+use super::variables::Collected;
+
+/// One API of a collection, as its requests are built.
+pub(crate) struct Member<'a> {
+    pub api: &'a RestApi,
+    /// The API's auth, with member-suffixed variables in a shared module.
+    pub auth: ExportAuth,
+    /// The collection variable holding the API's base URL.
+    pub base_url_var: String,
+    /// Whether each request carries the member's auth (a shared module
+    /// whose members' auths differ) instead of inheriting the collection's.
+    pub request_level_auth: bool,
+    /// Appended to every credential variable of the member's endpoints in a
+    /// shared module (`bearerToken_EmqxBearer`), so members never share one.
+    pub variable_suffix: Option<String>,
+    pub examples: ExampleSource,
+}
 
 /// Builds a request item from an endpoint.
 ///
-/// `owning_auth` is the auth that should govern this specific request.
-/// When `emit_request_level_auth` is `true`, that auth is serialized
-/// directly on the request (used in mixed-auth grouped collections so
-/// each request advertises its own auth even though the collection has
-/// none). When `false`, the request inherits collection-level auth and
-/// emits no `auth` block.
-///
-/// An endpoint's own authentication ([`endpoint_auth_override`]) is always
-/// emitted on the request and takes precedence over `owning_auth`.
+/// When the member's `request_level_auth` is set, its auth is serialized on
+/// the request; otherwise the request inherits the collection's auth. An
+/// endpoint's own authentication ([`endpoint_auth_override`]) is always
+/// emitted on the request and takes precedence.
 ///
 /// When `disambiguate_with_api_name` is `true`, the request name is
 /// suffixed with the owning API name (e.g. `"ListAlarms (EmqxBasic)"`)
 /// so duplicate IDs across grouped APIs become distinguishable in
 /// Postman's UI and exports.
+///
+/// A JSON body holds an example built from the request schema, and the item
+/// saves one example response per success shape and declared error. An
+/// example that cannot be built leaves its body empty and is reported in
+/// `collected`.
 pub(crate) fn build_request_item(
     endpoint: &Endpoint,
-    api: &RestApi,
-    owning_auth: &ExportAuth,
-    emit_request_level_auth: bool,
+    member: &Member<'_>,
     disambiguate_with_api_name: bool,
-    base_url_var: &str,
+    collected: &mut Collected,
 ) -> PostmanItem {
+    let api = member.api;
+    let own_auth = endpoint_auth_override(endpoint).map(|own| match &member.variable_suffix {
+        Some(suffix) => with_variable_suffix(own, suffix),
+        None => own,
+    });
+    if let Some(own) = &own_auth {
+        collected.auth(own);
+    }
+    let effective_auth = own_auth.as_ref().unwrap_or(&member.auth);
     let path_params = extract_path_params(&endpoint.path);
     // Reserved-expansion markers (`{+name}`) are a runtime encoding hint; the
     // exported collection must render valid `{name}` / `:name` templates.
     let export_path = strip_reserved_markers(&endpoint.path);
-    let url = build_url(
-        &api.base_url,
-        &export_path,
-        &path_params,
-        endpoint,
-        base_url_var,
-    );
-    let headers = build_headers(endpoint, api);
-    let body = endpoint
-        .request
-        .as_ref()
-        .map(|req| super::request::build_body(&map_body(req)));
+    let url = build_url(&export_path, &path_params, endpoint, &member.base_url_var, effective_auth, collected);
+    let export_body = endpoint.request.as_ref().map(map_body);
+    let headers = build_headers(endpoint, api, effective_auth, export_body.as_ref(), collected);
+
+    let example = match &endpoint.request {
+        Some(ApiRequest::Json(reference)) => match member.examples.example(reference) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                collected.example_failure(api, &endpoint.id, "request body", &error);
+                None
+            }
+        },
+        _ => None,
+    };
+    let body = export_body.as_ref().map(|body| build_body(body, example.as_ref()));
+
+    let (response, failures) = saved_responses(&member.examples, endpoint.success_shapes(), &api.effective_errors(endpoint));
+    for (role, error) in failures {
+        collected.example_failure(api, &endpoint.id, &role, &error);
+    }
 
     let name = if disambiguate_with_api_name {
         format!("{} ({})", endpoint.id, api.name)
@@ -59,9 +93,9 @@ pub(crate) fn build_request_item(
         endpoint.id.clone()
     };
 
-    let auth = match endpoint_auth_override(endpoint) {
-        Some(own) => build_collection_auth(&own),
-        None if emit_request_level_auth => build_collection_auth(owning_auth),
+    let auth = match &own_auth {
+        Some(own) => build_collection_auth(own),
+        None if member.request_level_auth => build_collection_auth(&member.auth),
         None => None,
     };
 
@@ -75,6 +109,7 @@ pub(crate) fn build_request_item(
             body,
             description: request_description(endpoint, api),
         }),
+        response,
     }
 }
 

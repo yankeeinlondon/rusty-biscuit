@@ -14,6 +14,86 @@
       "key": "apiKey",
       "value": "",
       "description": "API key value"
+    },
+    {
+      "key": "path_owner",
+      "value": "",
+      "description": "Value of the `owner` path parameter"
+    },
+    {
+      "key": "path_repo",
+      "value": "",
+      "description": "Value of the `repo` path parameter"
+    },
+    {
+      "key": "path_sha",
+      "value": "",
+      "description": "Value of the `sha` path parameter"
+    },
+    {
+      "key": "query_recursive",
+      "value": "",
+      "description": "Value of the `recursive` query parameter"
+    },
+    {
+      "key": "path_filepath",
+      "value": "",
+      "description": "Value of the `filepath` path parameter"
+    },
+    {
+      "key": "query_page",
+      "value": "",
+      "description": "Value of the `page` query parameter"
+    },
+    {
+      "key": "query_limit",
+      "value": "",
+      "description": "Value of the `limit` query parameter"
+    },
+    {
+      "key": "query_state",
+      "value": "",
+      "description": "Value of the `state` query parameter"
+    },
+    {
+      "key": "query_sort",
+      "value": "",
+      "description": "Value of the `sort` query parameter"
+    },
+    {
+      "key": "path_index",
+      "value": "",
+      "description": "Value of the `index` path parameter"
+    },
+    {
+      "key": "query_issue_type",
+      "value": "",
+      "description": "Value of the `issue_type` query parameter"
+    },
+    {
+      "key": "query_draft",
+      "value": "",
+      "description": "Value of the `draft` query parameter"
+    },
+    {
+      "key": "query_pre_release",
+      "value": "",
+      "description": "Value of the `pre_release` query parameter"
+    },
+    {
+      "key": "path_branch",
+      "value": "",
+      "description": "Value of the `branch` path parameter"
+    },
+    {
+      "key": "path_git_ref",
+      "value": "",
+      "description": "Value of the `git_ref` path parameter"
+    },
+    {
+      "key": "path_org",
+      "value": "",
+      "description": "Value of the `org` path parameter"
     }
   ],
   "auth": {
@@ -54,17 +134,21 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "org",
-                  "value": "<org>"
+                  "value": "{{path_org}}"
                 }
               ]
             },
@@ -75,7 +159,21 @@
               }
             ],
             "description": "List repositories for an organization"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     },
@@ -99,11 +197,11 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -114,7 +212,21 @@
               }
             ],
             "description": "Get repository metadata including default branch"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"archived\": false,\n  \"clone_url\": null,\n  \"created_at\": null,\n  \"default_branch\": null,\n  \"description\": null,\n  \"empty\": false,\n  \"forks_count\": null,\n  \"full_name\": null,\n  \"html_url\": null,\n  \"id\": null,\n  \"language\": null,\n  \"mirror\": false,\n  \"name\": null,\n  \"open_issues_count\": null,\n  \"owner\": null,\n  \"private\": false,\n  \"ssh_url\": null,\n  \"stars_count\": null,\n  \"updated_at\": null,\n  \"watchers_count\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetGitTree",
@@ -135,21 +247,23 @@
               ],
               "query": [
                 {
-                  "key": "recursive"
+                  "key": "recursive",
+                  "value": "{{query_recursive}}",
+                  "disabled": true
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "sha",
-                  "value": "<sha>"
+                  "value": "{{path_sha}}"
                 }
               ]
             },
@@ -160,7 +274,21 @@
               }
             ],
             "description": "Get a Git tree; set recursive to include nested entries"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"page\": null,\n  \"sha\": null,\n  \"total_count\": null,\n  \"tree\": [],\n  \"truncated\": false,\n  \"url\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetRepositoryContentRaw",
@@ -181,15 +309,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "filepath",
-                  "value": "<filepath>"
+                  "value": "{{path_filepath}}"
                 }
               ]
             },
@@ -200,7 +328,21 @@
               }
             ],
             "description": "Get raw file content from repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         },
         {
           "name": "ListPullRequests",
@@ -220,29 +362,37 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by PR state"
                 },
                 {
                   "key": "sort",
+                  "value": "{{query_sort}}",
+                  "disabled": true,
                   "description": "Sort order for results"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -253,7 +403,21 @@
               }
             ],
             "description": "List pull requests with metadata"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListPullRequestFiles",
@@ -275,25 +439,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "index",
-                  "value": "<index>"
+                  "value": "{{path_index}}"
                 }
               ]
             },
@@ -304,7 +472,21 @@
               }
             ],
             "description": "List files changed in a pull request"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListIssues",
@@ -324,29 +506,37 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by issue state"
                 },
                 {
                   "key": "issue_type",
+                  "value": "{{query_issue_type}}",
+                  "disabled": true,
                   "description": "Filter by type (issues, pulls, or all)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -357,7 +547,21 @@
               }
             ],
             "description": "List issues (use type=issues to exclude PRs)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetIssue",
@@ -378,15 +582,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "index",
-                  "value": "<index>"
+                  "value": "{{path_index}}"
                 }
               ]
             },
@@ -397,7 +601,21 @@
               }
             ],
             "description": "Get a single issue by index"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"body\": null,\n  \"closed_at\": null,\n  \"comments\": null,\n  \"created_at\": null,\n  \"html_url\": null,\n  \"id\": null,\n  \"index\": null,\n  \"number\": null,\n  \"pull_request\": null,\n  \"state\": null,\n  \"title\": null,\n  \"updated_at\": null,\n  \"url\": null,\n  \"user\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListIssueComments",
@@ -419,25 +637,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "index",
-                  "value": "<index>"
+                  "value": "{{path_index}}"
                 }
               ]
             },
@@ -448,7 +670,21 @@
               }
             ],
             "description": "List comments on an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListIssueTimeline",
@@ -470,25 +706,29 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "index",
-                  "value": "<index>"
+                  "value": "{{path_index}}"
                 }
               ]
             },
@@ -499,7 +739,21 @@
               }
             ],
             "description": "List timeline events for an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListTags",
@@ -519,21 +773,25 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -544,7 +802,21 @@
               }
             ],
             "description": "List repository tags"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "ListReleases",
@@ -564,29 +836,37 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "limit",
+                  "value": "{{query_limit}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 },
                 {
                   "key": "draft",
+                  "value": "{{query_draft}}",
+                  "disabled": true,
                   "description": "Include draft releases"
                 },
                 {
                   "key": "pre_release",
+                  "value": "{{query_pre_release}}",
+                  "disabled": true,
                   "description": "Include pre-releases"
                 }
               ],
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 }
               ]
             },
@@ -597,7 +877,21 @@
               }
             ],
             "description": "List releases (linked to tags via tag_name)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetBranch",
@@ -618,15 +912,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "branch",
-                  "value": "<branch>"
+                  "value": "{{path_branch}}"
                 }
               ]
             },
@@ -637,7 +931,21 @@
               }
             ],
             "description": "Get a branch (commit.id is the branch head commit)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"commit\": {\n    \"id\": \"string\",\n    \"message\": null,\n    \"timestamp\": null\n  },\n  \"name\": \"string\",\n  \"protected\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetTagReference",
@@ -659,15 +967,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "git_ref",
-                  "value": "<git_ref>"
+                  "value": "{{path_git_ref}}"
                 }
               ]
             },
@@ -678,7 +986,21 @@
               }
             ],
             "description": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetAnnotatedTag",
@@ -700,15 +1022,15 @@
               "variable": [
                 {
                   "key": "owner",
-                  "value": "<owner>"
+                  "value": "{{path_owner}}"
                 },
                 {
                   "key": "repo",
-                  "value": "<repo>"
+                  "value": "{{path_repo}}"
                 },
                 {
                   "key": "sha",
-                  "value": "<sha>"
+                  "value": "{{path_sha}}"
                 }
               ]
             },
@@ -719,7 +1041,21 @@
               }
             ],
             "description": "Get annotated tag object details (message, tagger)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"message\": null,\n  \"sha\": null,\n  \"tag\": null,\n  \"url\": null\n}"
+            }
+          ]
         }
       ]
     }

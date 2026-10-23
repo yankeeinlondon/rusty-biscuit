@@ -95,7 +95,8 @@ just -f schematic/justfile check-drift
 The standard output roots are `schematic/schema/src`, `schematic/openapi`, and
 `schematic/postman`. When the CLI output ends in `schema/src`, it selects the
 sibling export directories automatically; `--no-openapi` and `--no-postman`
-suppress those outputs. A Rust module can be a single file or a directory
+suppress those outputs, and `--postman-environment` (which the `just` recipes
+pass) adds each collection's Postman environment. A Rust module can be a single file or a directory
 containing `mod.rs`, `requests.rs`, and `responses.rs` when it exceeds the split
 threshold. See [partial generation](partial-generation.md) for publication,
 ownership, and cleanup rules.
@@ -130,6 +131,7 @@ See [typed registration](../typed-registration.md) for the assembly contract.
 just -f schematic/justfile test
 just -f schematic/justfile lint
 just -f schematic/justfile test-schema
+just -f schematic/justfile doctest-schema
 ```
 
 The ordinary test recipe includes the separate fresh-output compiler guards and
@@ -139,7 +141,8 @@ reports a missing offline dependency, populate the cache with
 `cargo fetch --manifest-path schematic/schema/Cargo.toml` and rerun.
 
 The schema recipe checks the committed generated crate, including paging and
-compiler diagnostics. Current artifact tests compare complete Rust, OpenAPI, and Postman file sets
+compiler diagnostics; `doctest-schema` compiles every example in its docs with
+the default features and with one module selected. Current artifact tests compare complete Rust, OpenAPI, and Postman file sets
 and bytes. Loopback HTTP fixtures assert generated
 wire requests, credentials, codecs, hooks, and paging behavior; they make no live
 provider requests. Generated WebSocket clients are tested against a scriptable

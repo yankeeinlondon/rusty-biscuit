@@ -149,6 +149,18 @@ doctest *args="":
     @just _doctest schematic-gen {{ args }}
     @just _doctest schematic-oauth {{ args }}
     @just _doctest schematic-runtime {{ args }}
+    @just doctest-schema {{ args }}
+
+# Doctests of the generated schematic-schema crate (excluded from the workspace):
+# the default features, then the shared `emqx` module alone, which leaves out
+# the crate-level and prelude examples gated on another module's feature.
+doctest-schema *args="": _storage_preflight
+    @echo ""
+    @echo "Doctests for schematic-schema (generated)"
+    @echo "-----------------------------------------"
+    @echo ""
+    @cargo test --doc --manifest-path schema/Cargo.toml {{ args }}
+    @cargo test --doc --manifest-path schema/Cargo.toml --no-default-features --features emqx {{ args }}
 
 # not applicable: schematic has no cargo-fuzz targets
 fuzz:
@@ -227,7 +239,7 @@ generate:
     @echo "--------------------------"
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
-        --openapi-out openapi --postman-out postman -v
+        --openapi-out openapi --postman-out postman --postman-environment -v
     @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
 # regenerate one API's module group in schema/, openapi/, and postman/, keeping every other module
@@ -237,7 +249,7 @@ generate-one api:
     @echo "------------------------------"
     @echo ""
     @cargo run -p schematic-gen -- generate --api {{ api }} --output schema/src \
-        --openapi-out openapi --postman-out postman -v
+        --openapi-out openapi --postman-out postman --postman-environment -v
 
 # generate only OpenAPI specs (no Postman)
 generate-openapi:
@@ -248,14 +260,14 @@ generate-openapi:
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --openapi-out openapi --no-postman -v
 
-# generate only Postman collections (no OpenAPI)
+# generate only Postman collections and environments (no OpenAPI)
 generate-postman:
     @echo ""
     @echo "Generating Postman Collections"
     @echo "------------------------------"
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
-        --postman-out postman --no-openapi -v
+        --postman-out postman --postman-environment --no-openapi -v
 
 # build, install CLI, generate schemas, and verify
 install *args="":

@@ -80,6 +80,7 @@ impl Roots {
             postman_out: Some(&self.postman),
             no_openapi: false,
             no_postman: false,
+            postman_environment: false,
         }
     }
 
@@ -352,11 +353,12 @@ fn read_json(path: &Path) -> serde_json::Value {
 
 #[test]
 fn header_and_cookie_parameters_reach_every_postman_writer() {
+    // Values are collection variables; the optional header is disabled, and
+    // the cookies share one `Cookie` header holding the required one.
     let expected = vec![
-        ("x-required".to_string(), "<x-required>".to_string(), false),
-        ("x-optional".to_string(), "<x-optional>".to_string(), true),
-        ("Cookie".to_string(), "session=<session>".to_string(), false),
-        ("Cookie".to_string(), "theme=<theme>".to_string(), true),
+        ("x-required".to_string(), "{{header_x-required}}".to_string(), false),
+        ("x-optional".to_string(), "{{header_x-optional}}".to_string(), true),
+        ("Cookie".to_string(), "session={{cookie_session}}".to_string(), false),
     ];
     let api = header_and_cookie_api();
 
@@ -377,6 +379,10 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
     }
     let batch = read_json(&Path::new(&roots.postman).join("located.postman_collection.json"));
     assert_eq!(request_headers(&batch), expected);
+    let cookie = batch.pointer("/item/0/item/0/request/header/2").unwrap_or_else(|| panic!("{batch:#}"));
+    assert_eq!(cookie["description"], "Optional cookies, sent only when added: theme.");
+    let declared: Vec<&str> = batch["variable"].as_array().unwrap().iter().map(|v| v["key"].as_str().unwrap()).collect();
+    assert_eq!(declared, ["baseUrl", "header_x-required", "header_x-optional", "cookie_session"]);
 
     // OpenAPI declares all four in their own locations.
     let openapi = std::fs::read_to_string(Path::new(&roots.openapi).join("located.json")).unwrap();

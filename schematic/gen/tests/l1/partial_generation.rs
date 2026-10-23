@@ -645,6 +645,7 @@ impl Roots {
             postman_out: Some(&self.postman),
             no_openapi: false,
             no_postman: false,
+            postman_environment: false,
         }
     }
 }

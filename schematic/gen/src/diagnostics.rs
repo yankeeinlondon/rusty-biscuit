@@ -154,16 +154,17 @@ pub enum Feature {
     PaginationParameter,
     /// An endpoint's own authentication (public, or a replacement policy).
     EndpointAuth,
-    /// A schema registered as a `oneOf`, `anyOf`, or `allOf` composition.
-    SchemaComposition,
     /// An OAuth2 grant an output has no form for.
     #[serde(rename = "oauth2-grant")]
     OAuth2Grant,
     /// A typed path parameter (`EndpointParams.path`).
     PathParameter,
-    /// A GraphQL operation, which an output does not carry.
+    /// A GraphQL operation an output does not carry, or cannot address.
     #[serde(rename = "graphql-operation")]
     GraphQlOperation,
+    /// A request body, saved response, or GraphQL `variables` for which no
+    /// value validating against its registered schema could be built.
+    ExampleValue,
     /// A WebSocket API definition, found while lowering it into its
     /// generated module. The message starts with the definition path.
     #[serde(rename = "websocket-definition")]
@@ -198,10 +199,10 @@ impl Feature {
             Self::PaginationException => "pagination-exception",
             Self::PaginationParameter => "pagination-parameter",
             Self::EndpointAuth => "endpoint-auth",
-            Self::SchemaComposition => "schema-composition",
             Self::OAuth2Grant => "oauth2-grant",
             Self::PathParameter => "path-parameter",
             Self::GraphQlOperation => "graphql-operation",
+            Self::ExampleValue => "example-value",
             Self::WebSocketDefinition => "websocket-definition",
         }
     }
@@ -393,6 +394,7 @@ mod tests {
             Feature::InvalidOutputFilename,
             Feature::InvalidSchemaReference,
             Feature::GraphQlOperation,
+            Feature::ExampleValue,
             Feature::WebSocketDefinition,
         ];
         for feature in features {

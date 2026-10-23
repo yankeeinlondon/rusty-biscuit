@@ -73,6 +73,17 @@
 
 ### Production Dependencies
 
+- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
+
+    _JSON Schema validator (default features off, the workspace-wide pin). The
+    Postman exporter's example engine (`export::examples`) validates every
+    example against the API's registered schemas (Draft 2020-12, offline,
+    local references only) before emitting it; the L1 tests also validate
+    collections against the published Postman schema. A normal dependency
+    since examples are checked at generation time, not only in tests._
+
+    _Tags: json-schema, validation_
+
 - [clap](https://github.com/clap-rs/clap) _v4.5_ [📄](https://docs.rs/clap)
 
     _Command-line argument parser with derive API for declarative CLI definitions._
@@ -186,12 +197,6 @@
     `l1` test binary. The dev entry adds no crate to the workspace._
 
     _Tags: workspace, testing_
-
-- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
-
-    _JSON Schema validator (default features off) used by the L1 tests that validate exported Postman collections against the published schema._
-
-    _Tags: testing, json-schema_
 
 ---
 

@@ -79,6 +79,7 @@ fn opts<'a>(rust: &'a str, openapi: &'a str, postman: &'a str) -> GenerateOpts<'
         postman_out: Some(postman),
         no_openapi: false,
         no_postman: false,
+        postman_environment: false,
     }
 }
 

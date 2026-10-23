@@ -84,7 +84,7 @@ fn explicit(methods: Vec<AuthMethod>) -> AuthPolicy {
 fn vocabulary_diagnostics(diagnostics: Vec<ValidationDiagnostic>) -> Vec<ValidationDiagnostic> {
     diagnostics
         .into_iter()
-        .filter(|d| matches!(d.feature, Feature::EndpointAuth | Feature::SchemaComposition | Feature::OAuth2Grant | Feature::PathParameter))
+        .filter(|d| matches!(d.feature, Feature::EndpointAuth | Feature::OAuth2Grant | Feature::PathParameter))
         .collect()
 }
 
@@ -166,8 +166,8 @@ fn enum_path_parameter_lists_its_values_and_postman_describes_the_type() {
 
     let collection = postman(&fixture);
     let variables = &request(&collection, "GetPet")["url"]["variable"];
-    assert_eq!(variables[0], json!({"key": "kind", "value": "<kind>", "description": "one of: cat, dog"}));
-    assert_eq!(variables[1], json!({"key": "id", "value": "<id>", "description": "Pet id (integer)"}));
+    assert_eq!(variables[0], json!({"key": "kind", "value": "{{path_kind}}", "description": "one of: cat, dog"}));
+    assert_eq!(variables[1], json!({"key": "id", "value": "{{path_id}}", "description": "Pet id (integer)"}));
 }
 
 // ---------------------------------------------------------------------------
@@ -425,22 +425,24 @@ fn group_merge_reports_a_conflicting_same_name_composed_component() {
 }
 
 #[test]
-fn postman_warns_about_each_composed_component_and_still_writes_the_collection() {
+fn postman_builds_composed_examples_or_reports_why_not() {
+    // `Cat` and `Dog` both accept `{}`, so no value matches exactly one
+    // `oneOf` branch: the request body is reported and left empty, while the
+    // `allOf` response merges both members into a valid `{}`.
     let fixture = composed_api("Pets", json!({"oneOf": [reference("Cat"), reference("Dog")]}));
-    let warnings = vocabulary_diagnostics(validate_postman(&[&fixture]));
-    let summary: Vec<(Severity, Feature, Output, Option<&str>, bool)> = warnings.iter()
-        .map(|d| (d.severity, d.feature, d.output, d.endpoint.as_deref(), d.api == ["Pets"])).collect();
-    let expected = (Severity::Warning, Feature::SchemaComposition, Output::Postman, Some("Adopt"), true);
-    assert_eq!(summary, [expected, expected]);
-    assert!(warnings[0].message.contains("request body uses component \"Pet\", a oneOf composition"), "{}", warnings[0].message);
-    assert!(warnings[1].message.contains("response uses component \"Both\", a allOf composition"), "{}", warnings[1].message);
-    assert!(vocabulary_diagnostics(validate_openapi(&[&fixture])).is_empty());
-
-    // The existing placeholder example is kept; nothing is invented.
+    let warnings: Vec<ValidationDiagnostic> = validate_postman(&[&fixture]).into_iter().filter(|d| d.feature == Feature::ExampleValue).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert_eq!((warnings[0].severity, warnings[0].output, warnings[0].endpoint.as_deref()), (Severity::Warning, Output::Postman, Some("Adopt")));
+    assert!(warnings[0].message.contains("request body") && warnings[0].message.contains("no `oneOf` branch"), "{}", warnings[0].message);
     let collection = postman(&fixture);
-    assert_eq!(request(&collection, "Adopt")["body"]["raw"], "{}");
+    assert_eq!(request(&collection, "Adopt")["body"]["raw"], "");
     let dir = tempfile::TempDir::new().unwrap();
     assert!(write_postman(&fixture, dir.path(), false).unwrap().exists());
+
+    // `anyOf` accepts the overlap: the first branch's value is the example.
+    let fixture = composed_api("Pets", json!({"anyOf": [reference("Cat"), reference("Dog")]}));
+    assert!(validate_postman(&[&fixture]).iter().all(|d| d.feature != Feature::ExampleValue));
+    assert_eq!(request(&postman(&fixture), "Adopt")["body"]["raw"], "{}");
 }
 
 // ---------------------------------------------------------------------------
@@ -564,8 +566,8 @@ fn an_api_adopting_no_vocabulary_exports_as_before() {
     let get_item = request(&collection, "GetItem");
     assert!(get_item.get("auth").is_none());
     assert_eq!(get_item["description"], "GetItem operation");
-    assert_eq!(get_item["url"]["variable"], json!([{"key": "item_id", "value": "<item_id>"}]));
-    assert_eq!(variable_keys(&collection), ["baseUrl", "bearerToken"]);
+    assert_eq!(get_item["url"]["variable"], json!([{"key": "item_id", "value": "{{path_item_id}}"}]));
+    assert_eq!(variable_keys(&collection), ["baseUrl", "bearerToken", "path_item_id", "query_q"]);
 
     assert!(vocabulary_diagnostics(validate_openapi(&[&fixture])).is_empty());
     assert!(vocabulary_diagnostics(validate_postman(&[&fixture])).is_empty());

@@ -46,7 +46,57 @@ pub enum PostmanItem {
         name: String,
         /// Request details.
         request: Box<PostmanRequest>,
+        /// Saved example responses: one per success shape, then one per
+        /// declared error entry.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        response: Vec<PostmanResponse>,
     },
+}
+
+/// A saved example response.
+#[derive(Debug, Clone, Serialize)]
+pub struct PostmanResponse {
+    /// Display name: the status, its reason, and the media type.
+    pub name: String,
+    /// The status's reason phrase.
+    pub status: String,
+    /// The HTTP status code.
+    pub code: u16,
+    /// Response headers; a body-bearing response declares its
+    /// `Content-Type`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub header: Vec<PostmanHeader>,
+    /// The example body; absent for a response without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+/// A Postman environment: the variables a collection uses, with values.
+///
+/// Serialized as Postman's environment export format.
+#[derive(Debug, Clone, Serialize)]
+pub struct PostmanEnvironment {
+    /// Environment name.
+    pub name: String,
+    /// One entry per collection variable, in collection order.
+    pub values: Vec<PostmanEnvironmentValue>,
+    /// Always `environment`.
+    #[serde(rename = "_postman_variable_scope")]
+    pub scope: String,
+}
+
+/// One environment variable.
+#[derive(Debug, Clone, Serialize)]
+pub struct PostmanEnvironmentValue {
+    /// Variable key, as the collection references it.
+    pub key: String,
+    /// Initial value; empty for credentials and parameters.
+    pub value: String,
+    /// `secret` for a credential or secret parameter, otherwise `default`.
+    #[serde(rename = "type")]
+    pub type_field: String,
+    /// Always `true`.
+    pub enabled: bool,
 }
 
 /// HTTP request details.
@@ -102,6 +152,9 @@ pub struct PostmanAuth {
     /// Basic auth configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basic: Option<Vec<PostmanVariable>>,
+    /// OAuth2 configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth2: Option<Vec<PostmanVariable>>,
 }
 
 /// Variable definition.
@@ -190,6 +243,10 @@ pub struct PostmanQuery {
     /// Query parameter value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Whether Postman leaves the parameter out of the URL until the user
+    /// enables it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
     /// Query parameter description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

@@ -174,8 +174,8 @@ feature; `just test-l2` and CI enable it.
   name); otherwise, and for every union without a `discriminator` keyword
   (e.g. `TextResponseFormatConfiguration`), it is first-match untagged. A
   defaulted discriminated enum has an empty tag and does not decode again.
-- OpenAPI and Postman exports skip GraphQL operations (`graphql-operation`
-  warning); OpenAPI cannot express stream end conditions.
+- OpenAPI skips GraphQL operations (`graphql-operation` warning); Postman
+  exports them as runnable POSTs. OpenAPI cannot express stream end conditions.
 - Tests cover generation, compile-time structure, and wire behavior against
   wiremock, not live providers. See
   `schematic/reviews/2026-07-31-macro-review/spec.md` §10 before touching

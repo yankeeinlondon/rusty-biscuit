@@ -141,8 +141,10 @@ let api = RestApi::builder(&ctx, "GitHub", BASE).describes("..").bearer_env(["GI
   failure `GraphQlOperationError<D, H>` (`GraphQl(GraphQlFailure { errors,
   partial_data })` or `Http(H)`). No endpoint method: send with
   `client.send(IssuesRequest::new(vars))`.
-- OpenAPI and Postman exports skip operations with a `graphql-operation`
-  warning. No shipped definition declares operations yet.
+- OpenAPI skips operations with a `graphql-operation` warning; Postman
+  exports each as a runnable `POST` to `{{graphqlUrl}}` with `query`,
+  `operationName`, and example `variables`. No shipped definition declares
+  operations yet.
 
 ### Relay pagination
 

@@ -104,25 +104,28 @@ fn postman_records_the_first_success_shapes_telling_content_type() {
 }
 
 #[test]
-fn both_exporters_skip_graphql_operations_with_a_warning() {
+fn openapi_skips_graphql_operations_with_a_warning_and_postman_runs_them() {
     let mut ctx = DefinitionContext::types_in("::fixture");
     let api = api(vec![vec![]], &mut ctx, true);
 
-    for (diagnostics, output, target) in [
-        (validate_openapi(&[&api]), Output::OpenApi, "OpenAPI"),
-        (validate_postman(&[&api]), Output::Postman, "Postman"),
-    ] {
-        let skips: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::GraphQlOperation).collect();
-        let [skip] = skips.as_slice() else { panic!("{diagnostics:?}") };
-        assert_eq!(skip.severity, Severity::Warning);
-        assert_eq!((skip.output, skip.endpoint.as_deref(), skip.api.as_slice()), (output, Some("Viewer"), &["Fixture".to_string()][..]));
-        assert_eq!(skip.message, format!("Fixture operation Viewer: GraphQL operation skipped in {target} output"));
-        assert!(!diagnostics.iter().any(|d| d.is_error()), "{diagnostics:?}");
-    }
-    // The skip is nonfatal: both outputs build, without the operation.
+    let diagnostics = validate_openapi(&[&api]);
+    let skips: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::GraphQlOperation).collect();
+    let [skip] = skips.as_slice() else { panic!("{diagnostics:?}") };
+    assert_eq!(skip.severity, Severity::Warning);
+    assert_eq!((skip.output, skip.endpoint.as_deref(), skip.api.as_slice()), (Output::OpenApi, Some("Viewer"), &["Fixture".to_string()][..]));
+    assert_eq!(skip.message, "Fixture operation Viewer: GraphQL operation skipped in OpenAPI output");
+    assert!(!diagnostics.iter().any(|d| d.is_error()), "{diagnostics:?}");
+    // The skip is nonfatal: the document builds, without the operation.
     let document = serde_json::to_string(&build_openapi_grouped(&[&api], "fixture", &ExportOptions::new()).unwrap()).unwrap();
     assert!(!document.contains("Viewer"));
-    assert!(!serde_json::to_string(&build_postman_collection(&api)).unwrap().contains("Viewer"));
+
+    // Postman carries the operation as a request, so it reports nothing.
+    let postman = validate_postman(&[&api]);
+    assert!(postman.iter().all(|d| d.feature != Feature::GraphQlOperation && !d.is_error()), "{postman:?}");
+    let collection = serde_json::to_value(build_postman_collection(&api)).unwrap();
+    let graphql = collection["item"].as_array().unwrap().iter().find(|item| item["name"] == "GraphQL").expect("GraphQL folder");
+    assert_eq!(graphql["item"][0]["name"], "Viewer");
+    assert_eq!(graphql["item"][0]["request"]["method"], "POST");
 }
 
 // Shipped definitions: one module group per test.
