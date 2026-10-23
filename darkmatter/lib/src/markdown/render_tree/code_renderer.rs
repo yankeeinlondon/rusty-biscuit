@@ -1528,8 +1528,8 @@ last: 4
                 );
             }
             None => {
-                // Host lacks the Mermaid toolchain: a `None` is the correct
-                // failure signal — the renderer degrades per strictness.
+                // A failed render: a `None` is the correct failure signal —
+                // the renderer degrades per strictness.
             }
         }
     }
