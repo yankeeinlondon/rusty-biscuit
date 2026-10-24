@@ -17,6 +17,7 @@ mod core_schema_types;
 mod entry_point_parity;
 mod formatting_transaction;
 mod full_index_removal_guard;
+mod incremental_graph_equivalence;
 mod index_build;
 mod index_store_concurrency;
 mod index_store_facts;

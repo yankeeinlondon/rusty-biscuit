@@ -611,6 +611,15 @@ All parsing runs on the dispatch thread under the index lock, so two
 requests for the same target share one parse, and a newer buffer can never
 be overwritten by an older read.
 
+A parse that changes a document's bytes publishes a new live graph
+snapshot. That rebuild reads no file: it reuses the wiki universe and the
+document table (everything derived from paths alone) while the paths,
+dependencies, list state, and wiki roots are unchanged, and rebuilds every
+parsed document's nodes and references. Typing in an open buffer therefore
+costs no path work. See
+[Rebuilding the live snapshot](./architecture.md#rebuilding-the-live-snapshot)
+for exactly what is reused.
+
 ### Targets outside the file list
 
 The file list decides what the index store and wiki links cover. It does not
