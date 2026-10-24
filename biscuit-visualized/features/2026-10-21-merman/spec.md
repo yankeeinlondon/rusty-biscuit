@@ -26,7 +26,7 @@ reviewed: true
 reviewed_by: claude/opus
 reviewed_on: 2026-10-22
 review_note: the clarification process served as a review
-review_iterations: 0
+review_iterations: 3
 needs_rulings: false
 depends-on:
     - 2026-10-13-graphics-where-possible
@@ -92,6 +92,7 @@ references:
         never code (D6).
 implemented: true
 implemented_by: "claude/opus"
+completed: true
 ---
 
 # Merman Rendering
