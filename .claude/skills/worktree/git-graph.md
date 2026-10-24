@@ -194,7 +194,10 @@ A lane's boundary (the first commit below it) is classified too, sharing one
 
 ### L1 layout proof (portable)
 
-`git_graph::tests::gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`:
+`git_graph::tests::gathered_graph_lays_out_*`, one test per fixture
+(`assert_laid_out`), except the sparse-lanes fixture, whose ~40 measurements
+per plan earn one test per `Width` (`_at_120`, `_at_56`; a guard test's
+exhaustive `match` makes a new `Width` name its test):
 
 - gathers real-Git fixtures and plans them with the real measurement at 120
   and 56 columns; rows come from the measured whole graph (twice its rows, so
@@ -202,14 +205,32 @@ A lane's boundary (the first commit below it) is classified too, sharing one
   expects hidden lanes), because Merman's lanes are taller than a fixed 40
   rows allows;
 - checks `biscuit-visualized`'s `gitgraph_geometry` (a dev-dependency) for tag
-  overlaps, tags on their SHAs' IDs, exact merge parents, unchanged tag text,
-  and each fixture's expected `incomplete` and hidden-lane counts (`Evidence`);
+  overlaps, tags on their SHAs' IDs, exact merge parents, tag text equal to
+  the whole graph's, trimming whenever the whole graph is wider than the
+  viewport and no lane is hidden, and each fixture's expected `incomplete` and
+  hidden-lane counts (`Evidence`). Every check compares one viewport with the
+  whole graph, never two viewports, so the widths can run in separate tests;
 - the sparse-lanes fixture is complete and loses one lane to the height cap one
   row short of the whole graph at 120 columns; `post_merge` checks the commit after each merge source hangs from it;
 - `--width 40` is never trimmed (planned with the whole graph's rows so no lane
   is hidden).
 
 Other L1 facts:
+
+- **Speed.** A test process that measures a graph pays a one-time font setup
+  on its first `GitGraph::plan` (fontdb's system fonts, then fontique's
+  CoreText scan, which on macOS lists the test binary's directory; the `os`
+  skill's `macos.md`), then lays the diagram out with Merman once per
+  measured candidate, often dozens of times. The root `Cargo.toml`
+  optimizes Merman, fontdb, and ttf-parser in the test profile, and these
+  tests run only in the library target (`lib_target_tests!`, see
+  [SKILL.md](SKILL.md)). On macOS, `.config/nextest.toml`'s
+  `coretext-small-bundle` setup script points those tests' `CFProcessPath`
+  at `/usr/bin/true`, so the scan lists `/usr/bin` rather than `deps`; its
+  filter names the tests, so **a new test that calls `GitGraph::plan` (or
+  `run_pipeline` with image support) must be added to that filter**.
+  Splitting a fixture's views into more tests adds a font setup per test;
+  extend a test only while it stays well inside the 5 s budget.
 
 - `observed_sparse_lanes()`'s `commit_on` dates each commit one second after the
   last, because the height cap ranks lanes by tip commit time in whole seconds

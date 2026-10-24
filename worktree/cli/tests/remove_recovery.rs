@@ -505,18 +505,21 @@ fn stopped_after_the_move() -> (Fixture, PathBuf, PathBuf) {
     (fixture, quarantine, journal)
 }
 
-/// Retries the stopped removal and asserts it refused before deleting
-/// anything: the moved checkout, the branch, and the pending operation are
-/// all kept. Returns the retry's stderr.
-fn assert_retry_refused_by_the_journal(fixture: &Fixture, quarantine: &Path) -> String {
+/// Retries the stopped removal and asserts it refused (exit 3, as the
+/// lifecycle classifies an unusable journal) before deleting anything,
+/// naming `journal`: the moved checkout, the branch, and the pending
+/// operation are all kept. Returns the retry's stderr.
+fn assert_retry_refused_by_the_journal(fixture: &Fixture, quarantine: &Path, journal: &Path) -> String {
     let refused = fixture.remove(&["feat-x"], None);
     let stderr = stderr_of(&refused);
-    // Reading the pending removal's record fails before any retry starts,
-    // which `wt` reports as an unreadable store (exit 1), not as a refused
-    // retry (exit 3).
-    assert_eq!(refused.status.code(), Some(1), "{stderr}");
-    let prefix = "Nothing was removed. The record of an earlier removal could not be read: the deletion journal of removal ";
-    assert!(stderr.contains(prefix), "{stderr}");
+    assert_eq!(refused.status.code(), Some(3), "{stderr}");
+    // The operation directory and the file; the store root may be spelled
+    // through another (canonical) path than the fixture's.
+    let operation = journal.parent().and_then(Path::file_name).unwrap().to_string_lossy();
+    let file = journal.file_name().unwrap().to_string_lossy();
+    let named = format!("{operation}{}{file} cannot be used: ", std::path::MAIN_SEPARATOR);
+    let prefix = "Nothing was removed. The record of an earlier removal could not be read: the deletion journal ";
+    assert!(stderr.contains(prefix) && stderr.contains(&named), "expected {named:?} in {stderr}");
     assert!(!stderr.contains("Removed worktree"), "{stderr}");
     assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "nothing was deleted");
     assert!(quarantine.join(".git").is_file());
@@ -553,7 +556,7 @@ fn a_retry_refuses_a_journal_batch_naming_a_position_the_inventory_lacks() {
     let line = text.lines().count() + 1;
     fs::write(&journal, format!("{text}{{\"intent\":{{\"batch\":{},\"entries\":[999999]}}}}\n", batches + 1)).unwrap();
 
-    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine);
+    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine, &journal);
 
     let expected = format!("deletion journal line {line} is malformed: a batch plans a position the inventory does not have");
     assert!(stderr.contains(&expected), "expected {expected:?} in {stderr}");
@@ -569,10 +572,29 @@ fn a_retry_refuses_a_journal_of_an_unsupported_version() {
     assert_ne!(newer, text);
     fs::write(&journal, newer).unwrap();
 
-    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine);
+    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine, &journal);
 
     let expected = "the deletion journal has version 4, which this wt does not read";
     assert!(stderr.contains(expected), "expected {expected:?} in {stderr}");
+}
+
+/// An earlier attempt's archived journal that cannot be used: the refusal
+/// names `journal-1.jsonl`, not the current journal.
+#[test]
+fn a_retry_refusing_an_archived_journal_names_that_file() {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let (fixture, quarantine, journal) = stopped_after_the_move();
+    let archived = journal.with_file_name("journal-1.jsonl");
+    // Owner-only, as the store writes every file.
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&archived).unwrap();
+    file.write_all(b"{\"header\":{}}\n").unwrap();
+    drop(file);
+
+    let stderr = assert_retry_refused_by_the_journal(&fixture, &quarantine, &archived);
+
+    assert!(stderr.contains("deletion journal line 1 is malformed"), "{stderr}");
 }
 
 // Retention of finished removals: the cleanup runs at the start of both

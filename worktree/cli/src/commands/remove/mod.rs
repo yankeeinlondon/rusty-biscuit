@@ -52,7 +52,7 @@ use worktree::remove::lifecycle::{
 use worktree::remove::outcome::{BranchState, BranchTarget};
 use worktree::remove::admin_entry::common_git_dir;
 use worktree::remove::recovery::record::BranchBinding;
-use worktree::remove::recovery::store::{RecoveryStore, STORE_DIR};
+use worktree::remove::recovery::store::{RecoveryStore, STORE_DIR, StoreError};
 use worktree::remove::remote::{
     Reinterpretation, RemoteState, delete_remote_branch, origin_url, preflight_remote_deletion, remote_destination,
 };
@@ -513,7 +513,7 @@ fn resolve(
 ) -> Result<(WorktreeEntry, Option<Inspection>), WorktreeError> {
     let target = match resolve_target_in(base, entries, name) {
         Ok(Target::Pending(pending)) => {
-            let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error.to_string()))?;
+            let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error))?;
             match inspection.resolution {
                 Resolution::NotStarted | Resolution::MovedUnassociated => {
                     let display = original_name(&inspection);
@@ -559,7 +559,10 @@ fn resolve(
     };
     match target {
         Ok(Target::Live(entry)) => Ok((entry, None)),
-        Ok(Target::Pending(_)) => Err(store_error("the removal was released, but a pending record still matches the name")),
+        // An invariant of the release just made, not an unreadable store.
+        Ok(Target::Pending(_)) => Err(WorktreeError::RemovalFailed(unreadable_store_markup(
+            "the removal was released, but a pending record still matches the name",
+        ))),
         Ok(Target::Ambiguous(candidates)) => {
             let live: Option<Vec<WorktreeCandidate>> = candidates
                 .iter()
@@ -580,16 +583,22 @@ fn resolve(
         }
         Err(ResolveError::NotFound(name)) => Err(WorktreeError::WorktreeNotFound(name)),
         Err(ResolveError::Git(error)) => Err(error),
-        Err(ResolveError::Store(error)) => Err(store_error(&error.to_string())),
+        Err(ResolveError::Store(error)) => Err(store_error(&error)),
     }
 }
 
-/// A recovery store that could not be read: nothing was changed (exit 1).
-fn store_error(reason: &str) -> WorktreeError {
-    WorktreeError::RemovalFailed(format!(
+/// A recovery store that could not be read while resolving the name: nothing
+/// was changed, and the exit code is the one [`StoreError::exit_class`] gives
+/// the same error inside the lifecycle.
+fn store_error(error: &StoreError) -> WorktreeError {
+    recovery::exit_error(error.exit_class(), unreadable_store_markup(&error.to_string()))
+}
+
+fn unreadable_store_markup(reason: &str) -> String {
+    format!(
         "<red><b>Nothing was removed.</b></red> The record of an earlier removal could not be read: {}.",
         usage::visible(reason)
-    ))
+    )
 }
 
 /// The directory name the pending removal's checkout had.
@@ -1451,6 +1460,44 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
 mod tests {
     use super::*;
     use crate::exit::exit_code;
+    use worktree::remove::lifecycle::Refusal;
+    use worktree::remove::recovery::journal::{JournalInvalid, JournalWriteError};
+    use worktree::remove::recovery::lock::LockError;
+    use worktree::remove::recovery::record::RecordInvalid;
+    use worktree::remove::recovery::{OperationId, StorageProblem};
+
+    /// Resolving a name and running the lifecycle classify a store error
+    /// the same way, so `wt remove` exits with one code for it either way.
+    #[test]
+    fn a_store_error_exits_alike_from_name_lookup_and_the_lifecycle() {
+        let id = || OperationId::parse(&"0".repeat(32)).unwrap();
+        let errors = [
+            (StoreError::Storage { path: "/s".into(), problem: StorageProblem::Link }, 4),
+            (StoreError::Lock(LockError::Busy), 4),
+            (StoreError::Io(std::io::Error::other("denied")), 4),
+            (StoreError::JournalWrite(JournalWriteError::LimitReached { limit: 1 }), 4),
+            (StoreError::Pending(id()), 3),
+            (StoreError::Record { id: id().to_string(), reason: RecordInvalid::OperationMismatch }, 3),
+            (StoreError::Report { path: "/s/report.json".into(), reason: "eof".into() }, 3),
+            (
+                StoreError::Journal {
+                    path: "/s/journal-1.jsonl".into(),
+                    reason: JournalInvalid::Malformed { line: 2, reason: "bad".into() },
+                },
+                3,
+            ),
+            (StoreError::InventoryMismatch, 3),
+            (StoreError::WrongLock, 1),
+            (StoreError::PhaseOrder, 1),
+            (StoreError::Completed(id()), 1),
+        ];
+        for (error, code) in errors {
+            let looked_up = store_error(&error);
+            assert_eq!(exit_code(&looked_up), code, "{error:?}");
+            let refusal = Refusal::Store(error);
+            assert_eq!(exit_code(&recovery::refusal_error(&refusal, "feat-x", "feat-x", false)), code, "{refusal:?}");
+        }
+    }
 
     #[test]
     fn context_never_changes_an_exit_code() {

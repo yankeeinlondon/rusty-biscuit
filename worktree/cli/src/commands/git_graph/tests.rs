@@ -1806,9 +1806,32 @@ struct Evidence<'a> {
     post_merge: Vec<(&'a str, &'a str)>,
     /// The plan's notice: some fork, merge, or tagged commit is not drawn.
     incomplete: bool,
-    /// Lanes the height cap leaves out at 120 and at 56 columns. Zero plans
-    /// with rows that fit the whole graph; more plans one row short of it.
-    hidden_lanes: [usize; 2],
+    /// Lanes the height cap leaves out at each [`Width`], in [`Width::ALL`]'s
+    /// order. Zero plans with rows that fit the whole graph; more plans one
+    /// row short of it.
+    hidden_lanes: [usize; Width::ALL.len()],
+}
+
+/// The viewport widths [`assert_laid_out`] plans at.
+#[derive(Clone, Copy, Debug)]
+enum Width {
+    Ordinary,
+    Narrow,
+}
+
+impl Width {
+    const ALL: [Width; 2] = [Width::Ordinary, Width::Narrow];
+
+    fn columns(self) -> u32 {
+        match self {
+            Width::Ordinary => 120,
+            Width::Narrow => 56,
+        }
+    }
+
+    fn hidden_lanes(self, expected: &Evidence) -> usize {
+        expected.hidden_lanes[self as usize]
+    }
 }
 
 /// The laid-out commit emitted for `sha`. Display IDs are SHA prefixes of at
@@ -1836,24 +1859,32 @@ fn viewport(columns: u32, rows: u32) -> GraphViewport {
     }
 }
 
-/// Plans `facts` at 120 and 56 columns with the real measurement and checks the
+/// Plans `facts` at each of `widths` with the real measurement and checks the
 /// layout that renders: no two tags intersect, every expected tag is on its
 /// SHA's emitted ID, merge parents are exact (a first parent may be a `+N`
-/// square once trimmed), no tag text changes with the viewport, and a graph
-/// wider than 56 columns is trimmed or shrunk there. `--width 40` is never
-/// trimmed. Returns one report line per viewport for the implementation log.
-fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &Evidence) -> Vec<String> {
+/// square once trimmed), the tag texts are the whole graph's, and a graph
+/// wider than the viewport is trimmed or shrunk there when no lane is hidden.
+/// `--width 40` is never trimmed. Returns one report line per viewport for the
+/// implementation log.
+///
+/// Every check compares a viewport with the whole graph, never with another
+/// viewport, so a fixture whose plans are slow can check each width in a test
+/// of its own.
+fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &Evidence, widths: &[Width]) -> Vec<String> {
     let graph = to_git_graph(facts, prs, None).with_theme(MermaidTheme::Default);
     let mut report = Vec::new();
-    let mut tag_texts: Option<Vec<String>> = None;
-    let mut ordinary_columns = None;
+    let whole_mermaid = graph.mermaid().expect("mermaid");
+    let mut whole_tag_texts: Vec<String> = geometry_of(&whole_mermaid).tag_boxes().iter().map(|(_, text, _)| text.to_string()).collect();
+    whole_tag_texts.sort();
     // Rows come from the renderer's own measurement: the height cap is half
     // the viewport's rows, so twice the whole graph's rows hides no lane, and
     // one row fewer than that budget hides the least active lanes.
-    let whole_rows = graph.plan(viewport(10_000, 10_000)).expect("a plan").rows;
+    let whole = graph.plan(viewport(10_000, 10_000)).expect("a plan");
+    let whole_rows = whole.rows;
     let rows_for = |hidden_lanes: usize| if hidden_lanes == 0 { 2 * whole_rows } else { 2 * (whole_rows - 1) };
-    let viewports = [viewport(120, rows_for(expected.hidden_lanes[0])), viewport(56, rows_for(expected.hidden_lanes[1]))];
-    for (vp, hidden_lanes) in viewports.into_iter().zip(expected.hidden_lanes) {
+    for width in widths {
+        let hidden_lanes = width.hidden_lanes(expected);
+        let vp = viewport(width.columns(), rows_for(hidden_lanes));
         let planned = graph.plan(vp).expect("a plan");
         let context = format!("{name} {}x{}:\n{}", vp.columns, vp.rows, planned.mermaid);
         assert_eq!(planned.incomplete, expected.incomplete, "{context}");
@@ -1898,18 +1929,16 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
 
         let mut texts: Vec<String> = geometry.tag_boxes().iter().map(|(_, text, _)| text.to_string()).collect();
         texts.sort();
-        match &tag_texts {
-            None => tag_texts = Some(texts),
-            Some(ordinary) => assert_eq!(&texts, ordinary, "no label is shortened or dropped: {context}"),
-        }
-        match ordinary_columns {
-            None => ordinary_columns = Some(planned.columns),
-            Some(ordinary) if ordinary > vp.columns => assert!(
+        assert_eq!(texts, whole_tag_texts, "no label is shortened or dropped: {context}");
+        // With every lane drawn, the plan fits only by trimming; a hidden lane
+        // may make it fit untrimmed.
+        if hidden_lanes == 0 && whole.columns > vp.columns {
+            assert!(
                 planned.trimmed_commits > 0 || planned.columns > vp.columns,
-                "a {ordinary}-column graph is trimmed or shrunk at {}: {planned:?}",
+                "a {}-column graph is trimmed or shrunk at {}: {planned:?}",
+                whole.columns,
                 vp.columns
-            ),
-            Some(_) => {}
+            );
         }
         if planned.columns > vp.columns {
             let floor = graph.plan(viewport(1, vp.rows)).expect("a plan");
@@ -1928,7 +1957,7 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
     assert_eq!(explicit.hidden_lanes, 0, "{name}");
     assert_eq!(explicit.columns, 40, "{name}");
     assert_eq!(explicit.trimmed_commits, 0, "{name}: an explicit width is never trimmed to");
-    assert_eq!(explicit.mermaid, graph.mermaid().expect("mermaid"), "{name}: the whole graph, scaled");
+    assert_eq!(explicit.mermaid, whole_mermaid, "{name}: the whole graph, scaled");
     report
 }
 
@@ -1950,7 +1979,7 @@ fn gathered_graph_lays_out_observation_1() {
         };
         for (view, current) in [("observation-1 focused", "fix/wt-ux"), ("observation-1 base", "main")] {
             let (graph, _) = gather(&input(&repo.path, current, &["main", "fix/wt-ux"], ForkOriginStore::default()), true, false);
-            report.extend(assert_laid_out(view, &graph.expect("a graph"), &PrListing::default(), &expected));
+            report.extend(assert_laid_out(view, &graph.expect("a graph"), &PrListing::default(), &expected, &Width::ALL));
         }
     }
     // Recorded in the implementation log.
@@ -1976,6 +2005,7 @@ fn gathered_graph_lays_out_observation_2() {
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
+            &Width::ALL,
         ));
     }
     // Recorded in the implementation log.
@@ -2005,15 +2035,43 @@ fn gathered_graph_lays_out_long_labels() {
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
+            &Width::ALL,
         ));
     }
     // Recorded in the implementation log.
     eprintln!("{}", report.join("\n"));
 }
 
+// The sparse-lanes plans make about forty measurements, so each width is a
+// test of its own; together the two took over 5 s in a busy L1 run.
+
 #[test]
 #[serial_test::serial]
-fn gathered_graph_lays_out_sparse_lanes() {
+fn gathered_graph_lays_out_sparse_lanes_at_120() {
+    assert_sparse_lanes_lays_out(Width::Ordinary);
+}
+
+#[test]
+#[serial_test::serial]
+fn gathered_graph_lays_out_sparse_lanes_at_56() {
+    assert_sparse_lanes_lays_out(Width::Narrow);
+}
+
+/// Every width has its sparse-lanes test: a new [`Width`] does not compile
+/// until it names one.
+#[test]
+fn sparse_lanes_has_a_test_per_width() {
+    let tests: Vec<fn()> = Width::ALL
+        .iter()
+        .map(|width| match width {
+            Width::Ordinary => gathered_graph_lays_out_sparse_lanes_at_120 as fn(),
+            Width::Narrow => gathered_graph_lays_out_sparse_lanes_at_56,
+        })
+        .collect();
+    assert_eq!(tests.len(), Width::ALL.len());
+}
+
+fn assert_sparse_lanes_lays_out(width: Width) {
     let mut report = Vec::new();
     // Every connection is drawn: `fix/wt-ux` merges into `M103` from `W1`,
     // where `fix/sniff` forks. One row short of the whole graph, the height cap
@@ -2033,6 +2091,7 @@ fn gathered_graph_lays_out_sparse_lanes() {
                 incomplete: false,
                 hidden_lanes: [1, 0],
             },
+            &[width],
         ));
     }
     // Recorded in the implementation log.
@@ -2094,6 +2153,7 @@ fn assert_continued_after_merge_lays_out(local_main: LocalMain) {
                     incomplete: false,
                     hidden_lanes: [0, 0],
                 },
+                &Width::ALL,
             ));
         }
     }
@@ -2119,6 +2179,7 @@ fn gathered_graph_lays_out_merged_twice() {
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
+            &Width::ALL,
         ));
     }
     // Recorded in the implementation log.
@@ -2145,6 +2206,7 @@ fn gathered_graph_lays_out_new_branch_at_merged_tip() {
                 incomplete: true,
                 hidden_lanes: [0, 0],
             },
+            &Width::ALL,
         ));
         let (graph, _) = gather(&input(&repo.path, "main", &["main", "new"], ForkOriginStore::default()), true, false);
         report.extend(assert_laid_out(
@@ -2158,6 +2220,7 @@ fn gathered_graph_lays_out_new_branch_at_merged_tip() {
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
+            &Width::ALL,
         ));
     }
 

@@ -1,3 +1,8 @@
+// The library target runs these tests; see `lib_target_tests` in `lib.rs`.
+macro_rules! lib_target_tests {
+    ($($item:item)*) => {};
+}
+
 mod args;
 mod commands;
 mod env;

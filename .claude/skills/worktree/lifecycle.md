@@ -180,6 +180,14 @@ registration from the admin `gitdir` (`registration_state`), then:
   `recovery::inspection_markup` (exit 3). A retry never repairs (an unlinked
   quarantine refuses before `prepare`) and never hands off (a cwd inside the
   quarantine is exit 4).
+- **A `StoreError` has one exit class**, `StoreError::exit_class`, which
+  `Refusal::exit_class` delegates to. A store error met while resolving the
+  name (`resolve_target_in`, `inspect`) goes through `store_error` →
+  `recovery::exit_error` with it, so an unusable record or journal is exit 3
+  whether resolution or the lifecycle meets it (test:
+  `a_store_error_exits_alike_from_name_lookup_and_the_lifecycle`).
+  `StoreError::Journal` carries the `path` of the journal that failed
+  (`journal.jsonl` or an archived `journal-<n>.jsonl`), as `Report` does.
 - **Every existing checkout is fingerprinted** before the report
   (`Facts::reported`), because `Approval` needs one; `Approval.tip` is
   `Facts::head`. The old `files_unchanged` recheck is gone: the lifecycle's

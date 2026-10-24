@@ -263,6 +263,17 @@ fn state_of_result(n: usize) -> EntryState {
     }
 }
 
+/// The byte pairs where `new` and `old` differ, position by position.
+/// Equal 4 KiB blocks are skipped with one slice comparison: stepping
+/// through the 32 MB openings byte by byte takes a quarter second in a
+/// debug build.
+fn differences<'a>(new: &'a [u8], old: &'a [u8]) -> impl Iterator<Item = (u8, u8)> + 'a {
+    new.chunks(4096)
+        .zip(old.chunks(4096))
+        .filter(|(new, old)| new != old)
+        .flat_map(|(new, old)| new.iter().zip(old).filter(|(new, old)| new != old).map(|(&new, &old)| (new, old)))
+}
+
 /// The openings of both versions differ only in the version digit, and the
 /// version 3 batches take fewer bytes; the frozen version 2 journal reads
 /// back as planned.
@@ -271,8 +282,7 @@ fn version_3_batches_of_100k_entries_are_smaller_than_version_2s() {
     let Journals { id, v3, v3_opening, v2, v2_opening } = journals();
 
     // At most two, so a failure never prints megabytes.
-    let opening_differences: Vec<(u8, u8)> =
-        v3[..v3_opening].iter().zip(&v2[..v2_opening]).filter(|(new, old)| new != old).map(|(&new, &old)| (new, old)).take(2).collect();
+    let opening_differences: Vec<(u8, u8)> = differences(&v3[..v3_opening], &v2[..v2_opening]).take(2).collect();
     let v3_batches = (v3.len() - v3_opening) as u64;
     let v2_batches = (v2.len() - v2_opening) as u64;
     let measured = format!(

@@ -26,12 +26,16 @@ pub(super) fn write(path: &Path, entries: &[JournalEntry]) -> Result<(), super::
     let temp = storage::temp_beside(path)?;
     let result = (|| -> Result<(), super::StoreError> {
         let file = storage::create_private_file(&temp)?;
-        let mut encoder = GzBuilder::new().mtime(0).write(file, Compression::default());
+        let encoder = GzBuilder::new().mtime(0).write(file, Compression::default());
+        // `serde_json` writes each token separately, and the encoder runs a
+        // compression step per write: unbuffered, compressing 100,000
+        // entries took seconds in a debug build instead of a tenth of one.
+        let mut lines = io::BufWriter::with_capacity(64 * 1024, encoder);
         for entry in entries {
-            serde_json::to_writer(&mut encoder, entry).map_err(io::Error::from)?;
-            encoder.write_all(b"\n")?;
+            serde_json::to_writer(&mut lines, entry).map_err(io::Error::from)?;
+            lines.write_all(b"\n")?;
         }
-        let file = encoder.finish()?;
+        let file = lines.into_inner().map_err(io::IntoInnerError::into_error)?.finish()?;
         fault::save_at(SaveStep::EntriesWritten, &temp)?;
         storage::flush(&file)?;
         fault::save_at(SaveStep::EntriesFlushed, &temp)?;

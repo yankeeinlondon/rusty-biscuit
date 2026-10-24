@@ -539,5 +539,7 @@ fn stderr_graphics_route(stderr_is_tty: bool) -> GraphicsRoute {
     resolve_graphics_route(&RouteInputs::from_process().with_output_is_tty(stderr_is_tty))
 }
 
-#[cfg(test)]
-mod tests;
+lib_target_tests! {
+    #[cfg(test)]
+    mod tests;
+}

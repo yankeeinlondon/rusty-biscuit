@@ -44,6 +44,12 @@ facts and traps, not user docs.
   (`worktree_cli::…` and `wt::…`), so an `insta` snapshot in a shared unit
   test gets two names and one always fails. **Put snapshot tests in an
   integration test**, as `cli/tests/wrapper_protocol.rs` does.
+  - A module whose tests are expensive declares them inside
+    `lib_target_tests! { #[cfg(test)] mod tests; }`. That expands to nothing
+    in `main.rs`, so they run once, in the library target, which `just test`
+    runs. `commands::git_graph` and `commands::list` do this, because every
+    process that measures a graph pays the per-process font setup
+    ([git-graph.md](git-graph.md#tests)).
 - **Never infer the shell wrapper from captured stdout.** Only
   `WT_SHELL_WRAPPER=1` proves it ([cli-contracts.md](cli-contracts.md)).
 - **Never pick the first match** of an ambiguous worktree name; return

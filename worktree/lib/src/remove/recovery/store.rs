@@ -42,8 +42,10 @@ pub enum StoreError {
     Record { id: String, reason: RecordInvalid },
     #[error("the saved report {} cannot be read: {reason}", path.display())]
     Report { path: PathBuf, reason: String },
-    #[error("the deletion journal of removal {id} cannot be used: {reason}")]
-    Journal { id: OperationId, reason: JournalInvalid },
+    /// `path` is the journal that failed: the current `journal.jsonl` or an
+    /// earlier attempt's `journal-<n>.jsonl`.
+    #[error("the deletion journal {} cannot be used: {reason}", path.display())]
+    Journal { path: PathBuf, reason: JournalInvalid },
     /// The inventory was not taken of the checkout the record names.
     #[error("the deletion inventory does not describe the recorded checkout")]
     InventoryMismatch,
@@ -481,14 +483,17 @@ fn replay_generations(
     present: impl FnMut(&Path) -> io::Result<bool>,
 ) -> Result<(JournalLog, Vec<JournalEntry>), StoreError> {
     let read = |path: &Path| storage::read_private_file(path).map_err(storage_error(path));
-    let parse = |bytes: &[u8]| journal::parse(bytes, id).map_err(|reason| StoreError::Journal { id: id.clone(), reason });
-    let current_bytes = read(&dir.join(JOURNAL_FILE))?;
-    let current = parse(&current_bytes)?;
+    let parse = |path: &Path, bytes: &[u8]| {
+        journal::parse(bytes, id).map_err(|reason| StoreError::Journal { path: path.to_path_buf(), reason })
+    };
+    let current_path = dir.join(JOURNAL_FILE);
+    let current_bytes = read(&current_path)?;
+    let current = parse(&current_path, &current_bytes)?;
     let mut archives = Vec::new();
     for n in 1.. {
         let path = archive_path(dir, n);
         match storage::read_private_file(&path) {
-            Ok(bytes) => archives.push(bytes),
+            Ok(bytes) => archives.push((path, bytes)),
             Err(StorageProblem::Missing) => break,
             Err(problem) => return Err(storage_error(&path)(problem)),
         }
@@ -496,10 +501,10 @@ fn replay_generations(
     // A retry stopped after archiving but before publishing its journal
     // leaves the newest archive identical to the current journal: one
     // attempt, not two.
-    if archives.last() == Some(&current_bytes) {
+    if archives.last().is_some_and(|(_, bytes)| *bytes == current_bytes) {
         archives.pop();
     }
-    let earlier = archives.iter().map(|bytes| parse(bytes)).collect::<Result<Vec<_>, _>>()?;
+    let earlier = archives.iter().map(|(path, bytes)| parse(path, bytes)).collect::<Result<Vec<_>, _>>()?;
     let mut entries = Vec::new();
     for (index, log) in earlier.iter().enumerate() {
         let next = earlier.get(index + 1).map_or(&current.inventory, |next| &next.inventory);

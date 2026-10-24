@@ -1113,6 +1113,36 @@ fn a_completed_reopen_archives_the_previous_journal_and_publishes_a_new_one() {
     assert_eq!(names, BTreeSet::from([RECORD_FILE.into(), JOURNAL_FILE.into(), "journal-1.jsonl".into()]));
 }
 
+/// A journal that cannot be used names the file that failed, so an archived
+/// attempt's `journal-<n>.jsonl` is told apart from the current
+/// `journal.jsonl`.
+#[test]
+fn an_unusable_journal_error_names_the_current_or_archived_file() {
+    let f = fixture();
+    let (saved, _) = stopped_after_deleting_a(&f);
+    drop(reopen(&f, &saved).unwrap());
+    let dir = f.store.operation_dir(&saved.operation_id);
+    let recover = || f.store.recover(&saved.operation_id, &saved.repository, |_| Ok(false));
+    let garbage = b"{\"header\":{}}\n";
+
+    for name in ["journal-1.jsonl", JOURNAL_FILE] {
+        let path = dir.join(name);
+        let original = fs::read(&path).unwrap();
+        fs::write(&path, garbage).unwrap();
+
+        let error = recover().map(|_| ()).unwrap_err();
+
+        match &error {
+            StoreError::Journal { path: named, reason: JournalInvalid::Malformed { line: 1, .. } } => {
+                assert_eq!(named, &path, "{error}");
+            }
+            other => panic!("{name}: expected a journal refusal, got {other:?}"),
+        }
+        assert!(error.to_string().contains(&path.display().to_string()), "{error}");
+        fs::write(&path, original).unwrap();
+    }
+}
+
 /// Every attempt's journal is replayed. An earlier attempt keeps what was
 /// gone when the next one began: its deletions, and an unconfirmed entry the
 /// next inventory no longer lists, as uncertain. What the next inventory

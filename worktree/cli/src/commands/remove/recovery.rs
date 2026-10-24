@@ -72,8 +72,12 @@ pub fn refusal_error(refusal: &Refusal, display_name: &str, name: &str, resumed:
     if let Refusal::Recovery(inspection) = refusal {
         return WorktreeError::RefusedToLoseWork(inspection_markup(inspection, name));
     }
-    let markup = refusal_markup(refusal, display_name, name, resumed);
-    match refusal.exit_class() {
+    exit_error(refusal.exit_class(), refusal_markup(refusal, display_name, name, resumed))
+}
+
+/// The error that exits `wt` with `class`'s code and shows `markup`.
+pub fn exit_error(class: ExitClass, markup: String) -> WorktreeError {
+    match class {
         ExitClass::Blocked => WorktreeError::BlockedByEnvironment(markup),
         ExitClass::Failure => WorktreeError::RemovalFailed(markup),
         ExitClass::Refused | ExitClass::Success => WorktreeError::RefusedToLoseWork(markup),

@@ -616,11 +616,12 @@ delete, then holds two lines for each deletion batch:
   `uncertain`.
 - A batch holds at most 256 entries of one folder, and no entry appears in
   two batches. A journal that breaks any of these rules, or has a malformed
-  line, cannot be read: a retry stops with exit 1 before deleting anything,
-  printing `Nothing was removed.` and the problem, for example `deletion
-  journal line 3 is malformed: a batch plans a position the inventory does
-  not have`. Only an unfinished last line, which a crash can leave, is
-  ignored.
+  line, cannot be read: a retry refuses with exit 3 before deleting
+  anything, printing `Nothing was removed.`, the path of the journal it
+  could not use (`journal.jsonl`, or an earlier attempt's
+  `journal-<n>.jsonl`), and the problem, for example `deletion journal line
+  3 is malformed: a batch plans a position the inventory does not have`.
+  Only an unfinished last line, which a crash can leave, is ignored.
 
 Journals written by `wt` before 2026-10-23 have `"journal_version":2` and
 repeat each entry's path in every batch line instead of its position:
@@ -1016,7 +1017,7 @@ The path is checked before anything else, again after a [repair](#the-directory-
 | 0 | Done, including a question you declined or cancelled, and a removal that warned about changes after you agreed |
 | 1 | Something failed, or the removal was [interrupted](#interrupting-a-removal). Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). A removal that stopped after the checkout was moved exits 1 even if nothing was deleted yet, with both locations and the saved report; when a branch step fails after the checkout was removed, the report says which branches were deleted and which were kept |
 | 2 | Invalid arguments |
-| 3 | Refused, to avoid losing work: the usage check could not verify the checkout, approved files or the branch changed between a handoff's two runs, the checkout holds something it cannot safely delete, or a pending removal or a name matching it and another worktree needs resolving. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
+| 3 | Refused, to avoid losing work: the usage check could not verify the checkout, approved files or the branch changed between a handoff's two runs, the checkout holds something it cannot safely delete, a pending removal's record or deletion journal cannot be used, or a pending removal or a name matching it and another worktree needs resolving. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
 | 4 | Blocked by the environment (no shell wrapper, an expired handoff, a filesystem that cannot move the checkout without risking replacement, change watching that cannot start, a recovery record that cannot be written, another `wt remove` of the same worktree running, or on Windows a file held open that blocks the move); nothing was removed, and no flag helps |
 
 Exit 3 means "nothing removed", not "nothing changed": `wt remove` never prints "nothing was changed" after a repair attempt.

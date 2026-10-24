@@ -284,16 +284,7 @@ impl Refusal {
     pub fn exit_class(&self) -> ExitClass {
         match self {
             Self::Inventory(InventoryRefusal::Coverage(_)) | Self::Observation(_) => ExitClass::Blocked,
-            Self::Store(error) => match error {
-                StoreError::Storage { .. } | StoreError::Io(_) | StoreError::JournalWrite(_) => ExitClass::Blocked,
-                StoreError::Lock(LockError::Busy | LockError::Storage(_) | LockError::Io(_)) => ExitClass::Blocked,
-                StoreError::Pending(_)
-                | StoreError::Record { .. }
-                | StoreError::Report { .. }
-                | StoreError::Journal { .. }
-                | StoreError::InventoryMismatch => ExitClass::Refused,
-                StoreError::WrongLock | StoreError::PhaseOrder | StoreError::Completed(_) => ExitClass::Failure,
-            },
+            Self::Store(error) => error.exit_class(),
             Self::Move(error) => match error.class() {
                 MoveErrorClass::Refused => ExitClass::Refused,
                 MoveErrorClass::BlockedByEnvironment => ExitClass::Blocked,
@@ -307,6 +298,24 @@ impl Refusal {
             | Self::ConsentRequired
             | Self::Index(_)
             | Self::Recovery(_) => ExitClass::Refused,
+        }
+    }
+}
+
+impl StoreError {
+    /// The one classification of a recovery store error, whether it reaches
+    /// the CLI as a [`Refusal::Store`] or straight from [`inspect`] or
+    /// [`resolve_target`]: a record or journal that cannot be used refuses
+    /// (3), storage the environment denies blocks (4), and a broken internal
+    /// invariant fails (1).
+    pub fn exit_class(&self) -> ExitClass {
+        match self {
+            Self::Storage { .. } | Self::Io(_) | Self::JournalWrite(_) => ExitClass::Blocked,
+            Self::Lock(LockError::Busy | LockError::Storage(_) | LockError::Io(_)) => ExitClass::Blocked,
+            Self::Pending(_) | Self::Record { .. } | Self::Report { .. } | Self::Journal { .. } | Self::InventoryMismatch => {
+                ExitClass::Refused
+            }
+            Self::WrongLock | Self::PhaseOrder | Self::Completed(_) => ExitClass::Failure,
         }
     }
 }

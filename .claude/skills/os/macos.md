@@ -359,6 +359,34 @@ version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
   6 together 4.6 s each, with under 0.2 s of CPU apiece. Tests that enumerate
   audio devices slow down by their count, not core count; keep them few
   (sniff's `testing.md`).
+- **CoreText's first font enumeration lists the executable's directory.**
+  `CTFontCollection` (fontique's system-font scan, so every Mermaid
+  measurement in `biscuit-visualized`) registers the main bundle's fonts, and
+  for an unbundled executable the bundle is the directory the executable is
+  in. A test binary's is `target/debug/deps`: 175,820 entries in this
+  repository's shared target made that call 1.0-1.6 s per process (0.2 s for
+  the same binary elsewhere), and the listings serialize, so 16 test processes
+  together took about 11 s each. It scales with that directory, not with the
+  code. `CFProcessPath=<a binary elsewhere>` proves it (2.4 s to 0.35 s); a
+  `sample` of the process shows `_CFBundleReadDirectory` under
+  `TLocalFontRegistry::RegisterBundleFonts`. An installed `wt` lists its
+  own small directory, such as `~/.cargo/bin`.
+  - Most of those entries are `*.rcgu.o` files: macOS keeps debug info in the
+    object files (`split-debuginfo = "unpacked"`), and every incremental
+    rebuild of a workspace crate leaves a new set beside the old. They are
+    hours old, not weeks, so `just sweep`'s 14-day pass never reaches them;
+    206,034 of 221,677 entries were such objects, 153,006 referenced by no
+    executable (`nm -ap <exe> | grep ' OSO '` lists the ones a binary uses).
+    Deleting the unreferenced ones halved `deps`, and the tests were still
+    over budget, and the directory refills in hours. Don't treat cleanup as
+    the fix.
+  - The fix is per test: a nextest setup script that writes
+    `CFProcessPath=/usr/bin/true` to `$NEXTEST_ENV` for the font-measuring
+    tests (`.config/nextest.toml`, `coretext-small-bundle`, macOS hosts
+    only). At 111,080 entries and load 46 it took the eleven `wt list`
+    graph tests from 7.8-15 s each to 1.0-2.5 s, all running together. A
+    package with font-measuring tests that overrun on macOS adds its tests
+    to that script's filter.
 - **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
   network-interface probes, and tree-hugger's corpus tests, can exceed the
   30 s L1 budget when they run beside Clippy, other compiles, or other suites

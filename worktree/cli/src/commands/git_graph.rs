@@ -197,5 +197,7 @@ fn parse_conventional(message: &str) -> Option<(String, Option<String>, String)>
     None
 }
 
-#[cfg(test)]
-mod tests;
+lib_target_tests! {
+    #[cfg(test)]
+    mod tests;
+}
