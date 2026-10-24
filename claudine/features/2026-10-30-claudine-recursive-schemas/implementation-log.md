@@ -2121,3 +2121,57 @@ or integration cost: none beyond Phase 4's.
   is unchanged, since its outcomes do not move.
 - No other active spec has a higher `pipeline_step` or names this spec in
   `depends-on`.
+
+## Review iteration 1
+
+### Design Decisions
+
+**Passive validation uses the runtime registration's complete contract.**
+- **Decision:** retain the spec's settled requirement to bind generated operands
+  passively through the runtime registration, including numeric recovery,
+  excluded source types, and overload selection. A separate schema union and a
+  parity sample do not fulfill that integration.
+- **Alternatives considered:** accept schema-only validation while today's
+  overloads mostly agree; widen individual generated types to hide differences.
+- **Why:** the spec explicitly chooses the binder over union-only validation.
+  Review reproduced valid `number: [pear, 7]` and `round: [pear, 2.7]` being
+  rejected, and `length: [true]` being accepted against the runtime contract.
+- **Downsides:** passive validation needs an operand-to-source-path adapter;
+  it must preserve unknown-key, arity, and template checks without evaluation.
+
+**Single-action dictionaries remain supported at every stack position.**
+- **Decision:** preserve the spec's supported single-action dictionary long
+  forms at roots, branches, and loop loose verbs; keep multi-action bundles
+  short-only. The recorded statement that loop typing cannot express this
+  condition does not remove the requested scope.
+- **Alternatives considered:** require every long form to use a list item;
+  permit long forms in every bundle.
+- **Why:** the spec explicitly distinguishes a single-action dictionary from
+  a bundle. The public parser accepts the reproduced dictionary forms while
+  the new schemas reject them.
+- **Downsides:** the schema needs separate single-action alternatives and must
+  retain each event's restrictions; broadening bundle operands is insufficient.
+
+**Malformed operand templates receive a passive syntax diagnostic.**
+- **Decision:** retain the scanner's settled distinction between an unclosed
+  opener (literal text) and a complete span with invalid expression syntax;
+  reject the latter passively even when its parameter accepts string data.
+- **Alternatives considered:** depend on an incidental numeric type error;
+  leave syntax errors to the lifecycle parser alone.
+- **Why:** acceptance criterion 8 says malformed templates fail passively.
+  Review reproduced `ensure_file: "{{ 1 + }}"` passing the CLI, DMLS, and
+  Claudine's schema prevalidation, while its numeric counterpart fails.
+- **Downsides:** the passive diagnostic must preserve interpolation literals
+  and literal tokens and must stay within authored lifecycle operands.
+
+**Portable test scope is distinct from cross-OS run evidence.**
+- **Decision:** the new launch and binding tests must compile and be selected
+  on native Windows. This review requires no new cross-OS execution receipt.
+- **Alternatives considered:** accept the implementation's Unix-only tests;
+  demand fresh remote runs during review.
+- **Why:** the acceptance preamble explicitly requires portable tests, while
+  review closure explicitly excludes missing cross-OS results from readiness.
+  Omitting the tests through `#[cfg(unix)]` drops scope rather than merely
+  leaving an execution receipt to CI.
+- **Downsides:** the launch fixtures need a portable fake-provider mechanism;
+  the existing in-process tests cannot prove the process-launch boundary.
