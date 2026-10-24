@@ -9,6 +9,18 @@ mod contrast_corpus_tests;
 #[cfg(feature = "image")]
 mod corpus_measure_tests;
 #[cfg(feature = "image")]
+mod embed_comment_tests;
+#[cfg(feature = "image")]
+mod embed_embedding_tests;
+#[cfg(feature = "image")]
+mod embed_faces_tests;
+#[cfg(feature = "image")]
+mod embed_glyphs_tests;
+#[cfg(feature = "image")]
+mod embed_permission_tests;
+#[cfg(feature = "image")]
+mod embed_subset_tests;
+#[cfg(feature = "image")]
 mod font_chain_tests;
 #[cfg(feature = "image")]
 mod gitgraph_layout_tests;
@@ -67,11 +79,17 @@ pub(crate) fn isolated_cache_dir() -> TempDir {
 }
 
 /// Runs `run` with a subscriber that records every `WARN` event's message,
-/// for tests that assert a warning is logged (no `tracing-subscriber`
-/// dependency). The subscriber is the thread's default only while `run`
-/// runs.
+/// for tests that assert a warning is logged.
 #[cfg(feature = "image")]
 pub(crate) fn capture_warnings<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
+    capture_logs(tracing::Level::WARN, run)
+}
+
+/// Runs `run` with a subscriber that records the message of every event at
+/// `level` (no `tracing-subscriber` dependency). The subscriber is the
+/// thread's default only while `run` runs.
+#[cfg(feature = "image")]
+pub(crate) fn capture_logs<T>(level: tracing::Level, run: impl FnOnce() -> T) -> (T, Vec<String>) {
     use std::sync::{Arc, Mutex};
     use tracing::field::{Field, Visit};
     use tracing::span::{Attributes, Id, Record};
@@ -87,9 +105,9 @@ pub(crate) fn capture_warnings<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
         }
     }
 
-    struct Warnings(Arc<Mutex<Vec<String>>>);
+    struct Recorder(Level, Arc<Mutex<Vec<String>>>);
 
-    impl tracing::Subscriber for Warnings {
+    impl tracing::Subscriber for Recorder {
         fn enabled(&self, _: &Metadata<'_>) -> bool {
             true
         }
@@ -99,18 +117,18 @@ pub(crate) fn capture_warnings<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
         fn record(&self, _: &Id, _: &Record<'_>) {}
         fn record_follows_from(&self, _: &Id, _: &Id) {}
         fn event(&self, event: &Event<'_>) {
-            if *event.metadata().level() == Level::WARN {
+            if *event.metadata().level() == self.0 {
                 let mut message = Message(String::new());
                 event.record(&mut message);
-                self.0.lock().expect("warnings lock").push(message.0);
+                self.1.lock().expect("log lock").push(message.0);
             }
         }
         fn enter(&self, _: &Id) {}
         fn exit(&self, _: &Id) {}
     }
 
-    let warnings = Arc::new(Mutex::new(Vec::new()));
-    let result = tracing::subscriber::with_default(Warnings(Arc::clone(&warnings)), run);
-    let warnings = warnings.lock().expect("warnings lock").clone();
-    (result, warnings)
+    let messages = Arc::new(Mutex::new(Vec::new()));
+    let result = tracing::subscriber::with_default(Recorder(level, Arc::clone(&messages)), run);
+    let messages = messages.lock().expect("log lock").clone();
+    (result, messages)
 }

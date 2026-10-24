@@ -485,7 +485,7 @@ fn led_by_measured_face(stack: &str, context: &FontContext, measurer: &LabelMeas
 /// stylesheet, a CDATA section, and a double-quoted XML attribute alike:
 /// quotes, backslashes, markup characters, and controls become CSS hex
 /// escapes.
-fn css_quoted(family: &str) -> String {
+pub(crate) fn css_quoted(family: &str) -> String {
     let mut quoted = String::from("'");
     for c in family.chars() {
         if matches!(c, '\'' | '"' | '\\' | '<' | '>' | '&') || c.is_control() {

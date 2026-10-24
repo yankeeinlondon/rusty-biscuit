@@ -139,7 +139,7 @@ pub(super) fn png_difference(actual: &image::RgbaImage, golden: &image::RgbaImag
 }
 
 fn png_golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tests/goldens/png")
+    biscuit_test_harness::manifest_dir!().join("src/tests/goldens/png")
 }
 
 fn assert_png_golden(name: &str, source: &str, theme: MermaidTheme) {

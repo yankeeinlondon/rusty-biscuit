@@ -409,6 +409,23 @@ impl FontChain {
         best_match(&candidates, query.weight, query.style, query.stretch).map(|i| candidates[i].id)
     }
 
+    /// The bundled Inter face CSS matching picks for `query`'s weight, style,
+    /// and stretch; never an installed Inter.
+    pub(crate) fn bundled_inter(&self, query: &FontQuery) -> Option<ID> {
+        let candidates: Vec<&FaceInfo> = self
+            .named
+            .iter()
+            .filter(|face| !face.installed)
+            .filter_map(|face| self.db.face(face.id))
+            .collect();
+        best_match(&candidates, query.weight, query.style, query.stretch).map(|i| candidates[i].id)
+    }
+
+    /// Whether `id` is a bundled Inter face rather than an installed one.
+    pub(crate) fn is_bundled_inter(&self, id: ID) -> bool {
+        self.named.iter().any(|face| face.id == id && !face.installed)
+    }
+
     /// The OS's family for `generic`, case-folded.
     fn generic_answer(&self, generic: GenericFamily) -> Option<String> {
         self.generic_answers

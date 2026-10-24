@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -15,6 +15,49 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
 - biscuit-visualized
+- test-toolkit
+source_files_during_phase_2:
+- biscuit-visualized/src/src/mermaid/embed/mod.rs
+- biscuit-visualized/src/src/mermaid/embed/permission.rs
+- biscuit-visualized/src/src/mermaid/embed/comment.rs
+- biscuit-visualized/src/src/mermaid/embed/faces.rs
+- biscuit-visualized/src/src/mermaid/mod.rs
+- biscuit-visualized/src/src/mermaid/postprocess.rs
+- biscuit-visualized/src/src/fonts/chain.rs
+- biscuit-visualized/src/src/components/graph_expression.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/embed_permission_tests.rs
+- biscuit-visualized/src/src/tests/embed_comment_tests.rs
+- biscuit-visualized/src/src/tests/embed_faces_tests.rs
+docs_updated_during_phase_2:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- Cargo.lock
+- biscuit-visualized/src/Cargo.toml
+- biscuit-visualized/src/src/mermaid/embed/mod.rs
+- biscuit-visualized/src/src/mermaid/embed/glyphs.rs
+- biscuit-visualized/src/src/mermaid/embed/subset.rs
+- biscuit-visualized/src/src/mermaid/embed/comment.rs
+- biscuit-visualized/src/src/mermaid/embed/embedding.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/embed_glyphs_tests.rs
+- biscuit-visualized/src/src/tests/embed_subset_tests.rs
+- biscuit-visualized/src/src/tests/embed_comment_tests.rs
+- biscuit-visualized/src/src/tests/embed_embedding_tests.rs
+- biscuit-visualized/src/src/tests/embed_faces_tests.rs
+- biscuit-visualized/src/src/tests/embed_permission_tests.rs
+- biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+- biscuit-visualized/src/src/tests/golden_tests.rs
+- tools/test-toolkit/src/archive_guard.rs
+docs_updated_during_phase_3:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/biscuit-visualized/SKILL.md
 ---
 
 # Plan: Embedded Font for Mermaid Static SVG
@@ -322,7 +365,7 @@ do not apply to it.
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **2.1 `EmbedPermission` classifier.**
+- [x] **2.1 `EmbedPermission` classifier.**
     - In a new module of `biscuit-visualized`'s Mermaid code: read the raw
       `fsType` from the `OS/2` table bytes (offset 8) with `ttf-parser`'s raw
       table access, not the library's pre-digested `Permissions` helper, because
@@ -332,7 +375,7 @@ do not apply to it.
     - Unit tests: every row of the matrix above, using synthetic `OS/2` tables
       built in the test (a minimal valid font built with a test helper, with
       `fsType` set per case). AC-E13.
-- [ ] **2.2 Comment and name text hygiene.**
+- [x] **2.2 Comment and name text hygiene.**
     - A pure function that cleans a font name for an HTML comment and a CSS
       comment and `font-family`/`url()` contexts per Rule H.
     - Property-style tests: for random and crafted names (`a--b`, `a-->b`,
@@ -342,7 +385,7 @@ do not apply to it.
 
 ### Wave 2 (depends on 2.1)
 
-- [ ] **2.3 Family decision.**
+- [x] **2.3 Family decision.**
     - `choose_embedded_faces(requested_families, font_chain) -> EmbeddedFaces`:
       for each requested family, resolve regular and bold through the Merman
       chain (Rule B), classify each with 2.1, and produce either the resolved
@@ -372,14 +415,14 @@ Depends on Phase 2 and on S1's outcome.
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **3.1 Code-point and weight collector.**
+- [x] **3.1 Code-point and weight collector.**
     - Walk the final static SVG (Rule E) and return `UsedGlyphs { regular:
       BTreeSet<char>, bold: BTreeSet<char> }`. Use the same XML reader the
       post-process already uses, not a regex.
     - Tests: two diagrams with overlapping and differing labels; a bold label;
       entity-escaped text (`&amp;`, `&#x1F600;`); text inside `<tspan>`; an SVG
       with no text (empty sets, no `@font-face` later). Feeds AC-E3.
-- [ ] **3.2 `allsorts` subsetter.**
+- [x] **3.2 `allsorts` subsetter.**
     - Add the `allsorts` dependency (version from S1) to `biscuit-visualized`.
       Provide `subset(face_bytes, face_index, &code_points) -> Result<Vec<u8>,
       SubsetError>` that maps code points through the face's `cmap` to glyph ids
@@ -392,7 +435,7 @@ Depends on Phase 2 and on S1's outcome.
       absent; Inter's name IDs 0, 13 and 14 are present (AC-E8, AC-E12 table
       check). If S1 chose the unsubset fallback, this task implements only the
       unsubset path and AC-E12 records that.
-- [ ] **3.3 Page comment and attribution text.**
+- [x] **3.3 Page comment and attribution text.**
     - Build the D14 HTML comment for each reason (resolved face with its
       permission; Inter by `MERMAID_FONT=Inter`; Inter because Restricted /
       bitmap only / no readable `OS/2` / outline format; Inter because the chain
@@ -404,7 +447,7 @@ Depends on Phase 2 and on S1's outcome.
 
 ### Wave 2 (depends on 3.1–3.3)
 
-- [ ] **3.4 `FontEmbedding` builder.**
+- [x] **3.4 `FontEmbedding` builder.**
     - `build_font_embedding(&EmbeddedFaces, &[UsedGlyphs]) ->
       Result<FontEmbedding, FontEmbeddingError>`: unions the per-diagram sets
       (D4), subsets per face and weight actually used (a weight no label uses is

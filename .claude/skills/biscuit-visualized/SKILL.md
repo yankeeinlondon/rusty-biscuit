@@ -135,6 +135,7 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `cache/file_cache.rs` | `FileCache`, `MERMAID_BACKEND` |
 | `raster/png.rs` | SVG-to-PNG rasterization via resvg |
 | `fonts/` | Font chain (`chain.rs`, cache identity), shaper (`shaper.rs`), Merman measurer (`measure.rs`); crate-private |
+| `mermaid/embed/` | Embedded-font opt-in pieces (crate-private, not yet on the render path): `fsType` classifier and per-family face choice, code-point/weight collector (`roxmltree` + `simplecss` cascade, as usvg), `allsorts` subsetter, `@font-face` builder and page comments |
 
 ## Dependencies
 
@@ -145,6 +146,8 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `resvg` v0.47 | SVG-to-PNG rasterization |
 | `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); rustybuzz and ttf-parser stay on usvg's versions |
 | `svgtypes` 0.16.1 | Parses the author's text colors (CSS names included) for the contrast pass (feature `image`; usvg's version) |
+| `allsorts` 0.17 (`default-features = false`, `flate2_rust`) | Subsets the embedded font (keeps `cmap`, `OS/2`, `name`; writes no `GPOS`/`GSUB`/`kern`). The default `flate2_zlib` would build the C library libz-sys |
+| `roxmltree` 0.21.1, `simplecss` 0.2.2, `base64` 0.22 | Read a static SVG's labels through its CSS cascade (usvg's versions), and encode the `data:font/ttf` URI (feature `image`) |
 | Bundled fonts (`src/assets/fonts/`) | Inter 4.1 Regular/Bold (every OS) and Noto Emoji (Linux only), registered in the font chain |
 | `biscuit-hash` | xxHash for cache keys and font identity |
 | `serde` + `serde_json` | Site config and Merman layout data |

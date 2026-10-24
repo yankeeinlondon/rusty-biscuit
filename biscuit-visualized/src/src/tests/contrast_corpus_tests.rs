@@ -161,7 +161,7 @@ const ALLOWED: &[Allowed] = &[
 ];
 
 fn golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tests/goldens/svg")
+    biscuit_test_harness::manifest_dir!().join("src/tests/goldens/svg")
 }
 
 /// The goldens' font chain (bundled Inter only), as `golden_tests` renders.
@@ -652,7 +652,7 @@ white_primary_contrast! {
 /// Every family fixture on disk has a white-`primaryColor` test.
 #[test]
 fn every_family_fixture_has_a_white_primary_test() {
-    let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/merman/families");
+    let fixtures_dir = biscuit_test_harness::manifest_dir!().join("src/tests/fixtures/merman/families");
     let mut on_disk: Vec<String> = std::fs::read_dir(&fixtures_dir)
         .expect("the family fixture directory")
         .filter_map(|entry| {

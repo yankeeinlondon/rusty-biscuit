@@ -42,6 +42,91 @@ decisions_for_review:
       allsorts does not support and which would carry Inter's large layout
       tables. If the reviewer picks (a), Phase 3's subsetter is skipped and the
       plain-advance measurement in Phase 4 is dropped; nothing else changes.
+    - |-
+      Phase 2 (face choice): small rulings the plan left open. (1) A face that
+      cannot be parsed at all, or whose face index is out of range, gets the
+      reason "no readable OS/2 table", and a face with no `glyf` table counts
+      as "outline format not embeddable", like CFF and variable faces.
+      (2) When a face is both Restricted and bitmap-only, the reason given is
+      Restricted. (3) When a family's font stack itself names `Inter` (not
+      through `MERMAID_FONT`), the bundled Inter is treated as the resolved
+      face (reason "resolved", permission Installable) rather than as a
+      substitution; when `MERMAID_FONT=Inter` picks an installed copy of
+      Inter, that copy is judged by its own `fsType` like any other installed
+      face. (4) Only upright regular and bold are decided (the plan's Rule B);
+      an italic request is not decided. (5) The classifier result for
+      "no subsetting" carries no separate reason field: the browser-check
+      fallback is not a property of a face, and the spike chose the subset.
+      Alternatives: different reason labels for (1)-(2), or an explicit
+      Inter-substitution reason for (3); each changes only the comment text
+      Phase 3 writes and the enum variants in `src/mermaid/embed/`.
+    - |-
+      Phase 2: names written into CSS strings (`font-family` in the
+      `@font-face` rule) use the existing label post-process escaper
+      (`css_quoted`, now crate-visible), which turns quotes, backslashes,
+      `<`, `>`, `&`, and control characters into CSS hex escapes. The plan's
+      Rule H asked for escaping only `"` and `\`, plus a separate `url()`
+      escaper. I used the stricter, existing function so the `@font-face`
+      family and each label's leading family are spelled by one function, and
+      added no `url()` escaper because only base64 that the library produces
+      ever goes inside `url()`. Alternative: a new minimal escaper per Rule H;
+      that risks two spellings of one family name. Redo cost: one function.
+    - |-
+      Phase 2: two existing tests in `components/graph_expression.rs` were
+      named `browser_render_emits_svg` and `browser_render_dot_input_emits_svg`.
+      They need no browser, but the `browser_` prefix kept them out of the
+      normal test run, and `test-toolkit`'s tier contract test failed on it.
+      I renamed them (`render_browser_svg_emits_svg`,
+      `render_browser_svg_emits_svg_for_dot_input`) so they run. Alternative:
+      declare a browser test tier for this package, which would need a real
+      browser recipe for two tests that do not use a browser.
+    - |-
+      Phase 3: the code-point collector reads the static SVG with `roxmltree`
+      and applies the SVG's stylesheet with `simplecss`, copying how usvg
+      (our rasterizer) resolves styles. The plan said to reuse the
+      post-process's hand-written tag scanner. That scanner has no CSS
+      cascade, and Merman makes most bold text bold through class rules in
+      the SVG's `<style>`, so the scanner would misfile bold labels as
+      regular, and the browser would then fake bold from the regular face at
+      a different width. Both crates were already in the build (usvg uses
+      the same versions), so nothing new is downloaded. A test checks the
+      collector against usvg's own reading of real Merman output.
+      Alternative: extend the hand scanner with selector matching (more
+      code to own). Redo cost: one file (`embed/glyphs.rs`).
+    - |-
+      Phase 3: the collected code points are grouped by font family (the
+      first family each label names), not as one page-wide set as the plan
+      sketched, and the builder therefore also takes the font chain. This
+      way a family the page never draws is not embedded at all, and each
+      face gets only its own labels' characters. Alternative: one set for
+      every family (simpler, but embeds unused families and extra glyphs).
+      Redo cost: the `UsedGlyphs` type and two loops.
+    - |-
+      Phase 3: details of the generated CSS and logging that the spec left
+      open. (1) Each `@font-face` rule states `font-style:normal` and
+      `font-weight:400` or `700`, so a regular and a bold rule of the same
+      family are told apart; the spec's example shows neither. (2) The
+      family is written in single quotes with CSS escapes (the same function
+      that writes labels' family names), not double quotes. (3) "60 KB" is
+      taken as 60,000 bytes. (4) An over-budget file and a whole
+      (unsubset) face are logged at `info`, as expected outcomes (Rule I);
+      only a failure logs a warning. (5) If any one face cannot be subset,
+      the whole page gets no embedded font, rather than a font for some
+      families only. (6) Inter's OFL line is written for the bundled Inter
+      or any family named Inter; its copyright text is a constant that a
+      test compares with the bundled `OFL.txt`, which stays out of the
+      binary. (7) No "browser check failed" unsubset reason exists, because
+      the spike chose the subset; only the `fsType` no-subsetting reason is
+      written. Each is a small, local change if the reviewer disagrees.
+    - |-
+      Phase 3: fixed a test-guard failure that earlier phases left in place.
+      `test-toolkit`'s check for build-machine paths baked into tests
+      flagged seven places, all in this package area: three test helpers now
+      use the shared `manifest_dir!()` macro, and the four in the separate
+      benchmark crate (its own workspace, run only by `just bench`, never in
+      CI) were added to the guard's allow list with that reason.
+      Alternative: give the benchmark crate a dependency on the test
+      harness to use the macro too. Redo cost: four allow-list entries.
 source_files_during_phase_1:
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
@@ -53,25 +138,78 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
     - biscuit-visualized
+    - test-toolkit
+source_files_during_phase_2:
+    - biscuit-visualized/src/src/mermaid/embed/mod.rs
+    - biscuit-visualized/src/src/mermaid/embed/permission.rs
+    - biscuit-visualized/src/src/mermaid/embed/comment.rs
+    - biscuit-visualized/src/src/mermaid/embed/faces.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/components/graph_expression.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/embed_permission_tests.rs
+    - biscuit-visualized/src/src/tests/embed_comment_tests.rs
+    - biscuit-visualized/src/src/tests/embed_faces_tests.rs
+docs_updated_during_phase_2:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - Cargo.lock
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/embed/mod.rs
+    - biscuit-visualized/src/src/mermaid/embed/glyphs.rs
+    - biscuit-visualized/src/src/mermaid/embed/subset.rs
+    - biscuit-visualized/src/src/mermaid/embed/comment.rs
+    - biscuit-visualized/src/src/mermaid/embed/embedding.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/embed_glyphs_tests.rs
+    - biscuit-visualized/src/src/tests/embed_subset_tests.rs
+    - biscuit-visualized/src/src/tests/embed_comment_tests.rs
+    - biscuit-visualized/src/src/tests/embed_embedding_tests.rs
+    - biscuit-visualized/src/src/tests/embed_faces_tests.rs
+    - biscuit-visualized/src/src/tests/embed_permission_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - tools/test-toolkit/src/archive_guard.rs
+docs_updated_during_phase_3:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-visualized/SKILL.md
 message_to_agent: |-
-    Phase 1 (gate, rulings, spike S1, recon) is done; read the implementation
-    log's Phase 1 section before starting. Rulings A-H were accepted as the plan
-    recommends. Three things change later phases:
-    1. Use `allsorts = { version = "0.17.0", default-features = false, features = ["flate2_rust"] }`;
-       the default features pull the C library libz-sys.
-    2. Spike S1 found that the allsorts subset never carries GPOS/GSUB, so Chrome draws it
-       without kerning/ligatures (~1.3% wider than our kerned measurer). Spec D6 is amended:
-       with the opt-in on, measure labels with plain glyph advances (all layout features off),
-       for Inter and host faces alike. Oracle: measured width == sum of the subset's hmtx
-       advances. `ShapeParams.kerning` (src/fonts/shaper.rs) only disables `kern`; liga/calt
-       and the rest must go too. This is Phase 4 work, but Phase 2/3 types should allow it.
-    3. The text-fallback `md --feature` flag has NOT landed. Only task 5.3 needs it; re-check
-       before 5.3 and do not build a stand-in.
-    Also: OFL.txt declares no Reserved Font Name, so the family name is `Inter`; OFL.txt is
-    not compiled in anywhere (D15's line must be included or copied). macOS SFNS.ttf is
-    variable (fvar) and must be refused per Rule C. The working tree holds unrelated,
-    pre-existing darkmatter/dmls edits from another session; leave them alone and scope
-    `affected_scope.py` to this feature's files.
+    Phase 3 (subset and @font-face payload) is done; read the log's Phase 3 section.
+    New crate-private pieces under src/mermaid/embed/ (Phase 4 wires them in):
+    - glyphs.rs: collect_used_glyphs(final_static_svg) -> Result<UsedGlyphs, GlyphsError>.
+      UsedGlyphs { families: BTreeMap<leading family, WeightGlyphs{regular, bold}> }, keyed by
+      the FIRST family of each label's computed font-family (unquoted, CSS-unescaped), i.e.
+      the name html_static leads labels with. So Phase 4's post-process must lead every label
+      with FamilyChoice.family (css_quoted), or that label's code points are not embedded.
+      Rule D: cache this UsedGlyphs next to the SVG (it is plain data; add serde if needed).
+    - subset.rs: subset(data, index, &BTreeSet<char>) and whole_face(data, index), both
+      return a single-face TrueType file; SubsetError.
+    - embedding.rs: build_font_embedding(&EmbeddedFaces, &[UsedGlyphs], &FontChain) ->
+      Result<FontEmbedding, FontEmbeddingError>; FontEmbedding { comments, css, rules } and
+      markup() = comments + "<style>..</style>" ("" when nothing is drawn). On Err it has
+      already logged the warning (D7); the caller just emits no font.
+      build_font_embedding_with(.., make_file) is the failure-injection seam.
+    - comment.rs: page_comment(&FamilyChoice, unsubset), ofl_attribution(), INTER_COPYRIGHT.
+    - tests/mod.rs: capture_logs(Level, f) (capture_warnings now wraps it).
+    Still true from earlier phases: the measurer must use plain advances with the opt-in
+    (the subset has no GPOS/GSUB/kern; oracle: measured width == sum of subset hmtx
+    advances); remove `#[cfg_attr(not(test), allow(dead_code))]` on `mod embed` once the
+    render path calls it; the md `--feature` flag has NOT landed (re-check before 5.3, no
+    stand-in); family name is `Inter` (no Reserved Font Name).
+    Phase 6 still owes docs/dependencies.md (root and area) for allsorts and its 10
+    transitive crates (aliasable, bitreader, glyph-names, ouroboros, ouroboros_macro,
+    pathfinder_geometry, pathfinder_simd, proc-macro2-diagnostics,
+    unicode-canonical-combining-class, unicode-joining-type); roxmltree, simplecss, base64
+    are direct now but were already in the lock.
+    The test-toolkit archive_path_guard failure Phase 2 reported is fixed (see log).
 ---
 
 # Implementation Log for 2026-10-21-mermaid-embedded-font (7 phases)
@@ -382,3 +520,280 @@ the test page went to `/tmp/bv-s1-out` and are not kept.
   `just test` in `biscuit-visualized`: 976 passed, 3 skipped, 0 failed.
 - No dependent-package tests: no compiled code changed. No cross-OS check:
   nothing OS-specific changed.
+
+## Phase 2
+
+Face choice by `fsType`, in `biscuit-visualized` (2026-10-24). Pure logic: no
+render path, cache key, or output changes yet (Phase 4 wires it in), so every
+existing render is byte-identical.
+
+### What was built
+
+- **`src/mermaid/embed/permission.rs` (2.1).** `classify(data, index) ->
+  EmbedPermission` reads the raw `fsType` (`OS/2` offset 8) through
+  `ttf_parser::RawFace`, not `ttf-parser`'s `Permissions` helper. Results:
+  `Embed { permission, fs_type }`, `EmbedUnsubset { permission, fs_type }`
+  (the `0x0100` bit), or `Refuse(Refusal)` with `Restricted { fs_type }`,
+  `BitmapOnly { fs_type }`, `NoReadableOs2`, `OutlineFormat`. Order: an
+  unparseable face (bad data, index out of range) is `NoReadableOs2`; then
+  `CFF `/`CFF2`/`fvar`, or no `glyf`, is `OutlineFormat` (Rule C); then a
+  missing or short `OS/2` is `NoReadableOs2`; then the permission bits
+  (least restrictive wins; `0x0002` alone is Restricted), then `0x0200`
+  (bitmap only), then `0x0100` (unsubset). Reserved bits are ignored and
+  logged once per process at debug level.
+- **`src/mermaid/embed/comment.rs` (2.2).** `comment_safe(name)` removes
+  controls, `<`, `>`, then repeatedly every `--` and `*/` until none remains,
+  then trailing `-`. One function serves the HTML comment (D14) and the CSS
+  comment (D15). The CSS-string context (`font-family`) reuses the
+  post-process's `css_quoted`, now `pub(crate)`, so the `@font-face` family
+  and the labels' leading family are spelled by one function.
+- **`src/mermaid/embed/faces.rs` (2.3).** `choose_embedded_faces(requested:
+  &[&str], chain) -> EmbeddedFaces`: per distinct CSS `font-family` list,
+  resolve regular (400) and bold (700) through the chain (Rule B), classify
+  both; either refused → the whole family is the bundled Inter
+  (`ChoiceReason::Refused { face, refusal }`, warning logged); no face
+  resolves → `NoInstalledFace`; the `MERMAID_FONT` step landing on the
+  bundled Inter → `MermaidFontInter`; otherwise `Resolved` with both faces.
+  `FamilyChoice` carries `requested`, `family` (fontdb's first family name;
+  `Inter` for the bundled face), `bundled_inter`, `regular`/`bold`
+  (`EmbeddedFace { id, permission, fs_type, unsubset }`) and `reason`.
+- **`src/fonts/chain.rs`.** Two small accessors: `bundled_inter(query)` (the
+  bundled face by CSS matching, never an installed Inter) and
+  `is_bundled_inter(id)`.
+- `src/mermaid/mod.rs` declares `pub(crate) mod embed` with
+  `#[cfg_attr(not(test), allow(dead_code))]` until Phase 4 calls it.
+
+### Requirement-to-test mapping
+
+All L1, in-process, through the crate-level decision functions (F1: the
+classifier and decision are pure functions over font bytes and an injected
+chain; no CLI, filesystem, or terminal boundary is crossed yet).
+
+| Requirement / matrix row | Test (under `src/tests/`) |
+| --- | --- |
+| `0x0000`, `0x0008`, `0x0004` embed (AC-E13) | `embed_permission_tests::installable_editable_and_preview_print_embed` |
+| `0x0002` alone → Restricted | `…::restricted_as_the_only_permission_bit_is_refused` |
+| `0x0006`, `0x000A`, `0x000E`, `0x000C` least restrictive | `…::several_permission_bits_take_the_least_restrictive` |
+| `0x0200` with/without permission bits; with `0x0002` | `…::bitmap_only_is_refused_whatever_the_permission_bits` |
+| `0x0100` → unsubset; with `0x0002` → Restricted | `…::no_subsetting_embeds_unsubset_unless_restricted` |
+| reserved bits ignored (with and without `0x0002`) | `…::reserved_bits_do_not_change_the_decision` |
+| `OS/2` absent | `…::a_face_without_os2_is_refused` |
+| `OS/2` shorter than `fsType` (9 bytes) vs exactly 10 bytes | `…::an_os2_table_too_short_for_fs_type_is_refused_and_one_just_long_enough_is_read` |
+| `OS/2` record past end of file | `…::an_os2_record_pointing_past_the_end_of_the_file_is_refused` |
+| `CFF `, `CFF2`, `fvar`, no `glyf` (Rule C) | `…::cff_cff2_variable_and_glyf_less_faces_are_refused_as_outline_format`, `…::the_real_variable_noto_emoji_is_refused_as_outline_format` |
+| document: `.ttc` face index | `…::a_collection_face_is_classified_by_its_own_index` |
+| document: index out of range | `…::a_face_index_out_of_range_is_refused` |
+| document: trailing garbage | `…::trailing_bytes_after_a_valid_face_do_not_change_the_decision` |
+| document: not a font | `…::data_that_is_not_a_font_is_refused` |
+| bundled Inter is Installable | `…::the_bundled_inter_is_installable` |
+| crafted names (`a--b`, `a-->b`, `---`, `*/ x`, `"`, `\`, newline, `<!--`) cannot end either comment (AC-E14) | `embed_comment_tests::crafted_names_cannot_end_either_comment` |
+| property-style: 5,000 generated names | `embed_comment_tests::generated_names_cannot_end_either_comment` |
+| CSS-string context escapes `"`, `'`, `\`, `<`, newline | `embed_comment_tests::css_strings_escape_quotes_backslashes_and_markup` |
+| permitted resolved face measured = embedded (AC-E5) | `embed_faces_tests::permitted_resolved_faces_are_measured_and_embedded` |
+| Restricted resolved face → Inter, warning logged | `embed_faces_tests::a_restricted_resolved_face_gives_inter_and_warns` |
+| permitted regular + Restricted bold → whole family Inter (AC-E13 last clause) | `embed_faces_tests::a_restricted_bold_makes_the_whole_family_inter` |
+| bitmap-only, no `OS/2`, variable face → Inter | `embed_faces_tests::bitmap_only_gives_inter`, `…::a_face_without_os2_gives_inter`, `…::a_variable_resolved_face_gives_inter_as_outline_format` |
+| no-subsetting bit → that face unsubset | `embed_faces_tests::no_subsetting_embeds_the_resolved_face_unsubset` |
+| `MERMAID_FONT=Inter` / permitted / Restricted | `…::mermaid_font_inter_selects_inter`, `…::mermaid_font_naming_a_permitted_family_embeds_it`, `…::mermaid_font_naming_a_restricted_family_gives_inter` |
+| empty chain → Inter (`NoInstalledFace`) | `…::a_chain_with_no_installed_face_gives_inter` |
+| stack naming `Inter` → bundled Inter as resolved | `…::a_stack_naming_inter_embeds_the_bundled_inter_as_resolved` |
+| per-family decision; duplicates decided once | `…::each_requested_family_is_decided_on_its_own_and_duplicates_once` |
+
+The measured-equals-embedded oracle (AC-E5) is independent of the decision
+code: a permitted face must equal `chain.resolve(query)` (what the measurer
+uses unchanged); a substituted family must equal what a second chain built
+with `MERMAID_FONT=Inter` over the same installed fonts resolves (D13's
+definition of the substitution). The per-render override that makes the
+measurer use these faces (Rule A) is Phase 4 work.
+
+The Input Robustness Matrix's field-shape rows (absent/null/wrong type) do not
+apply: `fsType` is a bit set, and each document shape is tested once on the
+shared `RawFace` loader call.
+
+### Smell grep (checkpoint 2)
+
+`grep -n -E "serde\(default\)|unwrap_or_default\(\)|\.ok\(\)|filter_map\(.*as_str" src/src/mermaid/embed/*.rs`
+returns nothing. The one fallback (`classify_face`: font data the database
+cannot read → `Refuse(NoReadableOs2)`) fails closed.
+
+### Pre-existing defect fixed (Rule 5)
+
+- `test-toolkit`'s `declared_test_tiers_match_owned_tests` failed:
+  `components/graph_expression.rs` had two plain L1 tests named
+  `browser_render_emits_svg` and `browser_render_dot_input_emits_svg`. The
+  `browser_` prefix took them out of L1 while the area declares no browser
+  tier, so they never ran. Renamed to `render_browser_svg_emits_svg` and
+  `render_browser_svg_emits_svg_for_dot_input`; both pass, and the contract
+  test passes.
+
+### Pre-existing failure left in place
+
+- `test-toolkit`'s `archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path`
+  fails on 12 sites across the tree (seven in this area: `env!("CARGO_MANIFEST_DIR")`
+  in `src/tests/contrast_corpus_tests.rs:164,655`, `src/tests/golden_tests.rs:142`,
+  and the non-member `bench/` crate). None is in a file this phase touched,
+  and the `bench/` sites need an allow-list entry in `test-toolkit`, so it is
+  left for a separate fix and noted in `message_to_agent`.
+
+### Gates
+
+- `just lint` (biscuit-visualized): clean.
+- `just test` (biscuit-visualized): 1010 passed, 1 skipped (before the rename:
+  1008 passed, 3 skipped; the two recovered tests now run).
+- `just check-tier-coverage biscuit-visualized`: stranded 0.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages:
+  [biscuit-visualized, test-toolkit]`, `change_class: package`;
+  `test-toolkit` is scheduled by the planner's suite registry for any Rust
+  source change. `just test test-toolkit`: 474 passed, 2 failed, 4 skipped;
+  the two failures are the ones described above (one now fixed and passing
+  alone, one pre-existing).
+- Reverse dependencies (`darkmatter`, `biscuit-terminal-cli`, `sniff-cli`,
+  `worktree-cli`): `cargo check` clean. No public API or output changed (all
+  new items are `pub(crate)`), so their tests were not run.
+- No cross-OS check: no path, process, or `#[cfg(os)]` code changed; the
+  tests use only in-memory fonts.
+
+## Phase 3
+
+Subsetting and the `@font-face` payload, in `biscuit-visualized`
+(2026-10-24). Still crate-private and off the render path (Phase 4 wires
+it in), so every existing render is byte-identical: the 1045-test suite,
+golden corpus included, passes unchanged.
+
+### What was built (under `biscuit-visualized/src/src/mermaid/embed/`)
+
+- **`glyphs.rs` (3.1).** `collect_used_glyphs(svg) -> Result<UsedGlyphs,
+  GlyphsError>`. Parses the final static SVG with `roxmltree` and applies its
+  `<style>` with `simplecss`, using usvg's precedence (presentation attribute,
+  then rules in specificity order, then the `style` attribute; an
+  `!important` declaration keeps its place; the `font` shorthand through
+  `svgtypes`). Collects the character data of every `<text>` and its
+  descendants, drops controls, adds U+0020 to each family/weight that draws
+  text, and splits at weight 600 (`bold`, `bolder`, ≥ 600; `lighter` is
+  regular; undefined values such as `var()` are ignored, so the parent's
+  weight holds). Grouped by the first family of the computed `font-family`
+  (`first_family` unquotes and resolves CSS escapes, the inverse of
+  `css_quoted`). See `decisions_for_review` for why not the hand scanner.
+- **`subset.rs` (3.2).** `subset(data, index, &code_points)` maps code
+  points through the face's Unicode `cmap` (unmapped ones skipped, R-E8) and
+  calls `allsorts::subset::subset(…, SubsetProfile::Minimal,
+  CmapTarget::Unicode)`. `whole_face(data, index)` returns a single-face
+  file's own bytes, or rebuilds one face of a `.ttc` with every table
+  (`allsorts::subset::whole_font`), never a collection. **Defect found while
+  testing:** `allsorts` reads face 0 of a single-face file for any face
+  index; both functions now reject a nonzero index for such files.
+- **`comment.rs` (3.3).** `page_comment(&FamilyChoice, unsubset)` writes
+  one D14 comment per reason (resolved with permission, mixed regular/bold
+  permissions, `MERMAID_FONT=Inter`, Restricted, bitmap only, no readable
+  `OS/2`, outline format, no installed face) plus the "embedded unsubset
+  because fsType … forbids subsetting" clause; names pass through
+  `comment_safe`. `ofl_attribution()` is the D15 line built from
+  `INTER_COPYRIGHT`.
+- **`embedding.rs` (3.4).** `build_font_embedding(&EmbeddedFaces,
+  &[UsedGlyphs], &FontChain) -> Result<FontEmbedding, FontEmbeddingError>`:
+  unions each family's per-diagram sets, embeds each face once per weight
+  drawn (none for an undrawn weight or family), as
+  `@font-face{font-family:'X';font-style:normal;font-weight:N;src:url(data:font/ttf;base64,…) format("truetype")}`,
+  with Inter's OFL line immediately before its first rule. Over
+  `BUDGET_BYTES` (60,000) and unsubset files are logged at `info`; any
+  failure returns `Err` after one warning (D7). `build_font_embedding_with`
+  injects the file maker for the failure test. `FontEmbedding::markup()`
+  is the comments followed by the `<style>` element (empty when nothing is
+  drawn).
+- **Dependencies** (`biscuit-visualized/src/Cargo.toml`, all under the
+  `image` feature): `allsorts 0.17.0` (`default-features = false`,
+  `flate2_rust`, as S1), `roxmltree 0.21.1`, `simplecss 0.2.2`, `base64
+  0.22` (moved from dev-only to normal too). `Cargo.lock` gains `allsorts`
+  and ten transitive crates (listed in `message_to_agent`; Phase 6 records
+  them in `docs/dependencies.md`).
+
+### Requirement-to-test mapping
+
+All L1, in-process at the crate's internal API (F1 for pure functions; the
+collector and page tests also run real Merman output through the HTML static
+post-process, F2). No CLI, filesystem, terminal, or browser boundary is
+crossed yet; Darkmatter's page and the browser load are Phases 5 and 7.
+
+| Requirement | Test (under `src/tests/`) |
+| --- | --- |
+| Rule E collector vs an independent oracle (usvg's resolution of every span's family, weight, text) on real flowchart, class, sequence output | `embed_glyphs_tests::real_merman_output_matches_what_usvg_draws` |
+| bold through a stylesheet class rule (real class diagram) | `…::real_class_diagram_title_is_bold_through_the_stylesheet` |
+| two diagrams sharing and differing in characters | `…::two_diagrams_sharing_and_differing_in_characters` |
+| attribute / inline / rule / inherited / `bolder` / `599` / `font` shorthand / `lighter` | `…::bold_comes_from_attributes_inline_styles_and_rules` |
+| precedence: rule > attribute, style > rule, `!important`, specificity, `var()`, `inherit` | `…::the_cascade_follows_usvg_precedence` |
+| entity and numeric references (`&amp;`, `&#x1F600;`) | `…::entities_and_character_references_are_decoded` |
+| `<tspan>` collected; `<title>`, `<desc>`, `<style>` not | `…::text_and_tspans_are_collected_and_other_character_data_is_not` |
+| no text, and indentation only → empty | `…::a_page_without_text_draws_nothing` |
+| controls dropped, U+0020 added | `…::controls_are_dropped_and_a_space_is_added` |
+| keyed by leading family, case-insensitive lookup | `…::text_is_keyed_by_its_leading_family`, `…::first_family_reads_what_css_quoted_writes` |
+| malformed SVG → error | `…::malformed_svg_is_an_error` |
+| subset keeps `cmap`, `OS/2`, `name` (+ outlines); no `GPOS`/`GSUB`/`kern`/`fvar` (AC-E12 table check, R-E11) | `embed_subset_tests::the_subset_keeps_cmap_os2_and_name` |
+| name IDs 0, 13, 14 equal Inter's; `fsType` kept (AC-E8, R-E7) | `…::the_subset_carries_inters_copyright_and_license` |
+| every mapped code point present with its original advance; unmapped and unrequested absent (R-E8) | `…::every_mapped_code_point_is_in_the_subset_and_nothing_else` |
+| empty / wholly unmapped set → `.notdef` only | `…::an_empty_or_wholly_unmapped_set_gives_a_notdef_only_subset` |
+| `.ttc` face → single-face subset | `…::a_collection_face_is_subset_to_a_single_face_file` |
+| whole face: own bytes, or the one face of a `.ttc` with every table | `…::the_whole_face_is_the_file_itself_or_the_one_face_of_a_collection` |
+| not a font, index out of range (single file and `.ttc`), no `cmap` → errors | `…::unreadable_faces_are_errors` |
+| one D14 string per reason, mixed permissions (AC-E14) | `embed_comment_tests::the_comment_names_a_resolved_face_and_its_permission`, `…::the_comment_names_inter_and_why_for_every_substitution` |
+| unsubset clause (AC-E14) | `…::the_comment_says_when_the_face_is_embedded_unsubset` |
+| crafted family and face names (AC-E14) | `…::crafted_family_and_face_names_cannot_end_the_page_comment` |
+| exact D15 line; copyright equals `OFL.txt` line 1; no Reserved Font Name (AC-E15, AC-E8) | `…::the_ofl_attribution_is_one_css_comment_naming_inters_copyright`, `…::the_copyright_line_is_the_bundled_ofl_txt_first_line` |
+| one rule per face and weight; regular/bold subsets cover the union of their diagrams only (R-E3, AC-E3) | `embed_embedding_tests::diagrams_sharing_a_face_get_one_rule_per_weight_covering_their_union` |
+| AC-E3 on two real diagrams: every label code point Inter maps is in the decoded subset's `cmap` | `…::real_diagrams_on_one_page_are_covered_by_the_subset` |
+| bold-only page → no regular rule (D1) | `…::a_bold_only_page_embeds_no_regular_rule` |
+| no text / other family only → nothing, empty markup | `…::a_page_drawing_no_text_embeds_nothing`, `…::a_family_the_page_never_draws_is_not_embedded` |
+| family declared `Inter`, OFL line immediately before, one per page, comment, markup order (AC-E8, AC-E15) | `…::inter_is_declared_as_inter_with_its_ofl_line_immediately_before` |
+| host face only → no OFL line, resolved comment (AC-E15) | `…::a_page_embedding_only_a_host_face_has_no_ofl_line` |
+| Restricted host face → Inter rules and comment | `…::a_restricted_resolved_face_embeds_inter_and_says_why` |
+| no-subsetting face → whole face byte for byte, logged, commented | `…::a_no_subsetting_face_is_embedded_whole_logged_and_commented` |
+| over budget → embedded, size logged (captured `info`) (AC-E6, R-E4) | `…::a_subset_over_budget_is_embedded_and_its_size_logged`, `…::a_subset_within_budget_logs_nothing` |
+| injected failure (first and second weight) → `Err`, one warning (AC-E7, R-E5) | `…::a_subsetting_failure_embeds_nothing_and_warns` |
+| only `data:font/ttf` URLs, no external reference, one `<style>` | `…::the_css_references_nothing_outside_the_page` |
+
+AC-E7's "output has no `@font-face`" and AC-E3/AC-E4 at page level are
+completed by Phase 5 (Darkmatter emits nothing on `Err`). The Input
+Robustness Matrix does not apply beyond what Phase 2 covered: the new
+readers take our own SVG and font bytes; their document shapes (malformed
+XML, not a font, index out of range, missing `cmap`) are tested above. Smell
+grep over `src/mermaid/embed/*.rs` (`serde(default)`, `unwrap_or_default()`,
+`.ok()`, `filter_map(.. as_str())`): one hit, `child.text().unwrap_or_default()`
+in the collector, where `None` means a node with no text (not a parse
+failure). A `cmap` lookup error, first written as a silent skip, now fails
+the subset.
+
+### Pre-existing failure fixed (Rule 5)
+
+`test-toolkit`'s `archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path`
+(reported by Phase 2) now flagged seven sites, all in this area.
+`src/tests/contrast_corpus_tests.rs` (two) and `src/tests/golden_tests.rs`
+use `biscuit_test_harness::manifest_dir!()`; the four `bench/` sites are
+in `ALLOWED` (`tools/test-toolkit/src/archive_guard.rs`) as a non-member
+crate run only by `just bench`.
+
+### Gates
+
+- `just lint` (biscuit-visualized): clean. `cargo clippy -p test-toolkit
+  --all-targets -D warnings`: clean.
+- `just test` (biscuit-visualized): 1045 passed, 4 skipped, 0 failed
+  (38 tests new this phase: 12 collector, 7 subsetter, 6 comment, 13 builder).
+- `just check-tier-coverage biscuit-visualized`: stranded 0.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages:
+  [biscuit-visualized, test-toolkit, sniff]` before the skill edit,
+  `change_class: package`. `sniff`
+  is a narrowed cell: its tests read the repository's `Cargo.lock`, which
+  gained `allsorts`. (The working tree also holds Phase 2's uncommitted
+  files, so the list covers both phases.)
+- `just test test-toolkit`: 476 passed, 0 failed (the guard above now passes).
+- `sniff`: the lockfile tests (`just test lockfile` in `sniff/`): 212 passed.
+- After the skill edit the calculator also lists `darkmatter` (a narrowed
+  cell: two corpus tests parse every `.claude/skills` Markdown file). Final
+  scope: `[biscuit-visualized, test-toolkit, darkmatter, sniff]`. Ran them:
+  `just test shipped_markdown_` in `darkmatter/`: 2 passed.
+- Reverse dependencies (`darkmatter`, `biscuit-terminal-cli`, `sniff-cli`,
+  `worktree-cli`): `cargo check` clean; no public API or output changed.
+- Cross-OS: `just cross-check biscuit-visualized --os windows` → 1045 passed
+  (run because `allsorts` brings new transitive crates, including
+  `pathfinder_simd`). Code itself is pure byte processing with no paths or
+  OS calls.
