@@ -33,7 +33,6 @@ use darkmatter::markdown::compose::{
     ComposeOperation, ComposeOptions, EffectiveState, EffectiveStateBuilder,
 };
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::hint::black_box;
 use std::path::PathBuf;
 
@@ -82,7 +81,7 @@ fn replace_heavy_map() -> serde_json::Map<String, Value> {
 
 fn replace_heavy_state() -> EffectiveState {
     let map = replace_heavy_map();
-    let mut fm = HashMap::new();
+    let mut fm = serde_json::Map::new();
     fm.insert("replace".to_string(), Value::Object(map));
     EffectiveStateBuilder::new()
         .with_frontmatter(fm)

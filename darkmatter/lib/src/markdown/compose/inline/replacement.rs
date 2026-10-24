@@ -8,7 +8,6 @@ use super::super::super::types::MarkdownResult;
 use super::super::replacement;
 use super::super::{EffectiveState, EffectiveStateBuilder};
 use serde_json::Value;
-use std::collections::HashMap;
 use tracing::debug;
 
 /// Runs the text replacement stage.
@@ -53,7 +52,7 @@ pub(crate) fn run_stage(
     };
     let (new_content, edits) = if let Some(one_off) = &options.one_off_replace {
         let merged_replace = state::merge_replace_maps(state.get_replace_map(), Some(one_off));
-        let mut frontmatter = HashMap::new();
+        let mut frontmatter = serde_json::Map::new();
         frontmatter.insert("replace".to_string(), Value::Object(merged_replace));
         let scoped_state = EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter)

@@ -15,7 +15,6 @@
 //! `ctx.fm`.
 
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 
 use super::ast::Expr;
 
@@ -78,26 +77,6 @@ pub(crate) fn resolve_fm_namespace(path: &str, root: &Value) -> Option<Value> {
     match fm_namespace_path(path)? {
         FmPath::Member(rest) => traverse(root.as_object()?, rest),
         FmPath::Whole => Some(root.clone()),
-    }
-}
-
-/// Map-based variant of [`resolve_fm_namespace`] that resolves against the
-/// effective-state `data` map directly.
-///
-/// A `fm.<path>` traversal borrows into the map and clones only the resolved
-/// leaf instead of deep-cloning the entire state per lookup (F30). Bare `fm`
-/// still materializes the whole object snapshot.
-pub(crate) fn resolve_fm_namespace_in_map(
-    path: &str,
-    data: &HashMap<String, Value>,
-) -> Option<Value> {
-    match fm_namespace_path(path)? {
-        FmPath::Member(rest) => {
-            let mut segments = rest.split('.');
-            let first = data.get(segments.next()?)?;
-            descend(first, segments)
-        }
-        FmPath::Whole => Some(Value::Object(data.clone().into_iter().collect())),
     }
 }
 
@@ -185,13 +164,11 @@ mod tests {
     }
 
     #[test]
-    fn object_and_map_variants_agree_with_value_variant() {
+    fn object_variant_agrees_with_value_variant() {
         let object = root().as_object().cloned().unwrap();
-        let map: HashMap<String, Value> = object.clone().into_iter().collect();
         for path in ["fm", "fm.build", "fm.config.retries", "fm.fm.child", "fm.missing", "fm.build.nope"] {
             let expected = resolve_fm_namespace(path, &root());
             assert_eq!(resolve_fm_namespace_in_object(path, &object), expected, "{path}");
-            assert_eq!(resolve_fm_namespace_in_map(path, &map), expected, "{path}");
         }
         assert_eq!(resolve_fm_namespace_in_object("doc.build", &object), None);
     }

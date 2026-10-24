@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::super::super::error::CompositionError;
 use super::super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
@@ -38,7 +38,7 @@ struct ApprovalBasis {
     origin: PathBuf,
     label: String,
     /// The step frontmatter the early-binding state was built from.
-    frontmatter: Arc<HashMap<String, Value>>,
+    frontmatter: Arc<Map<String, Value>>,
     /// The context the early-binding state carried.
     state_context: ComposeContext,
     /// The context the expression resolution read.
@@ -141,7 +141,7 @@ pub(super) struct ApprovalRecordOwned {
     pub(super) approved: String,
     pub(super) origin: PathBuf,
     pub(super) label: String,
-    pub(super) frontmatter: Arc<HashMap<String, Value>>,
+    pub(super) frontmatter: Arc<Map<String, Value>>,
     pub(super) state_context: ComposeContext,
     pub(super) runtime_context: ComposeContext,
     pub(super) file_resolution_context: biscuit_file::FileResolutionContext,
@@ -167,7 +167,7 @@ impl ApprovalRecordOwned {
 
 /// The early-binding state a step's shell commands resolve against.
 pub(super) fn early_binding_state(
-    frontmatter: &HashMap<String, Value>,
+    frontmatter: &Map<String, Value>,
     context: ComposeContext,
 ) -> Result<EffectiveState, CompositionError> {
     EffectiveStateBuilder::new()

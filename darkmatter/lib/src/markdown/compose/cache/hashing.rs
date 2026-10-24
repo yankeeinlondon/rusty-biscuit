@@ -446,12 +446,11 @@ mod tests {
     #[test]
     fn phase_state_identity_matches_underlying_hashes() {
         use crate::markdown::compose::EffectiveStateBuilder;
-        use std::collections::HashMap;
 
         let ctx = ComposeContext::capture_for_content(Path::new("."), "");
 
         // Non-trivial frontmatter so the state hash is not the empty-map hash.
-        let mut fm: HashMap<String, Value> = HashMap::new();
+        let mut fm: serde_json::Map<String, Value> = serde_json::Map::new();
         fm.insert("title".into(), Value::from("Doc"));
         fm.insert("count".into(), Value::from(3));
         let state = EffectiveStateBuilder::new()

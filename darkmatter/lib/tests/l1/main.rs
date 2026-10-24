@@ -146,6 +146,7 @@ mod semantic_results_never_persist;
 mod serialized_code_neighbors;
 mod shipped_schema_corpus;
 mod set_overlay_integration;
+mod frontmatter_merge_order;
 mod shell_block_integration;
 mod shell_expansion_coordinates;
 mod shell_result_values;

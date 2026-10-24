@@ -68,7 +68,7 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 /// frontmatter interpolation; it is `None` for context-free callers.
 pub(crate) struct FrontmatterSeedState {
     declared_properties: HashSet<String>,
-    data: HashMap<String, Value>,
+    data: serde_json::Map<String, Value>,
     context: ComposeContext,
     resolution_context: Option<ResolutionContext>,
     name_coercion_keys: Vec<String>,
@@ -77,7 +77,7 @@ pub(crate) struct FrontmatterSeedState {
 }
 
 impl FrontmatterSeedState {
-    pub(crate) fn new(data: HashMap<String, Value>, context: ComposeContext) -> Self {
+    pub(crate) fn new(data: serde_json::Map<String, Value>, context: ComposeContext) -> Self {
         Self {
             declared_properties: data.keys().cloned().collect(),
             data,
@@ -151,7 +151,7 @@ impl EvaluationLookup for FrontmatterSeedState {
 
         // Reserved `fm` namespace, intercepted before key/ctx/env lookup.
         if fm_namespace::is_fm_namespace(path) {
-            return fm_namespace::resolve_fm_namespace_in_map(path, &self.data);
+            return fm_namespace::resolve_fm_namespace_in_object(path, &self.data);
         }
 
         // The `ctx` and `env` namespaces, their exact roots included, so a
@@ -911,7 +911,7 @@ fn interpolate_frontmatter_impl(
     // seed nor templated. Their values survive raw in frontmatter and are
     // invisible to other keys' resolution (a non-excluded key that
     // references one is rejected by the DM1a dependency check below).
-    let mut seed_map: HashMap<String, Value> = HashMap::new();
+    let mut seed_map = serde_json::Map::new();
     let templated_keys: Vec<String> = fm
         .keys()
         .filter(|k| {
@@ -1259,7 +1259,7 @@ fn transitively_shell_blocked_keys(
     templated_keys: &[String],
     original_values: &HashMap<String, Value>,
     shell_pending_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &serde_json::Map<String, Value>,
 ) -> HashSet<String> {
     let mut blocked: HashSet<String> = HashSet::new();
     if shell_pending_keys.is_empty() {
@@ -1300,7 +1300,7 @@ fn extract_frontmatter_key_refs_for_shell_blocking(
     value: &Value,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &serde_json::Map<String, Value>,
 ) -> Vec<String> {
     let mut refs = Vec::new();
     collect_frontmatter_key_refs_for_shell_blocking(
@@ -1320,7 +1320,7 @@ fn collect_frontmatter_key_refs_for_shell_blocking(
     refs: &mut Vec<String>,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &serde_json::Map<String, Value>,
 ) {
     match value {
         Value::String(s) => {
@@ -1364,7 +1364,7 @@ fn collect_variable_roots_for_shell_blocking(
     refs: &mut Vec<String>,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &serde_json::Map<String, Value>,
 ) {
     match expr {
         Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
@@ -1480,7 +1480,7 @@ fn collect_variable_roots_for_shell_blocking(
     }
 }
 
-fn static_truthiness(expr: &Expr, seed_map: &HashMap<String, Value>) -> Option<bool> {
+fn static_truthiness(expr: &Expr, seed_map: &serde_json::Map<String, Value>) -> Option<bool> {
     match expr {
         Expr::StringLiteral(value) => Some(!value.is_empty()),
         Expr::NumberLiteral(value) => Some(*value != 0.0),
@@ -1761,7 +1761,7 @@ mod tests {
 
         #[test]
         fn simple_key_resolves() {
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("base".to_string(), json!("/path"));
             let state = FrontmatterSeedState::new(data, test_context());
             assert_eq!(state.get("base"), Some(json!("/path")));
@@ -1769,7 +1769,7 @@ mod tests {
 
         #[test]
         fn ctx_today_resolves() {
-            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), test_context());
             assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
         }
 
@@ -1778,19 +1778,19 @@ mod tests {
             // A context's environment is whatever its request supplied.
             let mut ctx = test_context();
             ctx.env_mut().insert("HOME".to_string(), "/home/me".to_string());
-            let state = FrontmatterSeedState::new(HashMap::new(), ctx);
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), ctx);
             assert_eq!(state.get("env.HOME"), Some(json!("/home/me")));
         }
 
         #[test]
         fn env_missing_returns_none() {
-            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), test_context());
             assert_eq!(state.get("env.NONEXISTENT_VAR_12345"), None);
         }
 
         #[test]
         fn dotted_path_resolves_nested() {
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("meta".to_string(), json!({"author": "Alice"}));
             let state = FrontmatterSeedState::new(data, test_context());
             assert_eq!(state.get("meta.author"), Some(json!("Alice")));
@@ -1798,13 +1798,13 @@ mod tests {
 
         #[test]
         fn missing_key_returns_none() {
-            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), test_context());
             assert_eq!(state.get("nonexistent"), None);
         }
 
         #[test]
         fn fm_namespace_resolves_against_seed_only() {
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("build".to_string(), json!("seed-build"));
             data.insert("fm".to_string(), json!({ "child": "literal-fm" }));
             let state = FrontmatterSeedState::new(data, test_context());
@@ -1827,19 +1827,19 @@ mod tests {
 
         #[test]
         fn resolution_context_defaults_to_none() {
-            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), test_context());
             assert!(state.resolution_context().is_none());
         }
 
         #[test]
         fn get_string_returns_empty_for_missing() {
-            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            let state = FrontmatterSeedState::new(serde_json::Map::new(), test_context());
             assert_eq!(state.get_string("nonexistent"), "");
         }
 
         #[test]
         fn get_string_coerces_number() {
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("count".to_string(), json!(42));
             let state = FrontmatterSeedState::new(data, test_context());
             assert_eq!(state.get_string("count"), "42");
@@ -1847,7 +1847,7 @@ mod tests {
 
         #[test]
         fn get_string_coerces_named_object_when_key_is_set() {
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("state".to_string(), json!({ "name": "alpha", "index": 1 }));
             let state = FrontmatterSeedState::new(data, test_context())
                 .with_name_coercion_keys(vec!["state".to_string()]);
@@ -1863,7 +1863,7 @@ mod tests {
         #[test]
         fn get_string_named_object_without_keys_renders_json() {
             let value = json!({ "name": "alpha", "index": 1 });
-            let mut data = HashMap::new();
+            let mut data = serde_json::Map::new();
             data.insert("state".to_string(), value.clone());
             let state = FrontmatterSeedState::new(data, test_context());
             assert_eq!(state.get_string("state"), value.to_string());

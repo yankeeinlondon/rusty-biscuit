@@ -413,12 +413,7 @@ fn state_with_current(
     authority: darkmatter::markdown::compose::CurrentAuthority,
 ) -> darkmatter::markdown::compose::EffectiveState {
     use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
-    let fm: std::collections::HashMap<String, Value> = fm
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let fm = fm.as_object().unwrap().clone();
     EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_for_content(std::path::Path::new("."), ""))

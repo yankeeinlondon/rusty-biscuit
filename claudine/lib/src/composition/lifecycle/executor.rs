@@ -1066,11 +1066,9 @@ impl StackExecutionContext<'_> {
     /// globals (supplied separately by [`Self::bindings`]);
     /// `current.*` is the reserved root this state's refresh authority serves.
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
-        let frontmatter: HashMap<String, Value> =
-            fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let context = self.early_binding_context(scan_hint);
         EffectiveStateBuilder::new()
-            .with_frontmatter(frontmatter)
+            .with_frontmatter(fm.clone())
             .with_name_coercion_keys(super::super::sequence::reserved::NAME_COERCION_KEYS.iter().map(|key| key.to_string()).collect())
             .with_context(context)
             // Every event builds its own state, so every event starts fresh
