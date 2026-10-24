@@ -306,14 +306,17 @@ and `detailed` kinds are rejected with a usage error. Directory output forms:
 
 **Non-strict mode**
 
-- Frontmatter: canonicalized by sorted keys and JSON-serialized values.
+- Frontmatter: canonicalized by sorted keys and canonical-JSON values, so
+  object key order is ignored at every depth (including objects inside
+  arrays). Array element order still changes the hash.
 - Frontmatter keys (`structured`/`detailed` `fm_keys`): sorted before hashing.
 - Body: leading/trailing whitespace and blank-line variants are ignored, so
   whitespace-only edits do not change the semantic hash.
 
 **Strict mode**
 
-- Frontmatter: hashes YAML serialization without canonical key sorting.
+- Frontmatter: hashes YAML serialization in the author's key order, so
+  reordering keys at any depth, nested ones included, changes the hash.
 - Frontmatter keys (`structured`/`detailed` `fm_keys`): preserved in document
   order — strict performs no key reordering.
 - Body: hashes raw body bytes.

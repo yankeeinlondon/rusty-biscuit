@@ -4,9 +4,7 @@
 //! All hashes are `u64` values suitable for run-local cache keys and remote
 //! transport-cache entry keys.
 
-use biscuit_hash::{xx_hash, xx_hash_bytes};
-use serde::Serialize;
-use serde::ser::{SerializeMap, SerializeSeq};
+use biscuit_hash::{canonical_json, xx_hash, xx_hash_bytes};
 use serde_json::{Map, Value};
 use std::path::Path;
 
@@ -43,7 +41,7 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
         .filter(|(k, _)| k.as_str() != "ctx")
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let canonical = canonical_json_sorted(&Value::Object(as_map));
+    let canonical = canonical_json(&Value::Object(as_map));
     xx_hash(&canonical)
 }
 
@@ -58,7 +56,7 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
         values.remove(*key);
     }
 
-    let canonical = canonical_json_sorted(&Value::Object(values));
+    let canonical = canonical_json(&Value::Object(values));
     let mut parts = vec![canonical];
 
     // Sort env vars for determinism (kept separate for clarity)
@@ -161,14 +159,14 @@ pub(crate) fn set_overlay_hash(
     let mut parts = Vec::with_capacity(1 + set_properties.len());
 
     if let Some(map) = set_object {
-        let canonical = canonical_json_sorted(&Value::Object(map.clone()));
+        let canonical = canonical_json(&Value::Object(map.clone()));
         parts.push(format!("obj={}", canonical));
     } else {
         parts.push("obj=".to_string());
     }
 
     for (index, (name, value)) in set_properties.iter().enumerate() {
-        let canonical = canonical_json_sorted(value);
+        let canonical = canonical_json(value);
         parts.push(format!("p{}:{}={}", index, name, canonical));
     }
 
@@ -190,51 +188,6 @@ pub(crate) fn operation_entry_key(op_kind: &str, source_id: u64, variant_hash: u
     xx_hash_bytes(&data)
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
-
-/// Produces a canonical JSON string with recursively sorted object keys.
-///
-/// This ensures deterministic hashing regardless of insertion order.
-/// Arrays preserve their element order (order is semantically meaningful).
-pub(crate) fn canonical_json_sorted(value: &Value) -> String {
-    let mut bytes = Vec::new();
-    serde_json::to_writer(&mut bytes, &CanonicalJson(value)).unwrap();
-    String::from_utf8(bytes).unwrap_or_default()
-}
-
-struct CanonicalJson<'a>(&'a Value);
-
-impl Serialize for CanonicalJson<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self.0 {
-            Value::Null => serializer.serialize_unit(),
-            Value::Bool(value) => serializer.serialize_bool(*value),
-            Value::Number(value) => value.serialize(serializer),
-            Value::String(value) => serializer.serialize_str(value),
-            Value::Array(values) => {
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for value in values {
-                    seq.serialize_element(&CanonicalJson(value))?;
-                }
-                seq.end()
-            }
-            Value::Object(map) => {
-                let mut entries: Vec<_> = map.iter().collect();
-                entries.sort_by(|left, right| left.0.cmp(right.0));
-
-                let mut object = serializer.serialize_map(Some(entries.len()))?;
-                for (key, value) in entries {
-                    object.serialize_entry(key, &CanonicalJson(value))?;
-                }
-                object.end()
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,53 +201,6 @@ mod tests {
 
     fn request(options: ComposeOptions) -> ComposeRequest {
         crate::markdown::compose::test_request_in(options, fixed_context())
-    }
-
-    #[test]
-    fn canonical_json_sorts_keys() {
-        let value: Value = serde_json::json!({
-            "zebra": 1,
-            "alpha": 2,
-            "middle": {"z": true, "a": false}
-        });
-        let result = canonical_json_sorted(&value);
-        assert_eq!(
-            result,
-            r#"{"alpha":2,"middle":{"a":false,"z":true},"zebra":1}"#
-        );
-    }
-
-    #[test]
-    fn canonical_json_preserves_array_order() {
-        let value: Value = serde_json::json!({"items": [3, 1, 2]});
-        let result = canonical_json_sorted(&value);
-        assert_eq!(result, r#"{"items":[3,1,2]}"#);
-    }
-
-    #[test]
-    fn canonical_json_handles_nested_objects() {
-        let value: Value = serde_json::json!({
-            "b": {"d": 4, "c": 3},
-            "a": {"f": 6, "e": 5}
-        });
-        let result = canonical_json_sorted(&value);
-        assert_eq!(result, r#"{"a":{"e":5,"f":6},"b":{"c":3,"d":4}}"#);
-    }
-
-    #[test]
-    fn canonical_json_empty_object() {
-        assert_eq!(canonical_json_sorted(&serde_json::json!({})), "{}");
-    }
-
-    #[test]
-    fn canonical_json_scalars() {
-        assert_eq!(canonical_json_sorted(&serde_json::json!(null)), "null");
-        assert_eq!(canonical_json_sorted(&serde_json::json!(true)), "true");
-        assert_eq!(
-            canonical_json_sorted(&serde_json::json!("hello")),
-            r#""hello""#
-        );
-        assert_eq!(canonical_json_sorted(&serde_json::json!(42)), "42");
     }
 
     #[test]

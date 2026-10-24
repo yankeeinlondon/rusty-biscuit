@@ -25,6 +25,19 @@ if md.has_frontmatter() {
 }
 ```
 
+## Key Order and Hashing
+
+Key order is a contract: `darkmatter/lib/Cargo.toml` requests serde_json's
+`preserve_order`, so every `serde_json::Map` (and `FrontmatterMap`, an
+`IndexMap`) iterates in author order at every depth. Never rely on a map
+being sorted. A hash that must ignore key order renders through
+`biscuit_hash::canonical_json` / `xx_hash_json` (biscuit-hash `json` feature):
+the non-strict frontmatter hash (top-level keys sorted, each value canonical,
+entries joined with the literal two characters `\n`), the TOC normalized
+frontmatter hash, the schema validator cache key, and every compose cache key.
+Array order stays significant in all of them. Strict frontmatter hashes follow
+author order at every depth.
+
 ## Merge Strategies
 
 Parsing one YAML frontmatter document rejects duplicate keys at every mapping

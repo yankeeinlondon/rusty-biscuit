@@ -762,13 +762,13 @@ impl HostGlobals {
     /// compose-options fingerprints. A lazy entry is identified by this value's
     /// shared cache, so independently built globals never compare equal.
     pub(crate) fn identity(&self) -> String {
-        use crate::markdown::compose::cache::hashing::canonical_json_sorted;
+        use biscuit_hash::canonical_json;
         let mut roots: Vec<&String> = self.runtime.keys().collect();
         roots.sort_unstable();
         let mut identity = format!("scope={};document_fallbacks={:?}", self.view.scope(), self.document_fallbacks);
         for root in roots {
             let entry = match &self.runtime[root] {
-                RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json_sorted(value)),
+                RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json(value)),
                 RuntimeBinding::Lazy(_) => format!("lazy:{:p}", Arc::as_ptr(&self.cache)),
                 RuntimeBinding::Unavailable(reason) => format!("unavailable:{reason}"),
             };

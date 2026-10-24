@@ -437,9 +437,12 @@ impl From<&Markdown> for MarkdownToc {
             let raw_fm = serde_yaml_ng::to_string(&frontmatter.as_map()).unwrap_or_default();
             toc.frontmatter_hash = xx_hash(&raw_fm);
 
-            // Normalized hash (canonical JSON for comparison)
-            let normalized_fm = serde_json::to_string(&frontmatter.as_map()).unwrap_or_default();
-            toc.frontmatter_hash_normalized = xx_hash(&normalized_fm);
+            // Normalized hash: canonical JSON ignores object key order at every
+            // depth; array element order stays significant.
+            let normalized_fm = serde_json::Value::Object(
+                frontmatter.as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            );
+            toc.frontmatter_hash_normalized = biscuit_hash::xx_hash_json(&normalized_fm);
         }
 
         // Extract elements
@@ -950,5 +953,44 @@ See [nonexistent](#nonexistent).
                 .iter()
                 .any(|title| title.contains("last_updated") || title.contains("update_policy"))
         );
+    }
+
+    fn normalized_frontmatter_hash(frontmatter: &str) -> u64 {
+        let md: Markdown = format!("---\n{frontmatter}---\n# Title\n").into();
+        MarkdownToc::from(&md).frontmatter_hash_normalized
+    }
+
+    #[test]
+    fn normalized_frontmatter_hash_ignores_key_order_at_every_depth() {
+        let authored = normalized_frontmatter_hash(
+            "title: T\nmeta:\n  owner:\n    name: N\n    team: X\n  tags: [a, b]\nitems:\n  - id: 1\n    label: one\n",
+        );
+        let pairs = [
+            ("top-level", "meta:\n  owner:\n    name: N\n    team: X\n  tags: [a, b]\nitems:\n  - id: 1\n    label: one\ntitle: T\n"),
+            ("nested", "title: T\nmeta:\n  tags: [a, b]\n  owner:\n    team: X\n    name: N\nitems:\n  - id: 1\n    label: one\n"),
+            ("array-contained", "title: T\nmeta:\n  owner:\n    name: N\n    team: X\n  tags: [a, b]\nitems:\n  - label: one\n    id: 1\n"),
+        ];
+        assert_ne!(authored, 0);
+        for (name, reordered) in pairs {
+            assert_eq!(normalized_frontmatter_hash(reordered), authored, "{name} key reorder");
+        }
+
+        let array_reordered = normalized_frontmatter_hash(
+            "title: T\nmeta:\n  owner:\n    name: N\n    team: X\n  tags: [b, a]\nitems:\n  - id: 1\n    label: one\n",
+        );
+        assert_ne!(array_reordered, authored, "array element order is significant");
+    }
+
+    #[test]
+    fn normalized_frontmatter_hash_matches_compact_json_for_sorted_frontmatter() {
+        let md: Markdown = "---\na: 1\nb:\n  x: true\n  y: [2, 1]\n---\nBody\n".into();
+        let toc = MarkdownToc::from(&md);
+        assert_eq!(toc.frontmatter_hash_normalized, xx_hash(r#"{"a":1,"b":{"x":true,"y":[2,1]}}"#));
+    }
+
+    #[test]
+    fn normalized_frontmatter_hash_is_zero_for_empty_frontmatter() {
+        let md: Markdown = "# Title\n".into();
+        assert_eq!(MarkdownToc::from(&md).frontmatter_hash_normalized, 0);
     }
 }
