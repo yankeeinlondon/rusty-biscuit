@@ -45,10 +45,11 @@ would materially reduce language-server CPU use or editor delays after
 `2026-10-22-dmls-watched-file-flood`. Build an optimization only if the
 remaining cost justifies its additional state and invalidation rules.
 
-The first deliverable is a short measurement record and a decision. This
-spec does not yet authorize a new graph representation. A conditional
-implementation phase must describe the chosen change before implementation
-starts. Success may mean retaining full rebuilds with no production change.
+The first deliverable is a short measurement record and a decision. Phase 1
+has run (see the measurement and decision record): the remaining cost is
+real, it comes from open-buffer edits rather than watched-file events, and
+[Phase 2](#phase-2-cheaper-rebuilds-for-content-edits) specifies the change.
+This spec does not authorize a new graph representation.
 
 ## Current behavior
 
@@ -172,9 +173,179 @@ estimate and do not claim it proves the CPU bound.
 
 ### Measurement and decision record
 
-Pending. Record the observed costs, chosen outcome, rationale, and any
-inconclusive figures here before defining an implementation phase. This
-review does not claim to have run the performance sample.
+Measured 2026-10-23. Everything below is measured unless marked as an
+estimate.
+
+**Setup.** Apple M4 Max (16 cores, 128 GiB), macOS 27.2, revision
+`b49658f73`, `cargo build --release -p dmls`. The only local change to
+dmls was a temporary seam, since reverted: `WorkspaceIndex::rebuild` took
+`#[track_caller]` to attribute each rebuild to its calling method, deferred
+callers inside a batch were attributed to the batch's one rebuild, and each
+rebuild, assembly stage, and finalize stage printed its wall time and its
+thread CPU time (`CLOCK_THREAD_CPUTIME_ID`) to stderr. A Python LSP client
+drove the binary over stdio on this repository and logged no document text.
+The client advertised dynamic watched-file registration. After startup
+settled, it ran a scripted editing sample:
+
+- it opened three documents and typed about 250 characters across them, at
+  six characters per second, with pauses;
+- it sent a hover and a completion request, and saved twice with matching
+  watched-file change events;
+- a listed Markdown file joined the list and later left it;
+- 50 unlisted, unreferenced creations under `target/` arrived in one
+  notification;
+- it closed one buffer.
+
+Server CPU was the process's `ps` CPU time across the sample.
+
+**Counts.** 5,901 listed Markdown files; 1–4 parsed documents (1–3 open,
+0 dependencies); 5,935–6,203 nodes; 30–426 edges. Startup published 2
+snapshots, which are excluded below.
+
+**Baseline, 99.3 s sample.**
+
+| Cause | Rebuilds | CPU median | CPU total |
+| --- | --- | --- | --- |
+| open-buffer edit (`set_document`) | 311 | 43.0 ms | 13.04 s |
+| context relink (`relink`) | 6 | 49.5 ms | 0.27 s |
+| lazy target parse (`ensure_parsed`) | 2 | 41.1 ms | 0.08 s |
+| listed join (batched `disk_changed`) | 1 | 43.6 ms | 0.04 s |
+| listed leave (batched `disk_deleted`) | 1 | 44.3 ms | 0.04 s |
+| buffer close (`close_buffer`) | 1 | 31.5 ms | 0.03 s |
+| **all** | **322** | **42 ms** | **13.51 s** |
+
+Rebuilding used 13.5 CPU-seconds in 99.3 s, **13.6% of one core**. The bound
+is 1%. Rebuilding was 65% of the server's 20.6 CPU-seconds. Median wall time
+per rebuild was 52 ms, just over the 50 ms bound. Wall-time outliers (up to
+545 ms) had normal CPU (≈45 ms), so the rebuild thread was waiting, not
+working. The 50 build-output creations caused no rebuild.
+
+**Where one rebuild spends its time** (a second 97.5 s baseline run, CPU and
+wall medians per rebuild):
+
+| Stage | Median |
+| --- | --- |
+| wiki universe construction | 13.9 ms CPU |
+| per-document canonical wiki path, recomputed during assembly | 10.9 ms |
+| the rest of the per-document assembly loop | 6.1 ms |
+| reference resolution | 1.5 ms |
+| portability collisions | 9.4 ms |
+| frontmatter-key lookup | 0.8 ms |
+| reverse lookups | < 0.1 ms |
+
+About 34 of the 42 ms depend only on the set of document paths and the wiki
+roots, which an edit to an open buffer never changes. The cost scales with
+the 5,901 listed files, almost all of them unparsed, not with the edited
+text.
+
+**Prototype of Phase 2, step 1, 96.8 s sample.** A temporary prototype,
+since reverted, cached the step 1 state. Median rebuild CPU fell from
+41.7 ms to **12.35 ms** (p90 14.7 ms), and median wall time to 14.3 ms.
+Rebuild CPU totaled 4.23 s, **4.4% of one core**. Server CPU fell from
+20.7 s to 12.6 s. Comparing the cached universe's inputs on each rebuild
+cost 0.3 ms. The remaining time is per-document bookkeeping for unparsed
+documents (7.6 ms), reference resolution (1.7 ms), key and portability
+grouping (1.7 ms), and reverse lookups. With the prototype applied to
+`b49658f73` and the timing seam removed, `cargo nextest run -p dmls` passed
+1,269 tests (6 skipped). The prototype did not yet hold dependencies in the
+cached universe; the sample had none.
+
+**Decision.** Both bounds are missed. The dominant cause is open-buffer
+edits: 97% of rebuilds and 97% of rebuild CPU. Membership changes
+contributed two rebuilds and awaited creations none, so neither is
+optimized. Under the decision rule, a cheaper full rebuild comes first. Step
+1 of Phase 2 is that change, and its prototype meets the 50 ms bound. It
+still misses the 1% bound, so step 2 reuses the remaining path-derived
+document state on content-only rebuilds. Step 2 is the incremental work for
+the dominant cause, and it keeps full assembly of every parsed document's
+nodes and edges.
+
+## Phase 2: cheaper rebuilds for content edits
+
+Phase 2 addresses the measured cause: one full rebuild per open-buffer edit,
+dominated by path-derived work over every listed document. Full rebuilds
+remain the only way a snapshot is published, at most one per notification.
+Document IDs stay dense and path-ordered, and a content edit cannot change
+them, because the set of document paths is unchanged. Every other trigger,
+including listing changes, wiki-root changes, relinks, and awaited
+creations, keeps today's behavior apart from step 1's caching.
+
+### Step 1: compute path-derived wiki state once per document set
+
+- **Cache the live index's wiki universe.** `WorkspaceIndex` keeps the last
+  `Arc<WikiUniverse>` with the inputs it was built from: the sorted candidate
+  paths (listed files plus non-dependency parsed documents), the dependency
+  paths, and the wiki roots. A rebuild whose inputs compare equal reuses the
+  cached universe. Comparing inputs costs 0.3 ms on this repository and
+  cannot miss an invalidation. Per-method dirty flags are rejected because a
+  missed flag would silently serve stale wiki answers.
+- **Hold dependencies in the cached universe.** The live index appends each
+  dependency path to its universe as an unmatchable slot. Today assembly
+  pushes those slots itself (`Arc::make_mut`), which would copy a shared,
+  cached universe on every rebuild that has a dependency. Wiki matching is
+  unchanged because an unmatchable slot never matches.
+- **Store each slot's portability key.** `WikiUniverse` computes a slot's
+  portability key once, when the slot is added. `portability_collisions`
+  groups graph documents by their slots' keys and still considers only the
+  graph's non-dependency documents, so a request graph over a larger
+  universe reports the same collisions as today.
+- **Take canonical paths from the universe.** Assembly takes a
+  non-dependency document's canonical path and workspace ID from its
+  universe slot instead of recomputing them. A universe slot is built with
+  the same wiki roots as the assembly, so the values are identical. A
+  dependency's record keeps its real canonical path, computed as today.
+  A document missing from the supplied universe is computed and pushed as
+  today. Request graphs keep that path.
+
+### Step 2: reuse the document table on content-only rebuilds
+
+When the graph's sorted document paths, dependency set, listing state, and
+universe (the same `Arc`) all equal the previous build's, the new snapshot
+shares the previous snapshot's path-derived document table instead of
+rebuilding it. That table holds:
+
+- each document's path, canonical path, workspace ID, dependency flag, and
+  wiki slot;
+- the path-to-document map and the slot-to-document map;
+- the frontmatter-key lookup and the portability collisions.
+
+The table moves behind an `Arc` so that sharing it costs a reference-count
+increment. Per-snapshot document state (content hash and parsed flag) is
+stored apart from the table, and readers keep using the same accessors.
+When any input differs, the table is rebuilt from scratch.
+
+To make document roots independent of parsed content, roots are numbered
+first: document `d`'s root is `NodeId(d)`, and content nodes follow in
+document order. Node IDs stay dense and snapshot-local, and per-document
+node order is unchanged, so readers that filter nodes by document see the
+same sequence. This is a numbering change inside one snapshot, not the
+stable-identity representation the ruling below excludes. Heading facts are
+kept only for parsed documents, and an unparsed document reads as having
+none.
+
+Parsed documents' nodes and edges are still assembled and resolved in full
+on every rebuild. No edge, wiki resolution, or awaited path is carried from
+one snapshot to the next.
+
+### Acceptance
+
+- **Equivalence.** For content edits, buffer opens and closes, listed joins
+  and leaves, dependency transitions, and wiki-root changes, the snapshot
+  produced through the caches equals a fresh full build over the same
+  inputs. Compare paths, spans, resolutions, wiki outcomes, portability
+  collisions, awaited paths, and provider answers, as Verification and
+  delivery requires.
+- **Work counts.** Deterministic tests count operations, not elapsed time:
+  - a content-only edit computes no `WikiDoc::for_path` and no portability
+    key for an unchanged document, and builds no new document table;
+  - a listed join or leave, a wiki-root change, and a dependency transition
+    each rebuild the universe and the table exactly once.
+- **Re-measurement.** Re-run the Phase 1 sample (same host class, release
+  build, same scripted session) and add the results to the measurement
+  record. This is a record, not a gate: the bounds remain decision aids.
+  Phase 2 ends with step 2 whatever the figure. If editing still exceeds
+  the CPU bound, any further reduction, such as coalescing keystrokes or
+  changing the representation, is new work with its own spec.
 
 ## Conditional implementation requirements
 
