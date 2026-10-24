@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 6
+phase: 8
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -188,6 +188,178 @@ skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/rendering.md
 - .claude/skills/darkmatter/terminal.md
 - .claude/skills/biscuit-visualized/diagram-components.md
+source_files_during_phase_6:
+- biscuit-visualized/src/src/components/mermaid.rs
+docs_updated_during_phase_6:
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-visualized/docs/merman.md
+- biscuit-visualized/README.md
+- renderable/docs/tree-rendering.md
+- biscuit-terminal/docs/render-tree.md
+- darkmatter/docs/cli/render.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/cli/SKILL.md
+- .claude/skills/biscuit-terminal/SKILL.md
+- .claude/skills/biscuit-terminal/cli.md
+- .claude/skills/biscuit-terminal/diagrams.md
+- .claude/skills/darkmatter/cli.md
+source_files_during_phase_7:
+- biscuit-visualized/src/src/tests/component_fallback_tests.rs
+docs_updated_during_phase_7:
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-terminal/docs/cli.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/biscuit-visualized/mermaid-rendering.md
+source_code:
+- renderable/src/tree/mod.rs
+- biscuit-terminal/lib/src/render_tree/options.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- biscuit-terminal/lib/src/render_tree/mod.rs
+- biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+- biscuit-visualized/src/src/components/render_hook.rs
+- biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+- biscuit-visualized/src/Cargo.toml
+- biscuit-visualized/src/src/mermaid/text.rs
+- biscuit-visualized/src/src/mermaid/mod.rs
+- biscuit-visualized/src/src/mermaid/render.rs
+- biscuit-visualized/src/src/fonts/chain.rs
+- biscuit-visualized/src/src/cache/file_cache.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/text_tests.rs
+- biscuit-visualized/src/src/components/fallback_policy.rs
+- biscuit-visualized/src/src/components/mermaid.rs
+- biscuit-visualized/src/src/components/mod.rs
+- biscuit-visualized/src/src/tests/component_fallback_tests.rs
+- biscuit-visualized/src/tests/l1/display_size.rs
+- biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+- biscuit-terminal/lib/src/components/terminal_image/tests.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- Cargo.lock
+- biscuit-terminal/cli/Cargo.toml
+- biscuit-terminal/cli/src/args.rs
+- biscuit-terminal/cli/src/commands/block.rs
+- biscuit-terminal/cli/src/commands/erd.rs
+- biscuit-terminal/cli/src/commands/flowchart.rs
+- biscuit-terminal/cli/src/commands/git_graph.rs
+- biscuit-terminal/cli/src/commands/mermaid.rs
+- biscuit-terminal/cli/src/commands/pie.rs
+- biscuit-terminal/cli/src/commands/quadrant.rs
+- biscuit-terminal/cli/src/commands/quote.rs
+- biscuit-terminal/cli/src/commands/shared.rs
+- biscuit-terminal/cli/src/commands/state_diagram.rs
+- biscuit-terminal/cli/src/commands/timeline.rs
+- biscuit-terminal/cli/src/commands/xy_chart.rs
+- biscuit-terminal/cli/tests/l1/integration_test.rs
+- biscuit-terminal/cli/tests/l1/main.rs
+- biscuit-terminal/cli/tests/l1/mermaid_features.rs
+- biscuit-terminal/cli/tests/level2/diagrams.rs
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/enums.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/lib/assets/syntaxes/mermaid/Mermaid.sublime-syntax
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/highlighting/grammars.rs
+- darkmatter/lib/src/markdown/highlighting/mod.rs
+- darkmatter/lib/src/markdown/language_grammar.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/code_block.rs
+- darkmatter/lib/src/markdown/output/terminal.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+- darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+- darkmatter/lib/tests/l1/style_features_baseline.rs
+- darkmatter/lib/tests/l1/style_features_phase5.rs
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_valid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_fileref/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+- darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+documentation:
+- renderable/docs/tree-rendering.md
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-terminal/README.md
+- biscuit-terminal/lib/README.md
+- biscuit-terminal/docs/render-tree.md
+- .claude/skills/biscuit-terminal/diagrams.md
+- .claude/skills/biscuit-visualized/diagram-components.md
+- .claude/skills/renderable/tree.md
+- biscuit-visualized/docs/dependencies.md
+- docs/dependencies.md
+- .claude/skills/biscuit-visualized/SKILL.md
+- .claude/skills/biscuit-visualized/mermaid-rendering.md
+- biscuit-terminal/cli/README.md
+- biscuit-terminal/docs/dependencies.md
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/topics/code-blocks.md
+- biscuit-terminal/docs/cli.md
+- darkmatter/lib/assets/syntaxes/mermaid/SOURCE.md
+- darkmatter/lib/assets/syntaxes/mermaid/LICENSE
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/darkmatter/terminal.md
+- biscuit-visualized/docs/merman.md
+- biscuit-visualized/README.md
+- .claude/skills/cli/SKILL.md
+- .claude/skills/biscuit-terminal/SKILL.md
+- .claude/skills/biscuit-terminal/cli.md
+- .claude/skills/darkmatter/cli.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Merman Text Fallback
@@ -629,20 +801,20 @@ Mermaid diagram for the selection flow and the automatic-mode decision.
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **6.1 biscuit-visualized docs.**
+- [x] **6.1 biscuit-visualized docs.**
   `docs/components/mermaid_diagram.md`: eligibility rule, the two example
   projections, the partial note, policy and `MERMAID_FALLBACK`, width behavior,
   Unicode behavior, error behavior, each with an example; README overview if
   public behavior changed; `docs/dependencies.md` already updated in 3.1.
-- [ ] **6.2 renderable and biscuit-terminal docs.**
+- [x] **6.2 renderable and biscuit-terminal docs.**
   `renderable/docs/tree-rendering.md` (automatic mode, graphics ceiling,
   declined outcome); render-tree code-renderer pages in both areas;
   new `biscuit-terminal/docs/cli.md` (`--feature` flags, darkmatter-backed
   highlighting) linked from bt's README, which stays an overview.
-- [ ] **6.3 darkmatter docs.**
+- [x] **6.3 darkmatter docs.**
   `darkmatter/docs/cli/render.md`: `--feature`, automatic mode behind
   `--mermaid`, `no-mermaid-rendering`, Mermaid highlighting; README overview.
-- [ ] **6.4 Skills.**
+- [x] **6.4 Skills.**
   `.claude/skills/cli/`: the D4 convention. Update the `biscuit-visualized`,
   `biscuit-terminal`, `renderable` and `darkmatter` agent skills for changed
   architecture (fallbacks as code nodes, hook outcome, policy, `bt` → darkmatter
@@ -659,18 +831,18 @@ match the code.
 
 ### Wave 1 (parallel)
 
-- [ ] **7.1 Per-area gates.** `just test` and `just lint` in
+- [x] **7.1 Per-area gates.** `just test` and `just lint` in
   `biscuit-visualized`, `biscuit-terminal`, `renderable`, `darkmatter`; run
   `just test-l2` only where those areas' existing L2 suites touch the changed
   hook (and never with a window taking focus).
-- [ ] **7.2 Acceptance sweep.** Walk AC-F1 … AC-F17 against the passing tests
+- [x] **7.2 Acceptance sweep.** Walk AC-F1 … AC-F17 against the passing tests
   and record the mapping in the implementation log; any acceptance row without
   an automated check is called out.
-- [ ] **7.3 Smell grep.** Grep the new code for a hand-kept family-name list in
+- [x] **7.3 Smell grep.** Grep the new code for a hand-kept family-name list in
   the eligibility path, `unwrap_or_default()`/`.ok()` on load-bearing parses
   (capability lookup, env value, `--feature` fold), and `#[serde(default)]`
   on policy fields.
-- [ ] **7.4 Cross-OS check.** The CLI, env-var and path-free logic compiles
+- [x] **7.4 Cross-OS check.** The CLI, env-var and path-free logic compiles
   everywhere; confirm no `#[cfg(unix)]`-only code was added. Windows/WSL2 are
   proved by the nightly per repository CI policy; run `just ci-local --plan`
   before pushing and read the executing-cell count against the duration band.

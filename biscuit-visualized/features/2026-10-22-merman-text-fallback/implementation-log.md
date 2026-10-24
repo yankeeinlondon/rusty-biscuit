@@ -63,14 +63,8 @@ decisions_for_review:
       `bt` uses darkmatter's deprecated `TerminalCodeRenderer` (the raw code-renderer hook) once, with a local `#[allow(deprecated)]`, as its deprecation note permits; it is built the same way darkmatter's public `CodeBlock` builds it. The component's `text_columns` became public so `bt` can lay the nodes out at exactly the component's width. Alternatives: a non-deprecated public constructor in darkmatter, or a component method that takes a code renderer (which would make `text_columns` unnecessary). `bt`'s highlighted blocks have no language header row, unlike `md`'s `CodeBlock`, because the component's code nodes ask for none.
     - |-
       Darkmatter's full test run failed on 14 tests that store JSON output (41 snapshots and 8 expected-output files for schema conversion and `md schema validate --format json`). None is in code this work touched. The stored files had alphabetically sorted keys, while darkmatter now deliberately keeps keys in insertion order (made a contract on 2026-10-23, and already forced on by Merman before that). I re-recorded them after checking that every new file parses to exactly the same JSON value as the old one, so only key order changed. Alternative: treat the order change as a regression of `md schema validate --format json` (whose test is named "byte identical") and make that output sort its keys again. That would mean reverting these 8 fixtures and adding sorting in the schema output path.
-message_to_agent: |-
-    Phase 5 landed darkmatter (vendored Mermaid syntax in its own syntax set, `md --mermaid` = automatic mode, `--feature` with the four names) and `bt` (`--feature` on all nine Mermaid subcommands, darkmatter highlighting); read "## Phase 5" in this log.
-
-    For Phase 6 (docs and skills):
-    (1) Phase 5 already wrote or updated: `biscuit-terminal/docs/cli.md` (new; `bt` reference incl. `--feature`, fallback flow, highlighting), `darkmatter/docs/cli/render.md`, `darkmatter/docs/rendering/mermaid.md`, `darkmatter/docs/topics/code-blocks.md`, both `dependencies.md` files, `darkmatter/cli/README.md`, `biscuit-terminal/cli/README.md`, `biscuit-terminal/README.md` (links `docs/cli.md`), `biscuit-visualized/docs/components/mermaid_diagram.md`, and `.claude/skills/darkmatter/{rendering,terminal}.md`. Review them against the spec's Documentation list rather than rewriting. The `cli` skill (D4 convention) and the `biscuit-terminal` skill (bt now depends on darkmatter; highlighting) are not yet updated.
-    (2) bt's Mermaid subcommands are `flowchart`, `state-diagram`, `erd`, `pie-chart`, `quadrant`, `timeline`, `bar-chart`, `line-chart`, `git-graph` (no `bt mermaid`/`xy-chart`; the plan's names are wrong).
-    (3) Highlighting a Mermaid block in darkmatter must use `CodeHighlighter::syntax_set_for(grammar)`; `syntax_set()` alone resolves Mermaid as plain text.
-    (4) For Phase 7: `bt bar-chart 1 2 3` / `bt line-chart 1 2 3` show source on a no-image terminal because Merman's xychart text target needs an explicit `y-axis a --> b` range and bt's generated source has none (probed: adding `y-axis 0 --> 5` makes it draw). A drawn xychart also starts with a raw `xDomain: band categories=[bytes=1="a", ...]` line from Merman that looks like a debug artifact. Neither is promised or documented; decide whether bt should emit a y range and whether the xDomain line needs reporting upstream.
+    - |-
+      `bt bar-chart` and `bt line-chart` keep showing their source on a terminal without images; `bt` does not add a y-axis range to make them draw as text. Merman draws an XY chart as text only when its y-axis states a range (`y-axis 0 --> 5`), and the source `bt` generates never has one. Adding a range would also change the image these commands draw (Mermaid picks the range itself today), and a drawn XY chart starts with a raw `xDomain: band categories=[bytes=1="a", ...]` line from Merman that reads like a debug artifact. So I documented the behavior in the component page and `bt`'s CLI page, and added a test (`an_xychart_without_a_y_range_shows_the_source`) that fails if a Merman update changes it. The `xDomain` line belongs in a report to the Merman fork; I filed nothing (no external actions from this session). Alternative: have `bt` write `y-axis <min> --> <max>` from its data so bar and line charts draw as text. That changes their image output and shows the `xDomain` line, and would need `render_xy_chart`, the new test's expectation, and both docs changed.
 source_files_during_phase_2:
     - renderable/src/tree/mod.rs
     - biscuit-terminal/lib/src/render_tree/options.rs
@@ -244,6 +238,178 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/rendering.md
     - .claude/skills/darkmatter/terminal.md
     - .claude/skills/biscuit-visualized/diagram-components.md
+source_files_during_phase_6:
+    - biscuit-visualized/src/src/components/mermaid.rs
+docs_updated_during_phase_6:
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/README.md
+    - renderable/docs/tree-rendering.md
+    - biscuit-terminal/docs/render-tree.md
+    - darkmatter/docs/cli/render.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/cli/SKILL.md
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/biscuit-terminal/cli.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - .claude/skills/darkmatter/cli.md
+source_files_during_phase_7:
+    - biscuit-visualized/src/src/tests/component_fallback_tests.rs
+docs_updated_during_phase_7:
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/cli.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+source_code:
+    - renderable/src/tree/mod.rs
+    - biscuit-terminal/lib/src/render_tree/options.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/render_tree/mod.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+    - biscuit-visualized/src/src/components/render_hook.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/text.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/text_tests.rs
+    - biscuit-visualized/src/src/components/fallback_policy.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - biscuit-visualized/src/src/components/mod.rs
+    - biscuit-visualized/src/src/tests/component_fallback_tests.rs
+    - biscuit-visualized/src/tests/l1/display_size.rs
+    - biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+    - biscuit-terminal/lib/src/components/terminal_image/tests.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - Cargo.lock
+    - biscuit-terminal/cli/Cargo.toml
+    - biscuit-terminal/cli/src/args.rs
+    - biscuit-terminal/cli/src/commands/block.rs
+    - biscuit-terminal/cli/src/commands/erd.rs
+    - biscuit-terminal/cli/src/commands/flowchart.rs
+    - biscuit-terminal/cli/src/commands/git_graph.rs
+    - biscuit-terminal/cli/src/commands/mermaid.rs
+    - biscuit-terminal/cli/src/commands/pie.rs
+    - biscuit-terminal/cli/src/commands/quadrant.rs
+    - biscuit-terminal/cli/src/commands/quote.rs
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - biscuit-terminal/cli/src/commands/state_diagram.rs
+    - biscuit-terminal/cli/src/commands/timeline.rs
+    - biscuit-terminal/cli/src/commands/xy_chart.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/cli/tests/l1/main.rs
+    - biscuit-terminal/cli/tests/l1/mermaid_features.rs
+    - biscuit-terminal/cli/tests/level2/diagrams.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/enums.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/tests/l1/feature_flag.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/mermaid_features.rs
+    - darkmatter/lib/assets/syntaxes/mermaid/Mermaid.sublime-syntax
+    - darkmatter/lib/src/layout/page.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/highlighting/grammars.rs
+    - darkmatter/lib/src/markdown/highlighting/mod.rs
+    - darkmatter/lib/src/markdown/language_grammar.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/output/code_block.rs
+    - darkmatter/lib/src/markdown/output/terminal.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+    - darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+    - darkmatter/lib/tests/l1/style_features_baseline.rs
+    - darkmatter/lib/tests/l1/style_features_phase5.rs
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_valid/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_fileref/expected.json
+    - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+    - darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+documentation:
+    - renderable/docs/tree-rendering.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/lib/README.md
+    - biscuit-terminal/docs/render-tree.md
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/renderable/tree.md
+    - biscuit-visualized/docs/dependencies.md
+    - docs/dependencies.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - biscuit-terminal/cli/README.md
+    - biscuit-terminal/docs/dependencies.md
+    - darkmatter/cli/README.md
+    - darkmatter/docs/cli/render.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/rendering/mermaid.md
+    - darkmatter/docs/topics/code-blocks.md
+    - biscuit-terminal/docs/cli.md
+    - darkmatter/lib/assets/syntaxes/mermaid/SOURCE.md
+    - darkmatter/lib/assets/syntaxes/mermaid/LICENSE
+    - .claude/skills/darkmatter/rendering.md
+    - .claude/skills/darkmatter/terminal.md
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/README.md
+    - .claude/skills/cli/SKILL.md
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/biscuit-terminal/cli.md
+    - .claude/skills/darkmatter/cli.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-22-merman-text-fallback (7 phases)
@@ -1171,3 +1337,284 @@ empty element, empty value) are each tested once per CLI.
 - `bt` subagent `cargo nextest` (targeted): 123 passed; darkmatter subagent
   targeted runs: 771 + 532 (library), 135 + 217 (CLI, guards, help,
   completions) passed.
+
+## Phase 6
+
+Documentation and skills. Done by the orchestrator alone (no subagents): the
+work was reviewing Phase 5's docs against the spec's Documentation list and
+filling the gaps, which needed one consistent reading of the code.
+
+### Task 6.1: biscuit-visualized docs
+
+- `docs/components/mermaid_diagram.md` still described the pre-fallback
+  component (image or source only). Rewrote the affected parts and added
+  "Without images: the text fallback" with: the selection flow (Mermaid
+  diagram), which diagrams are drawn as text (Merman's metadata, the two
+  projections with a drawing and a mindmap report, the seven eligible
+  families, `text_eligibility` example), the partial note (text, styling,
+  wrapping, `PARTIAL_NOTE_ID`/`partial_note()`), the fallback policy and
+  `MERMAID_FALLBACK` (table, precedence, Rust and shell examples,
+  `MermaidFallbackFeature`), width (`text_columns`,
+  `TEXT_BLOCK_CHROME_COLUMNS`, `auto` layout families, too-narrow example),
+  drawing characters (Unicode vs ASCII, labels kept, real ASCII sample with
+  `Café`), errors on the text route, and laying the nodes out with your own
+  code renderer (`present` + `text_columns`). Key API table gained
+  `with_fallback_policy`, `present`, `text_columns`; `try_render` is marked
+  image-only. The stale "Terminal check" section is gone. The error-handling
+  flowchart and the render-tree flowchart now show the text route,
+  `Automatic` mode and the declined outcome.
+- All sample output was captured from the real binaries (`target/debug/bt
+  --plain …`, `md --mermaid` under a pseudo-terminal with
+  `BISCUIT_GRAPHICS=none`), not copied from the spec.
+- `docs/merman.md`: three stale spots: "only its SVG pipeline is compiled
+  in" (now SVG and the `ascii` text target), the source-fallback section
+  (now points to the text fallback), and "Possible later work: a text-art
+  fallback" (removed; the section was then empty and its heading went too).
+  The rev-bump checklist now names the text-eligibility snapshot.
+- `README.md`: the overview sentence mentions the text fallback; the `clap`
+  feature row names `MermaidFallbackFeature`.
+- `docs/dependencies.md` (Merman `ascii`) was already correct (Phase 3).
+
+### Task 6.2: renderable and biscuit-terminal docs
+
+- `renderable/docs/tree-rendering.md` already covered automatic mode, the
+  graphics ceiling and the declined outcome (Phase 2). Drift fixed: its
+  example built the hook as `TerminalDiagramRenderer` (a unit struct before
+  Phase 4); now `TerminalDiagramRenderer::default()`. It now says `md` and
+  `bt` both install darkmatter's code renderer.
+- `biscuit-terminal/docs/render-tree.md`: the sample hook's caption said it
+  "shows the source unless images are allowed", the opposite of what the code
+  does (declines at `Rich`, placeholder below); corrected. Names `bt` beside
+  `md` as installing darkmatter's code renderer.
+- `biscuit-terminal/docs/cli.md` (Phase 5) reviewed against the code: the
+  nine commands, flow, `--feature` rules, `MERMAID_FALLBACK`, highlighting
+  (fallback, `quote`; `block` also installs it) all match. No change. Root and
+  area `dependencies.md` already record `bt` → darkmatter.
+
+### Task 6.3: darkmatter docs
+
+- `darkmatter/docs/cli/render.md` covers `--feature`, automatic mode behind
+  `--mermaid`, `no-mermaid-rendering` and Mermaid highlighting. Drift fixed:
+  the `md --mermaid` sample showed 3-row boxes; real output has 5 rows (blank
+  padding rows) and, without color, `txt` fences. Replaced with the captured
+  output plus a sentence on the colored panel. `TERMINAL_IMAGES=0` → code was
+  checked in `entrypoints.rs` (`Never` → `GraphicsMode::Off`).
+- `darkmatter/docs/rendering/mermaid.md`, `topics/code-blocks.md`,
+  `darkmatter/cli/README.md`: reviewed, current. `darkmatter/README.md` does
+  not discuss Mermaid; left as an overview.
+
+### Task 6.4: skills
+
+- `cli` skill: the `--feature` convention already existed (from the
+  embedded-font feature). Added what this work established: shared names live
+  in the owning library behind `clap` (`MermaidFallbackFeature` +
+  `from_features`), how `bt` (flattened `MermaidFeatureArgs`) and `md`
+  (`Feature::mermaid_fallback()`) consume them, flag-beats-env by lowering to
+  explicit settings, accepted-but-inert features, and where each CLI documents
+  its names.
+- `biscuit-terminal` skill: `diagrams.md` and `cli.md` said `bt` never prints
+  a Mermaid fallback (stale since Phase 5); replaced with the no-image route,
+  exit codes, `--feature`, `MERMAID_FALLBACK`, and a "Code highlighting in
+  `bt`" paragraph (CLI-only darkmatter dependency, the one deprecated-API
+  use, `cargo tree` invariant). `SKILL.md` principle 6 now says the library
+  knows nothing about highlighting either.
+- `darkmatter` skill: `cli.md` gained the `--feature` lowering
+  (`apply_features`, `terminal_page`, the four names, `--mermaid` →
+  `Automatic`). `terminal.md`/`rendering.md` were already current (Phase 5).
+- `renderable` skill (`tree.md` "Terminal Mermaid modes") and
+  `biscuit-visualized` skill (`SKILL.md`, `diagram-components.md`) were
+  already current (Phases 2–4); no change.
+
+### Validation checkpoint 6
+
+- Feature/fix names: `git diff --name-only` (excluding the feature
+  directory) grepped for `YYYY-MM-DD-name`, `merman-text-fallback` and
+  `spec`: no new hit. Pre-existing hits outside this phase's edits
+  (`renderable/docs/tree-rendering.md:1113`, `renderable/docs/layout-and-style.md`,
+  `renderable/docs/components.md`, `.claude/skills/biscuit-terminal/SKILL.md:84`)
+  were left alone (Rule 3); they predate this feature.
+- Every required topic of the component page has an example (listed under
+  6.1).
+- Diagrams: the four flowcharts in `mermaid_diagram.md` (two new, one
+  rewritten, one existing) were each rendered through the image route
+  (`BISCUIT_GRAPHICS=iterm2 bt flowchart --vertical …` under a
+  pseudo-terminal): exit 0 with an iTerm2 image each; a control with a broken
+  source exits 1 with a parse error. (They are too wide for a text drawing,
+  so the text route could not tell a parse error from a fit failure.)
+- Comment drift: one stale inline comment, `components/mermaid.rs`
+  `try_render` ("image escapes or fenced code fallback"; `try_render` is
+  image-only since Phase 4), corrected. The other new symbols' `///` docs
+  (`present`, `text_columns`, `text_nodes`, `MermaidPresentation`,
+  `partial_note`, `MermaidFallbackPolicy`, `render_text`, `TerminalRenderable::render`)
+  match the code.
+
+### Requirement-to-test mapping
+
+No behavior changed in this phase (one comment line, docs, skills), so no
+test was added. The docs were checked against the existing tests' behavior
+and against the real binaries (above). The Input Robustness Matrix does not
+apply (no reader changed).
+
+### Gates
+
+- Skip check (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [biscuit-visualized, test-toolkit, darkmatter]`,
+  `change_class: package`. Gates run.
+- biscuit-visualized: `just lint` clean. `just test` first run: 874 passed,
+  1 failed (`tests::mermaid_tests::a_gitgraph_geometry_request_over_its_time_budget_fails_with_a_warning`),
+  252 not run (fail-fast), with the host load average about 87 from other
+  sessions. The test passed alone (0.5 s): **load-sensitive**, unrelated to
+  this phase (a time-budget test; the only code edit is a comment). Full
+  rerun: **1127 passed, 4 skipped**. `just check-tier-coverage
+  biscuit-visualized`: 0 stranded.
+- darkmatter (scheduled because its tests read `darkmatter/docs` and
+  `.claude/skills/darkmatter`): the doc- and skill-scanning L1 modules
+  (`schema_roots`, `current_root_*`, `schema_phase_validation`,
+  `meta_schema_repo_schemas`, `shipped_schema_corpus`,
+  `content_policy_disk_baseline`): 69 passed.
+  `shipped_schema_corpus::loadable_shipped_schemas_resolve_and_lower` took
+  9.2 s (pre-existing slowness under load; it reads schemas, not the docs
+  touched here).
+- test-toolkit (scheduled for its lint companion over skills/docs):
+  `ci_workflow_contracts::no_reader_facing_document_or_recipe_names_a_retired_ci_entity`
+  passed.
+- Dependents of biscuit-visualized (biscuit-terminal-cli, darkmatter-cli,
+  sniff-cli, worktree-cli): not rerun; the only source change is a comment
+  inside a function body, so no dependent's behavior or compilation can
+  change.
+- No cross-OS check: no code behavior changed.
+
+## Phase 7
+
+Final verification. Done by the orchestrator alone (no subagents), with the
+gates run one area at a time so no two suites competed for the host (load
+average about 40 at the start, from other sessions).
+
+### Open item from Phase 6: `bt bar-chart` / `bt line-chart` without images
+
+- Reproduced with `md --mermaid` under a pseudo-terminal with
+  `BISCUIT_GRAPHICS=none`: an `xychart-beta` with `y-axis 0 --> 5` draws as
+  text, and the drawing's first row is Merman's own
+  `xDomain: band categories=[bytes=1="a", bytes=1="b", bytes=1="c"]` line;
+  without a y range Merman reports no drawing and the source shows.
+- Decision (see `decisions_for_review`): `bt` stays unchanged and keeps
+  showing the source for these two commands. Writing a y range would change
+  their image output and expose the `xDomain` line. The `xDomain` line is a
+  Merman (fork) output issue; nothing was filed from this session.
+- Pinned by a new test, `component_fallback_tests::an_xychart_without_a_y_range_shows_the_source`
+  (F2, L1). It takes the exact source `bt bar-chart --json 1 2 3` prints
+  (source route), and as the control the same source plus `y-axis 0 --> 5`
+  (text route, `txt` code node plus note, drawing contains `5 ┤`).
+- Docs: `biscuit-visualized/docs/components/mermaid_diagram.md` (the
+  eligible-families paragraph gives the y-range rule and the `xDomain` line)
+  and `biscuit-terminal/docs/cli.md` (bar and line charts show their
+  source, and why).
+
+### Task 7.1: per-area gates
+
+Run serially, after all edits:
+
+| Area | `just lint` | `just test` | `check-tier-coverage` |
+| --- | --- | --- | --- |
+| biscuit-visualized | clean | 1127 passed, 4 skipped; after the new test 1128 passed, 4 skipped | 0 stranded |
+| biscuit-terminal (lib + `bt`) | clean | 3908 passed, 55 skipped | 0 stranded |
+| renderable | clean | 684 passed | 0 stranded |
+| darkmatter (lib + `md` + dmls) | clean (also zed-dmls wasm32) | 10708 passed (29 flagged slow by nextest, none failed), 10 skipped | 0 stranded |
+
+- L2: the only existing L2 suite on the changed hook path is `bt`'s
+  `tests/level2/diagrams.rs`. `just test-l2 level2_diagram` in
+  biscuit-terminal: 3 passed (`level2_diagram_fallback_when_no_image_protocol`,
+  `level2_diagram_width_kitty_apc_columns`,
+  `level2_diagram_width_respects_pane_columns`), tmux backend, no window
+  focus. biscuit-visualized's and renderable's `test-l2` are "not applicable"
+  stubs.
+- The load-sensitive gitGraph time-budget test from Phase 6 passed in every
+  run this phase.
+- test-toolkit (scheduled by the scope calculator for docs):
+  `ci_workflow_contracts::no_reader_facing_document_or_recipe_names_a_retired_ci_entity`
+  passed.
+- Dependents of biscuit-visualized outside these areas (sniff-cli,
+  worktree-cli): not rerun. This phase's only code change is a test in
+  biscuit-visualized's own in-crate test module, which no dependent compiles.
+
+### Task 7.2: acceptance sweep (AC-F1 … AC-F17)
+
+Every row has an automated check, except the docs-review half of AC-F12
+(MIT notice) and AC-F16 (docs review), which are reviews by nature. Every test
+named below was confirmed to exist by name (`grep "fn <name>"`) and passed in
+the 7.1 runs.
+
+| AC | Automated check |
+| --- | --- |
+| AC-F1 | `component_fallback_tests::a_flowchart_is_drawn_as_text_and_mindmap_and_pie_show_source`; `text_tests::ineligible_families_show_source_without_a_request` |
+| AC-F2 | `text_tests::dense_class_diagram_at_a_narrow_width_shows_source`, `text_tests::structured_text_result_of_a_diagrammatic_family_shows_source` (asserts the reported projection). In practice an over-wide class diagram is reported as overflow, not `StructuredText` (see `decisions_for_review`) |
+| AC-F3 | `text_tests::eligibility_table_at_the_pinned_rev` (snapshot), `text_tests::seven_families_are_eligible_at_the_pinned_rev`; code review: task 7.3 below |
+| AC-F4 | `component_fallback_tests::the_text_fallback_renders_exactly_with_its_note` (exact plain text, bold/dim/italic spans, node kinds and languages), `::a_hidden_note_leaves_only_the_drawing` |
+| AC-F5 | library: `component_fallback_tests::an_explicit_text_fallback_never_reads_the_environment`, `::an_unset_text_fallback_reads_mermaid_fallback`, `::mermaid_fallback_never_changes_the_partial_note`, `features::a_flag_beats_the_variable`; CLI: `bt` `mermaid_features.rs::{without_a_flag_or_the_variable_the_diagram_is_drawn_as_text, without_a_flag_mermaid_fallback_code_block_shows_the_source, a_flag_shows_the_source_with_the_variable_unset}`, `md` `mermaid_features.rs::{mermaid_render_without_a_flag_follows_the_fallback_env, mermaid_no_fallbacks_flag_beats_the_fallback_env}`. The plan's `bt mermaid` does not exist; `bt flowchart` stands in |
+| AC-F6 | `component_fallback_tests::no_partial_text_shows_the_source_for_every_eligible_family` (all seven families, zero text requests, control) |
+| AC-F7 | `bt`: `comma_separated_features_equal_repeated_flags`, `feature_names_match_case_insensitively`, `an_unknown_or_empty_name_is_a_usage_error_listing_the_names` (also `no-mermaid-rendering` rejected), `completion_offers_the_feature_names`, `the_static_completion_script_lists_the_feature_names`; `md`: `feature_flag.rs::{mermaid_feature_names_parse_comma_separated_repeated_and_in_any_case, unknown_name_is_a_usage_error_listing_valid_names, empty_name_is_a_usage_error_listing_valid_names, completion_offers_feature_names}` |
+| AC-F8 | biscuit-visualized `tests/l1/render_tree_diagram_hook.rs`: `automatic_mode_draws_an_image_at_rich_with_image_support`, `automatic_mode_draws_text_below_rich_or_without_images`, `automatic_mode_at_graphics_off_renders_code`, `an_ineligible_fence_renders_as_code_without_a_diagnostic`, `a_parse_error_follows_the_render_strictness`, `automatic_mode_without_the_hook_and_code_mode_render_code`, `image_mode_never_answers_with_text` |
+| AC-F9 | `darkmatter/cli/tests/l1/mermaid_features.rs::mermaid_flag_selects_automatic_mermaid_mode` |
+| AC-F10 | `md` `mermaid_features.rs::{no_mermaid_rendering_keeps_the_terminal_fence_a_code_block_over_mermaid, no_mermaid_rendering_html_is_a_highlighted_code_block_without_mermaid_js, no_mermaid_rendering_keeps_the_markdown_and_json_mermaid_fence}` |
+| AC-F11 | `text_tests::flowchart_too_wide_canonically_draws_compactly`, `::flowchart_too_wide_for_both_layouts_shows_source`, `::state_diagram_too_wide_canonically_shows_source_after_one_request` |
+| AC-F12 | `darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs::{vendored_mermaid_syntax_is_flat_and_self_contained, mermaid_gantt_highlights_its_header_comment_and_init_directive, mermaid_flowchart_highlights_nodes_and_arrows, mermaid_sequence_highlights_participants_and_arrows}`; MIT notice: docs review (`darkmatter/docs/dependencies.md`, `docs/dependencies.md`), **no automated check** |
+| AC-F13 | `text_tests::text_render_writes_no_artifact_and_asks_for_no_font_chain`, `component_fallback_tests::the_text_route_does_no_image_work`, `::the_image_route_never_falls_back_through_text`; the unchanged golden, image and component suites |
+| AC-F14 | `text_tests::{spec_flowchart_draws_in_unicode, spec_flowchart_draws_in_ascii, authored_unicode_labels_survive_both_charsets, state_diagram_keeps_its_significant_spaces, multiline_label_draws_on_separate_rows, label_control_characters_never_reach_the_terminal, ineligible_families_show_source_without_a_request, invalid_source_is_an_error_after_one_request, exceeded_time_budget_is_an_error_with_a_warning_and_no_retry, reached_resource_limit_is_an_error_and_no_retry}`; nested width: `render_tree_diagram_hook::a_nested_fence_is_drawn_within_its_own_width` |
+| AC-F15 | Phase 5's audit (complete; no exhaustive `TerminalMermaidMode` match exists, the three `MermaidMode` matches handle `Automatic`); every area compiled with `--all-targets` in the 7.1 lints |
+| AC-F16 | docs review (Phase 6 checkpoint: no spec names in the touched docs, an example per topic). **No automated check** beyond test-toolkit's retired-entity docs test |
+| AC-F17 | `biscuit-terminal/cli/src/commands/mermaid.rs` tests `a_source_fallback_is_highlighted_by_darkmatter`, `a_text_fallback_is_highlighted_by_darkmatter`, `a_source_fallback_matches_darkmatters_code_block`; dependency graph checked with `cargo tree` in Phase 5 (no darkmatter or syntect under biscuit-visualized or biscuit-terminal's library), **not a test** |
+
+### Task 7.3: smell grep
+
+Over `mermaid/text.rs`, `components/{fallback_policy,mermaid,render_hook}.rs`,
+`darkmatter/cli/src/{args/enums,render}.rs`, `bt`'s `commands/{shared,mermaid}.rs`:
+
+- Family-name list in the eligibility path: none. The only family literal is
+  `"flowchart"` in a doc example in `text.rs`.
+- `#[serde(default)]` on policy fields: none (the policy has no serde).
+- `fallback_policy.rs:88` `std::env::var(name).ok()`: the `MERMAID_FALLBACK`
+  read. A value that is not valid Unicode becomes "unset", which gives the
+  default; the spec gives every value other than `code-block` the default
+  anyway, so the outcome is the same. Kept.
+- `bt` `commands/mermaid.rs:138` `presentation.nodes().unwrap_or_default()`:
+  reached only after the `Image` arm, and `nodes()` is `None` only for
+  `Image`, so the default is unreachable. Not a parse; kept.
+- `darkmatter/cli/src/render.rs:104` `unwrap_or_default()`: the page's base
+  path, older code, not part of this work.
+- `--feature` fold: clap parses the names (`ValueEnum`); no `.ok()` or
+  default anywhere in the fold.
+
+### Task 7.4: cross-OS
+
+- `git diff` of every `.rs` file since before this feature's first commit:
+  no added `#[cfg(unix)]`, `#[cfg(windows)]`, `not(...)` or `target_os`
+  line. The new logic (environment variable, CLI names, text fit) has no
+  paths. No `just cross-check` was run: the work has no notable cross-OS risk,
+  and Windows/WSL2 are proved by the nightly.
+- `just ci-local --plan`: 87 cells `execute ci`, 62 of them on
+  `ubuntu-latest`/`macos-latest` (what a pull request runs). This is the
+  whole `feat/merman` branch against `origin/main` (1451 changed paths), not
+  this phase alone. Band: more than 30 cells, so expect 60–100 min, and up to
+  about 1.5 h before treating a run as stuck.
+
+### Requirement-to-test mapping (this phase)
+
+| Behavior | Test |
+| --- | --- |
+| An XY chart without a y range shows its source (the exact `bt bar-chart 1 2 3` source); with `y-axis 0 --> 5` it is drawn as text with the note (control) | `biscuit-visualized/src/src/tests/component_fallback_tests.rs::an_xychart_without_a_y_range_shows_the_source` (F2, L1, explicit no-image `Terminal`) |
+
+The Input Robustness Matrix does not apply (no reader changed).
+
+### Gate-skip check
+
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`:
+`packages: [biscuit-visualized, test-toolkit, darkmatter]`,
+`change_class: package` (the tree still holds Phase 6's uncommitted
+changes). Gates run, as listed above.
+
+### Validation checkpoint 7
+
+All gates green. The log records the rulings (Phase 1), the AC-F15 audit
+(Phase 5), the AC mapping (above) and the departures from the spec
+(`decisions_for_review`; docs corrected, spec text untouched). State:
+implementation complete, ready for review.
