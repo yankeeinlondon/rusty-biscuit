@@ -1,213 +1,189 @@
-/// Parsed form of a canonical descriptor signature string such as
-/// `set_frontmatter(file, prop, value)` or `and(...)`.
-///
-/// `optional_tail` counts trailing parameters that are absent from every
-/// overload of the verb (e.g. `ensure_file` has one optional tail parameter,
-/// `content`). `variadic` is set for descriptors that explicitly use `...`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Signature {
-    /// The verb name.
-    pub verb: String,
-    /// Ordered positional parameter names.
-    pub params: Vec<String>,
-    /// Number of trailing parameters that are optional across all overloads.
-    pub optional_tail: usize,
-    /// Whether the descriptor accepts a variable number of arguments.
-    pub variadic: bool,
+/// One overload of a generated lifecycle verb (a Darkmatter side effect or
+/// expression function), read from its typed catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Overload {
+    descriptor: &'static ExpressionFunctionDescriptor,
 }
 
-impl Signature {
-    /// Minimum number of arguments required by this signature.
-    pub fn required_count(&self) -> usize {
-        self.params.len().saturating_sub(self.optional_tail)
+impl Overload {
+    #[allow(missing_docs)]
+    pub fn parameters(&self) -> &'static [FunctionParameterDescriptor] {
+        self.descriptor.parameters
     }
 
-    /// Maximum number of arguments accepted by this signature.
-    ///
-    /// Returns `None` for variadic signatures.
+    /// The parameter names, in positional order.
+    pub fn names(&self) -> impl Iterator<Item = &'static str> {
+        self.descriptor.parameters.iter().map(|parameter| parameter.name)
+    }
+
+    /// The catalog display key, e.g. `round(x, [fallback])` or `and(...)`.
+    pub fn display(&self) -> &'static str {
+        self.descriptor.signature
+    }
+
+    /// Whether a rest parameter takes any number of trailing arguments.
+    pub fn is_variadic(&self) -> bool {
+        self.descriptor.parameters.iter().any(|parameter| parameter.rest)
+    }
+
+    /// The number of parameters that are neither optional nor rest.
+    pub fn min_count(&self) -> usize {
+        self.descriptor
+            .parameters
+            .iter()
+            .filter(|parameter| !parameter.optional && !parameter.rest)
+            .count()
+    }
+
+    /// `None` when a rest parameter takes any number of arguments.
     pub fn max_count(&self) -> Option<usize> {
-        if self.variadic {
-            None
-        } else {
-            Some(self.params.len())
-        }
+        (!self.is_variadic()).then_some(self.descriptor.parameters.len())
+    }
+
+    /// Whether `supplied` positional arguments fit this overload; the same
+    /// count rule the runtime binder applies before any argument binds.
+    pub fn accepts_count(&self, supplied: usize) -> bool {
+        supplied >= self.min_count() && self.max_count().is_none_or(|max| supplied <= max)
+    }
+
+    /// The required parameters absent from `keys`.
+    fn missing(&self, keys: &[&str]) -> Vec<&'static str> {
+        self.descriptor
+            .parameters
+            .iter()
+            .filter(|parameter| !parameter.optional && !parameter.rest && !keys.contains(&parameter.name))
+            .map(|parameter| parameter.name)
+            .collect()
     }
 }
 
-/// Parse a canonical descriptor signature string into a typed [`Signature`].
+/// Every overload of one generated lifecycle verb, in catalog order.
 ///
-/// Supported forms:
-/// - `verb(p1, p2, ...)` — fixed positional parameters
-/// - `verb(p1, p2?, ...)` — trailing optional parameters (explicit `?`)
-/// - `verb(p1, [p2], ...)` — trailing optional parameters (bracket notation;
-///   the Darkmatter catalog form, e.g. `number(x, [default])`)
-/// - `verb(...)` — variadic
-///
-/// Returns `None` for syntactically malformed signatures.
-pub fn parse_signature(signature: &str) -> Option<Signature> {
-    let signature = signature.trim();
-    let open = signature.find('(')?;
-    let close = signature.rfind(')')?;
-    if close != signature.len() - 1 || open == 0 {
-        return None;
+/// Arguments are checked per overload, never against a merge of them: a
+/// positional call must fit one overload's count, and a long form must name
+/// exactly one overload's parameters ([`VerbSignature::select_named`]). This
+/// is the parse-time half of the rule the event-time binder applies, so a
+/// call that binds no overload is rejected before the event fires.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerbSignature {
+    verb: &'static str,
+    overloads: Vec<Overload>,
+}
+
+/// Why a long form's keys select no overload ([`VerbSignature::select_named`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LongFormMismatch {
+    /// Every key names a parameter of `overload`, the closest overload that
+    /// takes them all, which still needs `missing`.
+    Missing {
+        overload: Overload,
+        missing: Vec<&'static str>,
+    },
+    /// Keys that no overload names, sorted.
+    Unknown(Vec<String>),
+    /// Every key is some overload's parameter, but no one overload takes
+    /// them all together (`pr_list: { query, count }`).
+    Unrelated,
+}
+
+impl VerbSignature {
+    #[allow(missing_docs)]
+    pub fn verb(&self) -> &'static str {
+        self.verb
     }
 
-    let verb = signature[..open].trim().to_string();
-    if verb.is_empty() {
-        return None;
+    #[allow(missing_docs)]
+    pub fn overloads(&self) -> &[Overload] {
+        &self.overloads
     }
 
-    let inner = signature[open + 1..close].trim();
-    if inner == "..." {
-        return Some(Signature {
+    /// Whether any overload takes a rest parameter. Such a verb is
+    /// positional-only: a long form cannot name a variable argument list.
+    pub fn is_variadic(&self) -> bool {
+        self.overloads.iter().any(Overload::is_variadic)
+    }
+
+    /// The fewest arguments any overload takes.
+    pub fn min_count(&self) -> usize {
+        self.overloads.iter().map(Overload::min_count).min().unwrap_or(0)
+    }
+
+    /// Whether `supplied` positional arguments fit at least one overload.
+    pub fn accepts_count(&self, supplied: usize) -> bool {
+        self.overloads.iter().any(|overload| overload.accepts_count(supplied))
+    }
+
+    /// The overloads' display keys joined with ` | `.
+    pub fn display_overloads(&self) -> String {
+        self.overloads.iter().map(Overload::display).collect::<Vec<_>>().join(" | ")
+    }
+
+    /// The overload a long form's `keys` select: the first non-variadic
+    /// overload, in catalog order, whose parameters include every key and
+    /// whose required parameters are all among the keys. Its parameter order
+    /// is the positional order the action dispatches in.
+    ///
+    /// ## Errors
+    ///
+    /// The [`LongFormMismatch`] naming the closest problem: missing required
+    /// parameters of the overload that takes every key with the fewest
+    /// missing (the first on a tie), else the keys no overload names, else
+    /// [`LongFormMismatch::Unrelated`].
+    pub fn select_named(&self, keys: &[&str]) -> Result<Overload, LongFormMismatch> {
+        let covering: Vec<&Overload> = self
+            .overloads
+            .iter()
+            .filter(|overload| !overload.is_variadic())
+            .filter(|overload| keys.iter().all(|key| overload.names().any(|name| name == *key)))
+            .collect();
+        if let Some(selected) = covering.iter().find(|overload| overload.missing(keys).is_empty()) {
+            return Ok(**selected);
+        }
+        if let Some(closest) = covering.iter().min_by_key(|overload| overload.missing(keys).len()) {
+            return Err(LongFormMismatch::Missing {
+                overload: **closest,
+                missing: closest.missing(keys),
+            });
+        }
+        let mut unknown: Vec<String> = keys
+            .iter()
+            .filter(|key| !self.overloads.iter().any(|overload| overload.names().any(|name| name == **key)))
+            .map(|key| (*key).to_string())
+            .collect();
+        if unknown.is_empty() {
+            return Err(LongFormMismatch::Unrelated);
+        }
+        unknown.sort_unstable();
+        Err(LongFormMismatch::Unknown(unknown))
+    }
+
+    /// The catalog overloads named `verb`, in catalog order.
+    fn from_catalog(verb: &'static str, descriptors: &'static [ExpressionFunctionDescriptor]) -> Self {
+        Self {
             verb,
-            params: Vec::new(),
-            optional_tail: 0,
-            variadic: true,
-        });
-    }
-
-    if inner.is_empty() {
-        return Some(Signature {
-            verb,
-            params: Vec::new(),
-            optional_tail: 0,
-            variadic: false,
-        });
-    }
-
-    let mut params = Vec::new();
-    let mut optional_tail = 0;
-    for raw in split_signature_params(inner) {
-        let raw = raw.trim();
-        if raw.is_empty() {
-            return None;
-        }
-        // Two optional-parameter spellings are accepted: a trailing `?`
-        // (`content?`) and Darkmatter's catalog bracket form (`[default]`).
-        let optional_name = raw
-            .strip_suffix('?')
-            .or_else(|| raw.strip_prefix('[').and_then(|s| s.strip_suffix(']')));
-        if let Some(stripped) = optional_name {
-            optional_tail += 1;
-            let name = stripped.trim();
-            if name.is_empty() {
-                return None;
-            }
-            params.push(name.to_string());
-        } else {
-            if optional_tail > 0 {
-                // A required parameter cannot follow an optional one.
-                return None;
-            }
-            params.push(raw.to_string());
+            overloads: descriptors
+                .iter()
+                .filter(|descriptor| descriptor.name == verb)
+                .map(|descriptor| Overload { descriptor })
+                .collect(),
         }
     }
-
-    Some(Signature {
-        verb,
-        params,
-        optional_tail,
-        variadic: false,
-    })
 }
 
-/// Split a signature parameter list on commas, respecting nested parentheses,
-/// brackets, and quotes so that type-like expressions or default values are
-/// kept intact.
-fn split_signature_params(s: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    for (i, ch) in s.char_indices() {
-        if let Some(qc) = quote {
-            if ch == qc {
-                quote = None;
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if start <= s.len() {
-        out.push(&s[start..]);
-    }
-    out
-}
-
-/// The positional parameter signature for a known Darkmatter side-effect verb.
+/// The overloads of a known Darkmatter side-effect verb.
 ///
-/// Derived from [`EFFECT_DESCRIPTORS`]. Overloaded verbs (e.g. `ensure_file`)
-/// are merged so that parameters present only in longer overloads are marked
-/// as optional tail parameters.
-///
-/// Long-form side-effect actions carry their arguments as named sibling keys
-/// (`file:`, `prop:`, `value:`). The parser uses this signature to reorder
-/// those named parameters into the verb's positional call order so the
-/// executor can dispatch positionally.
-pub fn side_effect_signature(verb: &str) -> Option<Signature> {
-    SIDE_EFFECT_SIGNATURES.get(verb).cloned()
-}
-
-/// Lazily-built map from side-effect verb to merged positional signature.
-///
-/// Build cost is paid once and the result is immutable; no runtime I/O or
-/// host probing is performed.
-static SIDE_EFFECT_SIGNATURES: std::sync::LazyLock<std::collections::HashMap<String, Signature>> =
-    std::sync::LazyLock::new(build_side_effect_signatures);
-
-fn build_side_effect_signatures() -> std::collections::HashMap<String, Signature> {
-    let mut by_verb: std::collections::HashMap<String, Vec<Signature>> =
-        std::collections::HashMap::new();
-    for desc in EFFECT_DESCRIPTORS {
-        if let Some(sig) = parse_signature(desc.signature) {
-            by_verb.entry(sig.verb.clone()).or_default().push(sig);
-        }
-    }
-
-    let mut out = std::collections::HashMap::new();
-    for (verb, sigs) in by_verb {
-        out.insert(verb, merge_signatures(&sigs));
-    }
-    out
-}
-
-/// Merge overloaded signatures for one verb into a single signature with the
-/// longest parameter list and an `optional_tail` covering parameters that do
-/// not appear in the shortest overload.
-///
-/// Assumes overloads only add trailing parameters, which is true for the
-/// current Darkmatter catalog (`ensure_file(file)` / `ensure_file(file, content)`,
-/// `frontmatter(file)` / `frontmatter(file, prop)`).
-///
-/// The merged `optional_tail` is the larger of two sources: the parameters the
-/// shortest overload omits, and the longest overload's own intrinsic optional
-/// tail (`[default]` / `name?` markers). The latter matters for a single
-/// non-overloaded signature such as `number(x, [default])`, where `base` and
-/// `longest` are the same signature and the omitted-parameter count is zero.
-fn merge_signatures(sigs: &[Signature]) -> Signature {
-    debug_assert!(!sigs.is_empty());
-    let mut sorted = sigs.to_vec();
-    sorted.sort_by_key(|s| s.params.len());
-    let base = sorted.first().expect("non-empty signature list").clone();
-    let longest = sorted.last().expect("non-empty signature list").clone();
-    let from_overloads = longest.params.len().saturating_sub(base.params.len());
-    let optional_tail = from_overloads.max(longest.optional_tail);
-    Signature {
-        verb: longest.verb,
-        params: longest.params,
-        optional_tail,
-        variadic: longest.variadic,
-    }
+/// [`EFFECT_DESCRIPTORS`] decides which verbs exist; the overloads come from
+/// the typed side-effect catalog ([`effect_function_descriptors`]), which a
+/// coverage test holds in step with it.
+pub fn side_effect_signature(verb: &str) -> Option<&'static VerbSignature> {
+    static SIGNATURES: LazyLock<HashMap<&'static str, VerbSignature>> = LazyLock::new(|| {
+        EFFECT_DESCRIPTORS
+            .iter()
+            .filter_map(|descriptor| parsed_verb_of(descriptor.signature))
+            .map(|verb| (verb, VerbSignature::from_catalog(verb, effect_function_descriptors())))
+            .collect()
+    });
+    SIGNATURES.get(verb)
 }
 
 /// Returns `true` when `verb` names a known Darkmatter side-effect.
@@ -270,23 +246,17 @@ fn parsed_verb_of(signature: &str) -> Option<&str> {
     Some(&signature[..open])
 }
 
-/// Positional signature for a known Darkmatter expression-function verb.
-///
-/// Derived from [`expression_function_descriptors`]. Overloaded functions are
-/// merged so that parameters present only in longer overloads are marked as
-/// optional tail parameters.
-pub fn expression_function_signature(verb: &str) -> Option<Signature> {
-    let sigs: Vec<Signature> = expression_function_descriptors()
-        .iter()
-        .filter_map(|d| {
-            let sig = parse_signature(d.signature)?;
-            if sig.verb == verb { Some(sig) } else { None }
-        })
-        .collect();
-    if sigs.is_empty() {
-        return None;
-    }
-    Some(merge_signatures(&sigs))
+/// The overloads of a known Darkmatter expression-function verb (exact
+/// canonical name; aliases are not lifecycle verbs).
+pub fn expression_function_signature(verb: &str) -> Option<&'static VerbSignature> {
+    static SIGNATURES: LazyLock<HashMap<&'static str, VerbSignature>> = LazyLock::new(|| {
+        let descriptors = expression_function_descriptors();
+        descriptors
+            .iter()
+            .map(|descriptor| (descriptor.name, VerbSignature::from_catalog(descriptor.name, descriptors)))
+            .collect()
+    });
+    SIGNATURES.get(verb)
 }
 
 /// Returns every lifecycle action verb known to the parser.
@@ -321,7 +291,33 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
     verbs.dedup();
     verbs
 }
-use crate::effects::EFFECT_DESCRIPTORS;
-use crate::markdown::compose::expression::expression_function_descriptors;
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use crate::effects::{EFFECT_DESCRIPTORS, effect_function_descriptors};
+use crate::markdown::compose::expression::{
+    ExpressionFunctionDescriptor, FunctionParameterDescriptor, expression_function_descriptors,
+};
 
 use super::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::compose::expression::catalog::load_catalog;
+
+    /// A rest parameter after a fixed prefix (Phase 1 finding 9): no catalog
+    /// function has one today, so the shape is built from a fixture catalog.
+    #[test]
+    fn a_rest_parameter_after_a_fixed_prefix_counts_the_prefix_as_required() {
+        let source = "kind: schema\ncategories:\n    - Text -> Text.\ntypes:\n    joined: |-\n        function(\n            parameters(separator: string, ...parts: string);\n            returns(string);\n            category(Text);\n        ) -> Joins parts.\n";
+        let catalog: &'static _ = Box::leak(Box::new(load_catalog(source, "fixture.yaml", &[]).expect("fixture loads")));
+        let joined = VerbSignature::from_catalog("joined", catalog.descriptors);
+
+        assert!(joined.is_variadic());
+        assert_eq!(joined.min_count(), 1);
+        assert!(!joined.accepts_count(0));
+        assert!(joined.accepts_count(1) && joined.accepts_count(4));
+        assert!(joined.select_named(&["separator"]).is_err(), "a variadic overload has no long form");
+    }
+}

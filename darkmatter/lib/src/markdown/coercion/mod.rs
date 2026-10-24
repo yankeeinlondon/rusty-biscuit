@@ -86,16 +86,21 @@ impl Bound<'_> {
 }
 
 /// The deferral predicate of [`BindOptions`]: the path is relative to the
-/// bound value.
-pub type Defer = dyn Fn(&[PathSegment], &Value) -> bool;
+/// bound value. The predicate may borrow for `'a`, so a caller's recorder or
+/// scope can sit behind it without being cloned into an owned closure.
+pub type Defer<'a> = dyn Fn(&[PathSegment], &Value) -> bool + 'a;
 
 /// Options for [`bind_with`].
 #[derive(Clone, Copy)]
 pub struct BindOptions<'a> {
-    /// A value at a path for which this returns `true` is treated as an exact
-    /// match of whatever shape is there (frontmatter keeps shell-pending
-    /// `$(...)` values for later re-validation).
-    pub defer: Option<&'a Defer>,
+    /// Consulted at every value the engine reaches, whatever the shape: a
+    /// value at a path for which this returns `true` is treated as an exact
+    /// match of whatever shape is there. The caller decides which values
+    /// wait (frontmatter keeps shell-pending top-level `$(...)` values for
+    /// later re-validation; the call binder defers operands). The predicate
+    /// consulted only where the schema marks a place deferrable is
+    /// [`bind_with_marked`]'s.
+    pub defer: Option<&'a Defer<'a>>,
     pub max_depth: usize,
 }
 
@@ -132,8 +137,28 @@ pub fn bind<'v>(shape: &Shape, value: &'v Value) -> Result<Bound<'v>, Conversion
 ///
 /// A [`ConversionError`] holding every failing path.
 pub fn bind_with<'v>(shape: &Shape, value: &'v Value, options: &BindOptions<'_>) -> Result<Bound<'v>, ConversionError> {
+    bind_with_marked(shape, value, options, None)
+}
+
+/// [`bind_with`], also consulting `marked` at every [`Shape::Deferrable`]
+/// node, i.e. only where the schema marks a value as one that may be supplied
+/// later: a value for which it returns `true` there is treated as an exact
+/// match of the marked shape. [`BindOptions::defer`] is still consulted
+/// everywhere. Schema validation passes a `{{ … }}` template test as
+/// `marked`, so a template is set aside only where the schema allows it.
+///
+/// ## Errors
+///
+/// A [`ConversionError`] holding every failing path.
+pub fn bind_with_marked<'v>(
+    shape: &Shape,
+    value: &'v Value,
+    options: &BindOptions<'_>,
+    marked: Option<&Defer<'_>>,
+) -> Result<Bound<'v>, ConversionError> {
     let engine = Engine {
         defer: options.defer,
+        defer_marked: marked,
         max_depth: options.max_depth,
         convert: true,
     };
@@ -154,6 +179,7 @@ pub fn bind_with<'v>(shape: &Shape, value: &'v Value, options: &BindOptions<'_>)
 pub fn check_exact(shape: &Shape, value: &Value) -> Result<(), ConversionError> {
     let engine = Engine {
         defer: None,
+        defer_marked: None,
         max_depth: MAX_DEPTH,
         convert: false,
     };
@@ -170,6 +196,7 @@ pub fn check_exact(shape: &Shape, value: &Value) -> Result<(), ConversionError> 
 pub fn accepts_exactly(shape: &Shape, value: &Value) -> bool {
     Engine {
         defer: None,
+        defer_marked: None,
         max_depth: MAX_DEPTH,
         convert: false,
     }

@@ -55,10 +55,10 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::effects::EffectEngine;
+use crate::effects::{EffectEngine, effect_registration};
 use crate::markdown::compose::expression::{
-    BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding, evaluate,
-    is_truthy, scalar_string,
+    BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding, evaluate, functions,
+    is_truthy, scalar_string, unknown_function_error,
 };
 use crate::markdown::compose::shell_expansion::template::{
     HoleEvaluator, LookupEvaluator, fill_template,
@@ -923,16 +923,46 @@ impl<'a> StackExecutor<'a> {
     /// action in the same stack reads the mutated value. Lifecycle `set`
     /// mappings use [`Self::dispatch_runtime_set`] instead of this positional
     /// Darkmatter-effect path.
+    ///
+    /// The evaluated arguments bind to the verb's typed overloads
+    /// ([`effect_registration`]) before the engine is called, by the same rule
+    /// as an expression-function call. A call that does not bind is an
+    /// evaluation failure carrying [`ExpressionError::Call`], exactly as a
+    /// failed expression-function binding is, and nothing is written. The
+    /// engine receives the bound values (a number given for a `string`
+    /// parameter arrives as its text), and the bound overload, not the
+    /// argument count, picks the `ensure_file` form.
     fn dispatch_side_effect(&self, verb: &str, args: &[Expr], working: &mut Map<String, Value>) -> Result<Value, ActionFailure> {
-        // Argument evaluation/interpolation is the expression layer: a raise
-        // here is an evaluation error.
-        let values = args
+        // Argument evaluation/interpolation and binding are the expression
+        // layer: a raise here is an evaluation error.
+        let evaluation_err = |error: LifecycleExprError| ActionFailure::Evaluation(self.expr_error(verb, error));
+        let evaluated = args
             .iter()
             .map(|expr| self.evaluate_operand(expr, working))
             .collect::<Result<Vec<_>, LifecycleExprError>>()
-            .map_err(|error| ActionFailure::Evaluation(self.expr_error(verb, error)))?;
-        // From here on, an error is a side-effect dispatch failure (a missing
-        // argument, an unknown verb, or an effect-engine error).
+            .map_err(evaluation_err)?;
+        let (values, takes_content) = match effect_registration(verb) {
+            Some(registration) => {
+                let call = registration.bind_call(&evaluated).map_err(|error| {
+                    evaluation_err(LifecycleExprError::Evaluate(Box::new(ExpressionError::Call(Box::new(error)))))
+                })?;
+                let takes_content = registration.overloads()[call.overload()].parameter("content").is_some();
+                let bound: Vec<Value> = evaluated
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| call.args().get(index).unwrap_or(value).clone())
+                    .collect();
+                (bound, takes_content)
+            }
+            None => {
+                let takes_content = evaluated.len() >= 2;
+                (evaluated, takes_content)
+            }
+        };
+        // From here on, an error is a side-effect dispatch failure (an unknown
+        // verb, or an effect-engine error). Binding already checked arity for
+        // every typed verb; the missing-argument error stays as a guard should
+        // the typed catalog and this dispatch table ever diverge.
         let dispatch_err = |msg: String| ActionFailure::Dispatch(self.action_failure(verb, msg));
         let engine = self.inputs.effect_engine;
         let s = |idx: usize| -> Result<String, ActionFailure> {
@@ -965,7 +995,7 @@ impl<'a> StackExecutor<'a> {
             "append_frontmatter" => engine.append_frontmatter(&s(0)?, &s(1)?, stored(2)?),
             "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, stored(2)?),
             "ensure_file" => {
-                if values.len() >= 2 {
+                if takes_content {
                     engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
                 } else {
                     engine.ensure_file(&path(0)?).map(Value::String)
@@ -1271,18 +1301,57 @@ impl<'a> StackExecutor<'a> {
 
     /// Invoke a read-only expression function for its result, logging it in
     /// the lifecycle/status style.
+    ///
+    /// Operands follow the action-operand rule ([`Self::evaluate_operand`]):
+    /// a template operand (`"n={{ fm.count }}"`) is interpolated once and the
+    /// function receives the text it renders, never the template itself. A
+    /// call with no template operand evaluates as the expression call it
+    /// spells, so a context function keeps its caller-file provenance. A lazy
+    /// function (`and`, `or`) still evaluates its operands one at a time and
+    /// stops at the short-circuit, templates included.
     fn invoke_expression_function(&self, function: &str, args: &[Expr], fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
-        let call = Expr::FunctionCall {
-            name: function.to_string(),
-            args: args.to_vec(),
+        let value = if args.iter().any(is_template_operand) {
+            self.call_with_operand_values(function, args, fm)?
+        } else {
+            let call = Expr::FunctionCall {
+                name: function.to_string(),
+                args: args.to_vec(),
+            };
+            self.eval_expr(&call, fm)?
         };
-        let value = self.eval_expr(&call, fm)?;
         warn!(
             function,
             result = %scalar_string(&value),
             "lifecycle expression-function action evaluated"
         );
         Ok(value)
+    }
+
+    /// Call `function` with each operand evaluated by
+    /// [`Self::evaluate_operand`], through the runtime registry and binder.
+    fn call_with_operand_values(&self, function: &str, args: &[Expr], fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+        let call_error = |error| LifecycleExprError::Evaluate(Box::new(ExpressionError::Call(Box::new(error))));
+        if let Some((registration, short_circuit)) = functions::lazy_function(function) {
+            registration.check_arity(args.len()).map_err(call_error)?;
+            let mut call = registration.lazy_call().expect("a lazy registration starts a lazy call");
+            let stop_on_truthy = short_circuit == functions::ShortCircuit::OnTruthy;
+            for arg in args {
+                let value = self.evaluate_operand(arg, fm)?;
+                if is_truthy(call.bind_next(value).map_err(call_error)?) == stop_on_truthy {
+                    return Ok(Value::Bool(stop_on_truthy));
+                }
+            }
+            call.finish().map_err(call_error)?;
+            return Ok(Value::Bool(!stop_on_truthy));
+        }
+        let values = args
+            .iter()
+            .map(|arg| self.evaluate_operand(arg, fm))
+            .collect::<Result<Vec<_>, _>>()?;
+        let context = self.resolution_context()?;
+        functions::call_function(function, &values, Some(&context))
+            .unwrap_or_else(|| Err(unknown_function_error(function)))
+            .map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
     }
 
     /// Resolve a parse-time [`LifecycleControlAction`] into a runtime
@@ -1620,9 +1689,22 @@ fn push_proxy_with_scan_content(value: &WithValue, content: &mut String) {
 
 /// Whether an action operand is a template, interpolated once, rather than an
 /// expression evaluated to data ([`evaluate_operand_in`]): an authored literal
-/// body carrying `{{ … }}` spans.
+/// body that [`is_deferred_template`] recognizes (the one template rule passive
+/// operand validation also uses), or one holding an interpolation literal
+/// (`{{{ … }}}`) or a literal token (`{{!…}}`), which only the compose pass
+/// unwraps or refuses. Text whose `{{` the scanner recognizes as none of
+/// these (an unclosed or escaped opener) stays the literal it is written as.
+///
+/// [`is_deferred_template`]: crate::markdown::compose::expression::is_deferred_template
 pub fn is_template_operand(expr: &Expr) -> bool {
-    matches!(expr, Expr::StringLiteral(text) if text.contains("{{"))
+    let Expr::StringLiteral(text) = expr else {
+        return false;
+    };
+    if crate::markdown::compose::expression::is_deferred_template(text) {
+        return true;
+    }
+    let scan = ExpressionFinder::scan_plain(text);
+    !scan.literals.is_empty() || !scan.tokens.is_empty()
 }
 
 /// Evaluate one action operand against an established state, as lifecycle

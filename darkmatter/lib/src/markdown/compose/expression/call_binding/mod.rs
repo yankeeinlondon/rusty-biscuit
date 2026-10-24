@@ -12,6 +12,10 @@
 //!   selects one overload, or reports a [`CallBindingError`]; the handler
 //!   reads the result through [`BoundArgs`], whose accessors never parse or
 //!   convert. Lazy functions bind through [`LazyCall`].
+//! - [`FunctionRegistration::select_overload_with`] binds passively with a
+//!   deferral predicate: a value supplied later (a `{{ … }}` template) is
+//!   taken as matching, and the overloads it leaves open are reported as an
+//!   [`OverloadSelection::Deferred`] rather than as an ambiguity.
 //! - [`CompiledSignature::check_return`] holds a handler to its declared
 //!   return type without converting the result.
 //!
@@ -39,7 +43,7 @@ mod registration;
 mod signature;
 pub mod translate;
 
-pub use bind::{BoundArgs, BoundCall, LazyCall, Recovery};
+pub use bind::{BoundArgs, BoundCall, LazyCall, OverloadSelection, Recovery};
 pub use error::{
     ArgumentError, ArgumentProblem, CallBindingError, CallErrorKind, CandidateFailure, ContractViolation, SignatureProblem,
 };

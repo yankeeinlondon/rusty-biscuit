@@ -733,7 +733,11 @@ fn build_problems(
             }
         }
     }
-    vec![build_problem(err, positions, arm_index, anchors)]
+    let problem = build_problem(err, positions, arm_index, anchors);
+    match anchors {
+        FileRefAnchors::Resolved { excused: Some(excused), .. } if excused(&problem) => Vec::new(),
+        _ => vec![problem],
+    }
 }
 
 /// A root-union arm's `match` glob rejected the file; see [`super::file_match`].
@@ -883,14 +887,23 @@ pub(super) enum FileRefAnchors<'a> {
         /// The request context the validator resolved file values in, so the
         /// re-resolution sees the same repository root.
         context: &'a biscuit_file::FileResolutionContext,
+        /// Problems this returns `true` for are left out of the report as
+        /// they are built, before an `anyOf` failure chooses which of its
+        /// arms' problems to show, so an excused problem never hides a
+        /// sibling one (nested `{{ … }}` templates, see
+        /// [`super::coerce::NestedTemplates`]).
+        excused: Option<&'a Excused<'a>>,
     },
 }
+
+/// The `excused` predicate of [`FileRefAnchors::Resolved`].
+pub(super) type Excused<'a> = dyn Fn(&ValidationProblem) -> bool + 'a;
 
 impl FileRefAnchors<'_> {
     fn file_values(&self) -> FileValues {
         match *self {
             Self::Syntax => FileValues::Syntax,
-            Self::Resolved { base_dir, fallback, context } => FileValues::Resolved {
+            Self::Resolved { base_dir, fallback, context, .. } => FileValues::Resolved {
                 base_dir: base_dir.map(PathBuf::from),
                 fallback: fallback.map(PathBuf::from),
                 context: Box::new(context.clone()),
@@ -936,7 +949,7 @@ fn darkmatter_file_reference_outcome(
         return None;
     };
     if format == format::DARKMATTER_FILE_FORMAT
-        && let FileRefAnchors::Resolved { base_dir, fallback, context } = anchors
+        && let FileRefAnchors::Resolved { base_dir, fallback, context, .. } = anchors
     {
         return match format::resolve_file_reference_in_context(value, base_dir, fallback, context) {
             Ok(_) => None,
@@ -2198,7 +2211,7 @@ mod tests {
             validator,
             instance,
             &PositionMap::new(),
-            FileRefAnchors::Resolved { base_dir: None, fallback: None, context },
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context, excused: None },
         )
     }
 
@@ -2470,7 +2483,7 @@ mod tests {
             &[v0, v1],
             &instance,
             &PositionMap::new(),
-            FileRefAnchors::Resolved { base_dir: None, fallback: None, context: &context },
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context: &context, excused: None },
         );
         assert_eq!(
             problems.len(),

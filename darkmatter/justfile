@@ -525,6 +525,15 @@ regen-expr-doc:
     @echo
     @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
 
+# Regenerate the generated lifecycle verb types in schemas/partials/lifecycle.yaml
+regen-lifecycle-schema:
+    @echo
+    @echo -e "Regenerating the {{ BOLD }}generated lifecycle verb types{{ RESET }}"
+    @echo
+    @cargo run -p darkmatter --example lifecycle_schema_generator -- --write
+    @echo
+    @echo -e "{{ BOLD }}{{ GREEN }}Lifecycle verb types regenerated{{ RESET }} in schemas/partials/lifecycle.yaml"
+
 readme:
     _readme_files darkmatter
 

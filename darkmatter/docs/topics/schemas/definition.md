@@ -297,6 +297,36 @@ Every type accepts:
   the names it lists.
 - `generated` — marks a property whose value the **host tool supplies at compose time** (for example the `ctx.*` context values in the Darkmatter base schema). It emits the `x-darkmatter-generated: true` annotation and suppresses the property's static `required` entry, so an authored document validates before the host fills the value in; the typed (non-null) arm is preserved. `datetime(generated; required)` therefore reads "required once generated", not "must be authored".
 
+- `deferred` — a value here that is a `{{ … }}` template is **supplied later**,
+  when whatever consumes it renders the template, so schema validation accepts
+  it without judging or evaluating it. Every literal value here is still
+  judged, and so is everything around the template: an unknown key beside it,
+  a missing or extra tuple element, a malformed template (`{{ 1 + }}`). A
+  template at a place **not** marked `deferred` is ordinary text and is judged
+  against the declared type. It emits the `x-darkmatter-deferred: true`
+  annotation on the node it marks (never on an optional property's `null`
+  wrapper):
+
+  ```yaml
+  $schema:
+      on_success: "{ retries: number(integer; deferred) | object(deferred), note: string }[]"
+  on_success:
+      - retries: "{{ fm.max_retries }}"   # accepted: the template is rendered later
+      - retries: 3                         # judged: a literal
+      - note: "{{ fm.summary }}"           # judged as text: `note` is not marked
+  ```
+
+  Where it is written decides what it marks: `number(deferred)[]` marks each
+  item, `number[](deferred)` the list itself, `tuple([number(deferred),
+  number])` one slot, and inside a union `a | b` only the alternative that
+  carries it (write it on each arm that may be a template). It works the same
+  inside a named or [recursive](#recursive-named-types) type, at every depth.
+  It applies to templates nested below a top-level key; a whole top-level
+  template follows
+  [the shell-deferral contract](../../inline/schema-validation.md#the-shell-deferral-contract).
+  Raw JSON Schema can mark a node
+  the same way by writing `x-darkmatter-deferred: true` on it.
+
 `required` and `eager` are independent axes: `required` decides whether the
 property must be present, `eager` decides when a supplied value is validated.
 Phase-aware validation derives both recursively from the resolved
@@ -3613,7 +3643,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - The stage **mutates** the document: it converts values to their declared types, at every declared depth (see [Type Coercion](#type-coercion)), and **writes the converted values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
 - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper.
-- Problems on a whole-value frontmatter shell expression (`$(...)`), or on a key whose `{{ }}` template reads one, are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing, so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- Problems on a whole-value frontmatter shell expression (`$(...)`), or at a path whose `{{ }}` template reads one (a problem on a literal sibling of that template is not deferred), are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing except a `{{ … }}` template nested at a place the schema marks [`deferred`](#universal-constraints), so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
 - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and the run-local options hash, so cached results are not reused across different baselines.

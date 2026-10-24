@@ -251,8 +251,10 @@ const EXCEPTIONS: &[Exception] = &[
 /// one of the core types, with the canonical keywords it uses; `any` parses as
 /// `unknown`. Native YAML null declarations parse as `null`.
 const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
-    // Zero-argument verbs take `null` or an empty `unknown[]`, generated verbs
-    // and loose bodies are `unknown`, and `shell` types the shell command.
+    // Zero-argument verbs take `null` or an empty `unknown[]`, a generated
+    // operand is `unknown` (or `null`) where its catalog parameter is, the
+    // deprecated untyped verb values are `unknown`, and `shell` types the
+    // shell command.
     ("darkmatter/schemas/partials/lifecycle.yaml", &["null", "shell", "unknown"]),
     // The md profile's open keys and loose bodies.
     ("darkmatter/schemas/partials/md-lifecycle.yaml", &["unknown"]),

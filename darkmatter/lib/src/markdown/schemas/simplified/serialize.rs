@@ -296,6 +296,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
         Constraint::Generated => out.push_str("generated"),
+        Constraint::Deferred => out.push_str("deferred"),
 
         Constraint::Min(n) => {
             let _ = write!(out, "min({})", format_number(*n));

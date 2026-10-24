@@ -208,13 +208,13 @@ fn parser_only_defects_pass_schema_validation() {
         &bundle,
         &[
             ("depth6", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6.md")),
-            ("shell-in-initialize-below-typed-levels", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-below-typed-levels.md")),
-            ("generated-verb-arbitrary-value", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-arbitrary-value.md")),
+            ("depth5-guarded-bundle", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md")),
+            ("shell-expansion-in-initialize-set", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md")),
         ],
     );
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(0), "{records:?}");
-    for name in ["depth6", "shell-in-initialize-below-typed-levels", "generated-verb-arbitrary-value"] {
+    for name in ["depth6", "depth5-guarded-bundle", "shell-expansion-in-initialize-set"] {
         assert_record(&records, name, true, &[]);
     }
 }

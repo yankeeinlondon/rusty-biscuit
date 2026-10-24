@@ -426,7 +426,16 @@ A property whose value a later stage will compute has not been computed yet at v
 | `content_policy: ["$(echo X)", TimeSensitive]` — `$(...)` inside a list is never run | judged as written, so rejected |
 | `title: "see $(date)"` — `$(...)` after other text is never run | judged as written |
 
-Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing: no later stage resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+Deferral is decided per problem, at the problem's own path. A wholly later-resolved key — a whole-value command, or a value read from one — defers every problem beneath it. Otherwise a problem waits only when the value at its path (or, for a missing node, its nearest existing parent) still holds a `{{ … }}` template: rendering a template changes only its own value, so it can fix a problem there or on a parent that contains it, never one on a literal sibling. Two problems never wait: an unknown or missing key on a mapping (rendering changes values, not keys), and a problem beside a template the schema already accepted at a place marked `deferred` (that template's value was already allowed for, so what remains is a real mistake).
+
+```yaml
+$schema:
+  cfg: "{ counts: number[] }"
+cfg:
+  counts: [three, "{{ x }}"]   # fails fast at /cfg/counts/0; /cfg/counts/1 waits
+```
+
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../topics/schemas/definition.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
 
 The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--no-schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
 

@@ -108,7 +108,9 @@ impl<'p> Path<'p> {
 }
 
 pub(super) struct Engine<'o> {
-    pub(super) defer: Option<&'o super::Defer>,
+    pub(super) defer: Option<&'o super::Defer<'o>>,
+    /// Consulted only at [`Shape::Deferrable`] nodes.
+    pub(super) defer_marked: Option<&'o super::Defer<'o>>,
     pub(super) max_depth: usize,
     /// `false` for exact checks: any needed conversion is a failure.
     pub(super) convert: bool,
@@ -180,6 +182,7 @@ impl Engine<'_> {
             Shape::Union(options) => options.iter().any(|option| self.exact(option, value, path)),
             Shape::Assert(inner, assertion) => self.exact(inner, value, path) && assertion.holds(value),
             Shape::Ref(reference) => reference.target().is_some_and(|target| self.exact(&target, value, path.hop())),
+            Shape::Deferrable(inner) => self.marked_deferred(value, path) || self.exact(inner, value, path),
         }
     }
 
@@ -236,11 +239,17 @@ impl Engine<'_> {
                 Some(target) => self.walk(&target, value, path.hop()),
                 None => Err(fail(shape, value, path, None, FailureReason::NoConversion)),
             },
+            Shape::Deferrable(_) if self.marked_deferred(value, path) => Ok(Step::Kept),
+            Shape::Deferrable(inner) => self.walk(inner, value, path),
         }
     }
 
     fn deferred(&self, value: &Value, path: Path<'_>) -> bool {
         self.defer.is_some_and(|defer| defer(&path.to_vec(), value))
+    }
+
+    fn marked_deferred(&self, value: &Value, path: Path<'_>) -> bool {
+        self.defer_marked.is_some_and(|defer| defer(&path.to_vec(), value))
     }
 
     /// A failure for a value that needs a conversion: the conversion's own

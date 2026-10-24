@@ -346,7 +346,7 @@ fn source_kinds(shape: &Shape) -> Vec<ValueKind> {
             }
             kinds
         }
-        Shape::Assert(inner, _) => source_kinds(inner),
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => source_kinds(inner),
         Shape::Ref(reference) => reference.target().map_or_else(Vec::new, |target| source_kinds(&target)),
     }
 }
@@ -391,7 +391,7 @@ fn literal_family(value: &Value) -> Option<Family> {
 /// reference is never unfolded; it is judged by its family.
 fn fit(source: &Shape, target: &Shape) -> Fit {
     match (source, target) {
-        (Shape::Assert(inner, _), _) => fit(inner, target),
+        (Shape::Assert(inner, _) | Shape::Deferrable(inner), _) => fit(inner, target),
         (Shape::Ref(reference), _) => reference.target().map_or(Fit::Unknown, |body| fit(&body, target)),
         (Shape::Union(options), _) => Fit::all(options.iter().map(|option| fit(option, target))),
         // `numberlike` and `boolish` deliver either the native scalar or the
@@ -409,7 +409,7 @@ fn fit(source: &Shape, target: &Shape) -> Fit {
         ]),
         (Shape::Any, _) => Fit::Unknown,
         (_, Shape::Any) => Fit::Fits,
-        (_, Shape::Assert(inner, _)) => fit(source, inner),
+        (_, Shape::Assert(inner, _) | Shape::Deferrable(inner)) => fit(source, inner),
         (_, Shape::Union(options)) => options.iter().map(|option| fit(source, option)).fold(Fit::Wrong, Fit::best),
         (Shape::Null, Shape::Null) => Fit::Fits,
         (Shape::Null, _) | (_, Shape::Null) => Fit::Wrong,
@@ -455,7 +455,7 @@ fn retained_text_fit(text: Family, target: &Shape) -> Fit {
     match target {
         Shape::Any => Fit::Fits,
         Shape::Null => Fit::Wrong,
-        Shape::Assert(inner, _) => retained_text_fit(text, inner),
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => retained_text_fit(text, inner),
         Shape::Union(options) => options.iter().map(|option| retained_text_fit(text, option)).fold(Fit::Wrong, Fit::best),
         Shape::Literal(value) => match literal_family(value) {
             Some(to) if family_fit(text, to, true) != Fit::Wrong => Fit::Maybe,
@@ -474,7 +474,7 @@ fn family(shape: &Shape) -> Option<Family> {
         Shape::Array(_) | Shape::Tuple(_) => Some(Family::List),
         Shape::Object(_) => Some(Family::Object),
         Shape::Literal(value) => literal_family(value),
-        Shape::Assert(inner, _) => family(inner),
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => family(inner),
         Shape::Ref(reference) => reference.target().and_then(|target| family(&target)),
         Shape::Any | Shape::Null | Shape::Union(_) => None,
     }
@@ -483,7 +483,7 @@ fn family(shape: &Shape) -> Option<Family> {
 fn scalar_text(target: &Shape) -> bool {
     match target {
         Shape::Text(text) => text.scalar_text,
-        Shape::Assert(inner, _) => scalar_text(inner),
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => scalar_text(inner),
         _ => true,
     }
 }

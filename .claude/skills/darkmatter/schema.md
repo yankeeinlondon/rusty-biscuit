@@ -230,7 +230,29 @@ The baseline types Darkmatter's five lifecycle events (`initialize`,
 (`partials/md-lifecycle.yaml`): md verbs are typed and offered, and an open
 pattern-key arm that excludes every md verb lets another host's verb (`say`,
 `retry`) pass untyped and unoffered. The neutral shape of every verb, Claudine's
-included, lives in `partials/lifecycle.yaml`. `lib/tests/l1/lifecycle_schema_parity.rs`
+included, lives in `partials/lifecycle.yaml`. Its expression-function and
+side-effect verb types (`<verb>-short`/`<verb>-long`) and their category and
+bundle keys are generated from the typed catalogs by
+`lifecycle::schema_projection` between `# BEGIN GENERATED`/`# END GENERATED`
+markers: regenerate with `just regen-lifecycle-schema`, never by hand;
+`lib/tests/l1/lifecycle_schema_generation.rs` fails on drift. Side-effect
+parameter types come from `partials/mutations.yaml` (`effects::effect_function_catalog`,
+`effect_registration`; a coverage test fails when an `EFFECT_DESCRIPTORS`
+signature has no typed entry). Generated operands carry the `deferred`
+constraint (`x-darkmatter-deferred`, `Shape::Deferrable`): a `{{ }}` template
+there is accepted unjudged while literal siblings are judged, and
+`ValidationReport::deferred` lists what was accepted; an unmarked template is
+judged as text. A template is recognized only by
+`expression::is_deferred_template` (scanner + parser), never by a substring;
+`expression::is_malformed_template` names a span that fails to parse, which
+a caller setting template problems aside for later rendering (Claudine's
+launch pre-validation) judges as written. The resolver stores only cycle
+members in `$defs` and inlines every other named type at each reference, so
+a host must write its stack families recursively (Claudine's are), never
+unrolled: Claudine's typed three-level unroll resolved to 11 MB.
+The passive operand check is `lifecycle::validate_operands` (runtime
+registration, `select_overload_with`); `lib/tests/l1/lifecycle_generated_operands.rs`
+holds the binder/schema parity table. `lib/tests/l1/lifecycle_schema_parity.rs`
 derives events, action types, the open arm's exclusions, and the bare-verb
 `suggest` list from the md registry and parser. The inlined stacks cost about
 70–90 ms per debug validation; the regex memo in `convert.rs` and the import
@@ -722,7 +744,8 @@ For grammar or schema changes, cover:
   it) or `trigger_source()`. Embedded triggers add no dependency edges.
   Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
   input matrix for block YAML and JSON syntax).
-- Large host payloads (Claudine's resolves to ~2.5 MB) are kept affordable by
+- Large host payloads (Claudine's resolves to about 0.7 MB, its recursive
+  families stored once in `$defs`) are kept affordable by
   process-wide memos, each holding its inputs alive and keyed by `Arc`
   identity (plus value equality for small authored schemas): embedded
   trigger loads (`discovery.rs::load_embedded_trigger`, successes only),

@@ -1,15 +1,17 @@
 //! Both translators feed one rule core: every grammar construct, bound
 //! through the grammar translator (`call_binding`) and through its JSON
 //! Schema lowering plus the schema adapter's translator, keeps, converts, or
-//! rejects each probe value identically. Recursive named types are bound
-//! through the resolved schema: its definition table on the grammar side,
-//! its lowered `$defs` on the JSON Schema side.
+//! rejects each probe value identically, both plainly and with a template
+//! test consulted at the places marked `deferred`. Recursive named types are
+//! bound through the resolved schema: its definition table on the grammar
+//! side, its lowered `$defs` on the JSON Schema side.
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::coercion::{Bound, bind};
+use darkmatter::markdown::coercion::{BindOptions, Bound, ConversionError, PathSegment, Shape, bind, bind_with_marked};
 use darkmatter::markdown::compose::expression::call_binding::{
     NoNamedTypes, shape_from_simplified_schema, shape_from_simplified_schema_with_definitions,
 };
+use darkmatter::markdown::compose::expression::is_deferred_template;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::shape_from_json_schema;
 use darkmatter::markdown::schemas::simplified::{parse_yaml_schema, to_json_schema};
@@ -24,12 +26,24 @@ enum Outcome {
     Rejected,
 }
 
-fn outcome(result: Result<Bound<'_>, darkmatter::markdown::coercion::ConversionError>) -> Outcome {
+fn outcome(result: Result<Bound<'_>, ConversionError>) -> Outcome {
     match result {
         Ok(Bound::Kept(_)) => Outcome::Kept,
         Ok(Bound::Converted(value)) => Outcome::Converted(value),
         Err(_) => Outcome::Rejected,
     }
+}
+
+/// The template test schema validation consults at `deferred` places.
+fn template(_: &[PathSegment], value: &Value) -> bool {
+    value.as_str().is_some_and(is_deferred_template)
+}
+
+/// The outcome of binding `value` plainly and with [`template`] consulted at
+/// the shape's `deferred` places.
+fn outcomes(shape: &Shape, value: &Value) -> (Outcome, Outcome) {
+    let marked = bind_with_marked(shape, value, &BindOptions::default(), Some(&template));
+    (outcome(bind(shape, value)), outcome(marked))
 }
 
 fn probes() -> Vec<Value> {
@@ -72,6 +86,11 @@ fn probes() -> Vec<Value> {
         json!(["Ada", "36"]),
         json!(["Ada"]),
         json!(["Ada", "36", "yes", "extra"]),
+        json!("{{ fm.count }}"),
+        json!("n={{ fm.count }}"),
+        json!("{{ 1 + }}"),
+        json!(["{{ x }}", "2"]),
+        json!({"id": "{{ x }}"}),
     ]
 }
 
@@ -86,8 +105,8 @@ fn assert_translators_agree(definition: &str) {
     let mut disagreements = Vec::new();
     for probe in probes() {
         let document = json!({ "v": probe });
-        let through_grammar = outcome(bind(&grammar_shape, &document));
-        let through_json = outcome(bind(&json_shape, &document));
+        let through_grammar = outcomes(&grammar_shape, &document);
+        let through_json = outcomes(&json_shape, &document);
         if through_grammar != through_json {
             disagreements.push(format!("{probe}: grammar {through_grammar:?}, JSON Schema {through_json:?}"));
         }
@@ -147,6 +166,39 @@ conformance! {
     union_crossed_objects => "\"{ a: number, b: boolean } | { a: boolean, b: number }\"";
     union_yaml_list => "[\"number\", \"boolean\"]";
     nullable_number => "\"number | null\"";
+    deferred_number => "\"number(deferred)\"";
+    deferred_required_number => "\"number(required; deferred)\"";
+    deferred_items => "\"number(deferred)[]\"";
+    deferred_list => "\"number[](deferred)\"";
+    deferred_union_arms => "\"number(integer; deferred) | object(deferred)\"";
+    deferred_one_union_arm => "\"number(deferred) | boolean\"";
+    deferred_tuple_slot => "\"tuple([number(deferred), boolean])\"";
+    deferred_property => "\"{ id: number(deferred) }\"";
+    deferred_file => "\"file(deferred)\"";
+    deferred_tuple => "\"tuple([number, number]; deferred)\"";
+}
+
+/// The `deferred` cases above agree because both translators mark the same
+/// place, not because neither does: a marked number keeps a template only
+/// when the template test is consulted, and an unmarked one never does.
+#[test]
+fn deferred_marks_only_its_own_place_in_both_translators() {
+    for (definition, value, expected) in [
+        ("\"number(deferred)\"", json!({ "v": "{{ x }}" }), (Outcome::Rejected, Outcome::Kept)),
+        ("number", json!({ "v": "{{ x }}" }), (Outcome::Rejected, Outcome::Rejected)),
+        ("\"number(deferred)[]\"", json!({ "v": ["{{ x }}", "2"] }), (Outcome::Rejected, Outcome::Converted(json!({ "v": ["{{ x }}", 2] })))),
+        ("\"number[](deferred)\"", json!({ "v": ["{{ x }}"] }), (Outcome::Rejected, Outcome::Rejected)),
+        ("\"number[](deferred)\"", json!({ "v": "{{ x }}" }), (Outcome::Rejected, Outcome::Kept)),
+        ("\"number(deferred) | boolean\"", json!({ "v": "{{ x }}" }), (Outcome::Rejected, Outcome::Kept)),
+        ("\"number | boolean\"", json!({ "v": "{{ x }}" }), (Outcome::Rejected, Outcome::Rejected)),
+    ] {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&format!("v: {definition}")).expect("YAML");
+        let schema = parse_yaml_schema(&yaml).expect("the definition parses");
+        let grammar_shape = shape_from_simplified_schema(&schema, &NoNamedTypes).expect("grammar translates");
+        let json_shape = shape_from_json_schema(&to_json_schema(&schema).expect("the definition lowers"));
+        assert_eq!(outcomes(&grammar_shape, &value), expected, "grammar: {definition} {value}");
+        assert_eq!(outcomes(&json_shape, &value), expected, "JSON Schema: {definition} {value}");
+    }
 }
 
 /// Binds every probe through both translators of the resolved inline
@@ -166,8 +218,8 @@ fn assert_recursive_translators_agree(schema: &str, probes: &[Value]) {
     let json_shape = shape_from_json_schema(&resolved.json_schema);
     let mut disagreements = Vec::new();
     for probe in probes {
-        let through_grammar = outcome(bind(&grammar_shape, probe));
-        let through_json = outcome(bind(&json_shape, probe));
+        let through_grammar = outcomes(&grammar_shape, probe);
+        let through_json = outcomes(&json_shape, probe);
         if through_grammar != through_json {
             disagreements.push(format!("{probe}: grammar {through_grammar:?}, JSON Schema {through_json:?}"));
         }
@@ -250,6 +302,22 @@ fn ambiguous_union_inside_a_recursive_type() {
         json!({ "tree": chain(json!({ "a": "1", "b": true })) }),
         json!({ "tree": chain(json!({ "a": true, "b": "2" })) }),
         json!({ "tree": chain(json!({ "a": "x", "b": "y" })) }),
+    ];
+    assert_recursive_translators_agree(schema, &probes);
+}
+
+#[test]
+fn deferred_place_inside_a_recursive_type() {
+    let schema = "node: \"{ n: number(deferred), m: number, kids: node[] }\"\ntree: node(required)\n";
+    let chain = |leaf: Value| {
+        (0..6).fold(json!({ "n": leaf.clone(), "m": leaf }), |inner, _| json!({ "n": "1", "kids": [inner] }))
+    };
+    let probes = [
+        json!({ "tree": chain(json!("{{ x }}")) }),
+        json!({ "tree": chain(json!("2")) }),
+        json!({ "tree": chain(json!("pear")) }),
+        json!({ "tree": { "n": "{{ x }}" } }),
+        json!({ "tree": { "m": "{{ x }}" } }),
     ];
     assert_recursive_translators_agree(schema, &probes);
 }

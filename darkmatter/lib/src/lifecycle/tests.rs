@@ -196,3 +196,5 @@ fn md_parses_its_own_spellings_and_leaves_host_only_keys_as_data() {
     assert!(config.stack(LifecycleSignal::Success).is_empty());
     assert!(config.stack(LifecycleSignal::Loop).is_empty());
 }
+
+mod overloads;

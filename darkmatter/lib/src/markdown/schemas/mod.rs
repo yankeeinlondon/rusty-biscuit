@@ -805,6 +805,7 @@ impl DarkmatterSchemas {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                deferred: Vec::new(),
                 advisories: Vec::new(),
             }),
         }
@@ -846,6 +847,7 @@ impl DarkmatterSchemas {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                deferred: Vec::new(),
                 advisories: Vec::new(),
             }),
         }
@@ -1106,18 +1108,50 @@ impl EffectiveSchema {
     /// rewrite them to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly on an already-valid
     /// instance.
+    ///
+    /// ## Nested templates
+    ///
+    /// A `{{ … }}` template below a top-level key, at a place the schema
+    /// marks `deferred` (`success: [{pr_list: "{{ fm.count }}"}]` against
+    /// `pr_list: number(deferred)`), is supplied only when it is rendered, so
+    /// it is accepted without judging its value; nothing is evaluated. Its
+    /// literal siblings and the shape of the collection holding it are still
+    /// judged: an unknown key, an extra or missing tuple element, or an
+    /// invalid literal beside it is reported. A template at an unmarked place,
+    /// and malformed template syntax anywhere, is judged as written. A whole
+    /// top-level template value is not deferred here (see
+    /// [`Self::validate_with_options`]).
     pub fn validate_with_positions(
         &self,
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
+        self.validate_converted(frontmatter, positions, None)
+    }
+
+    /// [`Self::validate_with_positions`]; `templates`, when given, were
+    /// found in the authored form of `frontmatter` (before literal tokens
+    /// were decoded), so decoded literal text is never taken for a template.
+    fn validate_converted(
+        &self,
+        frontmatter: &Value,
+        positions: &PositionMap,
+        templates: Option<&coerce::NestedTemplates>,
+    ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        let working_copy = if self.accepts_as_is(frontmatter) {
-            frontmatter.clone()
-        } else {
-            coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter)
+        if self.accepts_as_is(frontmatter) {
+            return self.validate_instance(frontmatter, positions, &coerce::NestedTemplates::default());
+        }
+        let found;
+        let templates = match templates {
+            Some(templates) => templates,
+            None => {
+                found = self.nested_templates(frontmatter);
+                &found
+            }
         };
-        self.validate_instance(&working_copy, positions)
+        let working_copy = coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, templates);
+        self.validate_instance(&working_copy, positions, templates)
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.
@@ -1183,8 +1217,11 @@ impl EffectiveSchema {
         drop(resolve);
         Ok(match phase {
             SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
+            // Raw, as `validate_raw` is, but nested templates at `deferred`
+            // places are deferred as in every phase.
             SchemaPhase::Completion => {
-                projected.validate_raw_with_positions(frontmatter, positions)
+                let _validate = timings::stage(ValidationStage::Validate);
+                projected.validate_instance(frontmatter, positions, &projected.nested_templates(frontmatter))
             }
         })
     }
@@ -1210,18 +1247,35 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        self.validate_instance(frontmatter, positions)
+        self.validate_instance(frontmatter, positions, &coerce::NestedTemplates::default())
+    }
+
+    /// The nested templates of `authored` that this schema marks `deferred`
+    /// ([`coerce::NestedTemplates::find`]).
+    fn nested_templates(&self, authored: &Value) -> coerce::NestedTemplates {
+        coerce::NestedTemplates::find(self.conversion(), &self.json_schema, authored)
     }
 
     /// Shared validation body over an already-prepared instance. Callers
     /// choose the preparation: [`Self::validate_with_positions`] passes a
     /// coerced working copy, the `validate_raw` pair passes the instance as
-    /// parsed.
-    fn validate_instance(&self, instance: &Value, positions: &PositionMap) -> ValidationReport {
+    /// parsed. Problems owed to one of `templates` are left out as they are
+    /// collected.
+    fn validate_instance(
+        &self,
+        instance: &Value,
+        positions: &PositionMap,
+        templates: &coerce::NestedTemplates,
+    ) -> ValidationReport {
+        let failures = std::cell::OnceCell::new();
+        let excused = |problem: &ValidationProblem| {
+            templates.excuses_problem(problem, self.conversion(), &self.json_schema, instance, &failures)
+        };
         let anchors = validate::FileRefAnchors::Resolved {
             base_dir: self.base_dir.as_deref(),
             fallback: self.file_ref_fallback_dir.as_deref(),
             context: &self.file_resolution_context,
+            excused: (!templates.is_empty()).then_some(&excused as &validate::Excused<'_>),
         };
         let mut problems = match &self.validators {
             // Root `anyOf` union. When a shared literal discriminant selects a
@@ -1262,7 +1316,7 @@ impl EffectiveSchema {
                 )
             }
         };
-        coerce::annotate_problems(self.conversion(), &self.json_schema, instance, &mut problems);
+        coerce::annotate_problems(self.conversion(), &self.json_schema, instance, templates, &mut problems);
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
         // the rendered message (#9) are suppressed so the output stays additive.
@@ -1276,6 +1330,7 @@ impl EffectiveSchema {
             valid: problems.is_empty(),
             problems,
             pending: Vec::new(),
+            deferred: templates.pointers(),
             advisories: self.advisories.clone(),
         }
     }
@@ -1286,10 +1341,14 @@ impl EffectiveSchema {
     /// Top-level values that are a whole-value `$(...)` shell expression or
     /// still hold an unresolved `{{ ... }}` template are collected into
     /// [`ValidationReport::pending`]. With [`PendingPolicy::Defer`] (the
-    /// default), problems attributable to a pending key are dropped from the
-    /// report — mirroring compose, which lets a later shell-expansion pass
-    /// re-validate the resolved value. Keys in `options.excluded_keys` have
-    /// their problems dropped unconditionally (caller-owned keys).
+    /// default), a problem is dropped when its key is a whole-value `$(...)`
+    /// or when the authored value at the problem's own path holds a
+    /// `{{ ... }}` template — mirroring compose's pre-shell gate, which lets
+    /// a later pass re-validate the rendered value. A problem on a literal
+    /// sibling of a template stays. Independently of the policy, templates at
+    /// places the schema marks `deferred` are never judged. Keys in
+    /// `options.excluded_keys` have their problems dropped unconditionally
+    /// (caller-owned keys).
     ///
     /// Nothing here executes a shell command, reads the environment, or
     /// touches the network: pending values are recognised lexically only.
@@ -1302,12 +1361,25 @@ impl EffectiveSchema {
         // Stored literal tokens are judged by the text they hold. A malformed
         // one stays raw; composition reports it.
         let decoded = crate::markdown::literal_token::decode_literal_tokens(frontmatter).ok();
-        let mut report =
-            self.validate_with_positions(decoded.as_ref().unwrap_or(frontmatter), positions);
+        let templates = self.nested_templates(frontmatter);
+        let mut report = self.validate_converted(
+            decoded.as_ref().unwrap_or(frontmatter),
+            positions,
+            Some(&templates),
+        );
         let pending = scan_pending_values(frontmatter);
-        let pending_keys: HashSet<&str> = pending.iter().map(|p| p.key.as_str()).collect();
+        let shell_pending_keys: HashSet<&str> = pending
+            .iter()
+            .filter(|p| p.reason == PendingValueReason::ShellExpression)
+            .map(|p| p.key.as_str())
+            .collect();
         let defer = matches!(options.pending_policy, PendingPolicy::Defer);
 
+        // Path-precise, as compose's pre-shell gate is: rendering a template
+        // changes only the value at its own path, so it can settle a problem
+        // there or on an ancestor whose subtree holds it, never one on an
+        // unrelated sibling. A whole-value `$( … )` replaces its whole key.
+        let deferred = &report.deferred;
         report.problems.retain(|problem| {
             let Some(key) = attributable_top_level_key(problem) else {
                 return true;
@@ -1315,7 +1387,15 @@ impl EffectiveSchema {
             if options.excluded_keys.contains(&key) {
                 return false;
             }
-            !(defer && pending_keys.contains(key.as_str()))
+            if !defer {
+                return true;
+            }
+            if shell_pending_keys.contains(key.as_str()) {
+                return false;
+            }
+            let holds = |text: &str| text.contains("{{") && crate::markdown::literal_token::holds_pending_syntax(text);
+            !authored_node_at(frontmatter, &problem.path)
+                .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
         });
         report.valid = report.problems.is_empty();
         report.pending = pending;
@@ -1431,13 +1511,22 @@ pub struct ValidationReport {
     pub valid: bool,
     /// Individual problems, in `iter_errors` order.
     pub problems: Vec<ValidationProblem>,
-    /// Top-level values that could not be validated yet because they still
-    /// hold a `$(...)` shell expression or an unresolved `{{ ... }}` template
-    /// (R-5 Priority 3). Always empty for [`EffectiveSchema::validate`] /
+    /// Top-level values that could not be validated yet, wholly or in part,
+    /// because they still hold a `$(...)` shell expression or an unresolved
+    /// `{{ ... }}` template (R-5 Priority 3). A list or mapping holding a
+    /// template is listed even though at most its templates at places the
+    /// schema marks `deferred` are deferred.
+    /// Always empty for [`EffectiveSchema::validate`] /
     /// [`EffectiveSchema::validate_with_positions`]; populated only by
     /// [`EffectiveSchema::validate_with_options`], which mirrors the compose
     /// deferral rules without executing anything.
     pub pending: Vec<PendingValue>,
+    /// JSON Pointers of the `{{ ... }}` templates this validation accepted
+    /// without judging because the schema marks their place `deferred`. A
+    /// caller that sets problems aside for later rendering consults it (see
+    /// [`awaits_rendering`]): a problem left beside an accepted template is
+    /// genuine, since that template's value was already allowed for.
+    pub deferred: Vec<String>,
     /// Non-fatal findings discovered while resolving the effective schema.
     pub advisories: Vec<SchemaAdvisory>,
 }
@@ -1670,8 +1759,9 @@ pub enum PendingValueReason {
 /// How [`EffectiveSchema::validate_with_options`] treats pending values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingPolicy {
-    /// Drop problems attributable to a pending top-level key (mirrors compose
-    /// when shell expansion will re-validate the value downstream).
+    /// Drop a problem whose key is a whole-value `$(...)`, or whose own
+    /// path holds an unresolved `{{ ... }}` template (mirrors compose when a
+    /// later pass will re-validate the rendered value).
     Defer,
     /// Keep every problem; pending values are still listed on
     /// [`ValidationReport::pending`] but do not suppress diagnostics.
@@ -2056,6 +2146,82 @@ fn pending_reason(value: &Value) -> Option<PendingValueReason> {
     } else {
         None
     }
+}
+
+/// The authored value a problem's JSON Pointer names, or its nearest
+/// existing ancestor when the pointer names a missing member, with that
+/// node's own pointer. `None` for the root pointer or an absent top-level
+/// key.
+pub fn authored_node_at<'a>(frontmatter: &'a Value, pointer: &str) -> Option<(String, &'a Value)> {
+    let mut segments = pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(|segment| segment.replace("~1", "/").replace("~0", "~"));
+    let key = segments.next().filter(|key| !key.is_empty())?;
+    let mut node = frontmatter.get(&key)?;
+    let encode = |segment: &str| segment.replace('~', "~0").replace('/', "~1");
+    let mut node_pointer = format!("/{}", encode(&key));
+    for segment in segments {
+        let child = match node {
+            Value::Object(map) => map.get(&segment),
+            Value::Array(items) => segment.parse::<usize>().ok().and_then(|index| items.get(index)),
+            _ => None,
+        };
+        match child {
+            Some(child) => {
+                node = child;
+                node_pointer.push('/');
+                node_pointer.push_str(&encode(&segment));
+            }
+            None => break,
+        }
+    }
+    Some((node_pointer, node))
+}
+
+/// Whether rendering a template could settle `problem`, so a caller that
+/// renders later may set it aside: `node` (at `node_pointer`, see
+/// [`authored_node_at`]) is a template itself, or a collection holding one,
+/// and that template is not one the schema already accepted (`deferred`, from
+/// [`ValidationReport::deferred`]). `holds` is the caller's template test.
+///
+/// Rendering changes values, never keys: an unknown or missing key on a
+/// collection is never set aside, and a problem on a literal sibling of a
+/// template never reaches a node that holds it.
+pub fn awaits_rendering(
+    problem: &ValidationProblem,
+    node: &Value,
+    node_pointer: &str,
+    deferred: &[String],
+    holds: &dyn Fn(&str) -> bool,
+) -> bool {
+    fn unaccepted(value: &Value, pointer: &mut String, deferred: &[String], holds: &dyn Fn(&str) -> bool) -> bool {
+        match value {
+            Value::String(text) => holds(text) && !deferred.iter().any(|accepted| accepted == pointer),
+            Value::Array(items) => items.iter().enumerate().any(|(index, item)| {
+                let len = pointer.len();
+                pointer.push_str(&format!("/{index}"));
+                let found = unaccepted(item, pointer, deferred, holds);
+                pointer.truncate(len);
+                found
+            }),
+            Value::Object(map) => map.iter().any(|(key, item)| {
+                let len = pointer.len();
+                pointer.push('/');
+                pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
+                let found = unaccepted(item, pointer, deferred, holds);
+                pointer.truncate(len);
+                found
+            }),
+            _ => false,
+        }
+    }
+    if !node.is_string()
+        && matches!(problem.code, ValidationProblemCode::UnknownKey | ValidationProblemCode::MissingRequired)
+    {
+        return false;
+    }
+    unaccepted(node, &mut node_pointer.to_string(), deferred, holds)
 }
 
 fn value_contains_marker(value: &Value, marker: &str) -> bool {

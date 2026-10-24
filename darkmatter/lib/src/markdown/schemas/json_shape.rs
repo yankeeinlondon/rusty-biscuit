@@ -48,7 +48,7 @@ use super::format::{
     DARKMATTER_YAML_FORMAT,
 };
 use super::file_match::DARKMATTER_MATCH_KEYWORD;
-use super::simplified::{DRAFT_2020_12, SimplifiedType};
+use super::simplified::{DARKMATTER_DEFERRED_KEYWORD, DRAFT_2020_12, SimplifiedType};
 use super::validate::build_structural_validator;
 use crate::markdown::coercion::{
     Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
@@ -348,6 +348,11 @@ impl<'s> Translator<'s> {
         match node {
             Value::Bool(true) => Shape::Any,
             Value::Bool(false) => Shape::Union(Vec::new()),
+            // `x-darkmatter-deferred` marks the node the way SimplifiedSchema's
+            // `deferred` does, so both translators wrap the same place.
+            Value::Object(map) if map.get(DARKMATTER_DEFERRED_KEYWORD) == Some(&Value::Bool(true)) => {
+                self.object_node(node, map, references).deferrable()
+            }
             Value::Object(map) => self.object_node(node, map, references),
             // Not a schema; building the validator reports it.
             _ => Shape::Any,

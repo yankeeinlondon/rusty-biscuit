@@ -213,22 +213,18 @@ fn build_non_control_positional_action(
 
     // Side-effect verbs.
     if let Some(signature) = side_effect_signature(verb) {
-        check_positional_signature(verb, &args, &signature, source_file, property_name)?;
+        check_positional_signature(verb, &args, signature, source_file, property_name)?;
         return Ok(LifecycleActionKind::SideEffect(SideEffectAction {
             verb: verb.to_string(),
             args,
         }));
     }
 
-    // Expression-function verbs.
-    let signature = super::actions::expression_function_signature(verb)
-        .unwrap_or_else(|| super::actions::Signature {
-            verb: verb.to_string(),
-            params: Vec::new(),
-            optional_tail: 0,
-            variadic: true,
-        });
-    check_positional_signature(verb, &args, &signature, source_file, property_name)?;
+    // Expression-function verbs. A verb outside the catalog reaches here only
+    // under a profile that admits it; its arity is left to the event.
+    if let Some(signature) = expression_function_signature(verb) {
+        check_positional_signature(verb, &args, signature, source_file, property_name)?;
+    }
     Ok(LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
         function: verb.to_string(),
         args,
@@ -289,46 +285,45 @@ fn check_optional_positional_arity(
     Ok(())
 }
 
-/// Enforce positional arity against a descriptor signature.
+/// Enforce that the positional argument count fits at least one overload of
+/// a generated verb.
 fn check_positional_signature(
     verb: &str,
     args: &[Expr],
-    signature: &super::actions::Signature,
+    signature: &VerbSignature,
     source_file: &Path,
     property_name: &str,
 ) -> Result<(), LifecycleError> {
-    let min = signature.required_count();
-    let max = signature.max_count();
-
-    let too_few = args.len() < min;
-    let too_many = max.is_some_and(|m| args.len() > m);
-    if too_few || too_many {
-        let message = match max {
-            None => format!(
-                "`{verb}` is variadic and requires at least {min} argument(s), got {}; \
-                 expected {}",
-                args.len(),
-                signature.params.join(", ")
-            ),
-            Some(max) if min == max => format!(
-                "`{verb}` expects exactly {min} argument(s) ({}), got {}",
-                signature.params.join(", "),
-                args.len()
-            ),
-            Some(max) => format!(
-                "`{verb}` expects {min} to {max} argument(s) ({}), got {}",
-                signature.params.join(", "),
-                args.len()
-            ),
-        };
-        return Err(LifecycleError::LifecycleWrongArity {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            verb: verb.to_string(),
-            message,
-        });
+    let supplied = args.len();
+    if signature.accepts_count(supplied) {
+        return Ok(());
     }
-    Ok(())
+    let message = match signature.overloads() {
+        [only] => match (only.min_count(), only.max_count()) {
+            (min, None) => format!(
+                "`{verb}` requires at least {min} argument(s) (`{}`), got {supplied}",
+                only.display()
+            ),
+            (min, Some(max)) if min == max => format!(
+                "`{verb}` expects exactly {min} argument(s) (`{}`), got {supplied}",
+                only.display()
+            ),
+            (min, Some(max)) => format!(
+                "`{verb}` expects {min} to {max} argument(s) (`{}`), got {supplied}",
+                only.display()
+            ),
+        },
+        _ => format!(
+            "`{verb}` has no overload that takes {supplied} argument(s); overloads: {}",
+            signature.display_overloads()
+        ),
+    };
+    Err(LifecycleError::LifecycleWrongArity {
+        source_path: source_file.to_path_buf(),
+        property: property_name.to_string(),
+        verb: verb.to_string(),
+        message,
+    })
 }
 
 /// Suggest a known lifecycle verb that is close to the unknown `verb`.
@@ -488,7 +483,7 @@ pub(super) fn build_action_from_params(
     // Expression-function actions with concrete named parameters. Variadic
     // functions (`and`, `or`) are positional-only and reject long form.
     if let Some(signature) = expression_function_signature(verb) {
-        if signature.variadic {
+        if signature.is_variadic() {
             return Err(LifecycleError::LifecycleExpressionFunctionKeyValueUnsupported {
                 source_path: source_file.to_path_buf(),
                 property: property.to_string(),
@@ -496,7 +491,7 @@ pub(super) fn build_action_from_params(
             });
         }
         let args =
-            collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
+            collect_named_signature_args(verb, signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
             function: verb.to_string(),
@@ -506,14 +501,13 @@ pub(super) fn build_action_from_params(
 
     // Side-effect action: any remaining verb with named params. The
     // Darkmatter catalog is the authority. For a verb with a known signature
-    // we reorder the named params into positional call order (and reject any
-    // param the signature does not name) so the executor can dispatch
-    // positionally. For an unknown verb we keep the params in alphabetical
+    // the named params select one overload and are reordered into its
+    // positional call order so the executor can dispatch positionally. For an unknown verb we keep the params in alphabetical
     // key order for deterministic storage; the executor surfaces it as an
     // unknown side effect at runtime.
-    if let Some(signature) = super::actions::side_effect_signature(verb) {
+    if let Some(signature) = side_effect_signature(verb) {
         let args =
-            collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
+            collect_named_signature_args(verb, signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleActionKind::SideEffect(SideEffectAction {
             verb: verb.to_string(),
@@ -668,45 +662,55 @@ fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr,
     })
 }
 
-/// Collect key/value action arguments in the descriptor's positional order,
-/// enforcing the required-through-max parameter band at parse time.
+/// Collect key/value action arguments in the positional order of the one
+/// overload their keys select ([`VerbSignature::select_named`]).
 ///
-/// Walks `signature.params` and consumes each named parameter present in
-/// `params_map`. A parameter in the first [`required_count`] positions that is
-/// absent is a parse-time error naming the missing required parameter(s);
-/// optional-tail parameters being absent is allowed.
-///
-/// [`required_count`]: super::actions::Signature::required_count
+/// A long form that selects no overload is a parse-time error naming the
+/// missing required parameter(s) of the closest overload, the parameter(s) no
+/// overload names, or the overloads when the keys mix several of them.
 fn collect_named_signature_args(
     verb: &str,
-    signature: &super::actions::Signature,
+    signature: &VerbSignature,
     params_map: &mut std::collections::HashMap<String, Expr>,
     property: &str,
     source_file: &Path,
 ) -> Result<Vec<Expr>, LifecycleError> {
-    let required = signature.required_count();
-    let mut args = Vec::with_capacity(signature.params.len());
-    let mut missing: Vec<&str> = Vec::new();
-    for (index, name) in signature.params.iter().enumerate() {
-        match params_map.remove(name) {
-            Some(expr) => args.push(expr),
-            None if index < required => missing.push(name),
-            None => {}
-        }
-    }
-    if !missing.is_empty() {
-        return Err(LifecycleError::LifecycleActionInvalidLongForm {
+    let keys: Vec<&str> = params_map.keys().map(String::as_str).collect();
+    let overload = signature.select_named(&keys).map_err(|mismatch| {
+        let several = signature.overloads().len() > 1;
+        let message = match mismatch {
+            LongFormMismatch::Missing { overload, missing } if several => format!(
+                "`{verb}` is missing required parameter(s): {} (overload `{}`)",
+                missing.join(", "),
+                overload.display()
+            ),
+            LongFormMismatch::Missing { missing, .. } => {
+                format!("`{verb}` is missing required parameter(s): {}", missing.join(", "))
+            }
+            LongFormMismatch::Unknown(unknown) => format!(
+                "unknown parameter(s): {}; `{verb}` takes {}",
+                unknown.join(", "),
+                signature.display_overloads()
+            ),
+            LongFormMismatch::Unrelated => {
+                let mut keys = keys.clone();
+                keys.sort_unstable();
+                format!(
+                    "no overload of `{verb}` takes {} together; overloads: {}",
+                    keys.join(", "),
+                    signature.display_overloads()
+                )
+            }
+        };
+        LifecycleError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
             property: property.to_string(),
             action: verb.to_string(),
-            message: format!(
-                "`{verb}` is missing required parameter(s): {}",
-                missing.join(", ")
-            ),
+            message,
             source: None,
-        });
-    }
-    Ok(args)
+        }
+    })?;
+    Ok(overload.names().filter_map(|name| params_map.remove(name)).collect())
 }
 
 /// Reject leftover parameters after a long-form action consumes its known
@@ -742,4 +746,5 @@ fn expr_to_string(expr: &Expr) -> String {
 }
 
 use super::*;
+use super::actions::{LongFormMismatch, VerbSignature};
 use crate::markdown::compose::context::merge::json_type_name;

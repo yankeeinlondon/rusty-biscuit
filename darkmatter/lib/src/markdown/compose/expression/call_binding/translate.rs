@@ -240,14 +240,15 @@ pub fn shape_from_simplified_schema_with_definitions(
     }
 }
 
-/// The constraints that govern presence, timing, or documentation, never a
-/// value's type.
+/// The constraints that govern presence, timing, deferral, or
+/// documentation, never a value's type.
 fn is_annotation(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
             | Constraint::Default(_)
             | Constraint::Generated
+            | Constraint::Deferred
             | Constraint::Example(_)
             | Constraint::Category(_)
             | Constraint::Eager
@@ -593,11 +594,14 @@ impl<'r> Translator<'r> {
         let value_constraints: Vec<Constraint> = atom
             .constraints
             .iter()
-            .filter(|constraint| !matches!(constraint, Constraint::Category(_)))
+            .filter(|constraint| !matches!(constraint, Constraint::Category(_) | Constraint::Deferred))
             .cloned()
             .collect();
+        let deferred_value = atom.constraints.contains(&Constraint::Deferred);
+        let deferred_list = atom.is_array && atom.array_constraints.contains(&Constraint::Deferred);
         let inner = if atom.is_array {
-            self.descend(|this| this.atom_type(path, atom, &value_constraints, allow_optional_empty_file, required))?
+            let item = self.descend(|this| this.atom_type(path, atom, &value_constraints, allow_optional_empty_file, required))?;
+            if deferred_value { item.deferrable() } else { item }
         } else {
             self.atom_type(path, atom, &value_constraints, allow_optional_empty_file, required)?
         };
@@ -609,6 +613,8 @@ impl<'r> Translator<'r> {
         } else {
             inner
         };
+        // The lowering marks the same node: the list, or the value itself.
+        let shape = if deferred_list || (deferred_value && !atom.is_array) { shape.deferrable() } else { shape };
         Ok((shape, required))
     }
 

@@ -129,137 +129,60 @@ fn is_lifecycle_control_flag() {
 }
 
 // -------------------------------------------------------------------------
-// Signature parser
+// Generated verb signatures (per overload, from the typed catalogs)
 // -------------------------------------------------------------------------
 
-#[test]
-fn parse_signature_fixed_positional() {
-    let sig = parse_signature("set_frontmatter(file, prop, value)").unwrap();
-    assert_eq!(sig.verb, "set_frontmatter");
-    assert_eq!(sig.params, vec!["file", "prop", "value"]);
-    assert_eq!(sig.optional_tail, 0);
-    assert!(!sig.variadic);
-    assert_eq!(sig.required_count(), 3);
-    assert_eq!(sig.max_count(), Some(3));
+fn overload_names(signature: &VerbSignature) -> Vec<Vec<&'static str>> {
+    signature.overloads().iter().map(|overload| overload.names().collect()).collect()
 }
 
 #[test]
-fn parse_signature_optional_tail() {
-    let sig = parse_signature("ensure_file(file, content?)").unwrap();
-    assert_eq!(sig.verb, "ensure_file");
-    assert_eq!(sig.params, vec!["file", "content"]);
-    assert_eq!(sig.optional_tail, 1);
-    assert!(!sig.variadic);
-    assert_eq!(sig.required_count(), 1);
-    assert_eq!(sig.max_count(), Some(2));
-}
-
-#[test]
-fn parse_signature_bracket_optional_tail() {
-    // Darkmatter's catalog form for an optional trailing parameter.
-    let sig = parse_signature("number(x, [default])").unwrap();
-    assert_eq!(sig.verb, "number");
-    assert_eq!(sig.params, vec!["x", "default"]);
-    assert_eq!(sig.optional_tail, 1);
-    assert!(!sig.variadic);
-    assert_eq!(sig.required_count(), 1);
-    assert_eq!(sig.max_count(), Some(2));
-}
-
-#[test]
-fn parse_signature_variadic() {
-    let sig = parse_signature("and(...)").unwrap();
-    assert_eq!(sig.verb, "and");
-    assert!(sig.params.is_empty());
-    assert_eq!(sig.optional_tail, 0);
-    assert!(sig.variadic);
-    assert_eq!(sig.required_count(), 0);
-    assert_eq!(sig.max_count(), None);
-}
-
-#[test]
-fn parse_signature_zero_arg() {
-    let sig = parse_signature("stop()").unwrap();
-    assert_eq!(sig.verb, "stop");
-    assert!(sig.params.is_empty());
-    assert!(!sig.variadic);
-    assert_eq!(sig.required_count(), 0);
-    assert_eq!(sig.max_count(), Some(0));
-}
-
-#[test]
-fn parse_signature_malformed() {
-    assert!(parse_signature("no_parens").is_none());
-    assert!(parse_signature("(file)").is_none());
-    assert!(parse_signature("verb(").is_none());
-    assert!(parse_signature("verb(file").is_none());
-    assert!(parse_signature("verb(a, ?)").is_none());
-    assert!(parse_signature("verb(a?, b)").is_none());
-}
-
-// -------------------------------------------------------------------------
-// Side-effect signature derivation
-// -------------------------------------------------------------------------
-
-#[test]
-fn side_effect_signature_derives_from_descriptors() {
+fn side_effect_signature_reads_typed_overloads() {
     let set = side_effect_signature("set_frontmatter").unwrap();
-    assert_eq!(set.params, vec!["file", "prop", "value"]);
-    assert_eq!(set.optional_tail, 0);
+    assert_eq!(overload_names(set), [vec!["file", "prop", "value"]]);
 
     let ensure = side_effect_signature("ensure_file").unwrap();
-    assert_eq!(ensure.params, vec!["file", "content"]);
-    assert_eq!(ensure.optional_tail, 1);
+    assert_eq!(overload_names(ensure), [vec!["file"], vec!["file", "content"]]);
+    assert!(ensure.accepts_count(1) && ensure.accepts_count(2) && !ensure.accepts_count(3));
+    assert_eq!(ensure.min_count(), 1);
 
     assert!(side_effect_signature("not_a_verb").is_none());
 }
 
-// -------------------------------------------------------------------------
-// Expression-function signature derivation
-// -------------------------------------------------------------------------
-
 #[test]
-fn expression_function_signature_bracket_optional() {
-    // `number(x, [fallback])` — the bracketed param is optional, so the
-    // one-argument form `number("{{ value }}")` is valid arity.
-    let sig = expression_function_signature("number").unwrap();
-    assert_eq!(sig.params, vec!["x", "fallback"]);
-    assert_eq!(sig.optional_tail, 1);
-    assert_eq!(sig.required_count(), 1);
-    assert_eq!(sig.max_count(), Some(2));
+fn expression_function_signature_keeps_optional_parameters_per_overload() {
+    // `number(x, [fallback])`: one overload with an optional tail.
+    let number = expression_function_signature("number").unwrap();
+    assert_eq!(overload_names(number), [vec!["x", "fallback"]]);
+    assert_eq!((number.overloads()[0].min_count(), number.overloads()[0].max_count()), (1, Some(2)));
 
-    let round = expression_function_signature("round").unwrap();
-    assert_eq!(round.required_count(), 1);
-    assert_eq!(round.max_count(), Some(2));
-}
-
-#[test]
-fn expression_function_signature_merges_overloads() {
-    // Overloaded functions: the shorter overload's missing parameters are
-    // optional, so the one-argument positional form is valid arity.
-    let frontmatter = expression_function_signature("frontmatter").unwrap();
-    assert_eq!(frontmatter.params, vec!["file", "prop"]);
-    assert_eq!(frontmatter.optional_tail, 1);
-    assert_eq!(frontmatter.required_count(), 1);
-    assert_eq!(frontmatter.max_count(), Some(2));
-
+    // Overloads are never merged: `link(file)` | `link(target, desc)`.
     let link = expression_function_signature("link").unwrap();
-    assert_eq!(link.required_count(), 1);
-    assert_eq!(link.max_count(), Some(2));
-
-    let validate = expression_function_signature("validate_schema").unwrap();
-    assert_eq!(validate.required_count(), 1);
-    assert_eq!(validate.max_count(), Some(2));
+    assert_eq!(overload_names(link), [vec!["file"], vec!["target", "desc"]]);
+    assert!(link.accepts_count(1) && link.accepts_count(2) && !link.accepts_count(3));
 }
 
 #[test]
 fn expression_function_signature_variadic_preserved() {
     let and = expression_function_signature("and").unwrap();
-    assert!(and.variadic);
-    assert_eq!(and.required_count(), 0);
-    assert_eq!(and.max_count(), None);
+    assert!(and.is_variadic());
+    assert_eq!(and.min_count(), 0);
+    assert!(and.accepts_count(0) && and.accepts_count(7));
 
     assert!(expression_function_signature("not_a_function").is_none());
+}
+
+#[test]
+fn select_named_picks_the_overload_whose_parameters_cover_the_keys() {
+    let link = expression_function_signature("link").unwrap();
+    assert_eq!(link.select_named(&["file"]).unwrap().display(), "link(file)");
+    assert_eq!(link.select_named(&["desc", "target"]).unwrap().display(), "link(target, desc)");
+    assert!(matches!(
+        link.select_named(&["target"]),
+        Err(LongFormMismatch::Missing { missing, .. }) if missing == ["desc"]
+    ));
+    assert_eq!(link.select_named(&["bogus", "file"]), Err(LongFormMismatch::Unknown(vec!["bogus".to_string()])));
+    assert_eq!(link.select_named(&["file", "desc"]), Err(LongFormMismatch::Unrelated));
 }
 
 // -------------------------------------------------------------------------

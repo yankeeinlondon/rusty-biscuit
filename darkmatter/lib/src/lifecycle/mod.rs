@@ -82,6 +82,7 @@ pub mod envelope;
 pub mod error;
 pub mod executor;
 pub mod md_host;
+mod operands;
 mod parse;
 pub mod policy;
 pub mod preflight;
@@ -89,6 +90,7 @@ pub mod registry;
 pub mod run;
 pub mod run_guard;
 pub mod runtime;
+pub mod schema_projection;
 pub mod services;
 pub mod shell_template;
 mod source_map;
@@ -105,6 +107,7 @@ pub use envelope::{
     SourceExcerpt,
 };
 pub use error::LifecycleExprError;
+pub use operands::{OperandVerdict, validate_expression_function_operands, validate_operands, validate_operands_with};
 pub use services::{LifecycleService, LifecycleServices, MissingServiceError};
 pub use parse::{
     LOOP_ITERATION_KEYS, LifecycleParseOptions, UnknownVerbPolicy, parse_lifecycle_config_with,

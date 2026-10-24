@@ -3,13 +3,14 @@
 //! bound-argument accessors handlers read.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 
 use serde_json::{Map, Value};
 
 use super::error::{ArgumentError, ArgumentProblem, CallBindingError, CandidateFailure, SignatureProblem};
 use super::registration::{EvaluationMode, FunctionRegistration};
 use super::signature::{CompiledParameter, CompiledSignature};
-use crate::markdown::coercion::{Bound, ValueKind, bind};
+use crate::markdown::coercion::{BindOptions, Bound, PathSegment, ValueKind, bind_with};
 
 /// A numeric recovery that bound the call with the fallback selected.
 #[derive(Debug, Clone, PartialEq)]
@@ -133,6 +134,9 @@ pub struct BoundCall<'v> {
     overload: usize,
     exact: bool,
     args: BoundArgs<'v>,
+    /// Indices of the arguments in which the caller's deferral predicate
+    /// deferred a value; always empty without one.
+    deferred: Vec<usize>,
 }
 
 impl<'v> BoundCall<'v> {
@@ -154,6 +158,19 @@ impl<'v> BoundCall<'v> {
         self.args
     }
 
+    /// The arguments, by index, holding a value the deferral predicate of
+    /// [`FunctionRegistration::bind_call_with`] deferred (the whole argument
+    /// or any value inside it). A deferred value is kept as written and is
+    /// not yet known to bind.
+    pub fn deferred_arguments(&self) -> &[usize] {
+        &self.deferred
+    }
+
+    /// Whether any argument holds a deferred value.
+    pub fn is_deferred(&self) -> bool {
+        !self.deferred.is_empty()
+    }
+
     /// Detaches the call from the caller's values (see
     /// [`BoundArgs::into_owned`]).
     pub fn into_owned(self) -> BoundCall<'static> {
@@ -161,8 +178,23 @@ impl<'v> BoundCall<'v> {
             overload: self.overload,
             exact: self.exact,
             args: self.args.into_owned(),
+            deferred: self.deferred,
         }
     }
+}
+
+/// The outcome of [`FunctionRegistration::select_overload_with`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum OverloadSelection<'v> {
+    /// No argument holds a deferred value, and the call binds to this
+    /// overload by the same rule as [`FunctionRegistration::bind_call`].
+    Selected(Box<BoundCall<'v>>),
+    /// Some binding holds a deferred value, so the overload is chosen only
+    /// once the value exists. Every overload that binds with the deferred
+    /// values taken as matching remains, in registration order; each holds
+    /// at least one binding (a deferred value never fails, so a binding
+    /// without one would bind at event time too and still competes).
+    Deferred(Vec<BoundCall<'v>>),
 }
 
 impl FunctionRegistration {
@@ -177,38 +209,84 @@ impl FunctionRegistration {
     ///
     /// A [`CallBindingError`] of kind type, arity, or ambiguous overload.
     pub fn bind_call<'v>(&self, args: &'v [Value]) -> Result<BoundCall<'v>, CallBindingError> {
-        if let [signature] = self.overloads.as_slice() {
-            return bind_signature(signature, args)
-                .map(|(args, exact)| BoundCall { overload: 0, exact, args })
-                .map_err(|problem| self.failure(vec![candidate(signature, problem)], args.len()));
+        self.bind_call_with(args, &BindOptions::default())
+    }
+
+    /// [`FunctionRegistration::bind_call`] with coercion options.
+    ///
+    /// A value the deferral predicate defers binds as kept, so it never
+    /// fails and never makes a binding converted; the predicate sees the
+    /// path relative to the argument. It is consulted for a whole argument
+    /// before the source exclusions and the `null` rule, which judge the
+    /// value supplied later, not the placeholder. Arity is never deferred.
+    /// Overloads still select by the runtime rule, so a deferred argument
+    /// that several overloads accept is ambiguous here; passive callers use
+    /// [`FunctionRegistration::select_overload_with`].
+    ///
+    /// ## Errors
+    ///
+    /// As [`FunctionRegistration::bind_call`].
+    pub fn bind_call_with<'v>(&self, args: &'v [Value], options: &BindOptions<'_>) -> Result<BoundCall<'v>, CallBindingError> {
+        let bindings = self.bind_each(args, options)?;
+        self.select(bindings)
+    }
+
+    /// Binds like [`FunctionRegistration::bind_call_with`], but leaves the
+    /// overload open when a deferred value is involved: see
+    /// [`OverloadSelection`]. Without a deferral, the result is exactly
+    /// `bind_call_with`'s.
+    ///
+    /// ## Errors
+    ///
+    /// As [`FunctionRegistration::bind_call`]; ambiguity only when no binding
+    /// holds a deferred value.
+    pub fn select_overload_with<'v>(
+        &self,
+        args: &'v [Value],
+        options: &BindOptions<'_>,
+    ) -> Result<OverloadSelection<'v>, CallBindingError> {
+        let bindings = self.bind_each(args, options)?;
+        if bindings.iter().any(BoundCall::is_deferred) {
+            return Ok(OverloadSelection::Deferred(bindings));
         }
-        let mut exact = Vec::new();
-        let mut converted = Vec::new();
+        self.select(bindings).map(|call| OverloadSelection::Selected(Box::new(call)))
+    }
+
+    /// Every overload that binds, in registration order, or the failure of
+    /// every candidate when none does.
+    fn bind_each<'v>(&self, args: &'v [Value], options: &BindOptions<'_>) -> Result<Vec<BoundCall<'v>>, CallBindingError> {
+        let mut bindings = Vec::new();
         let mut failures = Vec::new();
         for (index, signature) in self.overloads.iter().enumerate() {
-            match bind_signature(signature, args) {
-                Ok((bound, true)) => exact.push((index, bound)),
-                Ok((bound, false)) => converted.push((index, bound)),
+            match bind_signature(signature, args, options) {
+                Ok((bound, exact, deferred)) => bindings.push(BoundCall {
+                    overload: index,
+                    exact,
+                    args: bound,
+                    deferred,
+                }),
                 Err(problem) => failures.push(candidate(signature, problem)),
             }
         }
-        let (tier, is_exact) = if exact.is_empty() { (converted, false) } else { (exact, true) };
-        match tier.len() {
-            0 => Err(self.failure(failures, args.len())),
-            1 => {
-                let (overload, args) = tier.into_iter().next().expect("one binding");
-                Ok(BoundCall {
-                    overload,
-                    exact: is_exact,
-                    args,
-                })
-            }
-            _ => Err(CallBindingError::AmbiguousOverload {
-                function: self.name.clone(),
-                exact: is_exact,
-                signatures: tier.iter().map(|(index, _)| self.overloads[*index].to_string()).collect(),
-            }),
+        if bindings.is_empty() {
+            return Err(self.failure(failures, args.len()));
         }
+        Ok(bindings)
+    }
+
+    /// The runtime selection rule: the exact tier if it is not empty,
+    /// otherwise the converted one; that tier must hold exactly one binding.
+    fn select<'v>(&self, bindings: Vec<BoundCall<'v>>) -> Result<BoundCall<'v>, CallBindingError> {
+        let any_exact = bindings.iter().any(BoundCall::is_exact);
+        let mut tier: Vec<BoundCall<'v>> = bindings.into_iter().filter(|call| call.exact == any_exact).collect();
+        if tier.len() == 1 {
+            return Ok(tier.pop().expect("one binding"));
+        }
+        Err(CallBindingError::AmbiguousOverload {
+            function: self.name.clone(),
+            exact: any_exact,
+            signatures: tier.iter().map(|call| self.overloads[call.overload].to_string()).collect(),
+        })
     }
 
     /// Checks only the argument count, before any argument is evaluated.
@@ -275,9 +353,14 @@ fn arity_problem(signature: &CompiledSignature, supplied: usize) -> SignaturePro
     SignatureProblem::Arity { min, max, supplied }
 }
 
-/// Binds every argument to `signature`; the flag says whether every one
-/// was kept unchanged.
-fn bind_signature<'v>(signature: &CompiledSignature, args: &'v [Value]) -> Result<(BoundArgs<'v>, bool), SignatureProblem> {
+/// Binds every argument to `signature`: the bound arguments, whether every
+/// one was kept unchanged, and the indices of the arguments holding a
+/// deferred value.
+fn bind_signature<'v>(
+    signature: &CompiledSignature,
+    args: &'v [Value],
+    options: &BindOptions<'_>,
+) -> Result<(BoundArgs<'v>, bool, Vec<usize>), SignatureProblem> {
     if !signature.accepts_count(args.len()) {
         return Err(arity_problem(signature, args.len()));
     }
@@ -285,11 +368,16 @@ fn bind_signature<'v>(signature: &CompiledSignature, args: &'v [Value]) -> Resul
     let mut errors = Vec::new();
     let mut exact = true;
     let mut subject_error = None;
+    let mut deferred = Vec::new();
     for (index, value) in args.iter().enumerate() {
         let parameter = signature.parameter_for(index).expect("arity admits every argument");
-        match bind_argument(parameter, index, value) {
-            Ok(Bound::Kept(kept)) => slots.push(Slot::Bound(Cow::Borrowed(kept))),
-            Ok(Bound::Converted(converted)) => {
+        match bind_argument(parameter, index, value, options) {
+            Ok((bound, true)) => {
+                deferred.push(index);
+                push_bound(&mut slots, &mut exact, bound);
+            }
+            Ok((Bound::Kept(kept), false)) => slots.push(Slot::Bound(Cow::Borrowed(kept))),
+            Ok((Bound::Converted(converted), false)) => {
                 exact = false;
                 slots.push(Slot::Bound(Cow::Owned(converted)));
             }
@@ -329,7 +417,18 @@ fn bind_signature<'v>(signature: &CompiledSignature, args: &'v [Value]) -> Resul
             recovery,
         },
         exact,
+        deferred,
     ))
+}
+
+fn push_bound<'v>(slots: &mut Vec<Slot<'v>>, exact: &mut bool, bound: Bound<'v>) {
+    match bound {
+        Bound::Kept(kept) => slots.push(Slot::Bound(Cow::Borrowed(kept))),
+        Bound::Converted(converted) => {
+            *exact = false;
+            slots.push(Slot::Bound(Cow::Owned(converted)));
+        }
+    }
 }
 
 impl CompiledParameter {
@@ -337,20 +436,41 @@ impl CompiledParameter {
     /// would: source exclusions, the `null` rule, then the coercion engine.
     /// Passive; the value is never changed.
     pub fn binds(&self, value: &Value) -> bool {
-        bind_argument(self, self.index(), value).is_ok()
+        bind_argument(self, self.index(), value, &BindOptions::default()).is_ok()
     }
 }
 
-/// Binds one argument: registered source exclusions first, then the
-/// parameter-level `null` rule, then the coercion engine.
-fn bind_argument<'v>(parameter: &CompiledParameter, index: usize, value: &'v Value) -> Result<Bound<'v>, Box<ArgumentError>> {
-    let problem = if parameter.excluded_sources().contains(&ValueKind::of(value)) {
+/// Binds one argument: a deferred whole value first, then registered source
+/// exclusions, then the parameter-level `null` rule, then the coercion
+/// engine. The flag says whether the deferral predicate deferred the value
+/// or any value inside it.
+fn bind_argument<'v>(
+    parameter: &CompiledParameter,
+    index: usize,
+    value: &'v Value,
+    options: &BindOptions<'_>,
+) -> Result<(Bound<'v>, bool), Box<ArgumentError>> {
+    let deferred = Cell::new(false);
+    let recording = |path: &[PathSegment], value: &Value| {
+        let defer = options.defer.is_some_and(|defer| defer(path, value));
+        if defer {
+            deferred.set(true);
+        }
+        defer
+    };
+    let options = BindOptions {
+        defer: options.defer.is_some().then_some(&recording as &dyn Fn(&[PathSegment], &Value) -> bool),
+        max_depth: options.max_depth,
+    };
+    let problem = if options.defer.is_some() && recording(&[], value) {
+        return Ok((Bound::Kept(value), true));
+    } else if parameter.excluded_sources().contains(&ValueKind::of(value)) {
         ArgumentProblem::SourceExcluded
     } else if value.is_null() && !parameter.admits_null() {
         ArgumentProblem::NullNotAdmitted
     } else {
-        match bind(parameter.shape(), value) {
-            Ok(bound) => return Ok(bound),
+        match bind_with(parameter.shape(), value, &options) {
+            Ok(bound) => return Ok((bound, deferred.get())),
             Err(error) => ArgumentProblem::Conversion(error),
         }
     };
@@ -390,9 +510,9 @@ impl LazyCall<'_> {
                 index + 1,
             ));
         };
-        let bound = match bind_argument(parameter, index, &value) {
-            Ok(Bound::Kept(_)) => value,
-            Ok(Bound::Converted(converted)) => {
+        let bound = match bind_argument(parameter, index, &value, &BindOptions::default()) {
+            Ok((Bound::Kept(_), _)) => value,
+            Ok((Bound::Converted(converted), _)) => {
                 self.exact = false;
                 converted
             }
@@ -439,6 +559,7 @@ impl LazyCall<'_> {
                 rest_start,
                 recovery: None,
             },
+            deferred: Vec::new(),
         })
     }
 }

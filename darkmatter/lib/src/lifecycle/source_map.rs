@@ -285,17 +285,16 @@ impl LifecycleSourceMap {
             return;
         }
 
-        let signature = expression_function_signature(verb)
-            .filter(|signature| !signature.variadic)
-            .or_else(|| side_effect_signature(verb));
-        let ordered: Vec<&Value> = match signature {
-            // Absent optional parameters are skipped, so an argument's index
-            // counts only the parameters actually present.
-            Some(signature) => signature
-                .params
-                .iter()
-                .filter_map(|name| obj.get(name))
-                .collect(),
+        let keys: Vec<&str> = params.iter().map(|(key, _)| key.as_str()).collect();
+        let overload = expression_function_signature(verb)
+            .filter(|signature| !signature.is_variadic())
+            .or_else(|| side_effect_signature(verb))
+            .and_then(|signature| signature.select_named(&keys).ok());
+        let ordered: Vec<&Value> = match overload {
+            // The overload the parser selects orders the arguments; absent
+            // optional parameters are skipped, so an argument's index counts
+            // only the parameters actually present.
+            Some(overload) => overload.names().filter_map(|name| obj.get(name)).collect(),
             None => {
                 let mut sorted = params;
                 sorted.sort_by(|a, b| a.0.cmp(b.0));

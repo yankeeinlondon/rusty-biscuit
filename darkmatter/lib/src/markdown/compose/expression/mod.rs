@@ -71,6 +71,7 @@ pub mod call_binding;
 pub mod call_check;
 pub mod catalog;
 pub mod ctx;
+mod deferred;
 pub(crate) mod equality;
 pub(crate) mod fm_namespace;
 pub mod error;
@@ -109,6 +110,7 @@ pub use catalog::{
 #[cfg(any(test, feature = "effects-instrumentation"))]
 pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
+pub use deferred::{defer_templates, is_deferred_template, is_deferred_value, is_malformed_template};
 pub use fm_namespace::{
     FRONTMATTER_ROOT, FmPath, fm_namespace_path, resolve_fm_namespace_in_object,
 };

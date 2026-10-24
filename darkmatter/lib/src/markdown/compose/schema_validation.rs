@@ -77,8 +77,13 @@ pub(crate) enum PendingDeferral<'a> {
 }
 
 impl PendingDeferral<'_> {
-    /// Whether problems on top-level `key`, holding `value`, wait for a later
-    /// stage.
+    /// Whether every problem on top-level `key`, holding `value`, waits for a
+    /// later stage.
+    ///
+    /// Key-level: it governs which keys conversion and normalization leave
+    /// unwritten, where a key holding a template anywhere must keep its
+    /// literal form for the stage that renders it. Problem reporting uses the
+    /// path-precise [`Self::defers_problem`].
     fn defers(&self, key: &str, value: Option<&serde_json::Value>, data: &DataPaths) -> bool {
         match self {
             Self::BeforeShell { provenance, provisional } => {
@@ -91,6 +96,41 @@ impl PendingDeferral<'_> {
                     })
             }
             Self::CallerOwned => value_pending_composition(key, value, data),
+            Self::Final => false,
+        }
+    }
+
+    /// Whether the problem at JSON `pointer` waits for a later stage.
+    ///
+    /// A wholly later-resolved key (`provisional`, an authored shell
+    /// candidate) defers every problem beneath it. Otherwise only the authored
+    /// value at the problem's own path is consulted (the nearest existing
+    /// ancestor when the pointer names an absent node): rendering a template
+    /// changes only the value at its own path, so it can resolve a problem
+    /// there or on an ancestor, never one on a literal sibling. A pointer
+    /// naming no top-level key, or an absent one, is never deferred.
+    fn defers_problem(
+        &self,
+        problem: &crate::markdown::schemas::ValidationProblem,
+        deferred: &[String],
+        frontmatter: &indexmap::IndexMap<String, serde_json::Value>,
+        data: &DataPaths,
+    ) -> bool {
+        let Some((key, path, node)) = authored_node_at(&problem.path, frontmatter) else {
+            return false;
+        };
+        let node_pointer = path_pointer(&path);
+        let awaits = |holds: &dyn Fn(&str) -> bool| {
+            let view = data.authored_view(&mut path.clone(), node);
+            crate::markdown::schemas::awaits_rendering(problem, &view, &node_pointer, deferred, holds)
+        };
+        match self {
+            Self::BeforeShell { provenance, provisional } => {
+                provisional.contains(&key)
+                    || provenance.is_authored_shell_candidate(&key)
+                    || awaits(&|text: &str| text.contains("{{") && crate::markdown::literal_token::holds_pending_syntax(text))
+            }
+            Self::CallerOwned => awaits(&crate::markdown::literal_token::holds_pending_syntax),
             Self::Final => false,
         }
     }
@@ -431,10 +471,7 @@ pub(crate) fn run_with_registry(
             if !defer_shell_pending {
                 return true;
             }
-            let Some(name) = top_level_pointer_segment(&p.path) else {
-                return true;
-            };
-            !deferral.defers(&name, fm_map.get(&name), data)
+            !deferral.defers_problem(p, &report.deferred, fm_map, data)
         })
         .cloned()
         .collect();
@@ -1646,6 +1683,52 @@ fn build_validation_instance(
     (serde_json::Value::Object(object), composition_pending)
 }
 
+/// Resolves JSON `pointer` against `frontmatter` to its top-level key, the
+/// path of the deepest node that exists, and that node.
+///
+/// `None` when the pointer names no top-level key or the key is absent; a
+/// deeper segment that does not exist stops the walk at its parent.
+fn authored_node_at<'a>(
+    pointer: &str,
+    frontmatter: &'a indexmap::IndexMap<String, serde_json::Value>,
+) -> Option<(String, Vec<ValuePathSegment>, &'a serde_json::Value)> {
+    let mut segments = pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(|segment| segment.replace("~1", "/").replace("~0", "~"));
+    let key = segments.next().filter(|key| !key.is_empty())?;
+    let mut node = frontmatter.get(&key)?;
+    let mut path = vec![ValuePathSegment::Key(key.clone())];
+    for segment in segments {
+        let (child, step) = match node {
+            serde_json::Value::Object(map) => match map.get(&segment) {
+                Some(child) => (child, ValuePathSegment::Key(segment)),
+                None => break,
+            },
+            serde_json::Value::Array(items) => {
+                match segment.parse::<usize>().ok().and_then(|index| items.get(index).map(|item| (item, index))) {
+                    Some((child, index)) => (child, ValuePathSegment::Index(index)),
+                    None => break,
+                }
+            }
+            _ => break,
+        };
+        node = child;
+        path.push(step);
+    }
+    Some((key, path, node))
+}
+
+/// The JSON Pointer of a value path.
+fn path_pointer(path: &[ValuePathSegment]) -> String {
+    path.iter()
+        .map(|segment| match segment {
+            ValuePathSegment::Key(key) => format!("/{}", key.replace('~', "~0").replace('/', "~1")),
+            ValuePathSegment::Index(index) => format!("/{index}"),
+        })
+        .collect()
+}
+
 fn top_level_pointer_segment(pointer: &str) -> Option<String> {
     let stripped = pointer.strip_prefix('/')?;
     let first = stripped.split('/').next()?;
@@ -2323,6 +2406,114 @@ mod tests {
         let mut md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
         let options = ComposeOptions::new();
         assert!(run(&mut md, &options).is_ok());
+    }
+
+    /// The paths of the problems `run` reports for `yaml`, or `None` when it
+    /// passes.
+    fn reported_paths(yaml: &str) -> Option<Vec<String>> {
+        let mut md = md_with_schema(yaml);
+        match run(&mut md, &ComposeOptions::new()) {
+            Ok(()) => None,
+            Err(MarkdownError::SchemaValidationFailed { problems, .. }) => {
+                Some(problems.into_iter().map(|p| p.path).collect())
+            }
+            Err(other) => panic!("expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_template_defers_only_its_own_path_before_shell() {
+        let paths = reported_paths(
+            "$schema:\n  cfg: \"{ counts: number[] }\"\ncfg:\n  counts: [three, \"{{ x }}\"]\n",
+        )
+        .expect("the literal sibling is judged");
+        assert_eq!(paths, vec!["/cfg/counts/0".to_string()]);
+    }
+
+    #[test]
+    fn nested_template_alone_is_deferred_before_shell() {
+        assert_eq!(
+            reported_paths("$schema:\n  cfg: \"{ counts: number[] }\"\ncfg:\n  counts: [3, \"{{ x }}\"]\n"),
+            None,
+            "the template's own problem waits for interpolation pass 2"
+        );
+    }
+
+    #[test]
+    fn literal_sibling_of_deferred_operand_is_reported_before_shell() {
+        let paths = reported_paths(
+            "$schema:\n  ops: \"{ min: tuple([number(deferred), number(deferred)]) }\"\n\
+             ops:\n  min: [three, \"{{ x }}\"]\n",
+        )
+        .expect("the literal operand is judged");
+        assert_eq!(paths, vec!["/ops/min/0".to_string()]);
+    }
+
+    #[test]
+    fn problem_on_ancestor_of_template_is_deferred_before_shell() {
+        // `counts` is too long, and only the template element can change; the
+        // problem lands on the list itself, which holds the template.
+        assert_eq!(
+            reported_paths("$schema:\n  cfg: \"{ counts: number[](max(1)) }\"\ncfg:\n  counts: [3, 4]\n"),
+            Some(vec!["/cfg/counts".to_string()]),
+            "the constraint reports on the list"
+        );
+        assert_eq!(
+            reported_paths(
+                "$schema:\n  cfg: \"{ counts: number[](max(1)) }\"\n\
+                 cfg:\n  counts: [3, \"{{ x }}\"]\n"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn caller_owned_defers_only_pending_paths() {
+        let frontmatter: IndexMap<String, serde_json::Value> = [(
+            "cfg".to_string(),
+            serde_json::json!({ "counts": ["three", "$(echo 1)"], "name": "{{ x }}" }),
+        )]
+        .into_iter()
+        .collect();
+        let data = DataPaths::default();
+        let deferral = PendingDeferral::CallerOwned;
+
+        let defers = |path: &str, code: ValidationProblemCode| {
+            let problem = ValidationProblem {
+                path: path.to_string(),
+                message: String::new(),
+                kind: ValidationProblemKind::Type,
+                property: None,
+                line: None,
+                column: None,
+                arm_index: None,
+                description: None,
+                code,
+                instance_path: crate::markdown::schemas::JsonPointer::parse(path),
+                schema_path: None,
+                offending_property: None,
+                file_reference: None,
+                caller_file: None,
+            };
+            deferral.defers_problem(&problem, &[], &frontmatter, &data)
+        };
+        let type_mismatch = ValidationProblemCode::TypeMismatch;
+
+        assert!(!defers("/cfg/counts/0", type_mismatch));
+        assert!(defers("/cfg/counts/1", type_mismatch));
+        assert!(defers("/cfg/name", type_mismatch));
+        assert!(defers("/cfg/counts", type_mismatch));
+        assert!(defers("/cfg/missing", type_mismatch), "an absent node falls back to its parent");
+        assert!(
+            !defers("/cfg/missing", ValidationProblemCode::MissingRequired),
+            "rendering a value never supplies a missing key"
+        );
+        assert!(
+            !defers("/cfg", ValidationProblemCode::UnknownKey),
+            "rendering a value never removes an unknown key"
+        );
+        assert!(!defers("/absent", type_mismatch));
+        assert!(!defers("", type_mismatch));
     }
 
     #[test]

@@ -385,13 +385,11 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
     // contributes `when` and `no_error` beside its verbs.
     let structural: BTreeSet<String> = STRUCTURAL_ITEM_KEYS.iter().map(|key| key.to_string()).collect();
     let mut authored_structural = BTreeSet::new();
-    for level in 1..=3 {
-        for conditional in [format!("conditional-{level}"), format!("initialize-conditional-{level}")] {
-            let keys = keys_of(&object(&lifecycle, &conditional));
-            assert!(keys.is_subset(&structural), "{conditional}: {keys:?}");
-            assert!(definition(&lifecycle, &conditional, "when").starts_with("expression"), "{conditional}");
-            authored_structural.extend(keys);
-        }
+    for conditional in ["conditional", "initialize-conditional", "cancelled-conditional"] {
+        let keys = keys_of(&object(&lifecycle, conditional));
+        assert!(keys.is_subset(&structural), "{conditional}: {keys:?}");
+        assert!(definition(&lifecycle, conditional, "when").starts_with("expression"), "{conditional}");
+        authored_structural.extend(keys);
     }
     for bundle in ["bundle", "initialize-bundle"] {
         let keys = keys_of(&object(&actions, bundle));

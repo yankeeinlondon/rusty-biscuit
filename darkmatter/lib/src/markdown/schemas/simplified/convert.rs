@@ -907,6 +907,11 @@ fn atom_to_schema(
         arms.insert(0, json!({ "type": "null" }));
         let mut m = Map::new();
         m.insert("anyOf".into(), Value::Array(arms));
+        // The flattened union is the marked node now; a template still never
+        // matches its `null` arm, so marking it defers the same values.
+        if let Some(deferred) = fragment.as_object_mut().and_then(|map| map.remove(DARKMATTER_DEFERRED_KEYWORD)) {
+            m.insert(DARKMATTER_DEFERRED_KEYWORD.into(), deferred);
+        }
         Value::Object(m)
     } else {
         wrap_optional_null(fragment)
@@ -988,14 +993,16 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
-    // `category(...)` is an annotation on the property, not a constraint any
+    // `category(...)` and `deferred` are annotations, not constraints any
     // type builder checks.
     let value_constraints: Vec<Constraint> = atom
         .constraints
         .iter()
-        .filter(|constraint| !matches!(constraint, Constraint::Category(_)))
+        .filter(|constraint| !matches!(constraint, Constraint::Category(_) | Constraint::Deferred))
         .cloned()
         .collect();
+    let deferred_value = atom.constraints.contains(&Constraint::Deferred);
+    let deferred_list = atom.is_array && atom.array_constraints.contains(&Constraint::Deferred);
     let inner = match &atom.ty {
         TypeExpr::Primitive(ty) => type_fragment(name, *ty, &value_constraints, defs.matching)?,
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &value_constraints, defs)?,
@@ -1075,6 +1082,10 @@ fn atom_fragment_without_null_wrap(
         && !atom.is_array
         && !required;
 
+    let mut inner = inner;
+    if deferred_value && atom.is_array {
+        mark_deferred(&mut inner);
+    }
     let mut fragment = if atom.is_array {
         let mut arr = Map::new();
         arr.insert("type".into(), Value::String("array".into()));
@@ -1086,6 +1097,9 @@ fn atom_fragment_without_null_wrap(
     } else {
         inner
     };
+    if deferred_list || (deferred_value && !atom.is_array) {
+        mark_deferred(&mut fragment);
+    }
 
     // Attach default + description on the fragment. For single atoms these
     // are moved to the optional wrapper by `atom_to_schema`; for union arms
@@ -1118,6 +1132,18 @@ fn atom_fragment_without_null_wrap(
 
 /// The annotation a `category(Name)` lowers to on a data type.
 pub const DARKMATTER_CATEGORY_KEYWORD: &str = "x-darkmatter-category";
+
+/// The annotation `deferred` lowers to: a `{{ … }}` template at this node is
+/// accepted unjudged (see [`Constraint::Deferred`]). It stays on the typed
+/// node, never on an optional property's `null` wrapper, so the coercion
+/// translator sees it on the shape it marks.
+pub const DARKMATTER_DEFERRED_KEYWORD: &str = "x-darkmatter-deferred";
+
+fn mark_deferred(fragment: &mut Value) {
+    if let Value::Object(map) = fragment {
+        map.insert(DARKMATTER_DEFERRED_KEYWORD.into(), Value::Bool(true));
+    }
+}
 
 /// Lowers a tuple to `type: array` with `prefixItems` for its positions,
 /// `minItems` for its required positions, and `items` for what may follow:
@@ -1601,8 +1627,10 @@ fn apply_array_constraints(
             | Constraint::Generated
             | Constraint::Example(_)
             | Constraint::Category(_)
+            | Constraint::Deferred
             | Constraint::Eager => {
-                // Hoisted to the property level by `atom_to_schema`.
+                // Hoisted to the property level by `atom_to_schema`, or (for
+                // `deferred`) marked on the list by the atom's lowering.
             }
             Constraint::MinItems(n) => items.lower(*n, c),
             Constraint::MaxItems(n) => items.upper(*n, c),
@@ -3398,6 +3426,61 @@ ctx_kind:
             atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default()))
                 .unwrap_or_else(|e| panic!("convert failed for `{input}`: {e:?}"));
         }
+    }
+
+    /// `deferred` is accepted on every type and marks the typed node it
+    /// belongs to: the value itself, an item when written before `[]`, the
+    /// list when written after it. An optional value keeps the mark on its
+    /// typed arm, not on the `null` wrapper.
+    #[test]
+    fn deferred_marks_the_node_it_is_written_on() {
+        for input in [
+            "string(deferred)",
+            "number(integer; min(1); deferred)",
+            "boolean(deferred)",
+            "date(deferred)",
+            "enum(a, b; deferred)",
+            "literal(1; deferred)",
+            "any(deferred)",
+            "object(deferred)",
+            "file(deferred)",
+            "{ foo: string }(deferred)",
+            "tuple([number, number]; deferred)",
+        ] {
+            let value = atom_value(input);
+            assert_eq!(value[DARKMATTER_DEFERRED_KEYWORD], true, "`{input}`: {value}");
+        }
+        let items = atom_value("number(deferred)[]");
+        assert_eq!(items["items"][DARKMATTER_DEFERRED_KEYWORD], true, "{items}");
+        assert!(items.get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{items}");
+        let list = atom_value("number[](deferred)");
+        assert_eq!(list[DARKMATTER_DEFERRED_KEYWORD], true, "{list}");
+        assert!(list["items"].get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{list}");
+
+        let optional = optional_atom_value("number(deferred)");
+        assert!(optional.get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{optional}");
+        assert_eq!(optional["anyOf"][1][DARKMATTER_DEFERRED_KEYWORD], true, "{optional}");
+    }
+
+    /// In a union `a | b` the mark belongs to the alternative that carries
+    /// it; a tuple slot carries its own mark.
+    #[test]
+    fn deferred_is_per_union_arm_and_per_tuple_slot() {
+        let v = convert("op: \"number(integer; deferred) | { state: string }\"");
+        let arms = v["properties"]["op"]["anyOf"].as_array().expect("anyOf");
+        let marked: Vec<bool> = arms.iter().map(|arm| arm.get(DARKMATTER_DEFERRED_KEYWORD).is_some()).collect();
+        assert_eq!(marked, [false, true, false], "{arms:?}");
+
+        let v = convert("pair: \"tuple([number(deferred), number])\"");
+        let prefix = &v["properties"]["pair"]["anyOf"][1]["prefixItems"];
+        assert_eq!(prefix[0][DARKMATTER_DEFERRED_KEYWORD], true, "{prefix}");
+        assert!(prefix[1].get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{prefix}");
+    }
+
+    #[test]
+    fn deferred_takes_no_arguments() {
+        let error = parse_type_expr("test", "number(deferred(1))").expect_err("rejected");
+        assert!(format!("{error:?}").contains("`deferred` does not take arguments"), "{error:?}");
     }
 }
 

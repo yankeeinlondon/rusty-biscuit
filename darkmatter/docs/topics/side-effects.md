@@ -41,6 +41,20 @@ at evaluation, not syntax:
 - side-effect **arguments** are evaluated by the read-only expression evaluator
   (so `upper(...)`, `frontmatter(...)`, and `{{ }}` interpolation work inside
   arguments)
+- the evaluated arguments then **bind** to the verb's typed signature, by the
+  same rule as an expression-function call, before anything is written. A
+  value that fits no signature stops the action with the expression layer's
+  call-binding error, naming the argument; the engine is never called, and
+  `no_error` does not hide it. The engine receives the bound values, so a
+  number given for a text parameter arrives as its text, and the selected
+  signature picks the `ensure_file` form:
+
+  ```yaml
+  composed:
+      - ensure_file: ["count.txt", 3]                # writes the text 3
+      - merge_frontmatter: ["doc.md", "{{ 5 }}"]     # fails before writing: obj must be an object
+  ```
+
 - only the outer **dispatch** mutates
 
 ## Safety Boundaries

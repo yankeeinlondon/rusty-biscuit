@@ -334,3 +334,30 @@ fn a_missing_service_is_a_typed_error() {
     assert_eq!(no_effects.err(), Some(MissingServiceError { service: LifecycleService::Effects }));
     assert_eq!(no_catalog.err(), Some(MissingServiceError { service: LifecycleService::Diagnostics }));
 }
+
+/// `length`'s result for one action operand, evaluated against `frontmatter`.
+fn action_length(frontmatter: Value, operand: Expr) -> Value {
+    let fixture = Fixture::new();
+    let fm = frontmatter.as_object().cloned().unwrap_or_default();
+    StackExecutor::with_services(fixture.inputs(LifecycleSignal::Success, &fm), &fixture.effects, &NoCodes)
+        .invoke_expression_function("length", &[operand], &fm)
+        .expect("length evaluates")
+}
+
+#[test]
+fn an_expression_function_receives_a_template_operand_rendered_once() {
+    // The raw template text is 16 characters; its rendering `n=3` is 3.
+    let operand = Expr::StringLiteral("n={{ fm.count }}".to_string());
+
+    assert_eq!(action_length(json!({ "count": 3 }), operand), json!(3));
+}
+
+#[test]
+fn an_expression_function_receives_a_whole_value_operand_as_typed_data() {
+    let items = crate::markdown::compose::expression::parse("fm.items").unwrap();
+    assert_eq!(action_length(json!({ "items": ["a", "b"] }), items), json!(2));
+
+    // Data is never scanned again: the value's own braces are counted.
+    let note = crate::markdown::compose::expression::parse("fm.note").unwrap();
+    assert_eq!(action_length(json!({ "note": "{{ 1 }}" }), note), json!(7));
+}

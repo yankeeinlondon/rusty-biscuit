@@ -43,6 +43,15 @@ pub enum Shape {
     /// A use of a reusable target shape: how a recursive type refers to
     /// itself, so a value converts at any depth the engine walks.
     Ref(ShapeRef),
+    /// The inner shape at a place the schema marks `deferred`: a value here
+    /// may be supplied later (a `{{ … }}` template). The engine treats a
+    /// value here as an exact match when [`BindOptions::defer_marked`]
+    /// accepts it, and otherwise binds it to the inner shape; without that
+    /// predicate the wrapper changes nothing. It is described as its inner
+    /// shape.
+    ///
+    /// [`BindOptions::defer_marked`]: super::BindOptions::defer_marked
+    Deferrable(Box<Shape>),
 }
 
 /// A use of a reusable target shape, built through a [`RefSlot`].
@@ -458,7 +467,7 @@ impl Shape {
         match self {
             Self::Null => true,
             Self::Union(options) => options.iter().any(Self::admits_null_explicitly),
-            Self::Assert(inner, _) => inner.admits_null_explicitly(),
+            Self::Assert(inner, _) | Self::Deferrable(inner) => inner.admits_null_explicitly(),
             Self::Ref(reference) => reference.target().is_some_and(|target| target.admits_null_explicitly()),
             _ => false,
         }
@@ -485,7 +494,21 @@ impl Shape {
     /// Whether this shape's description needs parentheses before `[]`, `?`,
     /// or `&`.
     fn is_compound(&self) -> bool {
-        matches!(self, Self::Union(options) if options.len() > 1) || matches!(self, Self::Assert(..))
+        match self {
+            Self::Union(options) => options.len() > 1,
+            Self::Assert(..) => true,
+            Self::Deferrable(inner) => inner.is_compound(),
+            _ => false,
+        }
+    }
+
+    /// Marks `self` as a place whose value may be supplied later
+    /// ([`Shape::Deferrable`]); marking twice is marking once.
+    pub fn deferrable(self) -> Self {
+        match self {
+            Self::Deferrable(_) => self,
+            other => Self::Deferrable(Box::new(other)),
+        }
     }
 }
 
@@ -573,6 +596,7 @@ impl fmt::Display for Shape {
                 write!(f, " & {}", assertion.description)
             }
             Self::Ref(reference) => f.write_str(reference.name()),
+            Self::Deferrable(inner) => write!(f, "{inner}"),
         }
     }
 }

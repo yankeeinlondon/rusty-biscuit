@@ -318,10 +318,26 @@ fn find_binding(name: &str) -> Option<&'static JoinedBinding> {
         .find(|entry| entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str()))
 }
 
-/// The compiled registration of the built-in function `name` names
-/// (canonical or alias, any case).
-#[cfg(test)]
-fn function_registration(name: &str) -> Option<&'static FunctionRegistration> {
+/// The runtime registration of the built-in function `name` names, resolved
+/// as dispatch resolves it: lowercased, then by canonical name or alias.
+/// `None` for an unregistered name.
+///
+/// This is the registration calls bind against, with the registry's source
+/// exclusions and numeric recoveries; a registration built from the catalog
+/// signatures alone lacks them. Thread-local test functions are not
+/// consulted.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::expression::functions::function_registration;
+/// use serde_json::json;
+///
+/// let length = function_registration("LENGTH").unwrap();
+/// assert_eq!(length.name(), "length");
+/// assert!(length.bind_call(&[json!(true)]).is_err());
+/// ```
+pub fn function_registration(name: &str) -> Option<&'static FunctionRegistration> {
     find_binding(name).map(|entry| &entry.registration)
 }
 

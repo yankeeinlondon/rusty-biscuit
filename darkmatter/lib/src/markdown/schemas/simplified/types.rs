@@ -775,6 +775,15 @@ pub enum Constraint {
     /// type/nullability.
     Generated,
 
+    /// A value here that is a `{{ … }}` template (as
+    /// [`crate::markdown::compose::expression::is_deferred_template`]
+    /// classifies it) is supplied later, when the template is rendered, so
+    /// schema validation accepts it without judging it; every literal value
+    /// here is judged as usual. Marks the node the atom lowers to: the item
+    /// when written before `[]`, the list when written after it. Lowers to
+    /// `x-darkmatter-deferred: true`.
+    Deferred,
+
     // ── numeric ──────────────────────────────────────────────────────────
     /// Inclusive minimum.
     Min(f64),
@@ -884,6 +893,7 @@ impl Constraint {
             Constraint::Required => "required",
             Constraint::Default(_) => "default",
             Constraint::Generated => "generated",
+            Constraint::Deferred => "deferred",
             Constraint::Min(_) => "min",
             Constraint::Max(_) => "max",
             Constraint::Integer => "integer",

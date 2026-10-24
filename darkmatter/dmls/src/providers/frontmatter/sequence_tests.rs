@@ -38,6 +38,11 @@ fn claudine_schema() -> (tempfile::TempDir, PathBuf) {
 
 /// The resolved shape (imports expanded) of the schema file at `path`.
 fn resolved_root(path: &Path) -> SchemaShape {
+    resolved_root_with_definitions(path).0
+}
+
+/// [`resolved_root`] with the recursive definitions its shape references.
+fn resolved_root_with_definitions(path: &Path) -> (SchemaShape, Definitions) {
     let base = path.parent().unwrap();
     let resolved = resolve_schema(
         &Value::String(path.to_string_lossy().into_owned()),
@@ -46,15 +51,32 @@ fn resolved_root(path: &Path) -> SchemaShape {
     )
     .unwrap_or_else(|error| panic!("{} resolves: {error}", path.display()));
     match resolved.simplified {
-        Some(SimplifiedSchema::Single(shape)) => shape,
+        Some(SimplifiedSchema::Single(shape)) => (shape, Definitions(resolved.definitions)),
         other => panic!("{} is a single shape: {other:?}", path.display()),
+    }
+}
+
+/// A resolved schema file's definition table, opened by an editor walk.
+struct Definitions(Arc<darkmatter::markdown::schemas::simplified::DefinitionTable>);
+
+impl DefinitionLookup for Definitions {
+    fn lookup_definition(
+        &self,
+        key: &darkmatter::markdown::schemas::simplified::DefKey,
+    ) -> Option<&darkmatter::markdown::schemas::simplified::Definition> {
+        self.0.get(key)
     }
 }
 
 /// Claudine's catalog payload's resolved shape.
 fn claudine_root() -> SchemaShape {
+    claudine_root_with_definitions().0
+}
+
+/// [`claudine_root`] with the recursive lifecycle families it references.
+fn claudine_root_with_definitions() -> (SchemaShape, Definitions) {
     let (_dir, path) = claudine_schema();
-    resolved_root(&path)
+    resolved_root_with_definitions(&path)
 }
 
 /// Runs `f` with an overlay-backed context for `text` at `/w/prompts/doc.md`,
@@ -124,18 +146,18 @@ fn hover_text(hover: &Hover) -> &str {
 
 #[test]
 fn nested_shape_consumes_array_index_against_item_type() {
-    // A stack is `item-1[] | bundle`: an index descends the array arm's item
-    // type, whose first inline-object arm is `communicate`; a bare key
-    // descends the `bundle` arm.
-    let root = claudine_root();
-    let item = nested_shape(&root, &[Key("initialize"), Index(0)], &NoDefinitions).expect("list item shape");
+    // A stack is `item[] | bundle`, a recursive definition: an index descends
+    // the array arm's item type, whose first inline-object arm is
+    // `communicate`; a bare key descends the `bundle` arm.
+    let (root, definitions) = claudine_root_with_definitions();
+    let item = nested_shape(&root, &[Key("initialize"), Index(0)], &definitions).expect("list item shape");
     for key in ["say", "notify", "info"] {
         assert!(item.properties.contains_key(key), "{key} on the list item");
     }
     assert!(!item.properties.contains_key("no_error"), "the item is not the bundle arm");
-    let bundle = nested_shape(&root, &[Key("failure")], &NoDefinitions).expect("bundle shape");
+    let bundle = nested_shape(&root, &[Key("failure")], &definitions).expect("bundle shape");
     assert!(is_expression_def(bundle.properties.get("when").expect("failure.when")));
-    let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")], &NoDefinitions)
+    let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")], &definitions)
         .expect("loop.gate[3].say resolves");
     assert!(!is_expression_def(nested));
 }

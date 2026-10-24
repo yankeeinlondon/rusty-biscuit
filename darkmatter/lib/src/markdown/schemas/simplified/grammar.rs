@@ -565,6 +565,7 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "integer"
             | "unique"
             | "generated"
+            | "deferred"
             | "default"
             | "min"
             | "max"
@@ -1004,6 +1005,7 @@ impl<'a> Parser<'a> {
                     Constraint::Required
                         | Constraint::Default(_)
                         | Constraint::Generated
+                        | Constraint::Deferred
                         | Constraint::Example(_)
                         | Constraint::Category(_)
                 )
@@ -1771,7 +1773,10 @@ impl<'a> Parser<'a> {
 
         for constraint in constraints {
             match constraint {
-                Constraint::Required | Constraint::Generated | Constraint::Category(_) => {}
+                Constraint::Required
+                | Constraint::Generated
+                | Constraint::Deferred
+                | Constraint::Category(_) => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
                         return self.err(
@@ -2407,6 +2412,7 @@ impl<'a> Parser<'a> {
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
             ("generated", false) => Constraint::Generated,
+            ("deferred", false) => Constraint::Deferred,
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
             }
@@ -2415,6 +2421,9 @@ impl<'a> Parser<'a> {
             }
             ("generated", true) => {
                 return self.err("`generated` does not take arguments", kw_span);
+            }
+            ("deferred", true) => {
+                return self.err("`deferred` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
