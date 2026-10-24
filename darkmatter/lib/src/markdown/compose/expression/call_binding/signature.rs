@@ -77,6 +77,7 @@ pub struct CompiledSignature {
     pub(super) parameters: Vec<CompiledParameter>,
     returns: Shape,
     returns_text: String,
+    declared_returns: Box<PropertyDef>,
     fallible: bool,
     min_arguments: usize,
     max_arguments: Option<usize>,
@@ -117,6 +118,7 @@ impl CompiledSignature {
             parameters,
             returns,
             returns_text: type_text(&ty.returns),
+            declared_returns: Box::new(ty.returns.clone()),
             fallible: ty.fallible,
             min_arguments,
             max_arguments,
@@ -147,6 +149,12 @@ impl CompiledSignature {
 
     pub fn returns(&self) -> &Shape {
         &self.returns
+    }
+
+    /// The `returns(...)` type as declared: the design-time type of a call
+    /// that selects this overload.
+    pub fn declared_returns(&self) -> &PropertyDef {
+        &self.declared_returns
     }
 
     /// The `(subject, fallback)` parameter indexes of the registration's

@@ -44,7 +44,7 @@ use super::call_binding::{
 };
 use super::functions;
 use super::prepared::PreparedValue;
-use super::scope::{Shape as ScopeShape, TypeScope};
+use super::scope::{Polarity, Shape as ScopeShape, TypeScope};
 use crate::markdown::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
 use crate::markdown::schemas::simplified::serialize_property_atom;
 use crate::markdown::schemas::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, is_subtype_with_definitions};
@@ -106,10 +106,12 @@ impl fmt::Display for ArgumentCategory {
 pub enum ArgumentType {
     /// A literal, judged by its value.
     Literal(Value),
-    /// A typed value: the narrowed type of a variable at the call site.
+    /// A typed value: the narrowed type of a variable at the call site, a
+    /// call's declared return type, or the type of a `||` or `?:` operand
+    /// union.
     Typed(ScopeShape),
-    /// No usable type: an undeclared or untyped variable, a call, an
-    /// operator expression.
+    /// No usable type: an undeclared or untyped variable, a call or operator
+    /// expression whose type is `unknown`.
     Unknown,
 }
 
@@ -117,20 +119,74 @@ impl ArgumentType {
     /// The design-time type of `arg` at the site `scope` describes.
     ///
     /// Literals (including lists and objects of literals, and a negated
-    /// number) carry their value; a variable read carries its scoped type;
-    /// anything else, including a function call, is unknown.
+    /// number) carry their value; anything else carries
+    /// [`expression_type`].
     pub fn of(arg: &SpannedExpr, scope: &TypeScope<'_>) -> Self {
         if let Some(value) = literal_value(arg) {
             return Self::Literal(value);
         }
-        match scope.type_of_expr(&arg.erase()) {
-            Some(ty) => match ty.shape() {
-                ScopeShape::Unknown { .. } => Self::Unknown,
-                shape @ ScopeShape::Arms { .. } => Self::Typed(shape.clone()),
-            },
-            None => Self::Unknown,
+        match expression_type(arg, scope) {
+            ScopeShape::Unknown { .. } => Self::Unknown,
+            shape @ ScopeShape::Arms { .. } => Self::Typed(shape),
         }
     }
+}
+
+/// The design-time type of `expr` at the site `scope` describes, without
+/// evaluating anything:
+///
+/// | Expression | Type |
+/// |---|---|
+/// | a literal | that value |
+/// | a variable, or a constant path on one | its type in `scope` |
+/// | a call | the union of the declared `returns` of every overload its argument count can select |
+/// | `x \|\| y` | `x`'s type without `null`, joined with `y`'s type where `x` is falsy |
+/// | `c ? a : b` | `a`'s type where `c` holds, joined with `b`'s where it does not |
+/// | any other operator | `unknown` |
+///
+/// Joins use [`ScopeShape::union`]. A call's own arguments are checked as a
+/// call of their own ([`check_expression_calls`]); typing the call never
+/// suppresses their findings.
+pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape {
+    if let Some(value) = literal_value(expr) {
+        return ScopeShape::of_literal(&value);
+    }
+    match &expr.kind {
+        SpannedExprKind::Paren(inner) => expression_type(inner, scope),
+        SpannedExprKind::FunctionCall { name, args } => call_returns(name, args.len()),
+        SpannedExprKind::Fallback { primary, fallback } => {
+            let present = expression_type(primary, scope).without_null();
+            present.union(&expression_type(fallback, &scope.assume(&primary.erase(), Polarity::False)))
+        }
+        SpannedExprKind::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            let condition = condition.erase();
+            let then_type = expression_type(then_branch, &scope.assume(&condition, Polarity::True));
+            then_type.union(&expression_type(else_branch, &scope.assume(&condition, Polarity::False)))
+        }
+        _ => scope
+            .type_of_expr(&expr.erase())
+            .map_or(ScopeShape::Unknown { non_null: false }, |ty| ty.shape().clone()),
+    }
+}
+
+/// The union of the declared `returns` of every overload of `name` that
+/// takes `count` arguments; `unknown` for a name nothing dispatches or a
+/// count no overload takes. Overloads are never selected by argument type.
+fn call_returns(name: &str, count: usize) -> ScopeShape {
+    functions::inspect_registration(name, |registration| {
+        registration
+            .overloads()
+            .iter()
+            .filter(|signature| signature.accepts_count(count))
+            .map(|signature| ScopeShape::of_type(signature.declared_returns()))
+            .reduce(|left, right| left.union(&right))
+    })
+    .flatten()
+    .unwrap_or(ScopeShape::Unknown { non_null: false })
 }
 
 impl fmt::Display for ArgumentType {
@@ -938,8 +994,8 @@ fn classify_against(
 /// the guards that enclose it ([`branch_scope`]).
 ///
 /// `site` must be built over the declaration-only layer
-/// ([`DeclaredTypes::new`]): static frontmatter values are runtime values,
-/// not design-time types. Recursive-typed arguments resolve in the layer's
+/// ([`DeclaredTypes::for_schema`](super::DeclaredTypes::for_schema)): static
+/// frontmatter values are runtime values, not design-time types. Recursive-typed arguments resolve in the layer's
 /// [`DeclaredTypes::definitions`](super::DeclaredTypes::definitions). Unknown functions are skipped
 /// ([`validate_expression`](super::validate_expression) reports them).
 pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<CallCheck> {

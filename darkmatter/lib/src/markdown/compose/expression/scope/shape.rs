@@ -134,25 +134,16 @@ impl ScopedType {
         }
     }
 
-    /// The type before any guard: the declaration, with descriptor and
-    /// static-value presence unless the subject was written.
-    pub(super) fn declared_base(declared: DeclaredType, static_scalar: bool, written: bool) -> Self {
+    /// The type before any guard: the declaration and the `shape` it
+    /// projects to, with declaration, descriptor, and static-value presence
+    /// unless the subject was written.
+    pub(super) fn declared_base(declared: DeclaredType, mut shape: Shape, static_scalar: bool, written: bool) -> Self {
         let mut evidence = Vec::new();
-        let mut shape = match &declared {
-            DeclaredType::Property(def) => {
-                if def.is_required() {
-                    evidence.push(PresenceEvidence::Declaration);
-                }
-                Shape::from_definition(def)
-            }
-            DeclaredType::Context { present } => {
-                if *present {
-                    evidence.push(PresenceEvidence::Descriptor);
-                }
-                Shape::Unknown { non_null: *present }
-            }
-            _ => Shape::Unknown { non_null: false },
-        };
+        match &declared {
+            DeclaredType::Property(_) if !shape.admits_null() => evidence.push(PresenceEvidence::Declaration),
+            DeclaredType::Context { present: true } => evidence.push(PresenceEvidence::Descriptor),
+            _ => {}
+        }
         if static_scalar && !written {
             evidence.push(PresenceEvidence::StaticValue);
             shape = shape.without_null();
@@ -224,12 +215,20 @@ impl ScopedType {
 }
 
 impl Shape {
-    /// The shape of a declaration: its leaf alternatives, with `null` unless
-    /// the shared presence rule makes the property required. An `unknown`
-    /// alternative makes the whole shape unknown.
+    /// The shape of a property declaration: [`Self::of_type`], plus `null`
+    /// unless the shared presence rule makes the property required.
     pub(super) fn from_definition(def: &PropertyDef) -> Self {
+        let shape = Self::of_type(def);
+        if def.is_required() { shape } else { shape.with_null() }
+    }
+
+    /// The values of the type `def` itself, with no optionality: its leaf
+    /// alternatives, normalized ([`Self::union`]). `null` is in the shape
+    /// only when an alternative is `null`, as in a function's `returns(...)`.
+    /// An `unknown` alternative makes the whole shape unknown.
+    pub(crate) fn of_type(def: &PropertyDef) -> Self {
         let mut arms = Vec::new();
-        let mut nullable = !def.is_required();
+        let mut nullable = false;
         for alternative in flattened_alternatives(def) {
             let mut atom = alternative.atom.clone();
             atom.is_array |= alternative.is_array;
@@ -239,7 +238,84 @@ impl Shape {
                 _ => arms.push(atom),
             }
         }
-        Self::Arms { arms, nullable }
+        Self::normalized(arms, nullable)
+    }
+
+    /// The shape holding exactly the non-null `value`: its literal, or for a
+    /// container (and a number no literal can pin) its bare family.
+    pub(crate) fn of_literal(value: &Value) -> Self {
+        match value {
+            Value::Null => Self::Arms { arms: Vec::new(), nullable: true },
+            value => Self::Arms { arms: vec![pinned_atom(value)], nullable: false },
+        }
+    }
+
+    /// The one union normalization every projection, fold, and join uses.
+    ///
+    /// `unknown` absorbs every type, `null` included. Otherwise the members of
+    /// both sides are flattened, a member equal to another as a type (presence
+    /// markers and descriptions aside) is kept once, and the members take a
+    /// canonical order, so equivalent unions are equal whatever the order of
+    /// the arms or keys they came from. Distinct members stay alternatives:
+    /// `file | string`, `string | string[]`, and `string[] | number[]` do not
+    /// collapse.
+    pub fn union(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Unknown { non_null: left }, Self::Unknown { non_null: right }) => {
+                Self::Unknown { non_null: *left && *right }
+            }
+            (Self::Unknown { non_null }, other) | (other, Self::Unknown { non_null }) => {
+                Self::Unknown { non_null: *non_null && !other.admits_null() }
+            }
+            (Self::Arms { arms: left, nullable: left_null }, Self::Arms { arms: right, nullable: right_null }) => {
+                Self::normalized(left.iter().chain(right).cloned().collect(), *left_null || *right_null)
+            }
+        }
+    }
+
+    /// The shape as a definition: its alternatives, each marked `required`
+    /// when `null` is excluded, with a `null` alternative when it is not.
+    /// `None` for an unknown shape.
+    pub(crate) fn to_definition(&self) -> Option<PropertyDef> {
+        let Self::Arms { arms, nullable } = self else {
+            return None;
+        };
+        let mut atoms = arms.clone();
+        if *nullable {
+            atoms.push(PropertyAtom::bare(SimplifiedType::Null));
+        } else {
+            for atom in &mut atoms {
+                atom.constraints.push(Constraint::Required);
+            }
+        }
+        Some(match atoms.len() {
+            1 => PropertyDef::Single(atoms.remove(0)),
+            _ => PropertyDef::Union(atoms),
+        })
+    }
+
+    fn with_null(self) -> Self {
+        match self {
+            Self::Unknown { .. } => Self::Unknown { non_null: false },
+            Self::Arms { arms, .. } => Self::Arms { arms, nullable: true },
+        }
+    }
+
+    /// `arms` with duplicates removed and in canonical order.
+    fn normalized(arms: Vec<PropertyAtom>, nullable: bool) -> Self {
+        let mut keyed: Vec<(String, PropertyAtom)> = arms
+            .into_iter()
+            .map(|atom| {
+                let atom = type_identity(atom);
+                (crate::markdown::schemas::simplified::serialize_property_atom(&atom), atom)
+            })
+            .collect();
+        keyed.sort_by(|left, right| left.0.cmp(&right.0));
+        keyed.dedup_by(|left, right| left.1 == right.1);
+        Self::Arms {
+            arms: keyed.into_iter().map(|(_, atom)| atom).collect(),
+            nullable,
+        }
     }
 
     pub fn admits_null(&self) -> bool {
@@ -253,7 +329,7 @@ impl Shape {
         matches!(self, Self::Arms { arms, nullable: false } if arms.is_empty())
     }
 
-    pub(super) fn without_null(&self) -> Self {
+    pub(crate) fn without_null(&self) -> Self {
         match self {
             Self::Unknown { .. } => Self::Unknown { non_null: true },
             Self::Arms { arms, .. } => Self::Arms { arms: arms.clone(), nullable: false },
@@ -261,24 +337,7 @@ impl Shape {
     }
 
     pub(super) fn join(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Self::Unknown { non_null: left }, Self::Unknown { non_null: right }) => {
-                Self::Unknown { non_null: *left && *right }
-            }
-            (Self::Unknown { non_null }, Self::Arms { nullable, .. })
-            | (Self::Arms { nullable, .. }, Self::Unknown { non_null }) => {
-                Self::Unknown { non_null: *non_null && !nullable }
-            }
-            (Self::Arms { arms: left, nullable: left_null }, Self::Arms { arms: right, nullable: right_null }) => {
-                let mut arms = left.clone();
-                for arm in right {
-                    if !arms.contains(arm) {
-                        arms.push(arm.clone());
-                    }
-                }
-                Self::Arms { arms, nullable: *left_null || *right_null }
-            }
-        }
+        self.union(other)
     }
 
     /// The true side of a truthiness test: `null` and always-falsy literals
@@ -469,6 +528,28 @@ fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
                 | Constraint::LiteralValue(_)
         )
     })
+}
+
+/// `atom` as a member of a value type: its presence markers, timing, and
+/// annotations removed, since a shape carries presence in `nullable` and two
+/// arms that differ only there are one type. Nested object members keep
+/// theirs.
+fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
+    let marker = |constraint: &Constraint| {
+        matches!(
+            constraint,
+            Constraint::Required
+                | Constraint::Default(_)
+                | Constraint::Generated
+                | Constraint::Eager
+                | Constraint::Suggest(_)
+                | Constraint::Example(_)
+        )
+    };
+    atom.constraints.retain(|constraint| !marker(constraint));
+    atom.array_constraints.retain(|constraint| !marker(constraint));
+    atom.description = None;
+    atom
 }
 
 fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {

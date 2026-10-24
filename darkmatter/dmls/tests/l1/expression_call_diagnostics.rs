@@ -181,6 +181,28 @@ mod settings {
         session.shutdown();
     }
 
+    /// Rows f and i: a call argument has its callee's declared return type,
+    /// and `|| 0` removes `null`, so neither outer `min` is shown under
+    /// either setting; the inner `length(count)` keeps its own category 2,
+    /// which only strict mode shows.
+    #[test]
+    fn rows_f_and_i_are_silent_under_both_settings() {
+        let text = format!("{FRONTMATTER}f {{{{ min(length(count), 5) }}}}\ni {{{{ min(maybe || 0, 5) }}}}\n");
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, &text);
+        assert!(session.calls().is_empty(), "default settings show nothing");
+        session.shutdown();
+
+        let workspace = LspWorkspace::new();
+        std::fs::write(workspace.path().join(".dmls.toml"), "[expressions]\nstrict = true\n").unwrap();
+        let mut session = Session::open(&workspace, &text);
+        let found = session.calls();
+        let row_f = body_line();
+        let (start, end) = columns(&text, row_f, "count");
+        assert_eq!(found, [(row_f, start, end, WARNING, UNCERTAIN.to_string())], "only the inner call warns");
+        session.shutdown();
+    }
+
     /// Criterion 40 from `.dmls.toml`, reloaded when the file changes.
     #[test]
     fn rows_a_to_e_from_the_config_file_and_its_reload() {

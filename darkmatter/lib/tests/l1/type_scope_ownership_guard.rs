@@ -63,6 +63,12 @@ const UNGUARDED: &[Unguarded] = &[
         count: 1,
         reason: "the composition call check's declaration-only base, which body `BodyGuards::scope_at` narrows",
     },
+    Unguarded {
+        path: "lifecycle/validate.rs",
+        item: "reject_incompatible_calls",
+        count: 1,
+        reason: "a category 5 verdict holds under every guard (narrowing only removes alternatives), so the rejection reads each event's declarations alone",
+    },
 ];
 
 /// The functions the type-narrowing inventory named as static decisions:
@@ -189,6 +195,10 @@ fn baseline() -> Vec<(&'static str, String)> {
         (
             "markdown/compose/call_precheck.rs",
             "pub(crate) fn check_document() { let site = TypeScope::unguarded(&declared); }".to_string(),
+        ),
+        (
+            "lifecycle/validate.rs",
+            "pub fn reject_incompatible_calls() { let site = TypeScope::unguarded(&event); }".to_string(),
         ),
     ];
     for entry in UNGUARDED {

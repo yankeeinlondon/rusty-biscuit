@@ -398,6 +398,9 @@ pub fn run_compose(
     options = options.with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
+    if let Some(config) = &lifecycle {
+        lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request)?;
+    }
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command

@@ -126,7 +126,7 @@ pub use source_map::{AuthoredValue, LifecycleSourceMap};
 pub use validate::{Surface, event_surfaces, walk_stack};
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
-    validate_no_nested_spans_in_literals, validate_no_nested_spans_in_literals_in,
+    reject_incompatible_calls, validate_no_nested_spans_in_literals, validate_no_nested_spans_in_literals_in,
 };
 
 /// Complete lifecycle configuration for a document.

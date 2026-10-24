@@ -79,7 +79,7 @@ mod projection {
             [
                 ("count", "string | null"),
                 ("flag", "boolean"),
-                ("foo", "string | number"),
+                ("foo", "number | string"),
                 ("maybe", "number | null"),
                 ("size", "number"),
             ]
@@ -115,7 +115,7 @@ anything: unknown(required)
 ",
         )))
         .top_level_types();
-        assert_eq!(shape_text(&types["union_required"]), "string | number");
+        assert_eq!(shape_text(&types["union_required"]), "number | string");
         assert_eq!(shape_text(&types["null_arm"]), "string | null");
         assert!(matches!(types["anything"], Shape::Unknown { .. }));
     }
@@ -146,8 +146,8 @@ count: string
 mod categories {
     use super::*;
 
-    /// Rows a–e of the worked example, and rows f and i (not rejected in
-    /// this phase: the outer argument is an expression, so unknown).
+    /// Rows a–e of the worked example, and rows f and i: a call argument has
+    /// its callee's declared return type, and `|| 0` removes `null`.
     #[test]
     fn the_worked_example_rows() {
         for (expression, expected) in [
@@ -156,8 +156,8 @@ mod categories {
             ("min(count, 5)", Uncertain),
             ("min(flag, 5)", Incompatible),
             ("min(untyped_var, 5)", Unknown),
-            ("min(length(count), 5)", Unknown),
-            ("min(maybe || 0, 5)", Unknown),
+            ("min(length(count), 5)", Compatible),
+            ("min(maybe || 0, 5)", Compatible),
         ] {
             assert_eq!(call_category(WORKED, expression), expected, "{expression}");
         }
@@ -366,8 +366,9 @@ mod walk {
         for expression in ["min(flag, 5)", "min(fm.flag, 5)", "min(fm['flag'], 5)", "min(fm.env, 5)"] {
             assert_eq!(checks(Some(&schema), expression)[0].category(), Incompatible, "{expression}");
         }
-        // Bare `env` is the reserved root, not the document property.
-        assert_eq!(checks(Some(&schema), "min(env, 5)")[0].category(), Unknown);
+        // Bare `env` is the reserved root, not the document property: an
+        // object, which no number parameter accepts.
+        assert_eq!(checks(Some(&schema), "min(env, 5)")[0].category(), Incompatible);
         assert_eq!(checks(Some(&schema), "min(flag.inner, 5)")[0].category(), Unknown);
     }
 

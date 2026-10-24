@@ -177,6 +177,25 @@ pub(crate) struct PreparedSchemas {
     schemas: Option<DarkmatterSchemas>,
 }
 
+/// The effective schema composing `markdown` under `request` validates
+/// against: the same document `$schema`, baseline, and trigger layers the
+/// pipeline assembles. `None` when no layer applies or the schema cannot be
+/// resolved; composition reports that failure itself.
+///
+/// A host checks its own lifecycle syntax against this before a run starts
+/// ([`crate::lifecycle::reject_incompatible_calls`]).
+///
+/// ## Errors
+///
+/// A schema configuration composition itself would refuse.
+pub fn effective_schema_for(
+    markdown: &Markdown,
+    request: &crate::markdown::compose::ComposeRequest,
+) -> MarkdownResult<Option<crate::markdown::schemas::EffectiveSchema>> {
+    let mut trigger_registry = None;
+    Ok(prepare_schemas(markdown, request, &mut trigger_registry)?.effective_for(markdown))
+}
+
 impl PreparedSchemas {
     /// The effective schema for `markdown` in its current state: document
     /// `$schema`, baseline, and matched triggers. `None` when there is none or

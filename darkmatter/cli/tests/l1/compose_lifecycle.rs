@@ -511,3 +511,25 @@ fn ctrl_c_runs_cancelled_then_finalize_and_exits_130() {
     assert_eq!(events(&seen), ["composed", "cancelled", "finalize"], "{seen}");
     assert!(!String::from_utf8_lossy(&output.stdout).contains("body"));
 }
+
+/// A lifecycle call the design-time check proves wrong is rejected before any
+/// event runs, with the verdict the same call gets in the body, and the
+/// document is not written.
+#[test]
+fn a_provably_wrong_lifecycle_call_rejects_before_any_event() {
+    let fixture = CliProcessFixture::named("lifecycle-call-check");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\n$schema:\n  flag: boolean(required)\nflag: true\ninitialize:\n  - info: \"event:initialize\"\ncomposed:\n  - when: min(flag, 5) > 1\n    then:\n      - stdout: hi\n---\nbody\n",
+    );
+    let ran = compose(&fixture, &doc, &[]);
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
+    assert!(events(&ran.stderr).is_empty(), "no event runs: {}", ran.stderr);
+    assert!(ran.stdout.is_empty(), "no document is written: {}", ran.stdout);
+    assert!(ran.stderr.contains("composed[0].when"), "{}", ran.stderr);
+    assert!(
+        ran.stderr.contains("min: argument 1 (`a`) is boolean, expected number (category 5: no value of that type can bind)"),
+        "{}",
+        ran.stderr
+    );
+}

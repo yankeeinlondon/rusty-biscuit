@@ -89,6 +89,24 @@ pub fn validate_no_nested_spans_in_literals(
         .map_err(CompositionError::from)
 }
 
+/// [`darkmatter::lifecycle::reject_incompatible_calls`] under Claudine's
+/// event registry: a lifecycle call no value of its argument's type can
+/// satisfy rejects the document before any event runs, as it would in the
+/// body.
+///
+/// ## Errors
+///
+/// [`CompositionError::LifecycleCallRejected`] for the first rejected call.
+pub fn reject_incompatible_calls(
+    frontmatter: &serde_json::Value,
+    lifecycle: &LifecycleConfig,
+    source_path: &Path,
+    schema: Option<&darkmatter::markdown::schemas::EffectiveSchema>,
+) -> Result<(), CompositionError> {
+    darkmatter::lifecycle::reject_incompatible_calls(frontmatter, lifecycle, source_path, registry::claudine_registry(), schema)
+        .map_err(CompositionError::from)
+}
+
 /// Check the shape every `with:` shares and return its mapping; see
 /// [`darkmatter::lifecycle::with_mapping_shape`].
 ///

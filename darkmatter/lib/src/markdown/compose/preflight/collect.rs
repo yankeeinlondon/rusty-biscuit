@@ -1370,13 +1370,8 @@ impl DiscoverySiteContext {
         let host_globals = host_global_roots(&self.options);
         let host_roots: Vec<&str> = host_globals.iter().map(String::as_str).collect();
         let effective = if has_holes { self.effective() } else { None };
-        let mut declared = crate::markdown::compose::expression::DeclaredTypes::new(
-            effective.and_then(|effective| effective.simplified.as_ref()),
-        )
-        .with_host_globals(&host_roots);
-        if let Some(effective) = effective {
-            declared = declared.with_definitions(effective.definitions());
-        }
+        let declared =
+            crate::markdown::compose::expression::DeclaredTypes::for_schema(effective).with_host_globals(&host_roots);
         // `SiteScope::site` narrows the compose pass's site by the same
         // guards, so the approved shape is the shape that runs.
         let types = crate::markdown::compose::page_blocks::guards::within(

@@ -30,6 +30,7 @@
 
 mod facts;
 mod projection;
+mod raw;
 mod shape;
 
 use std::collections::HashSet;
@@ -39,6 +40,7 @@ use crate::markdown::compose::expression::Expr;
 use crate::markdown::span::SourceSpan;
 
 pub use projection::{BindingId, DeclaredType, DeclaredTypes, Member, Subject};
+pub use raw::RawDeclarations;
 pub(crate) use projection::{Declaration, VariableClass};
 pub use shape::{PresenceEvidence, ScopedType, Shape};
 
@@ -185,11 +187,8 @@ impl<'d> TypeScope<'d> {
             }
             link = current.parent.as_deref();
         }
-        ScopedType::declared_base(
-            self.declared.declared(subject),
-            self.declared.has_static_scalar(subject),
-            written,
-        )
+        let (declared, shape) = self.declared.projected(subject);
+        ScopedType::declared_base(declared, shape, self.declared.has_static_scalar(subject), written)
     }
 
     /// The type of the stable subject `expr` reads, or `None` when it reads

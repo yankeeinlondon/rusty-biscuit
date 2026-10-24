@@ -704,6 +704,8 @@ impl DarkmatterSchemas {
             dependencies,
             advisories,
             conversion: OnceLock::new(),
+            layered_definitions: OnceLock::new(),
+            raw_declarations: OnceLock::new(),
         }))
     }
 
@@ -975,6 +977,10 @@ pub struct EffectiveSchema {
     advisories: Vec<SchemaAdvisory>,
     /// The conversion plan for [`Self::json_schema`], found on first use.
     conversion: OnceLock<Arc<coerce::ConversionPlan>>,
+    /// [`Self::layered_definitions`], merged on first use.
+    layered_definitions: OnceLock<Arc<DefinitionTable>>,
+    /// [`Self::raw_declarations`], projected on first use.
+    raw_declarations: OnceLock<Arc<crate::markdown::compose::expression::RawDeclarations>>,
 }
 
 impl EffectiveSchema {
@@ -1038,6 +1044,33 @@ impl EffectiveSchema {
         std::iter::once(&self.definitions)
             .chain(&self.trigger_definitions)
             .find_map(|table| table.get(key))
+    }
+
+    /// One table holding every definition [`Self::definition`] finds: the
+    /// document's, then each trigger layer's it lacks. A reference from any
+    /// layer resolves in it to the body [`Self::definition`] returns, so the
+    /// expression type layer looks references up here. Merged on first use;
+    /// the document's own table when no trigger adds one.
+    pub fn layered_definitions(&self) -> &Arc<DefinitionTable> {
+        self.layered_definitions.get_or_init(|| {
+            if self.trigger_definitions.is_empty() {
+                return Arc::clone(&self.definitions);
+            }
+            let mut merged = self.definitions.as_ref().clone();
+            for table in &self.trigger_definitions {
+                merged.absorb(table);
+            }
+            Arc::new(merged)
+        })
+    }
+
+    /// The conservative projection of [`Self::json_schema`], the merged
+    /// schema of every layer: the declared layer's source for the baseline
+    /// and for layers no SimplifiedSchema represents. Projected on first use.
+    pub fn raw_declarations(&self) -> &crate::markdown::compose::expression::RawDeclarations {
+        self.raw_declarations.get_or_init(|| {
+            Arc::new(crate::markdown::compose::expression::RawDeclarations::from_json_schema(&self.json_schema))
+        })
     }
 
     /// The files this schema depends on (imports + examples + the referenced
@@ -1261,6 +1294,8 @@ impl EffectiveSchema {
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
             conversion: OnceLock::new(),
+            layered_definitions: OnceLock::new(),
+            raw_declarations: OnceLock::new(),
         };
         Ok(projected)
     }

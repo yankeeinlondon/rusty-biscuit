@@ -113,6 +113,7 @@ pub(crate) mod parse_utils;
 pub(crate) mod perf;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
+pub use schema_validation::effective_schema_for;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;

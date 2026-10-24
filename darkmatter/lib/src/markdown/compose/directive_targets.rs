@@ -93,18 +93,13 @@ pub fn classify_target_nullability(
     target_nullability(&TypeScope::unguarded(&declared), expression)
 }
 
-/// The declared layer of `effective_schema`'s authored projection, with the
-/// recursive definitions it reaches, and `static_frontmatter`.
+/// The declared layer of every layer of `effective_schema`, and
+/// `static_frontmatter`.
 fn declared_types<'s>(
     effective_schema: Option<&'s EffectiveSchema>,
     static_frontmatter: &'s serde_json::Value,
 ) -> DeclaredTypes<'s> {
-    let declared = DeclaredTypes::new(effective_schema.and_then(|effective| effective.simplified.as_ref()))
-        .with_static_frontmatter(static_frontmatter);
-    match effective_schema {
-        Some(effective) => declared.with_definitions(effective.definitions()),
-        None => declared,
-    }
+    DeclaredTypes::for_schema(effective_schema).with_static_frontmatter(static_frontmatter)
 }
 
 /// The nullability of target `expression` at a site whose types are `scope`.

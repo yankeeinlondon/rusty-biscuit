@@ -69,6 +69,7 @@ use darkmatter::markdown::compose::shell_expansion::template::{
     LateValues, ModeRequirement, ShellCandidate, derived_deferred_keys, parse_authored,
 };
 use darkmatter::markdown::compose::expression::{DeclaredTypes, GuardOrigin, Polarity, TypeScope};
+use super::super::schema::globals::claudine_globals;
 use super::super::lifecycle::shell_template::{placeholder_guard, retime_guarded};
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use std::collections::HashSet;
@@ -1603,11 +1604,9 @@ impl<'a> Loader<'a> {
         // the guard selected the task before the command runs.
         let roots = sequence_deferred_roots();
         let schema = self.owner_schema(origin);
-        let mut declared = DeclaredTypes::new(schema.as_ref().and_then(|schema| schema.simplified.as_ref()))
-            .with_host_globals(&SEQUENCE_HOST_GLOBALS);
-        if let Some(schema) = &schema {
-            declared = declared.with_definitions(schema.definitions());
-        }
+        let declared = DeclaredTypes::for_schema(schema.as_ref())
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
         let types = site_types(&declared, scope.guard);
         let parsed = parsed.map(|mut template| {
             template.project_types(&types);
@@ -2007,11 +2006,9 @@ impl<'a> Loader<'a> {
         guard: Option<&TaskGuard>,
     ) -> PreparedWith {
         let schema = guard.and_then(|_| self.owner_schema(origin));
-        let mut declared = DeclaredTypes::new(schema.as_ref().and_then(|schema| schema.simplified.as_ref()))
-            .with_host_globals(&SEQUENCE_HOST_GLOBALS);
-        if let Some(schema) = &schema {
-            declared = declared.with_definitions(schema.definitions());
-        }
+        let declared = DeclaredTypes::for_schema(schema.as_ref())
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
         let types = site_types(&declared, guard);
         let mut deferred: Vec<String> =
             derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)

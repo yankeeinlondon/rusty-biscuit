@@ -114,6 +114,26 @@ pub enum LifecycleError {
         suggestion: Option<String>,
     },
 
+    /// A lifecycle expression makes a call the design-time check proves
+    /// wrong (category 5): the same verdict that rejects the call in the body,
+    /// before any lifecycle event or expression runs, in every branch.
+    #[error(
+        "lifecycle `{property}` calls a function with an argument that can never bind ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleCallRejected {
+        /// The prompt file whose lifecycle frontmatter holds the call.
+        source_path: PathBuf,
+        /// Authored lifecycle path of the surface, e.g. `success[0].say.text`
+        /// or `finalize[0].when`.
+        property: String,
+        /// The expression holding the call, as authored.
+        expression: String,
+        /// Always [`ExpressionError::CallCheck`](crate::markdown::compose::expression::ExpressionError::CallCheck).
+        #[source]
+        source: Box<crate::markdown::compose::expression::ExpressionError>,
+    },
+
     /// A frontmatter document uses removed lifecycle grammar.
     ///
     /// Covers the retired spellings the lifecycle parser sees: the `stack:`
@@ -530,6 +550,20 @@ pub enum LifecycleError {
         /// Human-readable description of the argument problem.
         message: String,
     },
+}
+
+impl LifecycleError {
+    /// The design-time verdict of a call this error rejects, when it is a
+    /// [`LifecycleError::LifecycleCallRejected`].
+    pub fn rejected_call(&self) -> Option<&crate::markdown::compose::expression::CallCheck> {
+        match self {
+            Self::LifecycleCallRejected { source, .. } => match source.as_ref() {
+                crate::markdown::compose::expression::ExpressionError::CallCheck(check) => Some(check),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 /// The rendered property path of a `with`: `{property}.{path}`, or `path`

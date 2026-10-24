@@ -100,7 +100,7 @@ pub use call_binding::{
 pub use call_check::{
     ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding, CallProblem, PreparedCallCheck, check_call,
     check_call_with_definitions, check_expression_calls, check_prepared_calls, classify_argument,
-    classify_argument_with_definitions,
+    classify_argument_with_definitions, expression_type,
 };
 pub use catalog::{
     CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,
@@ -124,8 +124,8 @@ pub(crate) use path_projection::{
 };
 pub use resolve_ctx::ResolutionContext;
 pub use scope::{
-    BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, ScopedType, Shape,
-    Subject, TypeScope, WriteSet,
+    BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, RawDeclarations,
+    ScopedType, Shape, Subject, TypeScope, WriteSet,
 };
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{

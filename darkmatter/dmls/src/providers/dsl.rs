@@ -397,8 +397,8 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 }
 
 /// Runs `analyze` with the type scope of a site in this document: the
-/// declared layer of its authored schema (`EffectiveSchema.simplified`, with
-/// the recursive definitions it reaches) and static frontmatter, narrowed, for a body `offset`, by every `::block when`
+/// declared layer of every layer of its effective schema
+/// (`DeclaredTypes::for_schema`) and static frontmatter, narrowed, for a body `offset`, by every `::block when`
 /// enclosing it ([`BodyGuards`]). These are the inputs composition and
 /// `analyze_directive_targets` build the same site's scope from. A
 /// frontmatter site (`None`) is unguarded: a lifecycle or task `when` is not
@@ -410,14 +410,11 @@ pub(crate) fn with_site_scope<R>(
 ) -> R {
     let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
     let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
-    let schema = bundle.and_then(|bundle| bundle.effective.simplified.as_ref());
     let static_frontmatter = bundle
         .map(|bundle| &bundle.frontmatter_json)
         .unwrap_or(&empty_frontmatter);
-    let mut declared = DeclaredTypes::new(schema).with_static_frontmatter(static_frontmatter);
-    if let Some(bundle) = bundle {
-        declared = declared.with_definitions(bundle.effective.definitions());
-    }
+    let declared = DeclaredTypes::for_schema(bundle.map(|bundle| &bundle.effective))
+        .with_static_frontmatter(static_frontmatter);
     let unguarded = TypeScope::unguarded(&declared);
     let site = match offset {
         Some(offset) => BodyGuards::scan(ctx.text).scope_at(unguarded, offset),

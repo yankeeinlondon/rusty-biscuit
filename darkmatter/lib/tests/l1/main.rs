@@ -96,6 +96,8 @@ mod expression_type_scope;
 #[cfg(feature = "effects-instrumentation")]
 mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]
+mod variable_type_projection;
+#[cfg(feature = "effects-instrumentation")]
 mod compose_call_precheck;
 mod frontmatter_coercion_engine;
 mod frontmatter_surface_projection;

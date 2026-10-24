@@ -152,11 +152,13 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         );
     }
 
+    // Without a SimplifiedSchema the merged JSON Schema still declares the
+    // optional property, so the raw layer projects its nullability.
     let mut raw_json = effective.clone();
     raw_json.simplified = None;
-    assert_eq!(
+    assert_nullable(
         classify_target_nullability(&parse("optional").unwrap(), Some(&raw_json), &missing),
-        TargetNullability::Unknown,
+        "optional",
     );
 
     for expression in ["nested.value", "fm.nested.value", "optional || 'fallback'"] {
@@ -175,12 +177,13 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         serde_yaml_ng::from_str("- optional: file\n- optional: file(required)\n").unwrap();
     let union = parse_yaml_schema(&union_yaml).unwrap();
     assert!(matches!(union, SimplifiedSchema::Union(_)));
+    // The arms fold to `file | null`: optional in one arm, so nullable.
     let mut root_union = effective.clone();
     root_union.simplified = Some(union);
     root_union.origins.clear();
-    assert_eq!(
+    assert_nullable(
         classify_target_nullability(&parse("optional").unwrap(), Some(&root_union), &missing),
-        TargetNullability::Unknown,
+        "optional",
     );
 
     // Root-union arms that agree on a property declare it, as they do for

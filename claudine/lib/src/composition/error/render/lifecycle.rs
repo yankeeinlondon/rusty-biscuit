@@ -188,6 +188,26 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "See the sequence and lifecycle documentation for the current grammar.",
                 )
         }
+        CompositionError::LifecycleCallRejected {
+            source_path,
+            property,
+            expression,
+            source,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle <cyan>`{property}`</cyan> in {file_link} evaluates <cyan>{}</cyan>, \
+                 which makes a call no value of its argument's type can satisfy.\n\n{source}",
+                code_span(expression),
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "incompatible lifecycle call"))
+                .body(body)
+                .hint(
+                    "The document is rejected before any lifecycle event runs, in every branch, \
+                     exactly as the same call in the body is. Fix the argument's type or the call.",
+                )
+        }
         CompositionError::LifecycleStackInvalidShape {
             source_path,
             property,

@@ -67,7 +67,7 @@ fn optional_declarations_admit_null_and_required_ones_are_present() {
     assert!(!type_at(&scope, "name").proves_present());
     assert!(type_at(&scope, "needed").proves_present());
     assert!(type_at(&scope, "needed").guard_presence().is_none(), "a declaration is not guard evidence");
-    assert_eq!(shape_text(&type_at(&scope, "union")), "string | number | null");
+    assert_eq!(shape_text(&type_at(&scope, "union")), "number | string | null");
     assert_eq!(shape_text(&type_at(&scope, "maybe")), "string | null");
     assert!(matches!(type_at(&scope, "missing").declared(), DeclaredType::Undeclared));
     assert_eq!(shape_text(&type_at(&scope, "missing")), "unknown");
@@ -98,7 +98,8 @@ fn constant_paths_and_indices_are_subjects_and_computed_ones_are_not() {
     // A fact on a path proves nothing about its parent or a sibling.
     assert!(!type_at(&scope, "a").proves_present());
     assert!(!type_at(&scope, "a.c").proves_present());
-    assert!(matches!(type_at(&scope, "a.b").declared(), DeclaredType::NestedProperty));
+    // No schema types the path, so its declaration is `unknown`.
+    assert!(matches!(type_at(&scope, "a.b").declared(), DeclaredType::NoProjection));
     for unstable in ["c[i]", "length(x)", "fm", "current.today", "null"] {
         assert!(scope.type_of_expr(&expr(unstable)).is_none(), "{unstable}");
     }
@@ -224,7 +225,7 @@ fn type_predicates_narrow_a_declared_union_on_both_sides() {
     assert_eq!(narrowed(&declared, "isNumber(target)", Polarity::True, "target"), "number");
     assert_eq!(narrowed(&declared, "is_null(target)", Polarity::True, "target"), "null");
     assert_eq!(narrowed(&declared, "mode != 'release'", Polarity::True, "mode"), "enum(debug,test)");
-    assert_eq!(narrowed(&declared, "is_array(target)", Polarity::True, "target"), "string | number | null", "contradiction keeps the incoming type");
+    assert_eq!(narrowed(&declared, "is_array(target)", Polarity::True, "target"), "number | string | null", "contradiction keeps the incoming type");
     let site = TypeScope::unguarded(&declared);
     let contradicted = site.assume(&expr("is_array(target)"), Polarity::True);
     assert!(type_at(&contradicted, "target").guard_presence().is_none(), "a contradiction is no presence proof");
@@ -267,8 +268,8 @@ fn equality_narrows_to_literals_of_every_scalar_family() {
         ("mode == 'release'", "mode", "literal(release)", "literal(debug)"),
         ("count == 4", "count", "literal(4)", "number"),
         // A number never equals text, so the numeric arm is gone.
-        ("either == '4'", "either", "literal('4')", "string | number | null"),
-        ("either == 4", "either", "literal(4)", "string | number | null"),
+        ("either == '4'", "either", "literal('4')", "number | string | null"),
+        ("either == 4", "either", "literal(4)", "number | string | null"),
         ("flag == true", "flag", "literal(true)", "literal(false)"),
         ("flag != true", "flag", "literal(false)", "literal(true)"),
         // `null` equals only `null`: `''` proves presence, `null` proves absence.
@@ -348,8 +349,8 @@ fn equality_pins_an_unknown_value_and_a_container_to_its_family() {
     assert_eq!(narrowed(&declared, "choice == []", Polarity::True, "choice"), "string[]");
     assert_eq!(narrowed(&declared, "choice == {'k': x}", Polarity::True, "choice"), "object");
     assert_eq!(narrowed(&declared, "[] == choice", Polarity::True, "choice"), "string[]");
-    assert_eq!(narrowed(&declared, "choice != []", Polarity::True, "choice"), "string[] | object | string | null");
-    assert_eq!(narrowed(&declared, "choice == []", Polarity::False, "choice"), "string[] | object | string | null");
+    assert_eq!(narrowed(&declared, "choice != []", Polarity::True, "choice"), "object | string | string[] | null");
+    assert_eq!(narrowed(&declared, "choice == []", Polarity::False, "choice"), "object | string | string[] | null");
 }
 
 #[test]
@@ -666,10 +667,10 @@ fn a_join_keeps_what_both_branches_learned_and_drops_one_sided_facts() {
     let strings = site.assume(&expr("is_string(target)"), Polarity::True);
     let numbers = site.assume(&expr("is_number(target)"), Polarity::True);
     let joined = TypeScope::join(&strings, &numbers);
-    assert_eq!(shape_text(&type_at(&joined, "target")), "string | number");
+    assert_eq!(shape_text(&type_at(&joined, "target")), "number | string");
     assert!(type_at(&joined, "target").guard_presence().is_some());
     let one_sided = TypeScope::join(&strings, &site);
-    assert_eq!(shape_text(&type_at(&one_sided, "target")), "string | number | null");
+    assert_eq!(shape_text(&type_at(&one_sided, "target")), "number | string | null");
     assert!(type_at(&one_sided, "target").guard_presence().is_none());
 }
 

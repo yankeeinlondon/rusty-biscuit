@@ -76,6 +76,9 @@ fn build() -> EventRegistry {
     for global in [host_global(LOOP_ROOT).name(), host_global("group").name()] {
         registry.declare_host_global(global).expect("Claudine's globals are unreserved and distinct");
     }
+    registry
+        .register_global_catalog(crate::composition::schema::globals::claudine_globals())
+        .expect("the registry is not shared yet");
     registry.validate().expect("every Claudine terminal outcome is paired");
     registry
 }

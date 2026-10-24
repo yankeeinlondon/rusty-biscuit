@@ -104,8 +104,9 @@ pub enum HoleValidator {
 pub enum TypeProvenance {
     /// A bare top-level property with a declaration.
     BareProperty { name: String },
-    /// A bare property, but the document has no typed projection (a raw JSON
-    /// Schema, no schema, or a root union whose arms disagree on it).
+    /// A bare property whose projected type is `unknown`: the document has
+    /// no schema, or a root-union arm or raw JSON Schema layer leaves it
+    /// untyped.
     NoProjection,
     /// A bare property the schema does not declare.
     Undeclared,
@@ -330,10 +331,10 @@ fn declared_hole(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
     };
     match declared.declaration(name) {
         Declaration::Found(def) => HoleType {
-            approval: ApprovalType::for_declaration(def),
+            approval: ApprovalType::for_declaration(&def),
             validator: HoleValidator::Declared {
-                definition: Box::new(def.clone()),
-                definitions: Arc::new(reached_definitions(def, declared.definitions())),
+                definitions: Arc::new(reached_definitions(&def, declared.definitions())),
+                definition: Box::new(def.into_owned()),
             },
             provenance: TypeProvenance::BareProperty { name: name.to_string() },
             refinement: None,

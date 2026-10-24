@@ -696,6 +696,25 @@ pub enum CompositionError {
         suggestion: Option<String>,
     },
 
+    /// A lifecycle expression makes a call Darkmatter's design-time check
+    /// proves wrong (category 5): the verdict that rejects the same call in
+    /// the body. Raised at prepare time, before any lifecycle event runs.
+    #[error(
+        "lifecycle `{property}` calls a function with an argument that can never bind ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleCallRejected {
+        /// The prompt file whose lifecycle frontmatter holds the call.
+        source_path: PathBuf,
+        /// Authored lifecycle path of the surface, e.g. `success[0].say.text`.
+        property: String,
+        /// The expression holding the call, as authored.
+        expression: String,
+        /// Darkmatter's `ExpressionError::CallCheck` verdict.
+        #[source]
+        source: Box<darkmatter::markdown::compose::expression::ExpressionError>,
+    },
+
     /// A removed harness validation or handler DSL key was found in the
     /// frontmatter.
     ///
@@ -3728,6 +3747,7 @@ impl CompositionError {
                 _ => None,
             },
             CompositionError::LifecycleNestedSpanInLiteral { property, .. }
+            | CompositionError::LifecycleCallRejected { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
             | CompositionError::LifecycleWhenExpressionInvalid { property, .. }

@@ -61,6 +61,29 @@ pub(super) fn root_lifecycle(md: &Markdown, source_path: &Path) -> Result<Option
         .map_err(Report::new)
 }
 
+/// Rejects a lifecycle call the design-time check proves wrong, against the
+/// effective schema `request` composes `md` with, before the run starts.
+///
+/// ## Errors
+///
+/// The first rejected call, or a schema composition would refuse.
+pub(super) fn reject_incompatible_calls(
+    md: &Markdown,
+    config: &LifecycleConfig,
+    source_path: &Path,
+    request: &ComposeRequest,
+) -> Result<()> {
+    let schema = darkmatter::markdown::compose::effective_schema_for(md, request).map_err(compose_error)?;
+    darkmatter::lifecycle::reject_incompatible_calls(
+        &frontmatter_value(md),
+        config,
+        source_path,
+        md_host::registry(),
+        schema.as_ref(),
+    )
+    .map_err(Report::new)
+}
+
 /// The keys composition keeps deferred for a lifecycle run.
 pub(super) fn event_keys() -> Vec<&'static str> {
     md_host::registry().authored_event_keys()

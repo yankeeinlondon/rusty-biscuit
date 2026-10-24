@@ -44,14 +44,11 @@ pub(crate) fn severity(category: ArgumentCategory, strict: bool) -> Option<Diagn
     }
 }
 
-/// The declaration-only type layer of `ctx`'s authored schema, with the
-/// definition table its recursive references resolve in; without a typed
-/// single-shape schema every variable is `unknown`.
+/// The declaration-only type layer of every layer of `ctx`'s effective
+/// schema ([`DeclaredTypes::for_schema`]); without one every variable is
+/// `unknown`.
 pub(crate) fn declared_types<'a>(ctx: &DocumentContext<'a>) -> DeclaredTypes<'a> {
-    let Some(effective) = ctx.overlay.and_then(|overlay| overlay.bundle()).map(|bundle| &bundle.effective) else {
-        return DeclaredTypes::new(None);
-    };
-    DeclaredTypes::new(effective.simplified.as_ref()).with_definitions(effective.definitions())
+    DeclaredTypes::for_schema(ctx.overlay.and_then(|overlay| overlay.bundle()).map(|bundle| &bundle.effective))
 }
 
 /// Every shown finding of every call in `expr`, in every branch, with

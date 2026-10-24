@@ -42,6 +42,7 @@ impl BlockError for CompositionError {
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
+            | CompositionError::LifecycleCallRejected { .. }
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
             | CompositionError::RemovedGrammar { .. }
@@ -445,6 +446,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleSayConflict(_)
             | CompositionError::LifecycleUnknownEffect(..)
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
+            | CompositionError::LifecycleCallRejected { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
             | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
@@ -861,6 +863,7 @@ impl Diagnostic for CompositionError {
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _)
             | CompositionError::LifecycleNestedSpanInLiteral { property, .. }
+            | CompositionError::LifecycleCallRejected { property, .. }
             // These two cardinality errors carry no dedicated `message` field,
             // so synthesize one from the `#[error]` rendering like the other
             // message-less lifecycle variants above.

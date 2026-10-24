@@ -236,13 +236,13 @@ fn hover_inside_strict_equality_guards_shows_the_library_type() {
     let mut session = Session::open(&workspace, &text);
 
     let present = offset_of(&text, "Present {{", "target", 0);
-    assert_shows(&session.hover(present), &library(present, "target"), "string | number");
+    assert_shows(&session.hover(present), &library(present, "target"), "number | string");
 
     let nonempty = offset_of(&text, "Nonempty {{", "target", 0);
     let nonempty_type = library(nonempty, "target");
     assert!(nonempty_type.guard_presence().is_none(), "{nonempty_type:?}");
     assert!(!nonempty_type.is_refined(), "{nonempty_type:?}");
-    assert_eq!(type_text(&nonempty_type), "string | number | null");
+    assert_eq!(type_text(&nonempty_type), "number | string | null");
     let nonempty_hover = session.hover(nonempty);
     assert!(!nonempty_hover.contains("Type here"), "{nonempty_hover}");
 

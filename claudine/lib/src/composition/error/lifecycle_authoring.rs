@@ -46,6 +46,17 @@ impl From<LifecycleError> for CompositionError {
                 nested,
                 suggestion,
             },
+            LifecycleError::LifecycleCallRejected {
+                source_path,
+                property,
+                expression,
+                source,
+            } => Self::LifecycleCallRejected {
+                source_path,
+                property,
+                expression,
+                source,
+            },
             LifecycleError::RemovedGrammar {
                 source_path,
                 path,
@@ -334,6 +345,15 @@ mod tests {
                 |e| matches!(e, CompositionError::LifecycleNestedSpanInLiteral { .. }),
             ),
             (
+                LifecycleError::LifecycleCallRejected {
+                    source_path: path(),
+                    property: s("start[0].say.text"),
+                    expression: s("min(flag, 5)"),
+                    source: Box::new(rejected_call_error()),
+                },
+                |e| matches!(e, CompositionError::LifecycleCallRejected { .. }),
+            ),
+            (
                 LifecycleError::RemovedGrammar {
                     source_path: path(),
                     path: s("start.stack"),
@@ -540,10 +560,18 @@ mod tests {
         ]
     }
 
+    /// The verdict Darkmatter's call check gives `min(true, 5)`.
+    fn rejected_call_error() -> darkmatter::markdown::compose::expression::ExpressionError {
+        use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionError, TypeScope, check_expression_calls, parse_spanned};
+        let (declared, expr) = (DeclaredTypes::new(None), parse_spanned("min(true, 5)").expect("parses"));
+        let check = check_expression_calls(&expr, &TypeScope::unguarded(&declared)).remove(0);
+        ExpressionError::CallCheck(Box::new(check))
+    }
+
     #[test]
     fn every_lifecycle_error_converts_to_its_same_named_twin_with_the_same_display() {
         let variants = every_variant();
-        assert_eq!(variants.len(), 27, "one case per `LifecycleError` variant");
+        assert_eq!(variants.len(), 28, "one case per `LifecycleError` variant");
         for (error, is_twin) in variants {
             let expected = error.to_string();
             let converted = CompositionError::from(error);

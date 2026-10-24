@@ -180,19 +180,19 @@ impl LifecycleShellTemplate {
     }
 }
 
-/// The declared layer a lifecycle shell site of a document whose effective
-/// schema is `schema` is typed against: its authored projection and the
-/// recursive definitions that projection reaches, with the registry's
-/// [host globals](EventRegistry::host_globals) as host roots. A placeholder
-/// reading one is typed `string`.
+/// The declared layer a lifecycle site of a document whose effective
+/// schema is `schema` is typed against: every layer of the schema
+/// ([`DeclaredTypes::for_schema`]), with the registry's
+/// [host globals](EventRegistry::host_globals) as host roots, typed by its
+/// [global catalog](EventRegistry::global_catalog) when it carries one.
+/// A shell placeholder reading a host global is typed `string`.
 pub fn lifecycle_declared_types<'a>(
     schema: Option<&'a crate::markdown::schemas::EffectiveSchema>,
     registry: &'a EventRegistry,
 ) -> DeclaredTypes<'a> {
-    let declared = DeclaredTypes::new(schema.and_then(|schema| schema.simplified.as_ref()))
-        .with_host_globals(registry.host_globals());
-    match schema {
-        Some(schema) => declared.with_definitions(schema.definitions()),
+    let declared = DeclaredTypes::for_schema(schema).with_host_globals(registry.host_globals());
+    match registry.global_catalog() {
+        Some(catalog) => declared.with_global_catalog(catalog),
         None => declared,
     }
 }

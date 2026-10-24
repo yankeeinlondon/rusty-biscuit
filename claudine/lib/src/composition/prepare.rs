@@ -965,6 +965,12 @@ fn prepare_direct_on(
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
     let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
+    super::lifecycle::reject_incompatible_calls(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+        launch_schema.as_ref().map(|schema| &schema.effective),
+    )?;
     let source_repo_root = options.source_repo_root.clone();
 
     Ok(PreparedComposition {
@@ -1087,6 +1093,12 @@ fn prepare_inline_on(
 
     let launch_schema =
         resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
+    super::lifecycle::reject_incompatible_calls(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+        launch_schema.as_ref().map(|schema| &schema.effective),
+    )?;
     let source_repo_root = options.source_repo_root.clone();
 
     // The agent works on the file: it is told which file, what the schema

@@ -48,6 +48,7 @@ use crate::markdown::compose::expression::{
 };
 
 use super::LifecycleSignal;
+use crate::markdown::schemas::catalog::GlobalCatalog;
 
 /// The five events Darkmatter owns. A host may rename only `Composed` and
 /// `Failed`.
@@ -472,6 +473,7 @@ struct RegistryInner {
     events: Vec<EventDescriptor>,
     pair: Option<Pair>,
     host_globals: Vec<&'static str>,
+    global_catalog: Option<&'static GlobalCatalog>,
 }
 
 /// A host's event registry. Clones share one registration; editing fails
@@ -514,6 +516,7 @@ impl EventRegistry {
                 events: Vec::new(),
                 pair: None,
                 host_globals: GENERIC_GLOBALS.to_vec(),
+                global_catalog: None,
             }),
         }
     }
@@ -691,6 +694,26 @@ impl EventRegistry {
             inner.host_globals.push(name);
             Ok(())
         })
+    }
+
+    /// Registers the host catalog that types the host's globals
+    /// ([`Self::global_catalog`]). Typing a global does not declare it: only
+    /// [`Self::declare_host_global`] does.
+    ///
+    /// ## Errors
+    ///
+    /// [`RegistrationError::RunStarted`].
+    pub fn register_global_catalog(&mut self, catalog: &'static GlobalCatalog) -> Result<(), RegistrationError> {
+        self.edit(|inner| {
+            inner.global_catalog = Some(catalog);
+            Ok(())
+        })
+    }
+
+    /// The host catalog that types the host's globals, when one is
+    /// registered. Darkmatter's own globals are typed by its catalog.
+    pub fn global_catalog(&self) -> Option<&'static GlobalCatalog> {
+        self.inner.global_catalog
     }
 
     /// Checks what can only be judged once registration is complete.

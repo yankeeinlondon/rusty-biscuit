@@ -118,6 +118,65 @@ fn reject_nested_span(
     })
 }
 
+/// Rejects the first lifecycle call the design-time check proves wrong
+/// (category 5), exactly as composition rejects the same call in the body.
+///
+/// Every surface [`walk_stack`] yields is checked, `when` predicates and
+/// operands alike, in both branches of every conditional, from its authored
+/// text. Its expressions are typed by the declared layer
+/// [`lifecycle_declared_types`](super::shell_template::lifecycle_declared_types)
+/// builds from `schema` and `registry`, with each event's globals as the
+/// event declares them: an unavailable global has no type. Passive: nothing
+/// is evaluated and no handler runs.
+///
+/// Guards are not applied. A guard only removes alternatives from a type, so
+/// it never turns a call no value can satisfy into one some value can.
+///
+/// ## Errors
+///
+/// [`LifecycleError::LifecycleCallRejected`] for the first rejected call, in
+/// [`LifecycleSignal::ALL`] order and then authored order.
+pub fn reject_incompatible_calls(
+    frontmatter: &serde_json::Value,
+    lifecycle: &LifecycleConfig,
+    source_path: &Path,
+    registry: &super::registry::EventRegistry,
+    schema: Option<&crate::markdown::schemas::EffectiveSchema>,
+) -> Result<(), LifecycleError> {
+    let sources = LifecycleSourceMap::from_frontmatter_in(frontmatter, registry);
+    let declared = super::shell_template::lifecycle_declared_types(schema, registry);
+    for (signal, path, surface) in event_surfaces(lifecycle) {
+        let Some(AuthoredValue::Text(text)) = sources.get(&path) else {
+            continue;
+        };
+        let mode = if surface.predicate {
+            AuthoredMode::Expression(ParseMode::Condition)
+        } else {
+            AuthoredMode::InterpolatedValue
+        };
+        // A surface that does not parse is the parser's to report.
+        let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode) else {
+            continue;
+        };
+        let event = match registry.id_of(signal) {
+            Some(id) => declared.with_binding_view(registry.globals(id)),
+            None => declared,
+        };
+        let rejected = check_prepared_calls(&prepared, &TypeScope::unguarded(&event))
+            .into_iter()
+            .find(|found| found.check.is_rejected());
+        if let Some(found) = rejected {
+            return Err(LifecycleError::LifecycleCallRejected {
+                source_path: source_path.to_path_buf(),
+                property: path.to_string(),
+                expression: found.expression,
+                source: Box::new(ExpressionError::CallCheck(Box::new(found.check))),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// One expression surface [`walk_stack`] reaches.
 #[derive(Clone, Copy)]
 pub struct Surface<'a> {
@@ -371,5 +430,6 @@ use super::*;
 use super::actions::{WithValue, for_each_action};
 use super::source_map::{AuthoredValue, LifecycleSourceMap};
 use crate::markdown::compose::expression::{
-    ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
+    AuthoredMode, ExpressionError, ExpressionLintKind, ParseMode, TypeScope, check_prepared_calls,
+    is_whole_value_span, lint_expression, prepare_value,
 };

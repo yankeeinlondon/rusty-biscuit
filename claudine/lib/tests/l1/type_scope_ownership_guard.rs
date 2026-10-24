@@ -40,7 +40,8 @@ fn is_static_preflight_module(path: &str) -> bool {
 enum Primitive {
     /// `TypeScope::unguarded(..)`: a scope with no guard facts.
     Unguarded,
-    /// `DeclaredTypes::new(..)`: the declared layer a scope reads.
+    /// `DeclaredTypes::new(..)` / `DeclaredTypes::for_schema(..)`: the
+    /// declared layer a scope reads.
     DeclaredTypes,
     /// `assume` / `assume_at`: the only fact producers.
     Assume,
@@ -65,7 +66,10 @@ impl Primitive {
                 ident_offsets(text, name).into_iter().filter(move |&at| {
                     let after = text[at + name.len()..].trim_start();
                     let called = match self {
-                        Self::DeclaredTypes => after.strip_prefix("::").is_some_and(|rest| rest.trim_start().starts_with("new")),
+                        Self::DeclaredTypes => after.strip_prefix("::").is_some_and(|rest| {
+                            let rest = rest.trim_start();
+                            rest.starts_with("new") || rest.starts_with("for_schema")
+                        }),
                         _ => after.starts_with('(') || after.starts_with("::<"),
                     };
                     called && !is_definition(text, at)
@@ -106,6 +110,13 @@ const ALLOWED: &[Allowed] = &[
         "site_types",
         1,
         "a task site's scope starts unguarded and assumes the task's own `when:`",
+    ),
+    allowed(
+        Primitive::Unguarded,
+        "darkmatter/lib/src/lifecycle/validate.rs",
+        "reject_incompatible_calls",
+        1,
+        "a category 5 verdict holds under every guard (narrowing only removes alternatives), so the rejection reads each event's declarations alone",
     ),
     allowed(
         Primitive::DeclaredTypes,
