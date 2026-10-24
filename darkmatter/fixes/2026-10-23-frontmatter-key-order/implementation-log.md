@@ -7,7 +7,11 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/json.rs, biscuit-hash/lib/src/lib.rs, biscuit-hash/justfile]
+docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
+docs_created_during_phase_2: [biscuit-hash/docs/json.md]
+skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
+packages: [biscuit-hash]
 decisions_for_review:
     - |-
         S1 found a second order-sensitive schema hash the plan does not name:
@@ -26,26 +30,41 @@ decisions_for_review:
         `just test --no-fail-fast` once, on the unmodified tree, to get the
         full list (45 failures, as the spec draft reported). No alternative
         gives the full list without running every test.
+    - |-
+        The plan said biscuit-hash's `json` feature needs only `serde_json`.
+        Moving Darkmatter's renderer byte-for-byte keeps its `Serialize`
+        wrapper, which needs the `serde` crate as well, so `json` enables
+        optional `serde` and `serde_json` (both already in the build, no new
+        version). The alternative was a hand-written JSON writer with no
+        `serde` dependency; that risks small byte differences in number and
+        string escaping, which would change every compose cache key.
+        Reversing this means rewriting `biscuit-hash/lib/src/json.rs` and
+        proving byte equality again.
+    - |-
+        The plan asked to confirm that `just lint` in biscuit-hash covers the
+        new feature-gated code. It did not: the shared lint recipe checks only
+        default features, so `json`, `blake3`, and `argon2id` code was never
+        linted. I changed the biscuit-hash `lint` recipe to run clippy with
+        `--all-features`, matching its `test` recipe and the precedent in
+        biscuit-visualized. The alternative was a one-off manual clippy run
+        per phase. Reverting is a two-line justfile change.
 message_to_agent: |-
-    Phase 1 (read-only) is done; its findings are in the implementation log under
-    "## Phase 1". Read that section before Phase 3 and Phase 4:
-    - `canonical_json_sorted` has callers the plan does not list:
-      compose/context/options.rs (graph_context_fingerprint and the
-      compose-options fingerprints, ~15 calls) and compose/expression/binding.rs:771.
-      Switch them all to `biscuit_hash::canonical_json` when the local copy is
-      deleted in Phase 3.
-    - schemas/validate.rs has a second schema hash, `schema_digest` (~:1462),
-      next to `schema_content_hash`; give it the N5 treatment (see
-      decisions_for_review).
-    - reference/provenance.rs:98 hashes the frontmatter map in insertion order
-      on purpose (document represented-state identity, also hashes the raw
-      source); justify it as order-sensitive in the Phase 3 audit table.
-    - N8 is much wider in Claudine than the plan's "six sites": 14
-      `EffectiveStateBuilder::with_frontmatter` sites plus ~10 `.data()`
-      consumers (including `loader.step_frontmatter`, an `Arc<HashMap>`).
-      All are listed in the log.
-    - Baseline: darkmatter `just test` fails fast; use
-      `just test --no-fail-fast` to compare against the 45-test baseline list.
+    Phase 2 is done: biscuit-hash now has a `json` feature exporting
+    `canonical_json(&Value) -> String`, `xx_hash_json(&Value) -> u64` (needs
+    `xx_hash`, a default feature) and `blake3_hash_json(&Value) -> String`
+    (needs `blake3`). `canonical_json` is Darkmatter's `canonical_json_sorted`
+    ported byte-for-byte, so swapping callers keeps compose cache keys
+    identical. For Phase 3:
+    - enable biscuit-hash `json` in darkmatter/lib/Cargo.toml (it already has
+      `blake3`; default features give `xx_hash`).
+    - Phase 1's unlisted callers of `canonical_json_sorted` still apply:
+      compose/context/options.rs (~15 calls) and compose/expression/binding.rs:771.
+    - Darkmatter's four `canonical_json_*` unit tests in compose/cache/hashing.rs
+      were copied (not moved) to biscuit-hash/lib/src/json.rs; delete the
+      Darkmatter copies together with `canonical_json_sorted` and `CanonicalJson`.
+    - Darkmatter's `just test --no-fail-fast` still shows exactly the 45
+      Phase 1 baseline failures.
+    - `just lint` in biscuit-hash now runs `--all-features`.
 ---
 
 # Implementation Log for 2026-10-23-frontmatter-key-order (6 phases)
@@ -248,3 +267,210 @@ None yet (Phase 5).
 
 - S1 found call sites the plan does not list (see above); they take their
   siblings' treatment, so no decision changes.
+
+## Phase 2
+
+biscuit-hash `json` feature: the shared canonical-JSON renderer and its hash
+conveniences. Darkmatter is not wired to it yet (Phase 3).
+
+### What landed
+
+- `biscuit-hash/lib/Cargo.toml`: `json = ["dep:serde", "dep:serde_json"]`
+  with optional `serde` 1 and `serde_json` 1. It enables neither `xx_hash`,
+  `blake3`, nor serde_json's `preserve_order`. A dev-dependency on
+  `serde_json` with `preserve_order` lets the crate's own tests build maps in
+  an explicit insertion order.
+- `biscuit-hash/lib/src/json.rs` (new, `#[cfg(feature = "json")]`):
+  - `canonical_json(&Value) -> String`: Darkmatter's `canonical_json_sorted` /
+    `CanonicalJson` ported byte-for-byte (same `Serialize` wrapper, keys
+    sorted by `str` order via borrowed `Vec<(&String, &Value)>`, compact
+    `serde_json::to_writer`). The `unwrap()` / `unwrap_or_default()` pair is
+    now two `expect`s with invariant messages (N1: infallible by
+    construction, no `Result`).
+  - `xx_hash_json(&Value) -> u64` (`json` + `xx_hash`) =
+    `xx_hash_bytes(canonical_json(v).as_bytes())`.
+  - `blake3_hash_json(&Value) -> String` (`json` + `blake3`) =
+    `blake3_hash(&canonical_json(v))`, the existing 64-char hex return type.
+- `biscuit-hash/lib/src/lib.rs`: module and re-exports gated per feature;
+  crate docs list the `json` feature.
+- `biscuit-hash/justfile`: `lint` now runs clippy with `--all-features` (see
+  decisions_for_review).
+
+### Requirement-to-test mapping
+
+All in `biscuit-hash/lib/src/json.rs` `tests` (L1, F1 in-process at the
+crate's public API; the boundary is the crate's exported functions). They run
+under `just test` (`--all-features`): 13 tests, all passing.
+
+| Requirement (plan Phase 2 Wave 3) | Test |
+|---|---|
+| ported behavior (moved Darkmatter tests) | `canonical_json_sorts_keys`, `canonical_json_preserves_array_order`, `canonical_json_handles_nested_objects`, `canonical_json_scalars` |
+| recursive object-order independence (incl. objects inside arrays) | `object_key_order_is_ignored_at_every_depth` (fixture asserted to differ in insertion order first) |
+| exact canonical bytes, representative fixture | same test, plus `canonical_json_sorts_keys` |
+| array-order sensitivity | `array_element_order_is_significant` |
+| empty `{}` / `[]` | `canonical_json_empty_containers` |
+| scalar roots | `canonical_json_scalars` |
+| Unicode keys | `unicode_keys_sort_by_str_order` |
+| escaped strings | `strings_are_escaped_like_serde_json` |
+| equals compact `serde_json::to_string` for sorted input | `sorted_input_matches_compact_serde_json` |
+| input iteration order unchanged (`preserve_order` on) | `input_iteration_order_is_unchanged` |
+| hash conveniences hash the renderer's bytes | `xx_hash_json_hashes_the_canonical_bytes`, `blake3_hash_json_hashes_the_canonical_bytes` |
+
+Doctest: `json::canonical_json` example. The Input Robustness Matrix does not
+apply (a renderer, not a reader).
+
+The Darkmatter copies of the four moved tests stay until Phase 3 deletes
+`canonical_json_sorted` with them; deleting them now would leave Darkmatter's
+still-live function untested.
+
+### Checkpoint 2
+
+- `cargo check -p biscuit-hash --no-default-features --features json`: clean
+- same with `json,xx_hash`, `json,blake3`, and default features: clean
+- `cargo check -p biscuit-hash --tests --no-default-features --features json`: clean
+- `cargo clippy -p biscuit-hash --lib --tests --no-default-features --features json -- -D warnings`: clean
+  (`--all-targets` there fails on the pre-existing bench, which needs `xx_hash`)
+- `just test` in `biscuit-hash/`: 87 run, 87 passed (baseline 74; +13 json)
+- `just lint` in `biscuit-hash/`: clean, now `--all-features`
+- `just doctest` in `biscuit-hash/`: clean
+- Pre-existing, not fixed: `cargo test --doc --no-default-features --features
+  json` (or `json,blake3`) fails on the crate-level `lib.rs` example, which
+  imports `xx_hash` without a feature gate. No recipe or CI cell runs doctests
+  without default features; it is unrelated to this fix.
+
+### Phase gates
+
+- Scope check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `change_class: package`, `packages: [biscuit-hash, test-toolkit,
+  darkmatter, sniff]`. Gates were run, not skipped.
+- `biscuit-hash/`: `just test` 87/87 passed; `just lint` clean.
+- `darkmatter/`: `just test --no-fail-fast`: **10611 run, 10566 passed, 45
+  failed, 10 skipped**. The failing set was diffed against the Phase 1
+  baseline list and is **identical** (no new failure, none resolved; this
+  phase does not touch Darkmatter). Phases 3-5 own those 45.
+  `just lint` clean.
+- Dependents: nothing enables `json`, so dependents build exactly as before.
+  `cargo check -p sniff -p test-toolkit --tests` clean (the two non-Darkmatter
+  packages the scope calculator named).
+- No cross-OS run: pure in-memory string rendering, no paths, processes, or
+  `cfg(windows)` code.
+
+### Departures
+
+- Plan's feature wiring named only `serde_json`; the ported `CanonicalJson`
+  wrapper implements `serde::Serialize`, so `json` also enables an optional
+  `serde` 1 (already in the graph). See decisions_for_review.
+- `biscuit-hash/justfile` `lint` changed to `--all-features` (decision below).
+- The moved unit tests were copied, not yet removed from Darkmatter; Phase 3
+  removes them with `canonical_json_sorted`.
+
+## Phase 3
+
+Darkmatter now requests `preserve_order` itself, and every order-insensitive
+hash renders through biscuit-hash's `canonical_json`.
+
+### What landed
+
+- `darkmatter/lib/Cargo.toml`: `serde_json = { version = "1.0", features =
+  ["preserve_order"] }` with a contract comment; `biscuit-hash` gains `json`
+  next to `blake3`.
+- `markdown/hash/mod.rs` `hash_frontmatter_map`: only the per-value rendering
+  changed (`serde_json::to_string` -> `canonical_json`). Top-level key sort,
+  `key:` prefix, literal two-character `\n` join, `xx_hash`, the empty map
+  sentinel, ignore filtering, and the strict YAML path are unchanged. Doc
+  comment now states recursive normalization and that strict follows author
+  order. `hash_frontmatter_keys`'s comment implies nothing about nested maps,
+  so it was left alone.
+- `markdown/toc/mod.rs`: normalized hash is `xx_hash_json` of the whole
+  frontmatter object (N4); empty-frontmatter sentinel (`0`, no assignment) and
+  the raw hash unchanged. Field doc in `toc/types.rs` updated.
+- `markdown/schemas/validate.rs`: `schema_content_hash` is `xx_hash_json`
+  (N5); `schema_digest` (Phase 1's extra site) hashes `canonical_json` bytes
+  and runs its `judges_files` substring scan on the same text. A doc block for
+  `canonical_hash` had drifted above `schema_content_hash`; moved it back onto
+  `canonical_hash` (comment-only).
+- `dmls/src/overlay/mod.rs` `schema_cache_key`: comment only (N6).
+- Compose cache (N1): `canonical_json_sorted` and `CanonicalJson` deleted from
+  `compose/cache/hashing.rs` with their five unit tests (the four the Phase 2
+  agent named plus `canonical_json_empty_object`; all are covered in
+  `biscuit-hash/lib/src/json.rs`). Callers switched to
+  `biscuit_hash::canonical_json`: `cache/hashing.rs`, `cache/operation.rs`,
+  `context/options.rs` (all 15), `expression/binding.rs`.
+- `cargo tree -e features -i serde_json -p darkmatter` (acceptance 7) shows:
+
+  ```text
+  │   └── serde_json feature "preserve_order"
+  │       ├── darkmatter v0.1.0 (.../darkmatter/lib) (*)
+  │       └── merman-core v0.9.1 (...)
+  ```
+
+  i.e. Darkmatter requests the feature directly, no longer only through merman.
+
+### Hash audit (complete)
+
+| Hash | Purpose | Order matters? | Action |
+|---|---|---|---|
+| `hash_frontmatter_map` non-strict | `md hash` semantic frontmatter | no | per-value `canonical_json` |
+| `hash_frontmatter_map` strict | `md hash --strict` | yes (author order) | unchanged; nested order now observable (N9) |
+| `hash_frontmatter_keys` | keys-only component | non-strict no / strict top-level only | unchanged |
+| TOC `frontmatter_hash_normalized` | TOC comparison | no | `xx_hash_json` of whole map (N4) |
+| TOC `frontmatter_hash` | raw YAML identity | yes | unchanged |
+| `schema_content_hash` | structural validator cache key | objects no, arrays yes | `xx_hash_json` (N5) |
+| `schema_digest` | context validator cache key + file-judging scan | objects no, arrays yes | `canonical_json` bytes |
+| DMLS `schema_cache_key` | DMLS schema cache | already sorted (`bool` + `BTreeMap`) | comment only (N6) |
+| compose cache keys (`effective_state_hash`, `context_hash`, operation keys, options fingerprints, globals identity) | compose caches | no | already canonical; renderer moved to biscuit-hash, bytes identical |
+| `reference/provenance.rs` represented-state identity | document identity that also hashes the raw frontmatter source | yes, deliberately | keep: it pairs with the raw source bytes, so a reorder is a real represented-state change |
+| `cicd_list` / `pr_list` provider cache keys | per-request provider query cache | n/a | typed query structs, deterministic field order; no change |
+| `capture/capabilities.rs` `for_document` | text scan for `current.` / function names, not a hash | no | no change |
+
+All other `serde_json::to_*` calls in `lib/src` and `dmls/src` are output,
+tests, or doc examples.
+
+Byte-identity evidence for the compose cache move: every `compose::cache::`,
+`compose::context::options`, and `expression::binding` test passes unchanged,
+and `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`
+passes with the manifest unchanged (`replace_heavy` = `9e3319d168b8b47a`).
+
+### Requirement-to-test mapping
+
+Boundary: the crate's public hash results (`Markdown::compute_hash`,
+`Markdown::hash_frontmatter`, `MarkdownToc::from`, `ValidatorCache`), fed by
+parsed YAML/JSON text. F1, in-process, L1 (unit `#[cfg(test)]` modules, run
+by `just test`). No CLI spawn: Phase 5 owns the `md hash` process tests.
+
+| Requirement | Test |
+|---|---|
+| Acceptance 1, fixed historical entry format | `markdown::hash::compute::tests::non_strict_frontmatter_hash_keeps_the_historical_entry_format` (expected `xx_hash("a:[2,1]\\nb:{\"x\":2,\"y\":1}")`, pinned hex `26b30b2982c8c394`, through helper, legacy method, and `Fm` kind) |
+| Acceptance 1, benchmark manifest unchanged | `darkmatter::l1 benchmark_fixtures::benchmark_manifest_matches_recorded_identities` (Phase 1 baseline failure, now passing) |
+| Acceptance 2, three reorder pairs; non-strict equal, strict differ, across helper + legacy + `fm`/`simple`/`structured`/`detailed` frontmatter components; nested-only pairs keep strict keys-only equal; top-level pair changes strict keys-only; body outputs unaffected | `markdown::hash::compute::tests::frontmatter_hash_matrix_ignores_key_order_only_when_non_strict` |
+| Array element order stays significant (scalar and object arrays) | `markdown::hash::compute::tests::non_strict_frontmatter_hash_changes_on_array_element_reorder` |
+| Acceptance 4, TOC: top-level, nested, array-contained reorder ignored; array reorder changes | `markdown::toc::tests::normalized_frontmatter_hash_ignores_key_order_at_every_depth` |
+| TOC bytes for sorted input equal compact JSON (old stored values for sorted documents unchanged) | `markdown::toc::tests::normalized_frontmatter_hash_matches_compact_json_for_sorted_frontmatter` |
+| TOC empty-map sentinel | `markdown::toc::tests::normalized_frontmatter_hash_is_zero_for_empty_frontmatter` |
+| Acceptance 4, schema: reordered objects share a validator, reordered arrays do not (structural path, `schema_content_hash`) | `markdown::schemas::validate::tests::reordered_schema_keys_share_a_structural_validator` |
+| Same, context-keyed path (`schema_digest`) | `markdown::schemas::validate::tests::reordered_schema_keys_share_a_context_validator` |
+
+Each fixture asserts it really differs in key order (or that the parsed data
+are equal) before asserting the hash, so the reorder is load-bearing. The
+Input Robustness Matrix does not apply (no reader changed).
+
+Targeted run: `cargo nextest run -p darkmatter --lib -E 'test(/markdown::hash::/)
+| test(/markdown::toc::/) | test(/schemas::validate::/) | test(/compose::cache::/)
+| test(/compose::context::options/) | test(/expression::binding/)'`: 402 passed.
+
+### Docs and skill
+
+- `darkmatter/docs/cli/hash.md` "Normalization Behavior": the non-strict and
+  strict frontmatter lines now state recursive normalization and author order
+  (the old lines became wrong with this phase). Phase 6 still owns the fuller
+  hash doc work (strict-baseline refresh guidance).
+- `.claude/skills/darkmatter/frontmatter.md`: new "Key Order and Hashing"
+  section.
+
+### Departures
+
+- Deleted five, not four, Darkmatter canonical-JSON unit tests: the fifth
+  (`canonical_json_empty_object`) tested the same deleted function and is
+  covered by biscuit-hash's `canonical_json_empty_containers`.
+- Updated `docs/cli/hash.md` now rather than waiting for Phase 6, because this
+  phase made two of its lines wrong.

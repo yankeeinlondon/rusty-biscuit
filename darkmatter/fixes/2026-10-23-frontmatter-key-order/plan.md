@@ -8,8 +8,12 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
-start_phase: 2
+source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/json.rs, biscuit-hash/lib/src/lib.rs, biscuit-hash/justfile]
+docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
+docs_created_during_phase_2: [biscuit-hash/docs/json.md]
+skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
+packages: [biscuit-hash]
+start_phase: 3
 ---
 
 # Plan: Frontmatter key order is the contract, the hash ignores it
@@ -172,30 +176,30 @@ Self-contained library work; nothing else depends on it except Phase 3.
 
 ### Wave 1 (parallel)
 
-- [ ] **Feature wiring.** (`biscuit-hash/lib/Cargo.toml`)
+- [x] **Feature wiring.** (`biscuit-hash/lib/Cargo.toml`)
   - add `json = ["dep:serde_json"]` and optional `serde_json = "1"`
   - it must not enable `preserve_order`, `xx_hash`, or `blake3`
-- [ ] **Docs skeleton.** Create `biscuit-hash/docs/` with a `json.md` topic
+- [x] **Docs skeleton.** Create `biscuit-hash/docs/` with a `json.md` topic
   (rendering, hash algorithms, feature combinations with a small table and one
   example per row). Audience: a developer new to the repo. Fill after the API
   lands.
 
 ### Wave 2 (after Wave 1 wiring)
 
-- [ ] **Canonical renderer.** New `biscuit-hash/lib/src/json.rs`, gated on
+- [x] **Canonical renderer.** New `biscuit-hash/lib/src/json.rs`, gated on
   `feature = "json"`, re-exported from `lib.rs`.
   - port Darkmatter's `canonical_json_sorted`/`CanonicalJson` (N1) byte-for-byte;
     move its unit tests here
   - borrowed traversal, sorted key refs, recursive through objects in arrays
   - arrays/scalars preserved; no input mutation; infallible (N1)
   - must compile with `--no-default-features --features json`
-- [ ] **Hash conveniences.** `xx_hash_json` under `json`+`xx_hash`
+- [x] **Hash conveniences.** `xx_hash_json` under `json`+`xx_hash`
   (existing seed and return type), `blake3_hash_json` under `json`+`blake3`;
   both hash the bytes of the one renderer, no second recursive algorithm.
 
 ### Wave 3 (after Wave 2)
 
-- [ ] **Unit tests** (nextest, in the crate): recursive object-order
+- [x] **Unit tests** (nextest, in the crate): recursive object-order
   independence; array-order sensitivity; empty `{}`/`[]`; scalar roots; Unicode
   keys; escaped strings; exact canonical bytes for one representative fixture;
   equality with compact `serde_json::to_string` for already-sorted input;
@@ -204,14 +208,14 @@ Self-contained library work; nothing else depends on it except Phase 3.
   conveniences equal `xx_hash_bytes`/blake3 helper of the canonical bytes.
   - the crate's own tests need `preserve_order` only as a dev-dependency
     feature, never as a normal feature
-- [ ] **Docs.** biscuit-hash README (overview + link only), crate docs
+- [x] **Docs.** biscuit-hash README (overview + link only), crate docs
   (`//!`), `docs/json.md`, and the `biscuit-hash` skill.
 
 **Checkpoint 2 (validation):**
 
-- [ ] `cargo check -p biscuit-hash --no-default-features --features json`
-- [ ] same with `json,xx_hash`, `json,blake3`, and default features
-- [ ] `just test` and `just lint` in `biscuit-hash/` (all-features recipe
+- [x] `cargo check -p biscuit-hash --no-default-features --features json`
+- [x] same with `json,xx_hash`, `json,blake3`, and default features
+- [x] `just test` and `just lint` in `biscuit-hash/` (all-features recipe
   covers `json`; confirm lint covers the gated code)
 
 ---
@@ -222,7 +226,7 @@ Requires Phase 2.
 
 ### Wave 1 (sequential, small)
 
-- [ ] **Manifest.** `darkmatter/lib/Cargo.toml`: `serde_json` gains
+- [x] **Manifest.** `darkmatter/lib/Cargo.toml`: `serde_json` gains
   `features = ["preserve_order"]` with a contract comment; the `biscuit-hash`
   dependency gains `json` alongside `blake3`.
   - run `cargo tree -e features -i serde_json -p darkmatter` and save the
@@ -230,44 +234,44 @@ Requires Phase 2.
 
 ### Wave 2 (parallel; disjoint files)
 
-- [ ] **`hash_frontmatter_map`** (`lib/src/markdown/hash/mod.rs`). Replace only
+- [x] **`hash_frontmatter_map`** (`lib/src/markdown/hash/mod.rs`). Replace only
   the value rendering with the shared renderer. Preserve: top-level key sort,
   `key:` + canonical value, the literal two-character `\n` join (not a newline),
   `xx_hash` of the bytes, empty -> `xx_hash("")`, ignore-property filtering,
   strict path (YAML of the unsorted map), body and keys-only rules.
   - update the stale doc comment on `hash_frontmatter_keys` only if it implies
     sorted nested maps
-- [ ] **TOC normalized hash** (`toc/mod.rs`, ~line 442): per N4.
-- [ ] **Schema content hash** (`schemas/validate.rs:1446`): per N5.
-- [ ] **DMLS cache key** (`dmls/src/overlay/mod.rs:1047`): per N6, add only the
+- [x] **TOC normalized hash** (`toc/mod.rs`, ~line 442): per N4.
+- [x] **Schema content hash** (`schemas/validate.rs:1446`): per N5.
+- [x] **DMLS cache key** (`dmls/src/overlay/mod.rs:1047`): per N6, add only the
   one-line comment; no code change.
-- [ ] **Compose cache renderer** (`compose/cache/hashing.rs`,
+- [x] **Compose cache renderer** (`compose/cache/hashing.rs`,
   `cache/operation.rs`): per N1, replace `canonical_json_sorted` with
   `biscuit_hash::canonical_json` and delete the local wrapper. Existing compose
   cache tests must pass unchanged, which shows the keys are byte-identical.
-- [ ] **Residual audit.** Search remaining Darkmatter and DMLS hash inputs for
+- [x] **Residual audit.** Search remaining Darkmatter and DMLS hash inputs for
   serialized JSON objects; canonicalize or justify each; record every audited
   hash (purpose, order matters?, action) in the log.
 
 ### Wave 3 (parallel tests, after Wave 2)
 
-- [ ] **Fixed historical-format regression.** A small fixed expected-hash test
+- [x] **Fixed historical-format regression.** A small fixed expected-hash test
   for the entry format (`key:value` joined with literal `\n`), so a future
   delimiter or whole-map change fails.
-- [ ] **Hash matrix tests** (parsed YAML fixtures, not value equality). Three
+- [x] **Hash matrix tests** (parsed YAML fixtures, not value equality). Three
   pairs: top-level-only reorder, two-level nested reorder, array-element
   reorder. Each: equal non-strict frontmatter hashes, different strict hashes.
   Cover the shared helper and the frontmatter component of each option-based
   hash kind; nested-only pairs leave strict keys-only hashes unchanged; body-only
   output unaffected.
-- [ ] **TOC/schema tests.** Normalized TOC hash ignores top-level, nested, and
+- [x] **TOC/schema tests.** Normalized TOC hash ignores top-level, nested, and
   array-contained object key reordering but changes on array-element reorder;
   reordered schema object shares a validator cache identity, reordered array
   does not.
 
 **Checkpoint 3 (validation):**
 
-- [ ] `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`
+- [x] `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`
   passes with the manifest **unchanged** (`replace_heavy` back to
   `9e3319d168b8b47a`)
 - [ ] run the Darkmatter suite and compare against the Phase 1 baseline list
