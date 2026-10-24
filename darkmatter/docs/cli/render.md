@@ -68,7 +68,36 @@ These are top-level flags (not render-specific) but affect `render` behavior:
   the page), so it stays consistent regardless of environment color detection.
 - `--line-numbers`: include code line numbers in terminal rendering
 - `--mermaid`: render mermaid diagrams as images in terminal mode when supported
-- `--feature embed-mermaid-font` (**planned**, not yet available): with HTML output whose Mermaid diagrams are static SVG, embed the font they were measured in, once per page (see [Mermaid rendering](../rendering/mermaid.md#embedded-font))
+- `--feature <NAME>`: turn on a named feature (see [Features](#features) below)
+
+### Features
+
+`--feature <NAME>` turns on an opt-in by name. It is accepted at the top level
+(`md --feature NAME doc.md`, before a subcommand) and on `render`
+(`md render doc.md --feature NAME`); both lists are combined. The top-level
+form also reaches `md --feature NAME compose doc.md --output html`.
+
+- Repeatable and comma-separated: `--feature a --feature b` is the same as
+  `--feature a,b`.
+- Names are case-insensitive, and repeating a name is harmless.
+- An unknown name, including an empty one (`--feature a,,b` or
+  `--feature ""`), is a usage error (exit code 2) that lists the valid names.
+  Shell completion offers them.
+
+| Name | Effect |
+| --- | --- |
+| `embed-mermaid-font` | In HTML output, embed the font static-SVG Mermaid diagrams were measured in, once per page (see [Mermaid rendering](../rendering/mermaid.md#embedded-font)). |
+
+`embed-mermaid-font` acts only on Mermaid diagrams emitted as static SVG.
+`md`'s HTML output does not produce static SVG today: its Mermaid diagrams
+are interactive `<pre class="mermaid">` blocks, so the page is byte for byte
+the same with and without the feature. Terminal, Markdown, and JSON output
+ignore it. No frontmatter key turns it on.
+
+```bash
+md --output html --feature embed-mermaid-font notes.md
+md render notes.md --output html --feature EMBED-MERMAID-FONT   # same
+```
 
 ### Output Behavior
 

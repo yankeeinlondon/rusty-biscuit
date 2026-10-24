@@ -52,6 +52,23 @@ Key clap patterns:
 - `clap::ValueEnum` for enum flag values
 - `clap_complete` with `derive` + `unstable-ext` features for shell completions
 
+### The `--feature` convention
+
+Named opt-ins share one flag across this repository's CLIs:
+
+- `--feature <NAME>` is repeatable and comma-separated (`--feature a --feature
+  b` == `--feature a,b`); names are case-insensitive; repeating one is harmless.
+- Each CLI declares its names in a `ValueEnum` (kebab-case). An unknown or
+  empty name (`--feature a,,b`, `--feature ""`) is a usage error (exit 2)
+  listing the valid names, and completion offers them.
+- When two named features overlap, the more restrictive one wins.
+- clap gives all of this from `#[arg(long = "feature", value_enum,
+  value_delimiter = ',', ignore_case = true, action = ArgAction::Append)]` on a
+  `Vec<Feature>`; clap rejects empty elements itself. Lower the list onto the
+  options in one helper so adding a name is one variant plus one match arm.
+  Reference: `md` (`darkmatter/cli/src/args/enums.rs` `Feature`,
+  `render::apply_features`; docs in `darkmatter/docs/cli/render.md#features`).
+
 ## Output Standards
 
 See [cli-best-practices.md](cli-best-practices.md) for the full standards reference.

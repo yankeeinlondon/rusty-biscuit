@@ -608,7 +608,7 @@ pub fn run_compose(
         }
         OutputFormat::Html => {
             let artifact =
-                html_artifact(&composed, cli, input)?;
+                html_artifact(&composed, cli, input, &cli.features)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {

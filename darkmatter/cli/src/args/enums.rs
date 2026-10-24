@@ -20,6 +20,18 @@ pub enum OutputFormat {
     Json,
 }
 
+/// A named opt-in accepted by `md --feature` (the repository's `--feature`
+/// convention: repeatable, comma-separated, case-insensitive).
+///
+/// Adding a feature is one variant here plus its lowering in
+/// [`apply_features`](crate::render::apply_features).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, ValueEnum)]
+pub enum Feature {
+    /// Embed the font static-SVG Mermaid diagrams were measured with in HTML
+    /// output. Has no effect on Mermaid rendered any other way.
+    EmbedMermaidFont,
+}
+
 /// Output format for `md code-block`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum CodeBlockOutput {

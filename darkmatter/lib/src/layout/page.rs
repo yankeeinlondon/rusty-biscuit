@@ -245,6 +245,12 @@ impl DarkmatterPage {
         self.line_numbers
     }
 
+    /// Whether the browser page embeds the Mermaid font; see
+    /// [`with_embed_mermaid_font`](Self::with_embed_mermaid_font).
+    pub fn embed_mermaid_font(&self) -> bool {
+        self.embed_mermaid_font
+    }
+
     /// The renderable [`ComponentPolicy`] for `component`, if any.
     pub fn component_policy(&self, component: PageComponent) -> Option<&ComponentPolicy> {
         self.component_policies.get(&component)

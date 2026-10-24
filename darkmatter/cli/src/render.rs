@@ -3,7 +3,7 @@
 //! Applies CLI layout claims and `style:` frontmatter to a [`DarkmatterPage`]
 //! and drives terminal rendering.
 
-use crate::args::Cli;
+use crate::args::{Cli, Feature};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
@@ -113,6 +113,16 @@ pub fn render_terminal_output(
 pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
     let claims = crate::style_claims::cli_style_claims(cli);
     apply_cli_claims(page, &claims)
+}
+
+/// Apply each `--feature` to `page`.
+///
+/// Every feature only switches a page option on, so order and repetition do
+/// not matter.
+pub fn apply_features(page: DarkmatterPage, features: &[Feature]) -> DarkmatterPage {
+    features.iter().fold(page, |page, feature| match feature {
+        Feature::EmbedMermaidFont => page.with_embed_mermaid_font(true),
+    })
 }
 
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors
