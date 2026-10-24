@@ -289,20 +289,20 @@ may run concurrently with Phase 3 Wave 3 on separate files.
 
 ### Wave 1 (parallel)
 
-- [ ] **Shallow merges** (`lib/src/markdown/frontmatter.rs`). Verify
+- [x] **Shallow merges** (`lib/src/markdown/frontmatter.rs`). Verify
   `merge_with` under every `MergeStrategy` and `set_defaults` keep base
   positions, append incoming-only keys in incoming order, never move an
   overwritten key, and replace nested objects wholesale (incoming internal
   order retained). `ErrorOnConflict` still errors; no rollback promise. Fix
   only what tests show is wrong; document as a stated contract in comments.
-- [ ] **Recursive composition order** (`compose/context/effective_state.rs`).
+- [x] **Recursive composition order** (`compose/context/effective_state.rs`).
   Per N7: receiving document is the base for document + external state; the
   child is the receiving document in transclusion; `apply_set_overrides` and
   `merge_replace_maps` keep base-first order. Remove the argument-reversal as
   an ordering policy while keeping value precedence identical.
   - preserve scalar/array/null, runtime `ctx`, and special `replace` rules;
     arrays remain leaves
-- [ ] **Ordered maps through `EffectiveState`** per N8: change the field,
+- [x] **Ordered maps through `EffectiveState`** per N8: change the field,
   accessor, constructor, builder, and `markdown_child_options` to
   `serde_json::Map`. Update the Darkmatter-internal callers and the six Claudine
   sites, deleting their `HashMap` conversions. Then run
@@ -310,17 +310,17 @@ may run concurrently with Phase 3 Wave 3 on separate files.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Merge tests.** Enumerate keys to assert order. Shallow: every strategy
+- [x] **Merge tests.** Enumerate keys to assert order. Shallow: every strategy
   and defaults, overwrite-without-movement (`{z,a}` + `{a,b}` -> `z,a,b` whether
   `a` keeps or takes the incoming value), incoming key order, nested object
   replacement. Recursive: document/external merge with both value-preference
   choices, transclusion inheritance, `set` / `set.NAME` overrides; plus
   regression assertions that value/null/array/`ctx`/`replace` precedence is
   unchanged.
-- [ ] **Metadata agreement.** Test that `Frontmatter::mapping_key_order` agrees
+- [x] **Metadata agreement.** Test that `Frontmatter::mapping_key_order` agrees
   with parsed value iteration order; update comments implying nested JSON maps
   must be sorted. Do not remove or redefine `mapping_key_order`.
-- [ ] **Unordered-map audit.** Check paths that expose/persist authored
+- [x] **Unordered-map audit.** Check paths that expose/persist authored
   mappings for conversions through `HashMap`; carry ordered maps instead.
   Record findings in the log.
 
