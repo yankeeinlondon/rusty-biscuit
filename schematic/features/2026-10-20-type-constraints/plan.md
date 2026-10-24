@@ -207,6 +207,157 @@ source_files_during_phase_7:
 docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+    - schematic/runtime/src/endpoint.rs
+docs_updated_during_phase_8:
+    - schematic/docs/authoring-examples.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/io/import-openapi.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_code:
+    - Cargo.lock
+    - schematic/gen/src/lib.rs
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/validate/mod.rs
+    - schematic/runtime/src/validate/decimal.rs
+    - schematic/runtime/src/validate/eval.rs
+    - schematic/runtime/src/validate/pattern.rs
+    - schematic/runtime/src/validate/plan.rs
+    - schematic/runtime/src/validate/violation.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/validate_decimal.rs
+    - schematic/runtime/tests/l1/validate_eval.rs
+    - schematic/runtime/tests/l1/validate_report.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.stderr
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/lib.rs
+    - schematic/define/Cargo.toml
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/src/constraints/check.rs
+    - schematic/define/src/constraints/mod.rs
+    - schematic/define/src/constraints/number.rs
+    - schematic/define/src/constraints/pattern.rs
+    - schematic/define/src/constraints/registered.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/lower.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/definition_serde.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_constraints.rs
+    - schematic/define/tests/registered_model_rules.rs
+    - schematic/define/tests/value_constraints.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/endpoint_auth_output.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/gen/tests/l1/typed_path_output.rs
+    - schematic/define/src/constraints/schema.rs
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/schema.rs
+    - schematic/define/src/openapi/import/normalize.rs
+    - schematic/define/src/openapi/import/resolver.rs
+    - schematic/define/src/openapi/options.rs
+    - schematic/define/tests/constraint_preservation.rs
+    - schematic/define/tests/fixtures/constraint_preservation.yaml
+    - schematic/define/tests/import_normalization.rs
+    - schematic/define/tests/openapi_constraint_export.rs
+    - schematic/define/tests/openapi_constraint_import.rs
+    - schematic/define/tests/support/constraint_meaning.rs
+    - schematic/definitions/src/openai/types.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/model_gen.rs
+    - schematic/gen/tests/l1/constraint_preservation.rs
+    - schematic/gen/tests/l1/definition_baseline.rs
+    - schematic/gen/tests/l1/definitions_out_constraints.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/openai.json
+    - schematic/postman/openai.postman_collection.json
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/value_rules/mod.rs
+    - schematic/gen/src/codegen/value_rules/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/request_structs/query_params.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/path_params.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/value_rules.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/schema/tests/pagination.rs
+    - schematic/runtime/src/endpoint.rs
+documentation:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/runtime/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/io/definition-bundles.md
+    - schematic/docs/pagination.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/websocket-definitions.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/value-constraints.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/validation.md
+    - schematic/docs/authoring-examples.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s1-lossless-numbers.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s2-schemars-output.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s3-body-encode-reuse.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/responses.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/pagination.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+completed_phase: 8
+implemented: true
 ---
 
 # Type constraints implementation plan
@@ -693,7 +844,7 @@ diff explained.
 
 ### Wave 18: Docs and skills (parallel; disjoint files)
 
-- [ ] **Topic docs**
+- [x] **Topic docs**
   - Update `docs/typed-registration.md`, `docs/definition-builders.md`,
     `docs/authoring-examples.md`, `docs/pagination.md`, the generation and
     runtime pages, and OpenAPI conversion docs. Written for a developer new to
@@ -704,7 +855,7 @@ diff explained.
   - Document the enforced subset honestly: formats annotation-only, pattern
     subset table, exact-number behavior, JSON body key-order note, and that
     responses are not validated.
-- [ ] **Skills and dependency docs**
+- [x] **Skills and dependency docs**
   - Update the Schematic skills (`schematic-define` and any generation/runtime
     skill) with the new builders and error behavior; update
     `docs/dependencies.md` for `regex`, the exact-number dependency, and any
@@ -712,11 +863,11 @@ diff explained.
 
 ### Wave 19: Closing audit
 
-- [ ] **Audit comments and drift**
+- [x] **Audit comments and drift**
   - For every behavior-changing symbol, confirm `///`/`//!` and inline comments
     match the code; code wins on drift, and each drift found is recorded with how
     it was resolved. Grep for dead references to clamping behavior.
-- [ ] **Final evidence**
+- [x] **Final evidence**
   - Re-run only checks whose inputs changed since Checkpoint 7. Complete
     `implementation-log.md` with commands, environment, results, changed files,
     adopted defaults, deviations, unexercised environments, and the review

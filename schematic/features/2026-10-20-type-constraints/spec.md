@@ -23,9 +23,10 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-21
-review_iterations: 0
+review_iterations: 5
 clarified: false
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 human_review: false
 depends_on:
     - 2026-10-14-schematic-definition-api
@@ -35,7 +36,7 @@ related:
     - 2026-10-13-schematic-pagination
     - 2026-10-18-schematic-fidelity-polish
 message_to_agent: |-
-  The three Open Questions were ruled on 2026-10-21 with their recommended options: JSON bodies are checked on the serialized representation that is sent, formats are annotation-only, and numeric rules use exact arithmetic. Earlier author-delegated choices favor generated checks, shared runtime helpers, and no response validation. The inline review updates those choices where current request, schema, and pagination contracts require it; reader notes explain the changes. Keep optional call build checks and awaited sends on the same validation path.
+  The three Open Questions were ruled on 2026-10-21 with their recommended options: JSON bodies are checked on the serialized representation that is sent, formats are annotation-only, and numeric rules use exact arithmetic. Earlier author-delegated choices favor generated checks, shared runtime helpers, and no response validation. The inline review updates those choices where current request, schema, and pagination contracts require it; reader notes explain the changes. Keep optional call build checks and awaited sends on the same validation path. On 2026-10-24 the author resolved review-5's blocked findings (R1-F3, R3-F1) with an explicit, API-level unchecked-composition opt-in; see "Unchecked-composition opt-in" under Supported schema traversal.
 ---
 
 # Type constraints
@@ -90,7 +91,17 @@ Do not equate Rust `PartialEq`, UTF-8 byte length, a serialized query string, or
 
 Validation must reach root values, object properties, array items, map values, local component references, and recursive models. Type-specific rules apply only to matching JSON kinds. Nullable wrappers and the equivalent nullable alternatives emitted by Schemars must remain supported. Inspect the supported Schemars output in a fixture rather than assuming every `anyOf` represents a nullable wrapper.
 
-Generic `oneOf`, `anyOf`, `allOf`, and `not` evaluation is outside scope. A constrained request beneath an unsupported composition or unresolved reference gets an actionable generation error; it must not produce a client that claims to enforce the rule. Recursive schema compilation must terminate by reusing named plans rather than expanding references indefinitely. Runtime traversal follows the finite request value.
+Generic `oneOf`, `anyOf`, `allOf`, and `not` evaluation is outside scope. A constrained request beneath an unsupported composition or unresolved reference gets an actionable generation error; it must not produce a client that claims to enforce the rule. This holds at every request entry point (JSON body, multipart JSON field, parameter), including a composition at a component root. The only relaxation is the author opt-in below. Recursive schema compilation must terminate by reusing named plans rather than expanding references indefinitely. Runtime traversal follows the finite request value.
+
+#### Unchecked-composition opt-in
+
+**Ruled by the author on 2026-10-24** (resolving review-5's conflict between strict refusal and Goal 4): an API author may explicitly accept unchecked composition rules for one API, instead of losing generation for it.
+
+- **Stored and explicit.** The opt-in is API-level definition metadata, absent by default, set through the fluent `RestApi` builder (final name in the plan), serialized with the definition, and kept by bundles and emitted definitions. It is a general author choice, not a special case keyed on a catalog name.
+- **Narrow.** It covers only constrained request rules beneath `anyOf`, `oneOf`, multi-member `allOf`, and `not`. Unresolved references, positional items, and the other unsupported keywords still fail generation. It never relaxes definition errors such as malformed or contradictory constraints.
+- **Disclosed.** With the opt-in, each covered rule is a warning naming the API, endpoint, schema path, keyword, and composition. Generation continues and emits no check for that rule. The generated rustdoc for the affected request input states which rules are not enforced. Without the opt-in, the same rules are generation errors.
+- **Preserved through rebuilding.** Imported definitions must keep the composition structure and the constraints beneath it, for all four generic shapes at every rebuilding position, so the rebuilt API produces the same errors (without the opt-in) or the same warnings and disclosures (with it) as the direct import. Keeping them is preservation, not evaluation; no runtime composition evaluator is added.
+- **OpenAI.** The OpenAI catalog sets the opt-in in its hand-written overlay (`definitions/src/openai_pagination.rs`, which the import never overwrites), so `just import-openai` and regeneration keep the existing client methods and pagination controls (Goal 4). Its catalog expectations record the resulting warning counts.
 
 ## Definition and preservation requirements
 
@@ -108,7 +119,7 @@ New optional stored metadata is omitted when absent and reads as absent from exi
 
 Reject malformed keyword values, negative lengths or counts, nonpositive `multipleOf`, incompatible authored types, empty enums, contradictory intervals, and lower bounds above upper bounds. Equal exclusive endpoints also define an empty interval. This is a check for direct contradictions, not a general proof that an arbitrary schema is satisfiable.
 
-Preserve unsupported rules when the source representation permits it, with API, endpoint when applicable, schema path, keyword, and reason in the diagnostic. Annotation-only keywords such as `title` and `description` do not trigger warnings. Generation must fail for a supported request rule it cannot enforce, except for explicitly documented pattern and format exceptions below. Response-only constraints remain exportable without generating response checks.
+Preserve unsupported rules when the source representation permits it, with API, endpoint when applicable, schema path, keyword, and reason in the diagnostic. Annotation-only keywords such as `title` and `description` do not trigger warnings. Generation must fail for a supported request rule it cannot enforce, except for explicitly documented pattern and format exceptions below and the unchecked-composition opt-in above. Response-only constraints remain exportable without generating response checks.
 
 ### OpenAPI conversion
 

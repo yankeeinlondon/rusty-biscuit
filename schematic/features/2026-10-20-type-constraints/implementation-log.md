@@ -17,25 +17,6 @@ packages:
     - schematic-define
     - schematic-definitions
 human_review: false
-message_to_agent: |-
-  Phase 7 regenerated and audited; read "## Phase 7" in this log. Facts
-  Phase 8 relies on:
-  - `just import-openai` + `just generate` reproduce every committed
-    artifact (after restoring the two pre-existing import_overlay pins in
-    definitions/src/openai/mod.rs with `git checkout`). If Phase 8 changes
-    no code, generation needs no rerun.
-  - Phase 7 changed tests only: schema/tests/value_rules.rs gained
-    a_reply_outside_its_declared_value_rules_still_decodes (the "responses
-    are not validated" evidence, usable as the docs' example: GetVectorStore
-    decodes days 4000 although VectorStoreExpirationAfter declares 1-365,
-    while CreateVectorStore refuses the same value), and
-    define/tests/value_constraints.rs gained a `format wrong type` cell.
-  - Two review-agenda items for the docs to describe honestly: rules inside
-    oneOf alternatives the importer collapses to serde_json::Value are not
-    preserved (generic composition is out of scope), and the Unfolded
-    Circle Core REST definition is handwritten and declares no value rules.
-  - Exact violation wording for a single-member enum is "must equal the one
-    allowed value" (not "must be one of the allowed values").
 source_files_during_phase_2:
     - Cargo.lock
     - schematic/gen/src/lib.rs
@@ -226,6 +207,157 @@ source_files_during_phase_7:
 docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+    - schematic/runtime/src/endpoint.rs
+docs_updated_during_phase_8:
+    - schematic/docs/authoring-examples.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/io/import-openapi.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/schematic/openapi.md
+source_code:
+    - Cargo.lock
+    - schematic/gen/src/lib.rs
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/validate/mod.rs
+    - schematic/runtime/src/validate/decimal.rs
+    - schematic/runtime/src/validate/eval.rs
+    - schematic/runtime/src/validate/pattern.rs
+    - schematic/runtime/src/validate/plan.rs
+    - schematic/runtime/src/validate/violation.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/validate_decimal.rs
+    - schematic/runtime/tests/l1/validate_eval.rs
+    - schematic/runtime/tests/l1/validate_report.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.rs
+    - schematic/runtime/tests/fixtures/compile_fail/path_segment_holds_only_static_names.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.rs
+    - schematic/runtime/tests/fixtures/compile_fail/violation_holds_no_submitted_value.stderr
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/lib.rs
+    - schematic/define/Cargo.toml
+    - schematic/define/src/builders.rs
+    - schematic/define/src/bundle.rs
+    - schematic/define/src/constraints/check.rs
+    - schematic/define/src/constraints/mod.rs
+    - schematic/define/src/constraints/number.rs
+    - schematic/define/src/constraints/pattern.rs
+    - schematic/define/src/constraints/registered.rs
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/export/parameters.rs
+    - schematic/define/src/openapi/import/mappings/mod.rs
+    - schematic/define/src/openapi/import/mappings/responses.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/lower.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/params/param_def.rs
+    - schematic/define/src/registration.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/builders.rs
+    - schematic/define/tests/definition_serde.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_constraints.rs
+    - schematic/define/tests/registered_model_rules.rs
+    - schematic/define/tests/value_constraints.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/src/ws_codegen/plan.rs
+    - schematic/gen/tests/l1/endpoint_auth_output.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/postman_runnable.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/gen/tests/l1/typed_path_output.rs
+    - schematic/define/src/constraints/schema.rs
+    - schematic/define/src/openapi/export/conversion.rs
+    - schematic/define/src/openapi/export/paths.rs
+    - schematic/define/src/openapi/export/request_body.rs
+    - schematic/define/src/openapi/import.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/openapi/import/mappings/parameters.rs
+    - schematic/define/src/openapi/import/mappings/schema.rs
+    - schematic/define/src/openapi/import/normalize.rs
+    - schematic/define/src/openapi/import/resolver.rs
+    - schematic/define/src/openapi/options.rs
+    - schematic/define/tests/constraint_preservation.rs
+    - schematic/define/tests/fixtures/constraint_preservation.yaml
+    - schematic/define/tests/import_normalization.rs
+    - schematic/define/tests/openapi_constraint_export.rs
+    - schematic/define/tests/openapi_constraint_import.rs
+    - schematic/define/tests/support/constraint_meaning.rs
+    - schematic/definitions/src/openai/types.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/model_gen.rs
+    - schematic/gen/tests/l1/constraint_preservation.rs
+    - schematic/gen/tests/l1/definition_baseline.rs
+    - schematic/gen/tests/l1/definitions_out_constraints.rs
+    - schematic/gen/tests/l1/extension_round_trip.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/openapi/openai.json
+    - schematic/postman/openai.postman_collection.json
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/value_rules/mod.rs
+    - schematic/gen/src/codegen/value_rules/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/codegen/request_structs/form.rs
+    - schematic/gen/src/codegen/request_structs/shared.rs
+    - schematic/gen/src/codegen/request_structs/query_params.rs
+    - schematic/gen/src/codegen/request_structs/named_params.rs
+    - schematic/gen/src/codegen/request_structs/path_params.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/value_rules.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/schema/tests/pagination.rs
+    - schematic/runtime/src/endpoint.rs
+documentation:
+    - docs/dependencies.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/runtime/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/definition-builders.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/io/definition-bundles.md
+    - schematic/docs/pagination.md
+    - schematic/docs/typed-registration.md
+    - schematic/docs/websocket-definitions.md
+    - schematic/docs/io/export-openapi.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/docs/value-constraints.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/validation.md
+    - schematic/docs/authoring-examples.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s1-lossless-numbers.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s2-schemars-output.md
+    - schematic/features/2026-10-20-type-constraints/spikes/s3-body-encode-reuse.md
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/schematic-define/schematic/SKILL.md
+    - .claude/skills/schematic-define/schematic/gen.md
+    - .claude/skills/schematic-define/schematic/responses.md
+    - .claude/skills/schematic-define/schematic/define.md
+    - .claude/skills/schematic-define/schematic/pagination.md
+    - .claude/skills/schematic-define/schematic/openapi.md
+completed_phase: 8
+implemented: true
 ---
 
 # Implementation Log for 2026-10-20-type-constraints (8 phases)
@@ -1994,3 +2126,177 @@ review.
 - Spec frontmatter: this phase's prompt asked for no spec properties, so
   the spec is unchanged. `os_failing` was not set, because no cross-check
   ran and nothing failed.
+
+## Phase 8
+
+Documentation, skills, and closure (Waves 18–19). I did the work myself,
+with no subagents: earlier phases had already written each topic page,
+skill, and dependency entry alongside their code (the plan's rule), so this
+phase was an audit that filled the gaps it found. Implementation complete,
+ready for review.
+
+### Wave 18: docs and skills
+
+Audit of the plan's required content against the current docs:
+
+| Required | Where it is | State before this phase |
+| --- | --- | --- |
+| What the reader can do, compact example per rule | `docs/value-constraints.md` (keyword table, exact numbers, formats, definition errors) | present |
+| Formats annotation-only | `value-constraints.md#formats`, `generation/request-side.md#what-is-not-checked` | present |
+| Pattern subset table | `value-constraints.md#patterns` (test-guarded `pattern-admission` table) | present |
+| Exact-number behavior | `value-constraints.md#exact-numbers`, `runtime/validation.md`, `io/import-openapi.md#value-constraints` | present |
+| JSON body key-order note | `generation/request-side.md#what-is-checked` | present |
+| Responses are not validated | `value-constraints.md`, `runtime/validation.md`, `request-side.md` | present |
+| Mermaid: where a request is checked (build vs await vs pager) | `generation/request-side.md#where-a-request-is-checked` | **gap**: the pager was missing |
+| Mermaid: import → definitions-out → registration round trip | `io/import-openapi.md` | **gap**: none for value rules |
+| Typed registration, definition builders, pagination | `typed-registration.md#value-rules-on-registered-models`, `definition-builders.md`, `pagination.md#bounds-are-checked-before-sending` | present |
+| Authoring examples | `docs/authoring-examples.md` | **gap**: no value rule |
+| Rules lost inside a collapsed `oneOf` (Phase 7 agenda) | — | **gap**: undocumented |
+| Dependencies: `regex`, `regex-syntax`, `num-bigint` | `docs/dependencies.md`, `schematic/docs/dependencies.md` | present |
+| Skills | `.claude/skills/schematic-define/` (SKILL.md, define, gen, openapi, pagination, responses) | present; the `oneOf` loss missing |
+| No "planned" marker, no feature name in docs | grep over the touched pages | clean |
+
+Changes:
+
+- `docs/generation/request-side.md`: the "Where a request is checked"
+  flow now has the pager. Its request goes through the same
+  `into_parts()` checks once (verified: `runtime/src/pager/pages.rs`
+  passes `self.request.into_parts()` to `Pages::new`), and each page size it
+  chooses is checked against the strategy's `min`/`max`. One sentence
+  added under the diagram to say so.
+- `docs/io/import-openapi.md`: "Not rebuilt on model fields" now names
+  rules inside a `oneOf`/`anyOf` member of a field typed as free-form JSON,
+  with OpenAI's `learning_rate_multiplier` as the example (verified:
+  `definitions/src/openai/types.rs` types it `Option<serde_json::Value>`
+  and `openapi/openai.json` carries only its description). Added a Mermaid
+  flow of one rule (`maximum: 100`) through import → `--definitions-out`
+  → `module_group()` registration → generated client and export.
+- `docs/authoring-examples.md` (compiled as `schematic-define`'s crate
+  doctest via `define/src/lib.rs`): the `tag` query parameter now declares
+  `Constraints::new().min_length(1).max_length(40)` and the example
+  asserts the built API carries `max_length == Some(40)`; the prose links
+  to value constraints.
+- `.claude/skills/schematic-define/schematic/openapi.md`: one sentence on
+  the `oneOf` loss, so a re-exported document with fewer rules than its
+  source is not mistaken for a regression.
+- READMEs: unchanged; they are overview-only and already point at the
+  docs.
+- The Unfolded Circle Core REST definition declaring no rules (Phase 7
+  agenda item 2) is a fact about one handwritten definition, not about
+  behavior, so no doc states it.
+
+### Wave 19: closing audit
+
+- **Dead references**: grep over the 61 feature-changed `.rs` files in
+  `runtime/src`, `define/src`, and `gen/src` for `clamp`, `TODO`,
+  `FIXME`, `not yet`, `planned`, `phase N`, and the feature name: no stale
+  hit (only `jitter.clamp` in WebSocket codegen and the pager's `Planned`
+  type). In docs and skills, `clamp` appears only as caller advice in
+  `pagination.md` ("Clamp …" your own value) and the openapi skill's "never
+  clamps": both accurate.
+- **Drift found and resolved (code wins)**:
+  `runtime/src/endpoint.rs` `EndpointSpec::into_parts` said it returns
+  `InvalidArgument` only "when a parameter cannot be encoded". Generated
+  implementations now also refuse a request that breaks a declared value
+  rule. The `## Errors` section now says so, links `crate::validate`, and
+  says "before any credential or network work", matching the other docs.
+- Spot-checked and consistent with the code: `runtime/src/validate/mod.rs`
+  module docs, `gen/src/codegen/value_rules/mod.rs` module docs, the
+  `into_parts`/`validate()` generator docs in
+  `gen/src/codegen/request_structs/into_parts.rs`, the pager's
+  `size_problem` doc, and `Pager::page_size` (no clamping claim).
+- **Performance sample (plan rule 13)**: not taken. It is defaulted as
+  optional and unneeded by the spec; left on the review agenda.
+
+### Requirement-to-test mapping (Phase 8)
+
+| Change | Evidence |
+| --- | --- |
+| `authoring-examples.md` declares and asserts a value rule | `schematic-define` crate doctest `src/lib.rs - (line 130)` (the included example), passed; `authoring_guidance::current_rest_guidance_uses_supported_authoring_surface`, passed |
+| `EndpointSpec::into_parts` doc and its new `crate::validate` link | `RUSTDOCFLAGS="-D warnings" cargo doc -p schematic-runtime --no-deps`, clean; `just _doctest schematic-runtime`, 11 passed |
+| Skill edit (a CI test input) | the narrowed readers below |
+| Docs-only edits (`request-side.md`, `import-openapi.md`) | no compiled reader besides `value-constraints.md`'s pattern table, which is unchanged |
+
+No behavior changed in this phase, so no new test was added. No new or
+renamed test, so tiers are unaffected.
+
+### Success criteria: where the evidence is
+
+| Plan success criterion | Evidence |
+| --- | --- |
+| Every keyword round-trips by meaning (direct import/export and `--definitions-out` → registration), large bound and decimal `multipleOf` unnarrowed | Phase 4 (`define constraint_preservation`, `gen constraint_preservation::slow_definitions_out_rebuilds_every_rule_through_registration`) |
+| A violating request is refused with `InvalidArgument` and zero sends through every send path; valid data unchanged | Phase 5 (`schema value_rules`, `gen` generated-output tests) |
+| `validate()` lists every violation deterministically with safe paths and no submitted values | Phases 2 and 5 (`runtime validate_report`, the compile-fail fixtures, `schema value_rules`) |
+| GitHub `.page_size(500).fetch_page()` refuses before sending through the shared helpers, including mid-traversal | Phase 6 (`runtime pager_rules`, `schema pagination`) |
+| A decodable reply outside a declared bound still decodes | Phase 7 (`schema value_rules::a_reply_outside_its_declared_value_rules_still_decodes`) |
+| `just test`, `just lint`, `just doctest`, `just test-schema`; docs, skills, dependency docs current | Phase 7 gates; this phase's gates and Wave 18 audit |
+
+### Gates (macOS, this host, no subagent running)
+
+- `just lint` (from `schematic/`): exit 0.
+- `just test` (from `schematic/`): exit 0. Main L1: 3119 passed (5 slow,
+  all pre-existing: the TLS `builder::*` tests, `import_overlay::reimporting…`,
+  and `constraint_preservation::slow_…`), 23 skipped; `test-fresh-output`:
+  17 passed; `test-compile-fail`: 1 passed. No failures, retries, or
+  timeouts.
+- Doctests, only the crates whose inputs changed: `just _doctest
+  schematic-runtime` (11 passed), `just _doctest schematic-define
+  --all-features` (205 passed, 7 ignored). Not rerun: `schematic-schema`
+  (577), `schematic-gen`, `schematic-definitions`, `schematic-oauth`; none
+  of their inputs changed since Phase 7's full `just doctest`.
+- `just test-schema`, `just check-drift`, regeneration: not rerun. No code
+  that generation reads changed (the only source edit is a doc comment on
+  a runtime trait method), so the Phase 7 results stand.
+- `just check-tier-coverage schematic`: 0 stranded.
+- Narrowed test-input readers (the skill edit), as the scope calculator
+  lists: `darkmatter` l1 skill readers (the same six groups as earlier
+  phases) → 63 passed; `test-toolkit` `archive_path_guard` +
+  `the_ci_documentation_states_the_implemented_behavior` → 2 passed.
+- Dependents: not run. The phase changed one rustdoc comment in
+  `schematic-runtime` and one doctest in `schematic-define`; neither is
+  compiled into another package's tests or code paths.
+- `just test-l2`: not run; this feature touches nothing the area's L2
+  tests cover (generator terminal styling).
+- Cross-OS: no `just cross-check`. This phase changed documentation and
+  one doc comment, with no OS-level risk; Phase 7's cross-OS review and
+  Windows compile check stand. Behavioral evidence for the whole feature is
+  macOS only; Linux and macOS are proven by the PR's CI legs, native
+  Windows and WSL2 by the nightly.
+- Scope calculator, from the repository root after all edits (including
+  plan, log, and spec frontmatter):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages:
+  ["schematic-define", "schematic-runtime", "test-toolkit", "darkmatter"]`,
+  `change_class: package`. The gates were required, and they ran.
+- Spec frontmatter: `implemented: true`, `implemented_by: "claude/opus"`.
+  `os_failing` not set. The feature was not moved to `_completed`, and
+  `just complete` was not run.
+
+### Adopted defaults (Phase 8)
+
+- adopted default: no performance sample of the request-check cost
+  (source: plan "Necessary Rules" rule 13). Left on the review agenda.
+
+### Review agenda (whole feature, consolidated)
+
+1. Rules inside `oneOf`/`anyOf` members of a field the importer types as
+   `serde_json::Value` are lost on `--definitions-out` (now documented in
+   `docs/io/import-openapi.md` and the openapi skill). Out of scope
+   (generic composition); preserving them needs the importer to keep the
+   union.
+2. The Unfolded Circle Core REST definition is handwritten and carries
+   none of the vendored document's value rules; porting them is separate
+   work.
+3. Optional (rule 13): one-host timing sample of the per-request check
+   and the JSON body's serialize-once path, if the author wants it.
+4. Earlier phases' agenda items stand as recorded in their sections.
+
+### Files changed in Phase 8
+
+- Source: `schematic/runtime/src/endpoint.rs` (doc comment only).
+- Docs: `schematic/docs/authoring-examples.md` (also the
+  `schematic-define` crate doctest), `schematic/docs/generation/request-side.md`,
+  `schematic/docs/io/import-openapi.md`.
+- Skills: `.claude/skills/schematic-define/schematic/openapi.md`.
+- Planning: `plan.md` (checkboxes, frontmatter), this log, `spec.md`
+  (frontmatter).
