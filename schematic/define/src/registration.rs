@@ -91,10 +91,11 @@ pub enum DefinitionError {
     /// Invalid authored facts, with assembly context.
     #[error("{api} endpoint {endpoint}: {message}")]
     InvalidDefinition { api: String, endpoint: String, message: String },
-    /// A value constraint that contradicts itself or its value's type, at
-    /// an input path such as `query.limit` or `body[]`.
-    /// Boxed to keep the error small.
-    #[error("{api} endpoint {}: {} `{}` {}", .problem.endpoint, .problem.path, .problem.keyword, .problem.reason)]
+    /// A value constraint that is malformed or contradicts itself or its
+    /// value's type: in endpoint metadata at an input path such as
+    /// `query.limit` or `body[]`, or in a stored schema component at a JSON
+    /// pointer such as `#/properties/code`. Boxed to keep the error small.
+    #[error("{api} {problem}")]
     InvalidConstraint { api: String, problem: Box<crate::constraints::ConstraintProblem> },
     /// Invalid GraphQL operation facts, including an unresolved variables,
     /// data, or error reference, with assembly context.

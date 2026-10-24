@@ -485,6 +485,9 @@ pub(crate) fn validate_api(api: &RestApi) -> Result<(), DefinitionError> {
             }
         }
     }
+    if let Some(problem) = crate::constraints::component_problems(api).into_iter().next() {
+        return Err(DefinitionError::InvalidConstraint { api: api.name.clone(), problem: Box::new(problem) });
+    }
     api.validate_references()?;
     api.validate_schema_closure()
 }

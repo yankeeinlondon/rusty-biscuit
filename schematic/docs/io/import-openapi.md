@@ -391,17 +391,64 @@ constraints and in stored component schemas; a `false` flag is dropped. A
 `const`, which `openapiv3` would drop, is kept.
 
 **Patterns.** A pattern inside the [enforced subset](../value-constraints.md#patterns)
-imports as an enforced rule. One outside it, or one that is not a valid
-regular expression, is kept as an unenforced pattern
-(`Constraints::unenforced_pattern`) for export and documentation, with a
-warning at its pointer that says which of the two it is. `format`, `title`,
+imports as an enforced rule. A valid pattern outside it is kept as an
+unenforced pattern (`Constraints::unenforced_pattern`) for export and
+documentation, with a warning at its pointer. A pattern that is not a regular
+expression at all (`(a`, `[a`) fails the import, as below. `format`, `title`,
 and `description` never produce a warning.
 
-**Rules a definition cannot carry** are dropped with a warning naming the
-input and keyword, so the import stays usable: a numeric rule on a URL-encoded
-text field, a source whose `minimum` is above its `maximum`, or a keyword such
-as `minProperties` on a parameter. Rules inside component schemas are always
-kept as written.
+**Invalid rules fail the import**, in permissive and strict mode alike, with
+`OpenApiError::Validation` at the offending keyword. The check is the one API
+build applies to stored components (see
+[definition errors](../value-constraints.md#definition-errors)), and it runs on
+every parameter (path, query, header, cookie), request body, form field, and
+component schema: a lower bound above its upper bound, an empty interval, a
+`multipleOf` of zero or less, an empty `enum`, or an invalid pattern. Nothing
+is dropped to make the document fit, so the valid rules beside an invalid one
+are never lost silently:
+
+```yaml
+- name: tags
+  in: query
+  schema:
+    type: array
+    uniqueItems: true
+    items: { type: string, minLength: 20, maxLength: 12 }
+# Validation error at '#/paths/~1items/get/parameters/0/schema/items/minLength':
+#   `minLength` 20 is above the maximum 12
+```
+
+**Rules a definition cannot carry** are removed one keyword at a time, with a
+warning naming the input and keyword, so the import stays usable: a numeric
+rule on a URL-encoded text field keeps that field's `maxLength`. A component
+schema's rule that applies to none of its declared `type` names is removed
+the same way, warned at the keyword's schema path, so the stored component
+passes the [definition check](../value-constraints.md#definition-errors):
+`{type: integer, minimum: 1, maxLength: 3}` is stored as
+`{type: integer, minimum: 1}`. A keyword no
+input rule can carry is reported where it was written and not preserved:
+`minProperties` and `maxProperties`, and the JSON Schema subschema keywords
+OpenAPI 3.0 lacks (`prefixItems`, `additionalItems`, `contains`,
+`unevaluatedItems`, `unevaluatedProperties`, `patternProperties`,
+`propertyNames`, `dependentSchemas`, `dependencies`, `if`, `then`, `else`),
+which the OpenAPI parser would otherwise drop without a trace. The parser
+drops those subschema keywords wherever they appear, so one inside a component
+schema, a request body, a form, or a response is reported at its own schema
+path the same way, and the stored schema does not hold it; strict mode fails
+on it like any other warning:
+
+```yaml
+components:
+  schemas:
+    Item:
+      properties:
+        code: { type: string, if: { minLength: 1 } }
+# WARN at '#/components/schemas/Item/properties/code/if':
+#   `if` is a JSON Schema keyword OpenAPI 3.0 does not define, ...; not preserved
+```
+
+A positional `items` list is not an OpenAPI 3.0 schema and fails to parse.
+Valid rules inside component schemas are kept as written.
 
 ### Authentication
 
@@ -481,13 +528,17 @@ when it is assembled:
   calls, with every number passed as text (`.maximum("18446744073709551616")`);
   an endpoint's typed path parameters are emitted when one of them carries
   rules;
-- a model field's rules become one `#[schemars(extend(..))]` attribute,
-  read from its component's stored schema. `extend` attaches to any field
+- a model's rules become `#[schemars(extend(..))]` attributes, read from
+  its component's stored schema: one on each field whose property has rules,
+  and one on the model itself for rules on its schema root and on its extra
+  properties (`additionalProperties`). `extend` attaches to any field
   type, where schemars' native `length`/`range` would silently drop on a
   mismatched one, and it expresses `exclusiveMinimum`, `multipleOf`, `enum`,
   and `const`, which have no native attribute. A field typed by a plain
-  alias (`pub type Limit = i64;`) carries the alias' rules; an optional
-  field's `enum` also admits `null`; a number no JSON number holds exactly
+  alias (`pub type Limit = i64;`) carries the alias' rules; an `enum` or
+  `const` is copied as written, so `null` is an allowed value only where the
+  source lists it (OpenAPI 3.0.3's `nullable: true` does not add it), and an
+  absent optional field is never checked; a number no JSON number holds exactly
   keeps its `x-schematic-exact` text:
 
 ```rust
@@ -496,10 +547,147 @@ when it is assembled:
 pub quantity: i64,
 ```
 
-Not rebuilt on model fields: a source `format` (schemars writes the format
-the Rust type implies), item rules of an array of named models, and rules
-beside a reference to a struct, enum, or union model, which belong to that
-model.
+The Rust type decides where a rule is written. Whether the rule is kept
+does not depend on it, except beneath a free-form value, where most
+compositions are not rebuilt (see below):
+
+| Source position | Emitted Rust | Rebuilt as |
+|---|---|---|
+| a property's own rules, any type | the field | `extend("maxLength" = 3u64)` on the field |
+| `format` | the field | `extend("format" = "uuid")`, replacing the format Schemars writes for the Rust type; still an annotation, never checked |
+| a primitive or model array's items | `Vec<T>` | `extend("items" = {..})`, the item schema Schemars would write plus the rules |
+| an inline object, a map, or an untyped value | `serde_json::Value` | the rules at every `properties`, `items`, and `additionalProperties` level, without `type`; each applies to a value of its kind, so `maxLength` checks a string value. Beside a kept `additionalProperties` rule, every declared property is kept, as `{}` when it has no rules, so its value is never checked as an extra one. A `$ref` to a model with rules is kept too, and so are a nullable alternative and a one-member `allOf` around rules or such a reference; any other `allOf`/`anyOf`/`oneOf`/`not` is not (see below) |
+| a rule beside a model reference | `Owner` | `extend("const" = {..})` on that field; the `Owner` component is unchanged |
+| a model's root, or its extra properties | the struct or enum | a container `extend` |
+
+A rule beside a model reference reaches the registered schema as a
+one-member `allOf` holding the `$ref` (Schemars' OpenAPI 3.0 form); the
+generated checks enter that `allOf` as they enter the reference.
+
+```rust
+#[schemars(extend("additionalProperties" = {"maxLength": 3u64, "type": "string"}))]
+pub struct Extras {
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub additional_properties: HashMap<String, String>,
+}
+```
+
+Beneath a free-form value, references and the two transparent wrappers
+around them are rebuilt, and other compositions are not:
+
+- **References.** A `$ref` to a model whose schema holds a rule (directly
+  or through its own references) stays a reference. The Rust type of a
+  free-form value does not name that model, so the field's schema is written
+  by a `schema_with` function that asks the Schemars generator for the
+  model's schema. That adds the model to the registered schema wherever the
+  containing type is reached, nested or not, and Schemars ends a recursive
+  reference at the model's component. An `Option` field written this way
+  also gets `#[serde(default)]`, which keeps it optional in the schema
+  without changing how it deserializes.
+
+  ```rust
+  #[serde(skip_serializing_if = "Option::is_none")]
+  #[serde(default)]
+  #[schemars(schema_with = "Item::field_rules_schema_details")]
+  pub details: Option<serde_json::Value>,
+
+  impl Item {
+      fn field_rules_schema_details(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+          let reference_0 = generator.subschema_for::<Owner>();
+          let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+          schema.insert("properties".to_owned(), serde_json::json!({"owner": reference_0}));
+          schema
+      }
+  }
+  ```
+
+  A rule or `nullable: true` beside the `$ref` stays beside it. A plain
+  alias (`pub type`) is not a component once assembled, so a reference to
+  one also carries the alias' own rules. A reference to a model without
+  rules adds nothing and is left out. A struct's flattened extra values
+  that reference a model are written the same way, on the flattened field.
+- **Transparent wrappers.** Two compositions are kept in their source
+  shape, because generated checks pass through them as they pass through a
+  reference: a nullable alternative (an `anyOf` of two members, exactly one
+  of which admits only null, as an `Option` is written) and a one-member
+  `allOf` with no `$ref` beside it. The member is rebuilt like any other
+  free-form schema, so its rules and references survive, and the null-only
+  member is copied as written, so null is still accepted. A wrapper whose
+  member holds no rule is left out. A wrapper inside a wrapper's member is
+  kept the same way.
+
+  ```yaml
+  details:                 # typed serde_json::Value in the rebuilt definition
+    anyOf:                 # kept: Owner's maxLength is checked, null accepted
+      - $ref: "#/components/schemas/Owner"
+      - {type: "null"}
+  ```
+
+  The same holds for a property whose own schema is such a wrapper, since
+  import types an inline composition as `serde_json::Value`.
+- **Other compositions.** Any other `allOf`, `anyOf`, `oneOf`, or `not`
+  beneath a free-form value (an `anyOf` without exactly one null-only
+  member, any `oneOf`, an `allOf` of two or more members, a `not`) is left
+  out of the rebuilt definition with everything beneath it, including a
+  `$ref` inside a member. Its rules are not carried into the rebuilt
+  definition, so a client generated from it does not check them, and
+  generation does not report them.
+
+  A client generated straight from the OpenAPI document keeps them: there,
+  a rule beneath such a composition is a generation error. For example, OpenAI's fine-tuning `learning_rate_multiplier` (a `oneOf` of
+  `"auto"` and a number above 0, inside an inline object) is reported when a
+  client is generated straight from the OpenAPI document, but the client
+  generated from the rebuilt definition neither checks nor reports it.
+
+Two plain-alias shapes hold rules the rebuilt Rust form has nowhere to put.
+A plain alias is emitted as `pub type` and registers no component, so
+`--definitions-out` fails the import for them, before writing either file,
+with an error naming the alias, the endpoint or reference, and the rule's
+location:
+
+- **A plain alias that refers back to itself through a free-form value**,
+  such as an array alias whose item objects hold the alias again in a
+  `children` property. The inner occurrence has no component to point back
+  to, so it would lose the alias' rules. A recursive alias without rules
+  imports normally.
+- **A JSON request body typed as a plain alias** whose rules reach past the
+  body's own keywords and its items' own rules: a rule on a property
+  beneath the items (`pub type Forest = Vec<serde_json::Value>;` with a
+  `maxLength` on each item's `label`), beneath `additionalProperties`, or a
+  reference to a model with rules. The body's rules become the endpoint's
+  `Constraints`, which cannot hold them. A body alias over constrained
+  scalars, such as an array of strings with `maxLength`, imports normally.
+
+```text
+endpoint `PlantForest` has a JSON body typed as the plain alias `Forest`,
+whose rule at `#/components/schemas/Forest/items/properties/label/maxLength`
+cannot be rebuilt: ...
+```
+
+To import such a document, give the alias' item or object schema a
+component name: move it under `components.schemas` and point `items` (or
+the property) at it with a `$ref`. The named schema is emitted as a model,
+which keeps its rules and gives the recursion a component to refer to:
+
+```yaml
+Forest:
+  type: array
+  maxItems: 3
+  items: {$ref: "#/components/schemas/Tree"}
+Tree:
+  type: object
+  properties:
+    label: {type: string, maxLength: 11}
+```
+
+```mermaid
+flowchart LR
+    S["OpenAPI document<br/>maximum: 100"] -->|"import --definitions-out"| M["mod.rs: Constraints builder calls<br/>types.rs: schemars extend attributes"]
+    M -->|"module_group(): typed registration"| D["RestApi: Constraints and<br/>component schemas"]
+    D -->|generate| C["client checks maximum 100<br/>before sending"]
+    D -->|export| O["OpenAPI document<br/>maximum: 100"]
+```
 
 ### Overlays: authored additions the import keeps
 

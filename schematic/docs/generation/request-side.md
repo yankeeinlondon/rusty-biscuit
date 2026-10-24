@@ -431,6 +431,9 @@ flowchart TD
     V["request.validate()"] --> C
     B["call.build()?"] --> P
     A["awaited call, .full(), client.send(request), send_raw"] --> P
+    G["pager: .pages(), .fetch_page(), collect_all"] --> P
+    G --> Z["each page size the pager chooses,<br/>checked against the strategy's min/max"]
+    Z -->|out of bounds| E
     P["EndpointSpec::into_parts()<br/>(generated)"] --> C
     C["the request's checks<br/>1. parameters, as typed values<br/>2. text body and text form fields<br/>3. JSON body and JSON form fields,<br/>each serialized once"]
     C -->|violations| E["InvalidArgument naming every violation<br/>(validate() returns Violations)"]
@@ -439,7 +442,8 @@ flowchart TD
 
 Every send runs the checks again, because a send prepares the request
 afresh: changing a field after `validate()` returned `Ok` is still caught.
-`validate()` is an early report, not a permit.
+`validate()` is an early report, not a permit. A pager prepares its request
+once, through the same checks, and then checks each page size it sends.
 
 | Send | A violating request returns |
 | --- | --- |
@@ -482,7 +486,8 @@ individual violations use `validate()`, which returns them as
 | `format` | an annotation only; labeled in rustdoc and reported as a `type-constraint` warning |
 | a pattern outside the [enforced subset](../value-constraints.md#patterns) | labeled in rustdoc and reported as a `type-constraint` warning |
 | a rule inside a member of a union component (an `anyOf`/`oneOf` that is a component's whole schema, as a Rust enum of structs is) | the serialized body does not say which member it is, so the rule is labeled and reported as a `type-constraint` warning |
-| a rule beneath any other `oneOf`, `anyOf`, `allOf`, or `not`, or beside a `$ref` that names no component | a `type-constraint` **error**: the Rust client is not generated |
+| a rule beneath any other `oneOf`, `anyOf`, `allOf` (other than a one-member `allOf`), or `not`, or beside a `$ref` that names no component | a `type-constraint` **error**: the Rust client is not generated |
+| a rule beneath a keyword the checks do not enter: a positional `items` list or `prefixItems` (a tuple's members), `additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema form of `dependencies`, or `if`/`then`/`else` | a `type-constraint` **error**, for example ``body (component `Pair` at `#/prefixItems/0`) `maxLength` is not enforced: beneath the `prefixItems` at `#` of component `Pair`, which the client does not traverse; ...``; only an `items` object is checked as an array's item schema |
 | a Rust enum's own variant values (a unit enum's `enum`, a tagged enum's tag `const`) and the bounds Schemars writes for an integer width (`minimum: 0` on a `u32`) | the Rust type already guarantees them; neither checked nor reported |
 
 Responses are never checked: a reply that decodes is returned even when it

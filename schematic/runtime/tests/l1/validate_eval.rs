@@ -51,18 +51,44 @@ fn an_empty_string_or_array_is_checked_and_an_absent_property_is_not() {
 }
 
 #[test]
-fn null_passes_a_nullable_plan_and_is_data_for_an_enum_otherwise() {
-    const NULLABLE: Plan = Plan::new().min_length(2).allowed_values(&[Literal::String("ab")]).nullable();
+fn null_is_data_for_an_enum_or_const_with_or_without_a_nullable_type() {
+    // `{"type": ["string", "null"], "enum": ["ab"]}`: the type admits null,
+    // the enum does not.
+    const NULLABLE_ENUM: Plan = Plan::new().min_length(2).allowed_values(&[Literal::String("ab")]).nullable();
+    const NULLABLE_CONST: Plan = Plan::new().constant(&Literal::String("ab")).nullable();
+    const NULLABLE_ENUM_WITH_NULL: Plan = Plan::new().allowed_values(&[Literal::String("ab"), Literal::Null]).nullable();
+    const NULLABLE_LENGTH_ONLY: Plan = Plan::new().min_length(2).nullable();
     const WITH_NULL: Plan = Plan::new().allowed_values(&[Literal::String("ab"), Literal::Null]);
     const WITHOUT_NULL: Plan = Plan::new().allowed_values(&[Literal::String("ab")]);
     const LENGTH_ONLY: Plan = Plan::new().min_length(2);
 
-    assert_eq!(keywords(json!(null), &NULLABLE), NONE);
-    assert_eq!(keywords(json!("a"), &NULLABLE), [Keyword::MinLength, Keyword::Enum], "a non-null value is checked");
+    assert_eq!(keywords(json!(null), &NULLABLE_ENUM), [Keyword::Enum], "nullability does not add null to the enum");
+    assert_eq!(keywords(json!(null), &NULLABLE_CONST), [Keyword::Const]);
+    assert_eq!(keywords(json!("a"), &NULLABLE_ENUM), [Keyword::MinLength, Keyword::Enum], "a non-null value is checked");
+    assert_eq!(keywords(json!("ab"), &NULLABLE_CONST), NONE);
+    assert_eq!(keywords(json!(null), &NULLABLE_ENUM_WITH_NULL), NONE);
+    assert_eq!(keywords(json!(null), &NULLABLE_LENGTH_ONLY), NONE);
     assert_eq!(keywords(json!(null), &WITH_NULL), NONE);
     assert_eq!(keywords(json!(null), &WITHOUT_NULL), [Keyword::Enum]);
     assert_eq!(keywords(json!(null), &LENGTH_ONLY), NONE, "null is not a string");
     assert_eq!(keywords(json!(null), &Plan::new().constant(&Literal::Null)), NONE);
+}
+
+#[test]
+fn a_null_alternative_admits_null_past_its_constrained_member() {
+    // `{"anyOf": [{"type": "string", "minLength": 2, "enum": ["ab"]}, {"type": "null"}]}`,
+    // lowered as the generator lowers a Schemars `Option`.
+    static MEMBER: Plan = Plan::new().min_length(2).allowed_values(&[Literal::String("ab")]);
+    static OPTION: Plan = Plan::reference(&MEMBER).nullable();
+    static CONST_MEMBER: Plan = Plan::new().constant(&Literal::String("ab"));
+    static CONST_OPTION: Plan = Plan::reference(&CONST_MEMBER).nullable();
+
+    assert_eq!(keywords(json!(null), &OPTION), NONE);
+    assert_eq!(keywords(json!(null), &CONST_OPTION), NONE);
+    assert_eq!(keywords(json!("a"), &OPTION), [Keyword::MinLength, Keyword::Enum]);
+    assert_eq!(keywords(json!("x"), &CONST_OPTION), [Keyword::Const]);
+    // Without the alternative, the same member refuses null.
+    assert_eq!(keywords(json!(null), &Plan::reference(&MEMBER)), [Keyword::Enum]);
 }
 
 #[test]

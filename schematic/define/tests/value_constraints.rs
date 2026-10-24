@@ -2,7 +2,7 @@
 //! paths: every field shape once per field validator, the bundle loader's
 //! document shapes, and the documented pattern-admission table.
 
-use schematic_define::constraints::{Constraints, PatternAdmission, admit_pattern, constraint_problems};
+use schematic_define::constraints::{Constraints, ConstraintSite, PatternAdmission, admit_pattern, constraint_problems, schema_rule_problems};
 use schematic_define::{
     ApiRequest, BundleError, DefinitionBundle, DefinitionContext, DefinitionError, Endpoint, FormField, ParamDef,
     PrimitiveType, QueryParamType, RestApi, TypeRef, definition_type,
@@ -39,7 +39,7 @@ fn post(edit: impl FnOnce(schematic_define::EndpointBuilder, &mut DefinitionCont
 fn located(result: Result<RestApi, DefinitionError>) -> (String, &'static str, String) {
     match result {
         Err(DefinitionError::InvalidConstraint { problem, .. }) => {
-            assert!(problem.endpoint == "List" || problem.endpoint == "Create", "{}", problem.endpoint);
+            assert!(matches!(problem.endpoint(), Some("List" | "Create")), "{:?}", problem.site);
             (problem.path, problem.keyword, problem.reason)
         }
         other => panic!("expected an invalid constraint, got {other:?}"),
@@ -268,6 +268,7 @@ fn serialized_field_shapes_per_validator() {
         ("pattern wrong type", with_tags_rules(json!({"items": {"pattern": 5}})), Err("invalid type")),
         ("pattern unsupported", with_tags_rules(json!({"items": {"pattern": "a.c"}})), Err("enforced pattern subset")),
         ("pattern unenforced", with_tags_rules(json!({"items": {"pattern": "a.c", "pattern_unenforced": true}})), Ok(())),
+        ("unenforced but invalid", with_tags_rules(json!({"items": {"pattern": "[a", "pattern_unenforced": true}})), Err("not a valid regular expression")),
         ("unenforced without pattern", with_tags_rules(json!({"items": {"pattern_unenforced": true}})), Err("no pattern")),
         ("format unknown name", with_tags_rules(json!({"items": {"format": "x-anything"}})), Ok(())),
         ("format empty", with_tags_rules(json!({"items": {"format": ""}})), Err("names no format")),
@@ -320,6 +321,197 @@ fn null_in_enum_and_const_is_preserved_as_data_through_a_bundle() {
 fn a_loaded_rule_located_error_names_the_api_endpoint_path_and_keyword() {
     let error = load(&with_limit_rules(json!({"min_length": 1}))).unwrap_err();
     assert_eq!(error.to_string(), "Items endpoint List: query.limit `minLength` does not apply to an integer");
+}
+
+// ---- Stored schema components ----
+
+/// A component's expected first problem: `(pointer, keyword, reason fragment)`.
+type Located = Option<(&'static str, &'static str, &'static str)>;
+
+/// Every component field-shape cell through the one shared validator, as
+/// `(schema, expected first problem)`.
+#[test]
+fn component_field_shapes_per_validator() {
+    let cells: Vec<(Value, Located)> = vec![
+        // Absence, controls, and the documented exceptions.
+        (json!({}), None),
+        (json!({"type": "string", "minLength": 0, "maxLength": 3}), None),
+        (json!({"pattern": ""}), None),
+        (json!({"pattern": "^\\s+$"}), None),
+        (json!({"uniqueItems": false}), None),
+        (json!({"enum": ["a", 1, null, {"k": [1]}, [true]]}), None),
+        (json!({"const": null}), None),
+        (json!({"const": [1, "x", null]}), None),
+        (json!({"type": "array", "items": {}}), None),
+        (json!({"items": true}), None),
+        (json!({"items": [{"maxLength": 3}]}), None),
+        (json!({"minimum": 0, "exclusiveMinimum": true, "maximum": 5, "exclusiveMaximum": false}), None),
+        (json!({"maximum": 1.8446744073709552e19, "x-schematic-exact": {"maximum": "18446744073709551616"}}), None),
+        (json!({"default": {"maxLength": "x"}, "example": {"minLength": -1}, "x-vendor": {"enum": []}}), None),
+        // Counts and lengths.
+        (json!({"maxLength": null}), Some(("", "maxLength", "not null"))),
+        (json!({"maxLength": "3"}), Some(("", "maxLength", "not a string"))),
+        (json!({"minItems": -1}), Some(("", "minItems", "nonnegative integer"))),
+        (json!({"maxItems": 2.5}), Some(("", "maxItems", "nonnegative integer"))),
+        (json!({"minLength": 4, "maxLength": 3}), Some(("", "minLength", "4 is above the maximum 3"))),
+        (json!({"minItems": 2, "maxItems": 1}), Some(("", "minItems", "2 is above the maximum 1"))),
+        // Numeric bounds and the divisor.
+        (json!({"maximum": null}), Some(("", "maximum", "not null"))),
+        (json!({"maximum": "3"}), Some(("", "maximum", "not a string"))),
+        (json!({"exclusiveMinimum": "0"}), Some(("", "exclusiveMinimum", "not a string"))),
+        (json!({"multipleOf": 0}), Some(("", "multipleOf", "greater than zero"))),
+        (json!({"minimum": 5, "maximum": 1}), Some(("", "minimum", "no number"))),
+        (json!({"exclusiveMinimum": 1, "exclusiveMaximum": 1}), Some(("", "exclusiveMinimum", "no number"))),
+        (json!({"maximum": 1, "x-schematic-exact": {"maximum": 7}}), Some(("", "maximum", "exact decimal text"))),
+        (json!({"maximum": 1, "x-schematic-exact": {"maximum": "ten"}}), Some(("", "maximum", "not JSON number text"))),
+        (json!({"maximum": 1, "x-schematic-exact": "1"}), Some(("", "x-schematic-exact", "an object"))),
+        // Pattern and format.
+        (json!({"pattern": null}), Some(("", "pattern", "not null"))),
+        (json!({"pattern": 7}), Some(("", "pattern", "not the number 7"))),
+        (json!({"pattern": "["}), Some(("", "pattern", "not a valid regular expression"))),
+        (json!({"pattern": "(a"}), Some(("", "pattern", "not a valid regular expression"))),
+        (json!({"format": 7}), Some(("", "format", "a string"))),
+        (json!({"format": ""}), Some(("", "format", "names no format"))),
+        // uniqueItems.
+        (json!({"uniqueItems": null}), Some(("", "uniqueItems", "a Boolean"))),
+        (json!({"uniqueItems": "yes"}), Some(("", "uniqueItems", "a Boolean"))),
+        // enum: whole JSON members, never filtered; the list itself is checked.
+        (json!({"enum": null}), Some(("", "enum", "an array"))),
+        (json!({"enum": "x"}), Some(("", "enum", "an array"))),
+        (json!({"enum": []}), Some(("", "enum", "at least one value"))),
+        // The item schema.
+        (json!({"items": 7}), Some(("", "items", "a schema"))),
+        (json!({"items": null}), Some(("", "items", "a schema"))),
+        // A rule must apply to a declared `type`: one type, or any of a
+        // type array's; `null` beside a type adds nothing, and no `type`
+        // declares nothing to check.
+        (json!({"type": "integer", "maxLength": 3}), Some(("", "maxLength", "does not apply to the declared type, an integer"))),
+        (json!({"type": "string", "minimum": 1}), Some(("", "minimum", "does not apply to the declared type, a string"))),
+        (json!({"type": "string", "minItems": 1}), Some(("", "minItems", "a string"))),
+        (json!({"type": "boolean", "format": "date"}), Some(("", "format", "a boolean"))),
+        (json!({"type": "array", "pattern": "^a$"}), Some(("", "pattern", "an array"))),
+        (json!({"type": ["integer", "null"], "maxLength": 3}), Some(("", "maxLength", "an integer or null"))),
+        (json!({"type": "object", "nullable": true, "maxItems": 3}), Some(("", "maxItems", "an object"))),
+        (json!({"type": "null", "minLength": 1}), Some(("", "minLength", "null"))),
+        (json!({"properties": {"n": {"type": "number", "uniqueItems": true}}}), Some(("/properties/n", "uniqueItems", "a number"))),
+        (json!({"type": ["integer", "string"], "maxLength": 3, "maximum": 9}), None),
+        (json!({"type": ["string", "null"], "maxLength": 3}), None),
+        (json!({"type": "integer", "format": "int32", "minimum": 0, "enum": [1, "x"]}), None),
+        (json!({"type": "boolean", "enum": [true], "const": true}), None),
+        (json!({"maxLength": 3, "minimum": 1, "minItems": 1}), None),
+        (json!({"type": "array", "items": {"type": "string", "maxLength": 3}, "maxItems": 2}), None),
+        // Every subschema is read; a property's name is never a keyword.
+        (json!({"properties": {"enum": {"items": {"maxLength": "3"}}}}), Some(("/properties/enum/items", "maxLength", "not a string"))),
+        (json!({"anyOf": [{"type": "null"}, {"minLength": 2, "maxLength": 1}]}), Some(("/anyOf/1", "minLength", "above"))),
+        (json!({"additionalProperties": {"multipleOf": -1}}), Some(("/additionalProperties", "multipleOf", "greater than zero"))),
+        (json!({"$defs": {"a/b": {"enum": []}}}), Some(("/$defs/a~1b", "enum", "at least one"))),
+    ];
+    for (schema, expected) in cells {
+        let problems = schema_rule_problems(&schema);
+        match (problems.first(), expected) {
+            (None, None) => {}
+            (Some(problem), Some((pointer, keyword, reason))) => {
+                assert_eq!((problem.pointer.as_str(), problem.keyword), (pointer, keyword), "{schema}");
+                assert!(problem.reason.contains(reason), "{schema}: {}", problem.reason);
+            }
+            (found, expected) => panic!("{schema}: expected {expected:?}, found {found:?}"),
+        }
+    }
+}
+
+definition_type!(#[derive(serde::Serialize, schemars::JsonSchema)] pub struct Label {
+    #[schemars(length(max = 40))]
+    pub text: String,
+});
+definition_type!(#[derive(serde::Serialize, schemars::JsonSchema)] pub struct Labeled {
+    pub label: Label,
+    #[schemars(length(max = 5))]
+    pub tags: Vec<String>,
+});
+definition_type!(#[derive(serde::Serialize, schemars::JsonSchema)] pub struct Impossible {
+    #[schemars(length(min = 4, max = 3))]
+    pub code: String,
+});
+
+// Schemars drops a native `length` on an integer; `extend` writes it.
+definition_type!(#[derive(serde::Serialize, schemars::JsonSchema)] pub struct Mistyped {
+    #[schemars(extend("maxLength" = 3))]
+    pub count: u32,
+});
+
+/// A registered rule its field's type cannot carry fails the API build at
+/// the component, like an authored endpoint rule on the wrong type.
+#[test]
+fn a_model_rule_inapplicable_to_its_type_fails_api_build() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let create = Endpoint::post("Create", "/items").describes("Create").request_json::<Mistyped>(&mut ctx).returns_empty().build().unwrap();
+    let error = RestApi::builder(&ctx, "Items", "https://api.example.com").describes("Items").no_auth().endpoints([create]).build().unwrap_err();
+    assert_eq!(error.to_string(), "Items component Mistyped: #/properties/count `maxLength` does not apply to the declared type, an integer");
+}
+
+/// A JSON body of `Labeled` (whose `label` references `Label`) and a form
+/// field typed by `Label`.
+fn component_api() -> RestApi {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let create = Endpoint::post("Create", "/items").describes("Create").request_json::<Labeled>(&mut ctx).returns_empty().build().unwrap();
+    let label = ctx.register::<Label>().unwrap().into_type_ref();
+    let upload = Endpoint::post("Upload", "/uploads").describes("Upload")
+        .request_form(vec![FormField::json("label", label)]).returns_empty().build().unwrap();
+    RestApi::builder(&ctx, "Items", "https://api.example.com").describes("Items").no_auth().endpoints([create, upload]).build().unwrap()
+}
+
+#[test]
+fn a_contradictory_model_rule_fails_api_build_located_by_component_and_pointer() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let create = Endpoint::post("Create", "/items").describes("Create").request_json::<Impossible>(&mut ctx).returns_empty().build().unwrap();
+    let error = RestApi::builder(&ctx, "Items", "https://api.example.com").describes("Items").no_auth().endpoints([create]).build().unwrap_err();
+    assert_eq!(error.to_string(), "Items component Impossible: #/properties/code `minLength` 4 is above the maximum 3");
+    let DefinitionError::InvalidConstraint { problem, .. } = error else { panic!("invalid constraint") };
+    assert_eq!(problem.site, ConstraintSite::Component("Impossible".into()));
+    assert_eq!(problem.endpoint(), None);
+}
+
+/// `component_api`'s bundle with one keyword of a stored component set to
+/// `value`: `component` names it, `pointer` its schema object.
+fn with_component_keyword(component: &str, pointer: &str, keyword: &str, value: Value) -> String {
+    let mut document: Value = serde_json::from_str(&DefinitionBundle::new(component_api()).unwrap().to_json()).unwrap();
+    let schemas = document["api"]["schemas"].as_array_mut().unwrap();
+    let stored = schemas.iter_mut().find(|stored| stored["name"] == component).unwrap();
+    stored["schema"].pointer_mut(pointer).unwrap().as_object_mut().unwrap().insert(keyword.into(), value);
+    document.to_string()
+}
+
+/// One wiring case per keyword family through bundle reload, in a
+/// component referenced from another and one used by a form field, plus
+/// the same component edited after build reaching `constraint_problems`.
+#[test]
+fn a_reloaded_bundle_refuses_a_malformed_component_rule_of_each_family() {
+    // Control.
+    let control = DefinitionBundle::new(component_api()).unwrap().to_json();
+    assert_eq!(load(&control).unwrap().to_json(), control);
+
+    let cases = [
+        ("Label", "/properties/text", "maxLength", json!("3"), "maxLength` must be a nonnegative integer"),
+        ("Label", "/properties/text", "minimum", json!(null), "minimum` must be a number"),
+        ("Label", "/properties/text", "multipleOf", json!(0), "multipleOf` must be greater than zero"),
+        ("Label", "/properties/text", "pattern", json!("["), "pattern` is not a valid regular expression"),
+        ("Label", "/properties/text", "format", json!(1), "format` must be a string"),
+        ("Labeled", "/properties/tags", "uniqueItems", json!("yes"), "uniqueItems` must be a Boolean"),
+        ("Labeled", "/properties/tags", "enum", json!([]), "enum` must list at least one value"),
+        ("Labeled", "/properties/tags", "items", json!(7), "items` must be a schema"),
+    ];
+    for (component, pointer, keyword, value, message) in cases {
+        let error = load(&with_component_keyword(component, pointer, keyword, value.clone())).unwrap_err();
+        let expected = format!("Items component {component}: #{pointer} `{message}");
+        assert!(error.to_string().starts_with(&expected), "{keyword}: {error}");
+
+        let mut api = component_api();
+        let stored = api.schemas.iter_mut().find(|stored| stored.name == component).unwrap();
+        stored.schema.pointer_mut(pointer).unwrap().as_object_mut().unwrap().insert(keyword.into(), value);
+        let problems = constraint_problems(&api);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!((&problems[0].site, problems[0].keyword), (&ConstraintSite::Component(component.into()), keyword));
+    }
 }
 
 // ---- Pattern admission, against the documented table ----

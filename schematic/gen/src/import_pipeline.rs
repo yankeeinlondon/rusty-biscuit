@@ -163,6 +163,9 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
             let definitions_dir = Path::new(definitions_out);
             let module_name = schematic_definitions::naming::resolve_module_name(&api);
 
+            // A rule neither file can carry fails the import before
+            // either is written.
+            definition_gen::check_alias_bodies(&api, &models)?;
             if has_types {
                 // The components are the imported source schemas, from
                 // which the models rebuild each field's value rules.

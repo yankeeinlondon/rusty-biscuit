@@ -267,8 +267,12 @@ otherwise: `length` on an `i32`, `range` on a `String`, `length` on an
 `Option<Model>` (a reference has no type), and `inner(..)` on a `HashMap` or
 an `Option<String>` all produce no keyword. Check the stored component when a
 rule matters, and use `extend(..)` or a newtype whose own field carries the
-rule. `extend` is never checked, so it also accepts values that are not valid
-JSON Schema, and it overrides a native rule for the same keyword.
+rule. `extend` overrides a native rule for the same keyword. Schemars does not
+check what `extend` writes, but API build does: a rule keyword of the wrong
+JSON type (`extend("maxLength" = "3")`), a contradiction such as
+`length(min = 4, max = 3)`, or an invalid pattern in any component fails with
+`DefinitionError::InvalidConstraint` naming the component and JSON pointer
+(see [definition errors](value-constraints.md#definition-errors)).
 
 Endpoints reference the component by name and store no copy of its rules. A
 model shared by several endpoints is stored once, and no endpoint can change
@@ -277,11 +281,21 @@ component fails the build. To constrain one endpoint differently, register a
 different model.
 
 A rule is enforceable only where the value's schema is a plain chain of
-properties, array items, map values, and `Option`s. An `anyOf` counts as an
-`Option` only when it has exactly two members and one admits only `null`; an
-untagged enum is an `anyOf` of its variants and does not. A rule beneath
-`oneOf`, any other `anyOf`, `allOf`, or `not`, or beside a `$ref` that names
-no component, is still stored and exported, but cannot be enforced.
+properties, array items (an `items` object), map values, and `Option`s. An
+`anyOf` counts as an `Option` only when it has exactly two members and one
+admits only `null`; an untagged enum is an `anyOf` of its variants and does
+not. A one-member `allOf` counts as its member: Schemars' OpenAPI 3.0 form
+writes a field such as `#[schemars(extend("const" = {..}))] pub owner: Owner`
+as `{"allOf": [{"$ref": ".../Owner"}], "enum": [{..}]}`, and both the rule
+beside it and `Owner`'s own rules are checked. A rule beneath `oneOf`, any
+other `anyOf`, an `allOf` of several members, or `not`, beneath a
+keyword the checks do not enter, or beside a `$ref` that names no
+component, is still stored and exported, but cannot be enforced. The
+untraversed keywords are a positional `items` list, `prefixItems` (how
+Schemars writes a tuple such as `struct Pair(String, u32)`),
+`additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`,
+`propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema form
+of `dependencies`, and `if`/`then`/`else`.
 `schematic_define::constraints::unenforceable_rules(&api, &body)` lists each
 such rule with its component, JSON pointer, keyword, and reason:
 

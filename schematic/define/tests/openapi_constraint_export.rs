@@ -310,3 +310,43 @@ fn exported_parameter_rules_survive_a_reimport() {
         assert!(imported.schemas.iter().any(|schema| schema.name == name), "{format:?}: {name} does not resolve");
     }
 }
+
+#[test]
+fn a_folded_null_alternative_keeps_admitting_null_and_a_rejecting_sibling_keeps_rejecting_it() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let endpoint = Endpoint::get("Count", "/count").describes("Count").returns_json::<Counter>(&mut ctx).build().unwrap();
+    let mut api = api(&ctx, [endpoint]);
+    api.schemas.push(SchemaComponent {
+        name: "Grade".into(),
+        rust_path: Some("::models::Grade".into()),
+        schema: json!({"maxLength": 5, "anyOf": [{"type": "string", "maxLength": 3, "enum": ["a"]}, {"type": "null"}]}),
+    });
+    api.schemas.push(SchemaComponent {
+        name: "Label".into(),
+        rust_path: Some("::models::Label".into()),
+        schema: json!({"type": "string", "anyOf": [{"maxLength": 3}, {"type": "null"}]}),
+    });
+
+    let doc = exported(&api);
+    let only_null = json!({"type": "object", "nullable": true, "enum": [null]});
+    let schemas = &doc["components"]["schemas"];
+    // The member overlaps the body's `maxLength`, so it stays an `allOf`
+    // member; it still admits null, as the source's null alternative did.
+    assert_eq!(
+        schemas["Grade"],
+        json!({"anyOf": [
+            {"maxLength": 5, "allOf": [{"anyOf": [{"type": "string", "maxLength": 3, "enum": ["a"]}, only_null]}]},
+            only_null,
+        ]})
+    );
+    // `type: string` rejects null whatever the alternative admits.
+    assert_eq!(schemas["Label"], json!({"type": "string", "maxLength": 3}));
+
+    let imported = OpenApiImport::new(OpenApiSource::json(text(&api, ExportFormat::Json))).api_name("Rules").build().expect("export re-imports").api;
+    let stored = |name: &str| imported.schemas.iter().find(|schema| schema.name == name).unwrap_or_else(|| panic!("{name} lost")).schema.clone();
+    // The re-import stores both exported forms unchanged, so the null each
+    // admits or rejects survives.
+    for name in ["Grade", "Label"] {
+        assert_eq!(stored(name), schemas[name], "{name}");
+    }
+}

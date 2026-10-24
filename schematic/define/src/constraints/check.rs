@@ -7,13 +7,14 @@ use serde_json::Value;
 use super::{Constraints, PatternAdmission, admit_pattern};
 use crate::{ApiRequest, Endpoint, FormFieldKind, QueryParamType, RestApi, TypeRef};
 
-/// One constraint a definition cannot carry, located by endpoint and input.
+/// One constraint a definition cannot carry, located by endpoint and input,
+/// or by schema component and JSON pointer.
 ///
 /// ## Examples
 ///
 /// ```
 /// use schematic_define::{DefinitionContext, Endpoint, ParamDef, QueryParamType, RestApi};
-/// use schematic_define::constraints::{Constraints, constraint_problems};
+/// use schematic_define::constraints::{Constraints, ConstraintSite, constraint_problems};
 ///
 /// let ctx = DefinitionContext::types_in("::models");
 /// let endpoint = Endpoint::get("List", "/items").describes("List").returns_empty()
@@ -27,15 +28,18 @@ use crate::{ApiRequest, Endpoint, FormFieldKind, QueryParamType, RestApi, TypeRe
 /// let query = &mut api.endpoints[0].params.as_mut().unwrap().query[0];
 /// query.constraints = Some(Box::new(Constraints::new().min_length(1)));
 /// let problem = &constraint_problems(&api)[0];
+/// assert_eq!(problem.site, ConstraintSite::Endpoint("List".into()));
 /// assert_eq!((problem.path.as_str(), problem.keyword), ("query.limit", "minLength"));
 /// # Ok::<(), schematic_define::DefinitionError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstraintProblem {
-    /// The endpoint id.
-    pub endpoint: String,
-    /// The constrained input: `query.limit`, `path.id`, `header.x-mode`,
-    /// `cookie.session`, `form.title`, or `body`; `[]` names array items.
+    /// The endpoint or schema component holding the rule.
+    pub site: ConstraintSite,
+    /// For an endpoint, the constrained input: `query.limit`, `path.id`,
+    /// `header.x-mode`, `cookie.session`, `form.title`, or `body`; `[]`
+    /// names array items. For a component, the JSON pointer of the schema
+    /// object holding the keyword: `#` for the root, `#/properties/code`.
     pub path: String,
     /// The JSON Schema keyword at fault (`maxLength`, `enum`, ...).
     pub keyword: &'static str,
@@ -43,23 +47,64 @@ pub struct ConstraintProblem {
     pub reason: String,
 }
 
-impl fmt::Display for ConstraintProblem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "endpoint {}: {} `{}`: {}", self.endpoint, self.path, self.keyword, self.reason)
+/// Where a [`ConstraintProblem`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstraintSite {
+    /// The endpoint with this id; its constraint metadata holds the rule.
+    Endpoint(String),
+    /// The stored schema component with this name.
+    Component(String),
+}
+
+impl ConstraintProblem {
+    /// The endpoint id, for a problem in endpoint metadata.
+    pub fn endpoint(&self) -> Option<&str> {
+        match &self.site {
+            ConstraintSite::Endpoint(id) => Some(id),
+            ConstraintSite::Component(_) => None,
+        }
     }
 }
 
-/// Every constraint problem of `api`'s endpoints, in endpoint order, then
-/// path, query, header, and cookie parameters, form fields, and the body.
+impl fmt::Display for ConstraintProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.site {
+            ConstraintSite::Endpoint(id) => write!(f, "endpoint {id}: ")?,
+            ConstraintSite::Component(name) => write!(f, "component {name}: ")?,
+        }
+        write!(f, "{} `{}` {}", self.path, self.keyword, self.reason)
+    }
+}
+
+/// Every constraint problem of `api`: its endpoints' metadata, in endpoint
+/// order, then path, query, header, and cookie parameters, form fields, and
+/// the body; then each stored schema component's rules
+/// ([`super::schema_rule_problems`]), in component order.
 pub fn constraint_problems(api: &RestApi) -> Vec<ConstraintProblem> {
-    api.endpoints.iter().flat_map(endpoint_problems).collect()
+    let mut problems: Vec<_> = api.endpoints.iter().flat_map(endpoint_problems).collect();
+    problems.extend(component_problems(api));
+    problems
+}
+
+/// The malformed or contradictory rules of `api`'s stored schema
+/// components, in component order.
+pub(crate) fn component_problems(api: &RestApi) -> Vec<ConstraintProblem> {
+    api.schemas.iter().flat_map(|component| {
+        super::schema_rule_problems(&component.schema).into_iter().map(|problem| ConstraintProblem {
+            site: ConstraintSite::Component(component.name.clone()),
+            path: format!("#{}", problem.pointer),
+            keyword: problem.keyword,
+            reason: problem.reason,
+        })
+    }).collect()
 }
 
 pub(crate) fn endpoint_problems(endpoint: &Endpoint) -> Vec<ConstraintProblem> {
     let mut found = Vec::new();
     let mut checked = |path: String, rules: &Constraints, target: &Target| {
         for (path, keyword, reason) in check(rules, target, &path) {
-            found.push(ConstraintProblem { endpoint: endpoint.id.clone(), path, keyword, reason });
+            found.push(ConstraintProblem { site: ConstraintSite::Endpoint(endpoint.id.clone()), path, keyword, reason });
         }
     };
     if let Some(params) = &endpoint.params {
@@ -245,13 +290,15 @@ pub(crate) fn check(rules: &Constraints, target: &Target, path: &str) -> Vec<(St
         if let (Some(low), Some(high)) = (low, high)
             && low > high { fail(keyword, format!("{low} is above the maximum {high}")); }
     }
+    // An unenforced pattern may lie outside the enforced subset, but it
+    // must still be a regular expression.
     if let Some(source) = &rules.pattern {
-        if !rules.pattern_unenforced {
-            match admit_pattern(source) {
-                PatternAdmission::Enforced { .. } => {}
-                PatternAdmission::Unsupported { reason } => fail("pattern", format!("is outside the enforced pattern subset: {reason}")),
-                PatternAdmission::Invalid { reason } => fail("pattern", format!("is not a valid regular expression: {reason}")),
+        match admit_pattern(source) {
+            PatternAdmission::Unsupported { reason } if !rules.pattern_unenforced => {
+                fail("pattern", format!("is outside the enforced pattern subset: {reason}"));
             }
+            PatternAdmission::Invalid { reason } => fail("pattern", format!("is not a valid regular expression: {reason}")),
+            _ => {}
         }
     } else if rules.pattern_unenforced {
         fail("pattern", "is marked unenforced but no pattern is declared".to_owned());
@@ -308,6 +355,29 @@ pub(crate) fn check(rules: &Constraints, target: &Target, path: &str) -> Vec<(St
         found.extend(check(item_rules, &item, &format!("{path}[]")));
     }
     found
+}
+
+/// The keywords of `rules` that apply to none of a schema's declared
+/// `type` names, as `(keyword, reason)`. A name outside JSON Schema's seven
+/// accepts every rule; `null` accepts none, and beside another type adds
+/// nothing.
+pub(crate) fn inapplicable_to_types(rules: &Constraints, types: &[&str]) -> Vec<(&'static str, String)> {
+    let targets: Vec<Target> = types.iter().map(|name| Target::of(match *name {
+        "string" => Kind::String,
+        "integer" => Kind::Integer,
+        "number" => Kind::Number,
+        "boolean" => Kind::Boolean,
+        "array" => Kind::Array(Box::new(Target::of(Kind::Any))),
+        "object" => Kind::Object,
+        "null" => Kind::Null,
+        _ => Kind::Any,
+    })).collect();
+    let described = targets.iter().map(Target::describe).collect::<Vec<_>>().join(" or ");
+    present(rules)
+        .into_iter()
+        .filter(|(_, group)| !targets.iter().any(|target| target.accepts(*group)))
+        .map(|(keyword, _)| (keyword, format!("does not apply to the declared type, {described}")))
+        .collect()
 }
 
 impl Target {

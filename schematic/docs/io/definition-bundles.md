@@ -109,7 +109,9 @@ Each rule, with the error it produces:
   "base_url"`. Whitespace around the document is fine.
 - **No explicit null for an option.** Write the option or omit it:
   `"docs_url": null` fails with `bundle field /api/docs_url: explicit null`.
-  Three exceptions: values inside `api.schemas[].schema`; an OAuth2 field the
+  Three exceptions: values inside `api.schemas[].schema` (whose rule keywords
+  are then checked as API build checks them, so `"maxLength": null` there
+  still fails, located by component and JSON pointer); an OAuth2 field the
   grant does not use (`authorization_url`, `device_authorization_url`, `pkce`),
   which may be absent or null but never a value; and a value constraint's
   `allowed_values` and `constant`, where `null` is a value to compare against

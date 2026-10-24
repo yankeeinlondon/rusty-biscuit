@@ -647,7 +647,8 @@ const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 /// not check, by endpoint: rules inside the members of a union component (a
 /// Rust enum of request structs), whose member the serialized body does not
 /// identify. Each is a `type-constraint` warning of the Rust output.
-const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 1] = [("OpenAI", "CreateResponse", 42)];
+const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 3] =
+    [("OpenAI", "CreateConversation", 13), ("OpenAI", "CreateResponse", 50), ("OpenAI", "Getinputtokencounts", 50)];
 
 /// The fixed headers of the live definitions that OpenAPI operations cannot
 /// carry: an `Accept` value no success response declares as its media type.
@@ -1061,6 +1062,47 @@ fn a_contradictory_constraint_edited_after_build_blocks_every_output() {
     }
 }
 
+/// A malformed or contradictory rule in a stored component blocks every
+/// output, located by component and pointer: whether the component is the
+/// body, referenced from it, or typed by a JSON form field.
+#[test]
+fn a_malformed_component_rule_blocks_every_output() {
+    let inner = SchemaComponent {
+        name: "Inner".into(),
+        rust_path: Some("Inner".into()),
+        schema: serde_json::json!({"type": "object", "properties": {"code": {"type": "string", "maxLength": 3}}}),
+    };
+    let referencing = |mut api: RestApi| { api.schemas.push(inner.clone()); api };
+    let nested = serde_json::json!({"$ref": "#/components/schemas/Inner"});
+    let control = referencing(with_wrapper_body(fixture_api("Wrapped", "wrapped"), nested.clone()));
+    assert!(validate_rust_client(&[&control]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+
+    let mut form = fixture_api("Wrapped", "wrapped");
+    form.schemas.push(inner.clone());
+    form.endpoints[0].method = schematic_define::RestMethod::Post;
+    form.endpoints[0].request = Some(schematic_define::ApiRequest::FormData {
+        fields: vec![schematic_define::FormField::json("inner", schematic_define::TypeRef::Named("Inner".into()))],
+    });
+    let cases = [
+        ("body component", with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "maxLength": "3"})),
+            "component `Wrapper` #/properties/value `maxLength` must be a nonnegative integer, not a string"),
+        ("referenced component", referencing(with_wrapper_body(fixture_api("Wrapped", "wrapped"), nested)),
+            "component `Inner` #/properties/code `multipleOf` must be greater than zero"),
+        ("form field component", form, "component `Inner` #/properties/code `multipleOf` must be greater than zero"),
+    ];
+    for (label, mut api, message) in cases {
+        if let Some(inner) = api.schemas.iter_mut().find(|component| component.name == "Inner") {
+            inner.schema["properties"]["code"]["multipleOf"] = serde_json::json!(0);
+        }
+        for (output, diagnostics) in [(Output::Rust, validate_rust_client(&[&api])),
+            (Output::OpenApi, validate_openapi(&[&api])), (Output::Postman, validate_postman(&[&api]))] {
+            let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint && d.is_error()).collect();
+            assert_eq!(found.len(), 1, "{label} {output}: {diagnostics:?}");
+            assert_eq!((found[0].endpoint.as_deref(), found[0].output, found[0].message.as_str()), (None, output, message), "{label}");
+        }
+    }
+}
+
 /// `api` whose `ListThings` posts a `Wrapper` body; `value` is the schema of
 /// its one property.
 fn with_wrapper_body(mut api: RestApi, value: serde_json::Value) -> RestApi {
@@ -1104,4 +1146,53 @@ fn a_request_rule_beneath_a_composition_blocks_only_the_rust_client() {
     );
     assert!(matches!(&rust.result, Err(GeneratorError::Validation { output: Output::Rust, .. })));
     assert_eq!(snapshot_or_absent(roots.schema_dir()), rust_before, "no Rust output is written");
+}
+
+#[test]
+fn a_request_rule_in_positional_items_blocks_the_rust_client() {
+    // Control: an `items` object is the enforced item schema.
+    let item_object = serde_json::json!({"type": "array", "items": {"type": "string", "maxLength": 3}});
+    let enforced = with_wrapper_body(fixture_api("Wrapped", "wrapped"), item_object);
+    assert!(validate_rust_client(&[&enforced]).iter().all(|d| d.feature != Feature::TypeConstraint));
+
+    let positional = serde_json::json!({"type": "array", "prefixItems": [{"type": "string", "maxLength": 3}, {"type": "integer"}]});
+    let api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), positional);
+    let found: Vec<_> = validate_rust_client(&[&api]).into_iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+    assert_eq!(
+        found,
+        vec![ValidationDiagnostic::new(
+            Severity::Error,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/prefixItems/0`) `maxLength` is not enforced: \
+             beneath the `prefixItems` at `#/properties/value` of component `Wrapper`, which the client does not \
+             traverse; the client cannot check it, so remove the rule or restructure the schema",
+        )]
+    );
+}
+
+/// A pattern that is not a regular expression, or an endpoint pattern
+/// outside the enforced subset that is not marked unenforced, is one
+/// definition error; the value-rule planner adds no second diagnostic.
+#[test]
+fn an_invalid_or_unenforceable_pattern_is_reported_once() {
+    use schematic_define::constraints::Constraints;
+    let component = with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "pattern": "("}));
+    let mut endpoint_invalid = fixture_api("Rules", "rules");
+    let mut endpoint_unsupported = fixture_api("Rules", "rules");
+    for (api, pattern) in [(&mut endpoint_invalid, "("), (&mut endpoint_unsupported, r"^\p{Lu}")] {
+        let mut params = EndpointParams::new();
+        params.query.push(ParamDef::new("code", QueryParamType::String).constraints(Constraints::new().max_length(3)));
+        api.endpoints[0].params = Some(params);
+        assert!(validate_rust_client(&[&*api]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+        api.endpoints[0].params.as_mut().unwrap().query[0].constraints = Some(Box::new(Constraints::new().pattern(pattern)));
+    }
+    for (label, api) in [("component", component), ("endpoint invalid", endpoint_invalid), ("endpoint unsupported", endpoint_unsupported)] {
+        let diagnostics = validate_rust_client(&[&api]);
+        let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+        assert_eq!(found.len(), 1, "{label}: {found:?}");
+        assert!(found[0].is_error() && found[0].message.contains("`pattern`"), "{label}: {found:?}");
+    }
 }

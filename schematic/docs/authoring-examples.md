@@ -11,6 +11,7 @@ endpoints and their API against one context. This example runs as part of
 ```rust
 use schematic_define::prelude::*;
 use schematic_define::{definition_type, rust_path, ParamDef, QueryParamType};
+use schematic_define::constraints::Constraints;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,7 +36,8 @@ assert_eq!(json.wire_schema(), serde_json::json!({}));
 
 let endpoint = Endpoint::get("ListItems", "/items")
     .describes("List items, optionally filtered by tag")
-    .query(ParamDef::new("tag", QueryParamType::String))
+    .query(ParamDef::new("tag", QueryParamType::String)
+        .constraints(Constraints::new().min_length(1).max_length(40)))
     .returns_json::<Vec<Item>>(&mut context)
     .build()?;
 let api = RestApi::builder(&context, "Items", "https://example.com")
@@ -45,7 +47,9 @@ let api = RestApi::builder(&context, "Items", "https://example.com")
     .build()?;
 context.finish()?;
 assert_eq!(api.endpoints[0].path, "/items");
-assert_eq!(api.endpoints[0].params.as_ref().unwrap().query[0].name, "tag");
+let tag = &api.endpoints[0].params.as_ref().unwrap().query[0];
+assert_eq!(tag.name, "tag");
+assert_eq!(tag.constraints.as_ref().unwrap().max_length, Some(40));
 assert_eq!(context.registrations().len(), 1);
 // The API carries each component once; endpoint references name it.
 assert_eq!(api.schemas[0].name, "Item");
@@ -81,7 +85,9 @@ Invalid values, repeated success/auth declarations, conflicting environment
 names, collisions, and unresolved references return `DefinitionError`.
 A path containing `?` and every GET body fail validation. Use `.query(...)`,
 `.header_param(...)`, `.cookie(...)`, path placeholders, and request body methods
-to state input location. Two declarations with the same method and normalized
+to state input location. A parameter's `.constraints(..)` declares its
+[value rules](value-constraints.md); generated clients check them before
+sending. Two declarations with the same method and normalized
 path are duplicates regardless of their inputs.
 
 For pagination, keep the strategy helper in the provider, set

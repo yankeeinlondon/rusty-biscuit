@@ -87,7 +87,7 @@ pub fn admit_pattern(source: &str) -> PatternAdmission {
 /// Parse errors that ECMAScript also reports; any other error is a
 /// construct Rust lacks or reads differently.
 fn definitely_invalid(kind: &ErrorKind) -> bool {
-    matches!(kind, ErrorKind::GroupUnclosed | ErrorKind::GroupUnopened | ErrorKind::RepetitionMissing
+    matches!(kind, ErrorKind::ClassUnclosed | ErrorKind::GroupUnclosed | ErrorKind::GroupUnopened | ErrorKind::RepetitionMissing
         | ErrorKind::RepetitionCountInvalid | ErrorKind::EscapeUnexpectedEof | ErrorKind::ClassRangeInvalid
         | ErrorKind::GroupNameDuplicate { .. })
 }

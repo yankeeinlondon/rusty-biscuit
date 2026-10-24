@@ -180,9 +180,6 @@ struct Walker<'a> {
 
 impl Walker<'_> {
     fn value(&mut self, value: &Value, plan: &Plan, hops: u8) {
-        if plan.nullable && value.is_null() {
-            return;
-        }
         match value {
             Value::String(text) => self.string(text, plan),
             Value::Number(number) => self.number(Decimal::from_json(number).ok().as_ref(), plan),
@@ -229,8 +226,12 @@ impl Walker<'_> {
             _ => {}
         }
 
+        // A nullable plan's reference is the non-null alternative of an
+        // `anyOf` with null (or a nullable `$ref`), which null never has to
+        // satisfy; the plan's own `enum` and `const` above still apply.
         if let Some(target) = plan.reference
             && hops < MAX_REFERENCE_HOPS
+            && !(plan.nullable && value.is_null())
         {
             self.value(value, target, hops + 1);
         }

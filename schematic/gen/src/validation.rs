@@ -214,18 +214,24 @@ pub(crate) fn ensure_no_errors(
     Ok(())
 }
 
-/// Reports every value constraint the definition cannot carry, the same
-/// check API build and bundle load apply, so a definition edited after
-/// build is refused before any output is written.
+/// Reports every value constraint the definition cannot carry, in endpoint
+/// metadata or a stored schema component: the same check API build and
+/// bundle load apply, so a definition edited after build is refused before
+/// any output is written, and no plan is compiled from a malformed rule.
 fn check_constraints(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    use schematic_define::constraints::ConstraintSite;
     for problem in schematic_define::constraints::constraint_problems(api) {
+        let place = match &problem.site {
+            ConstraintSite::Component(name) => format!("component `{name}` {}", problem.path),
+            _ => problem.path.clone(),
+        };
         diagnostics.push(ValidationDiagnostic::new(
             Severity::Error,
             &api.name,
-            Some(&problem.endpoint),
+            problem.endpoint(),
             Feature::TypeConstraint,
             output,
-            format!("{} `{}` {}", problem.path, problem.keyword, problem.reason),
+            format!("{place} `{}` {}", problem.keyword, problem.reason),
         ));
     }
 }

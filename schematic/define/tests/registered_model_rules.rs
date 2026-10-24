@@ -35,6 +35,8 @@ pub mod models {
         Number(#[schemars(range(min = 1))] i64),
         Small(u8),
     });
+    definition_type!(#[derive(JsonSchema, Serialize, Deserialize)] pub struct Pair(#[schemars(length(max = 3))] pub String, pub u32););
+    definition_type!(#[derive(JsonSchema, Serialize, Deserialize)] pub struct Placement { pub pair: Pair });
     definition_type!(#[derive(JsonSchema, Serialize, Deserialize)] pub struct Order {
         pub choice: Choice,
         pub fallback: Option<Choice>,
@@ -142,13 +144,17 @@ fn rules_beneath_an_untagged_enum_are_located() {
 }
 
 #[test]
-fn rules_beneath_one_of_all_of_and_not_are_located() {
+fn rules_beneath_one_of_all_of_and_not_are_located_but_a_one_member_all_of_is_walked_through() {
     let mut api = api_with_one_signup();
     let signup = &mut api.schemas.iter_mut().find(|c| c.name == "Signup").unwrap().schema["properties"];
     let name = signup["name"].take();
     signup["name"] = json!({"oneOf": [name, {"type": "null"}]});
-    signup["address"] = json!({"allOf": [{"$ref": "#/components/schemas/Address"}]});
+    signup["address"] = json!({"allOf": [{"$ref": "#/components/schemas/Address"}, {"type": "object"}]});
     signup["seats"] = json!({"not": {"type": "integer", "maximum": 3}});
+    // Schemars' OpenAPI 3.0 form of a `$ref` with sibling keywords is a
+    // one-member `allOf`; it constrains only as its member does, so its
+    // member's rules are enforceable.
+    signup["billing"] = json!({"allOf": [{"type": "string", "maxLength": 5}], "enum": ["Main"]});
 
     let rules = unenforceable_rules(&api, &named("Signup"));
     assert_eq!(located(&rules), [
@@ -175,4 +181,64 @@ fn rules_beside_an_unresolved_reference_are_located() {
     let rules = unenforceable_rules(&api, &named("Signup"));
     assert_eq!(located(&rules), [(Some("Signup"), "/properties/name", "maxLength")]);
     assert_eq!(rules[0].reason, r##"beside the unresolved reference "#/components/schemas/Gone""##);
+}
+
+#[test]
+fn rules_in_positional_items_are_located() {
+    let mut api = api(|ctx| vec![post::<Placement>("Place", ctx)]);
+    // Schemars writes a tuple's members as `prefixItems`, whatever the
+    // OpenAPI 3.0 settings.
+    assert_eq!(schema(&api, "Pair")["prefixItems"][0], json!({"type": "string", "maxLength": 3}));
+
+    let rules = unenforceable_rules(&api, &named("Placement"));
+    assert_eq!(located(&rules), [(Some("Pair"), "/prefixItems/0", "maxLength")]);
+    assert_eq!(rules[0].reason, "beneath the `prefixItems` at `#` of component `Pair`, which the client does not traverse");
+    assert_eq!(rules[0].composition, None);
+
+    // The draft-07 spelling: an `items` list is positional too.
+    let pair = &mut api.schemas.iter_mut().find(|c| c.name == "Pair").unwrap().schema;
+    let members = pair["prefixItems"].take();
+    pair.as_object_mut().unwrap().remove("prefixItems");
+    pair["items"] = members;
+    let rules = unenforceable_rules(&api, &named("Placement"));
+    assert_eq!(located(&rules), [(Some("Pair"), "/items/0", "maxLength")]);
+    assert_eq!(rules[0].reason, "beneath the `items` at `#` of component `Pair`, which the client does not traverse");
+
+    // An `items` object stays the enforceable item schema.
+    pair_items(&mut api, json!({"type": "string", "maxLength": 3}));
+    assert_eq!(unenforceable_rules(&api, &named("Placement")), []);
+}
+
+fn pair_items(api: &mut RestApi, items: Value) {
+    api.schemas.iter_mut().find(|c| c.name == "Pair").unwrap().schema["items"] = items;
+}
+
+#[test]
+fn rules_beneath_untraversed_keywords_are_located() {
+    let mut api = api_with_one_signup();
+    let signup = &mut api.schemas.iter_mut().find(|c| c.name == "Signup").unwrap().schema["properties"];
+    let rule = json!({"type": "string", "maxLength": 3});
+    signup["name"] = json!({"type": "array", "prefixItems": [rule], "additionalItems": rule, "contains": rule});
+    signup["displayName"] = json!({"type": "object", "patternProperties": {"^x-": rule}, "propertyNames": rule});
+    signup["tags"] = json!({"if": rule, "then": rule, "else": rule, "dependentSchemas": {"a": rule}, "dependencies": {"b": rule, "c": ["d"]}});
+    signup["price"] = json!({"unevaluatedItems": rule, "unevaluatedProperties": rule});
+
+    let rules = unenforceable_rules(&api, &named("Signup"));
+    let pointers: Vec<&str> = rules.iter().filter(|rule| rule.component.as_deref() == Some("Signup")).map(|rule| rule.pointer.as_str()).collect();
+    assert_eq!(pointers, [
+        "/properties/displayName/patternProperties/^x-",
+        "/properties/displayName/propertyNames",
+        "/properties/name/prefixItems/0",
+        "/properties/name/additionalItems",
+        "/properties/name/contains",
+        "/properties/price/unevaluatedItems",
+        "/properties/price/unevaluatedProperties",
+        "/properties/tags/dependentSchemas/a",
+        "/properties/tags/dependencies/b",
+        "/properties/tags/if",
+        "/properties/tags/then",
+        "/properties/tags/else",
+    ]);
+    assert!(rules.iter().all(|rule| rule.keyword == "maxLength" && rule.composition.is_none()), "{rules:#?}");
+    assert_eq!(rules[0].reason, "beneath the `patternProperties` at `#/properties/displayName` of component `Signup`, which the client does not traverse");
 }

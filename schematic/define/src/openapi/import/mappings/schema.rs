@@ -61,7 +61,9 @@ pub fn map_all_schemas(
                 remap_type_refs_in_model(&mut model, &final_by_original);
                 types.push(model);
                 let pointer = format!("#/components/schemas/{}", name.replace('~', "~0").replace('/', "~1"));
-                let schema = resolver.source_schema(schema_ref, &pointer);
+                let mut schema = resolver.source_schema(schema_ref, &pointer);
+                super::remove_inapplicable_component_rules(&mut schema, &pointer, diagnostics);
+                super::reject_invalid_rules(&schema, &pointer, resolver);
                 model_components.push(source_component(&final_name, schema, &final_by_original, options));
             }
         }

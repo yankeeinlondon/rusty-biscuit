@@ -47,7 +47,7 @@ flowchart LR
     B["EndpointBuilder<br/>.request_constraints(..)"] --> D
     M["#[schemars(length(max = 40))]<br/>on a model field"] --> C[Schema component] --> D
     D --> V{API build or<br/>bundle load}
-    V -- contradiction --> E["DefinitionError::InvalidConstraint"]
+    V -- malformed or contradictory --> E["DefinitionError::InvalidConstraint"]
     V -- ok --> O[OpenAPI, Postman, generated client]
 ```
 
@@ -98,14 +98,26 @@ Schematic does not recognize.
 
 ## Definition errors
 
-API build checks every rule, and so does loading a
-[definition bundle](io/definition-bundles.md). A problem fails with
-`DefinitionError::InvalidConstraint`, naming the API, endpoint, input path,
-keyword, and reason:
+API build checks every rule, and so do loading a
+[definition bundle](io/definition-bundles.md) and every generator output
+(`type-constraint`). The check is the same whichever way a rule arrived:
+written with `Constraints`, as a Schemars attribute on a model, imported from
+OpenAPI, or read back from JSON. A problem fails with
+`DefinitionError::InvalidConstraint`, naming the API, then the endpoint and
+input path or the schema component and JSON pointer, the keyword, and the
+reason:
 
 ```text
 Items endpoint ListItems: query.limit `minLength` does not apply to an integer
+Items component Tag: #/properties/label `minLength` 4 is above the maximum 3
 ```
+
+`constraint_problems(&api)` lists every problem; each has a `site`
+(`ConstraintSite::Endpoint(id)` or `ConstraintSite::Component(name)`).
+`schema_rule_problems(&schema)` checks one stored schema and every subschema
+in it (properties, items, `additionalProperties`, composition members,
+`$defs`, and the rest), never entering data such as `default`, `example`,
+`enum`, or `const` values.
 
 | Problem | Example |
 | --- | --- |
@@ -118,7 +130,29 @@ Items endpoint ListItems: query.limit `minLength` does not apply to an integer
 | An `enum` or `const` value of the wrong type | `allowed_values([1, 2])` on a string parameter |
 | A limit that is not a number | `maximum("ten")`, `maximum(f64::NAN)`, `maximum("1e99999")` |
 | A pattern outside the enforced subset | `pattern(r"^\s+$")` (see below) |
+| A pattern that is not a regular expression, even if unenforced | `pattern("(a")`, `unenforced_pattern("[a")` |
 | An empty format name | `format("")` |
+| In a stored schema, a keyword of the wrong JSON type, `null` included | `"maxLength": "3"`, `"maximum": null`, `"pattern": 7`, `"uniqueItems": "yes"`, `"enum": "x"`, `"items": 7` |
+| In a stored schema, a rule that applies to none of its declared `type` names | `{"type": "integer", "maxLength": 3}`, `{"type": "string", "minimum": 1}`, `{"type": ["integer", "null"], "minItems": 1}` |
+
+A stored schema is checked for contradictory bounds, a nonpositive divisor,
+an empty `enum` or format, an invalid pattern, and wrong JSON types. Where a
+schema object declares a `type`, each rule must also apply to it, as an
+endpoint rule must apply to its input: string rules (`minLength`,
+`maxLength`, `pattern`) to `string`, numeric rules and `format` to `integer`
+or `number` (`format` to `string` too), array rules to `array`. With a type
+array a rule must apply to at least one listed type, so
+`{"type": ["integer", "string"], "maxLength": 3}` is accepted; `null` and
+`nullable` change nothing, and a schema object with no `type` is not checked
+this way. `enum` and `const` members are data and are not compared with the
+type. Schemars drops a native `length` or `range` on a field of the wrong
+type, so this is mostly met through `extend(..)` attributes, bundle JSON, or
+an edited component. A valid pattern outside the enforced
+subset there is a generator warning, not an error. These are accepted, since
+they impose nothing or are data: an absent keyword, `"pattern": ""`,
+`"uniqueItems": false`, an `enum` or `const` holding any JSON values (`null`
+and mixed types included), an empty item schema `{}`, a Boolean `items`, and
+OpenAPI 3.0's Boolean `exclusiveMinimum`/`exclusiveMaximum` flags.
 
 Only direct contradictions are errors; Schematic does not try to prove that
 some value satisfies every rule at once.
@@ -173,6 +207,7 @@ reports the outcome:
 | `\Aabc\z` | unsupported | `\A` and `\z` are Rust syntax |
 | `\x{41}` | unsupported | braced hex escapes are not ECMAScript syntax |
 | `(a` | invalid | unclosed group |
+| `[a` | invalid | unclosed character class |
 | `a)` | invalid | unopened group |
 | `*a` | invalid | nothing to repeat |
 | `a{5,2}` | invalid | decreasing repetition range |
@@ -184,7 +219,8 @@ reports the outcome:
 
 | Stage | What happens |
 | --- | --- |
-| API build, bundle load | Every rule is checked for contradictions (above). |
+| API build, bundle load, generator validation | Every rule, in endpoint metadata and in stored schema components, is checked for the problems above. |
+| OpenAPI import | The same check runs on the source; an invalid rule fails the import at its keyword (see [importing](io/import-openapi.md#value-constraints)). |
 | Pagination | A page-size parameter adopted by a pager takes its bounds from the strategy's `min`/`max`; see [pagination](pagination.md). |
 | Generated clients | Each generated request with rules checks them before sending and has a `validate()` method; see [value rules](generation/request-side.md#value-rules). Formats and patterns outside the enforced subset are labeled, not checked. |
 | OpenAPI import and export | Rules travel through import, `--definitions-out`, and export without narrowing; see [importing](io/import-openapi.md#value-constraints) and [exporting](io/export-openapi.md#value-constraints). |

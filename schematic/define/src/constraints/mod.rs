@@ -36,14 +36,16 @@ mod schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use check::{ConstraintProblem, constraint_problems};
-pub(crate) use check::endpoint_problems;
+pub use check::{ConstraintProblem, ConstraintSite, constraint_problems};
+pub(crate) use check::{component_problems, endpoint_problems};
 pub use number::{ConstraintNumber, MAX_EXPONENT};
 pub use pattern::{PatternAdmission, admit_pattern};
 pub use registered::*;
-pub use schema::{EXACT_EXTENSION, NUMERIC_KEYWORDS, exact_number, json_number};
+pub use schema::{EXACT_EXTENSION, NUMERIC_KEYWORDS, SchemaRuleProblem, exact_number, json_number, schema_rule_problems};
 #[cfg(feature = "openapi")]
-pub(crate) use schema::{is_data_keyword, mark_inexact_numbers, normalize_exclusive_flags, set_number};
+pub(crate) use schema::{
+    is_data_keyword, mark_inexact_numbers, normalize_exclusive_flags, remove_inapplicable_rules, set_number, untyped_schema_rule_problems,
+};
 
 /// JSON Schema validation keywords for one value.
 ///
@@ -264,4 +266,35 @@ impl Constraints {
     /// assert_eq!(rules.items.unwrap().maximum.unwrap().as_str(), "9");
     /// ```
     pub fn items(mut self, rules: Constraints) -> Self { self.items = Some(Box::new(rules)); self }
+
+    /// Removes the JSON Schema `keyword` from the rules `depth` levels of
+    /// `items` down, dropping item rules left empty; whether it was present.
+    #[cfg(feature = "openapi")]
+    pub(crate) fn remove_keyword(&mut self, depth: usize, keyword: &str) -> bool {
+        if depth > 0 {
+            let Some(items) = self.items.as_deref_mut() else { return false };
+            let removed = items.remove_keyword(depth - 1, keyword);
+            if items.is_empty() { self.items = None; }
+            return removed;
+        }
+        fn take<T>(slot: &mut Option<T>) -> bool { slot.take().is_some() }
+        match keyword {
+            "minLength" => take(&mut self.min_length),
+            "maxLength" => take(&mut self.max_length),
+            "pattern" => { self.pattern_unenforced = false; take(&mut self.pattern) }
+            "format" => take(&mut self.format),
+            "minimum" => take(&mut self.minimum),
+            "maximum" => take(&mut self.maximum),
+            "exclusiveMinimum" => take(&mut self.exclusive_minimum),
+            "exclusiveMaximum" => take(&mut self.exclusive_maximum),
+            "multipleOf" => take(&mut self.multiple_of),
+            "minItems" => take(&mut self.min_items),
+            "maxItems" => take(&mut self.max_items),
+            "uniqueItems" => std::mem::take(&mut self.unique_items),
+            "enum" => take(&mut self.allowed_values),
+            "const" => take(&mut self.constant),
+            "items" => take(&mut self.items),
+            _ => false,
+        }
+    }
 }

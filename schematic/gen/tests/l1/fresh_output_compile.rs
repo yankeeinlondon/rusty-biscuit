@@ -125,6 +125,7 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
             "value-rules-recursive-component",
             "value-rules-text-body",
             "value-rules-form-fields",
+            "value-rules-declared-beside-extra-values",
         ],
     ),
 ];
@@ -392,6 +393,19 @@ pub struct NewItem {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Meta {
     pub title: String,
+}
+
+/// A declared property beside extra entries whose values have rules.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Mixed {
+    pub label: String,
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Holder {
+    pub inner: Mixed,
 }
 "#,
     ),
@@ -803,7 +817,22 @@ fn rules_fixture() -> RestApi {
         FormField::json("meta", named("Meta")),
     ]));
 
-    let mut api = fixture_api("FixtureRules", "fixture_rules", AuthStrategy::None, vec![list, create, text, upload]);
+    // `label` checks nothing itself; it must still never take the
+    // extra-value rule, at the root, through a named reference, or in a
+    // multipart JSON part.
+    let mut mixed = endpoint("CreateMixed", RestMethod::Post, "/mixed", vec![SuccessShape::empty()]);
+    mixed.request = Some(ApiRequest::json_type("Mixed"));
+    let mut holder = endpoint("CreateHolder", RestMethod::Post, "/holder", vec![SuccessShape::empty()]);
+    holder.request = Some(ApiRequest::json_type("Holder"));
+    let mut upload_mixed = endpoint("UploadMixed", RestMethod::Post, "/upload-mixed", vec![SuccessShape::empty()]);
+    upload_mixed.request = Some(ApiRequest::form_data(vec![FormField::json("mixed", named("Mixed"))]));
+
+    let mut api = fixture_api(
+        "FixtureRules",
+        "fixture_rules",
+        AuthStrategy::None,
+        vec![list, create, text, upload, mixed, holder, upload_mixed],
+    );
     let component = |name: &str, schema: serde_json::Value| SchemaComponent { name: name.to_string(), rust_path: Some(name.to_string()), schema };
     api.schemas = vec![
         component("NewItem", serde_json::json!({
@@ -825,6 +854,15 @@ fn rules_fixture() -> RestApi {
         component("Meta", serde_json::json!({
             "type": "object",
             "properties": {"title": {"type": "string", "minLength": 1}},
+        })),
+        component("Mixed", serde_json::json!({
+            "type": "object",
+            "properties": {"label": {"type": "string"}},
+            "additionalProperties": {"type": "string", "maxLength": 3},
+        })),
+        component("Holder", serde_json::json!({
+            "type": "object",
+            "properties": {"inner": {"$ref": "#/components/schemas/Mixed"}},
         })),
     ];
     api
@@ -995,7 +1033,8 @@ use schematic_schema::fixture_query::{
 };
 use schematic_schema::fixture_settings::{Echo, EchoRequest, FixtureSettings, MovedRequest};
 use schematic_schema::fixture_rules::{
-    CreateItemRequest, Extra, FixtureRules, Line, ListItemsRequest, Meta, NewItem, SendTextRequest, UploadForm, UploadRequest,
+    CreateHolderRequest, CreateItemRequest, CreateMixedRequest, Extra, FixtureRules, Holder, Line, ListItemsRequest, Meta, Mixed,
+    NewItem, SendTextRequest, UploadForm, UploadMixedForm, UploadMixedRequest, UploadRequest,
 };
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome, RedirectRefusal, TransportErrorKind};
@@ -2477,6 +2516,38 @@ async fn reports_of_secret_values_and_map_keys_never_contain_them() {
     }
     assert_nothing_sent(&server).await;
 }
+
+#[tokio::test]
+async fn a_declared_property_is_never_checked_by_the_extra_value_plan() {
+    let mixed = |extra: &[(&str, &str)]| Mixed {
+        label: "long declared label".to_string(),
+        extra: extra.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),
+    };
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    CreateMixedRequest::new(mixed(&[("ok", "abc")])).validate().unwrap();
+    CreateHolderRequest::new(Holder { inner: mixed(&[]) }).validate().unwrap();
+    UploadMixedRequest::new(UploadMixedForm { mixed: mixed(&[]) }).validate().unwrap();
+    client.send(CreateMixedRequest::new(mixed(&[]))).full().await.unwrap();
+    let sent: serde_json::Value = serde_json::from_slice(&only_request(&server).await.body).unwrap();
+    assert_eq!(sent, serde_json::json!({"label": "long declared label"}));
+
+    // A genuinely extra entry still takes the rule, under a redacted key.
+    let server = start_server().await;
+    let client = FixtureRules::new().base_url(server.uri()).build().unwrap();
+    let extra = [("SECRETKEY", "too long")];
+    for (request, expected) in [
+        (CreateMixedRequest::new(mixed(&extra)).validate(), "body[[redacted]]"),
+        (CreateHolderRequest::new(Holder { inner: mixed(&extra) }).validate(), "body.inner[[redacted]]"),
+        (UploadMixedRequest::new(UploadMixedForm { mixed: mixed(&extra) }).validate(), "body.mixed[[redacted]]"),
+    ] {
+        let found: Vec<(String, &str)> =
+            request.unwrap_err().iter().map(|v| (v.path_text(), v.keyword().as_str())).collect();
+        assert_eq!(found, [(expected.to_string(), "maxLength")]);
+    }
+    assert!(client.send(CreateMixedRequest::new(mixed(&extra))).full().await.is_err());
+    assert_nothing_sent(&server).await;
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -2539,6 +2610,7 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "a_field_changed_after_validate_is_caught_by_the_send",
     "text_bodies_and_form_fields_are_checked_before_they_are_encoded",
     "reports_of_secret_values_and_map_keys_never_contain_them",
+    "a_declared_property_is_never_checked_by_the_extra_value_plan",
 ];
 
 /// Renders a `format!` template whose arguments are all named in `args`:

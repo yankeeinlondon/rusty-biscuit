@@ -44,9 +44,11 @@ use crate::output::{format_code, validate_code, write_atomic};
 /// ## Errors
 ///
 /// Returns `GeneratorError::ConfigError` if `overlay` is not a plain Rust path
-/// (see [`parse_overlay_path`]), and another `GeneratorError` if the emitted
-/// tokens do not parse as Rust or the file cannot be written. Nothing is
-/// written on error.
+/// (see [`parse_overlay_path`]), `GeneratorError::CodeGenError` if such an
+/// alias holds a rule the endpoint's request constraints cannot carry (one
+/// beneath `properties`, `additionalProperties`, or a reference), and
+/// another `GeneratorError` if the emitted tokens do not parse as Rust or the
+/// file cannot be written. Nothing is written on error.
 pub fn generate_definition_module(
     api: &RestApi,
     models: &ModelCatalog,
@@ -59,6 +61,7 @@ pub fn generate_definition_module(
     let overlay = overlay.map(parse_overlay_path).transpose()?;
     let rules = RuleSource::new(models, &api.schemas);
     let tokens = assemble_definition_module(api, &rules, module_name, model_names, overlay.as_ref());
+    rules.finish()?;
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -69,6 +72,25 @@ pub fn generate_definition_module(
     }
 
     Ok(formatted)
+}
+
+/// Fails, as [`generate_definition_module`] would, when a JSON body typed
+/// by a plain alias holds a rule its endpoint cannot carry; the importer
+/// calls it before writing any file.
+///
+/// ## Errors
+///
+/// `GeneratorError::CodeGenError` naming each such endpoint, alias, and rule.
+pub(crate) fn check_alias_bodies(api: &RestApi, models: &ModelCatalog) -> Result<(), GeneratorError> {
+    let rules = RuleSource::new(models, &api.schemas);
+    for endpoint in &api.endpoints {
+        if let Some(ApiRequest::Json(reference)) = &endpoint.request
+            && endpoint.request_constraints.is_none()
+        {
+            rules.body_constraints(&endpoint.id, reference);
+        }
+    }
+    rules.finish()
 }
 
 /// Parses an `--overlay` value as a plain Rust path to a function, such as
@@ -269,7 +291,7 @@ fn endpoint_tokens(endpoint: &Endpoint, rules: &RuleSource) -> TokenStream {
             _ => builder,
         };
         let alias_rules = match request {
-            ApiRequest::Json(reference) if endpoint.request_constraints.is_none() => rules.body_constraints(reference),
+            ApiRequest::Json(reference) if endpoint.request_constraints.is_none() => rules.body_constraints(id, reference),
             _ => None,
         };
         if let Some(body_rules) = endpoint.request_constraints.as_deref().or(alias_rules.as_ref()) {

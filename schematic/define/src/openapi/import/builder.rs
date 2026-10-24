@@ -167,6 +167,10 @@ impl OpenApiImport {
     /// - An endpoint body or response names a schema the document does not
     ///   define ([`OpenApiError::Definition`] holding
     ///   [`crate::DefinitionError::UnresolvedReference`])
+    /// - A value rule in a parameter, body, form field, or component schema
+    ///   is malformed or contradictory (`minLength` above `maxLength`, a
+    ///   nonpositive `multipleOf`, an empty `enum`, an invalid `pattern`):
+    ///   [`OpenApiError::Validation`] located at the first such keyword
     /// - Strict mode is enabled and any WARN or ERROR diagnostic was
     ///   generated ([`OpenApiError::Validation`] located at the first one,
     ///   with the count and that diagnostic's message)
@@ -195,6 +199,20 @@ impl OpenApiImport {
         let schema_result =
             mappings::map_all_schemas(&doc, &resolver, &mut diagnostics, &catalog_options, &reserved_names);
 
+        // `openapiv3` drops these keywords wherever they sit (components,
+        // bodies, forms, responses), so the rule each carries is lost. A
+        // parameter, form field, or body rule has reported its own at the
+        // same pointer; every other one is reported here.
+        let reported: std::collections::HashSet<String> =
+            diagnostics.iter().map(|diagnostic| diagnostic.location.clone()).collect();
+        for pointer in keywords.dropped().filter(|pointer| !reported.contains(*pointer)) {
+            let keyword = pointer.rsplit('/').next().unwrap_or(pointer);
+            diagnostics.push(OpenApiDiagnostic::warn(
+                pointer.to_owned(),
+                format!("`{keyword}` is a JSON Schema keyword OpenAPI 3.0 does not define, so the parser drops it; not preserved"),
+            ));
+        }
+
         // A component that yielded its name (for example, to a request
         // struct) is referenced by its final name everywhere reference
         // validation reads, at any nesting depth.
@@ -202,6 +220,11 @@ impl OpenApiImport {
             if let Some(final_name) = schema_result.name_mapping.get(name) {
                 name.clone_from(final_name);
             }
+        }
+        // A malformed or contradictory value rule fails the import in
+        // either mode; dropping it would change what the API accepts.
+        if let Some(error) = resolver.take_rejection() {
+            return Err(error);
         }
         api.schemas = schema_result.components;
         api.validate_references()?;

@@ -461,8 +461,19 @@ The rules behind the table:
 
 - OpenAPI 3.0 reads `nullable` only beside a `type`, and ignores every sibling
   of a `$ref`, so a nullable reference or composition joins an `anyOf` with a
-  schema that admits only `null`. A nullable enum lists `null` among its values,
-  since `nullable` alone would still reject it.
+  schema that admits only `null`. An `enum` keeps the members it has: a
+  nullable type does not add `null` to it in either dialect, so an `enum`
+  without `null` still rejects it. Only an `enum` merged from an `anyOf`
+  member beside a null alternative gains `null`, since that alternative
+  admits it.
+- A single member left beside a null alternative folds into its parent. When
+  its keywords overlap the parent's it becomes an `allOf` member, written as
+  `{anyOf: [member, <null schema>]}` so that it still admits `null`:
+  `{maxLength: 5, anyOf: [{type: string, enum: [a]}, {type: "null"}]}` keeps
+  accepting `null`. A null alternative beside a `type`, `enum`, or `const`
+  that rejects `null` is dropped instead, because the schema still rejects
+  `null`: `{type: string, anyOf: [{maxLength: 3}, {type: "null"}]}` exports as
+  `{type: string, maxLength: 3}`, without `nullable`.
 - Several non-null types become an `anyOf` of single-type members, each taking
   the keywords that apply to its type (`minLength` to `string`, `minimum` to
   `integer` and `number`). It is never `oneOf`: `3` is both an integer and a

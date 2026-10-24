@@ -109,6 +109,12 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
     }
 
     let mut nullable = object.get("nullable") == Some(&Value::Bool(true));
+    // Null admitted by an `anyOf`/`oneOf` member rather than by a type: only
+    // then does a merged member's `enum` need `null` added.
+    let mut null_alternative = false;
+    // A sibling `type`, `enum`, or `const` that rejects null keeps rejecting
+    // it whatever an `anyOf`/`oneOf` null member admits.
+    let siblings_reject_null = rejects_null(object);
     let mut body = Map::new();
     for key in CONSTRAINTS {
         let Some(value) = object.get(*key) else { continue };
@@ -154,7 +160,8 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
                 let mut converted = Vec::new();
                 for (index, member) in members.iter().enumerate() {
                     if *key != "allOf" && admits_only_null(member) {
-                        nullable = true;
+                        nullable |= !siblings_reject_null;
+                        null_alternative |= !siblings_reject_null;
                     } else {
                         converted.push(convert(member, &format!("{at}/{index}"))?);
                     }
@@ -206,7 +213,15 @@ fn convert(value: &Value, pointer: &str) -> Result<Value, OpenApiError> {
                 1 if object.get(keyword).and_then(Value::as_array).is_some_and(|source| source.len() > 1) => {
                     let member = members[0].clone();
                     body.remove(keyword);
-                    body = merge_member(body, member);
+                    body = merge_member(body, member, null_alternative);
+                    if null_alternative
+                        && !object.contains_key("enum")
+                        && !object.contains_key("const")
+                        && let Some(Value::Array(values)) = body.get_mut("enum")
+                        && !values.iter().any(Value::is_null)
+                    {
+                        values.push(Value::Null);
+                    }
                 }
                 _ => {}
             }
@@ -290,11 +305,16 @@ fn restore_exact_numbers(value: &mut Value) {
 /// Folds the sole remaining member of an `anyOf`/`oneOf` into `body`: its own
 /// constraints join the body's when they do not overlap, or it becomes an
 /// `allOf` member when they do.
-fn merge_member(mut body: Map<String, Value>, member: Value) -> Map<String, Value> {
+///
+/// When the fold removed a null alternative (`null_alternative`), an `allOf`
+/// member keeps admitting null beside its own values; otherwise its `type`
+/// or `enum` would reject the null the source admits.
+fn merge_member(mut body: Map<String, Value>, member: Value, null_alternative: bool) -> Map<String, Value> {
     let Value::Object(member) = member else { return body };
     let overlaps = member.keys().any(|key| body.contains_key(key) && CONSTRAINTS.contains(&key.as_str()));
     if overlaps {
-        body.entry("allOf").or_insert(Value::Array(vec![])).as_array_mut().expect("allOf is an array").push(Value::Object(member));
+        let member = if null_alternative { json!({"anyOf": [member, null_branch()]}) } else { Value::Object(member) };
+        body.entry("allOf").or_insert(Value::Array(vec![])).as_array_mut().expect("allOf is an array").push(member);
     } else {
         for (key, value) in member {
             body.entry(key).or_insert(value);
@@ -341,19 +361,18 @@ fn split_types(mut body: Map<String, Value>, kinds: &[Value], nullable: bool) ->
 }
 
 /// `body` admitting null as well when `nullable`: a typed schema takes
-/// `nullable` (and `null` in its `enum`); an unconstrained one already admits
-/// null; anything else joins the null branch in an `anyOf`.
+/// `nullable`; an unconstrained one already admits null; anything else joins
+/// the null branch in an `anyOf`.
+///
+/// An `enum` keeps the members it has. OpenAPI 3.0.3's `nullable` does not
+/// add null to an `enum`, and neither does a nullable `type`, so an `enum`
+/// without null rejects null in both dialects.
 fn nullable_body(mut body: Map<String, Value>, nullable: bool) -> Map<String, Value> {
     if !nullable || body.is_empty() {
         return body;
     }
     if body.contains_key("type") {
         body.insert("nullable".into(), Value::Bool(true));
-        if let Some(Value::Array(values)) = body.get_mut("enum")
-            && !values.iter().any(Value::is_null)
-        {
-            values.push(Value::Null);
-        }
         return body;
     }
     if body.len() == 1 && let Some(Value::Array(members)) = body.get_mut("anyOf") {
@@ -378,6 +397,19 @@ fn admits_only_null(member: &Value) -> bool {
         && member.keys().all(|key| {
             ANNOTATIONS.contains(&key.as_str()) || IGNORED.contains(&key.as_str()) || matches!(key.as_str(), "type" | "nullable" | "enum" | "const")
         })
+}
+
+/// Whether `object`'s own `type`, `enum`, or `const` rejects null: a `type`
+/// naming no `null` (unless `nullable`), or an `enum`/`const` without it.
+fn rejects_null(object: &Map<String, Value>) -> bool {
+    let typed = match object.get("type") {
+        Some(Value::String(kind)) => kind != "null",
+        Some(Value::Array(kinds)) => !kinds.iter().any(|kind| kind == "null"),
+        _ => false,
+    };
+    (typed && object.get("nullable") != Some(&Value::Bool(true)))
+        || object.get("enum").and_then(Value::as_array).is_some_and(|values| !values.iter().any(Value::is_null))
+        || object.get("const").is_some_and(|constant| !constant.is_null())
 }
 
 /// The single JSON type of the non-null `values`, if they share one.
@@ -495,9 +527,34 @@ mod tests {
             export(json!({"type": ["string", "null"], "enum": ["a", "b", null]})),
             json!({"type": "string", "nullable": true, "enum": ["a", "b", null]})
         );
+        // A nullable type does not add null to an `enum` that omits it; a
+        // null alternative beside an enum member does.
         assert_eq!(
             export(json!({"type": "string", "enum": ["a"], "nullable": true})),
+            json!({"type": "string", "nullable": true, "enum": ["a"]})
+        );
+        assert_eq!(
+            export(json!({"type": ["string", "null"], "enum": ["a"]})),
+            json!({"type": "string", "nullable": true, "enum": ["a"]})
+        );
+        assert_eq!(
+            export(json!({"anyOf": [{"type": "string", "enum": ["a"]}, {"type": "null"}]})),
             json!({"type": "string", "nullable": true, "enum": ["a", null]})
+        );
+        // A member folded into `allOf` beside an overlapping body keeps
+        // admitting the null its alternative admitted.
+        assert_eq!(
+            export(json!({"maxLength": 5, "anyOf": [{"type": "string", "maxLength": 3, "enum": ["a"]}, {"type": "null"}]})),
+            json!({"anyOf": [{"maxLength": 5, "allOf": [{"anyOf": [{"type": "string", "maxLength": 3, "enum": ["a"]}, null_branch()]}]}, null_branch()]})
+        );
+        // A sibling `type` or `enum` that rejects null still rejects it.
+        assert_eq!(
+            export(json!({"type": "string", "anyOf": [{"maxLength": 3}, {"type": "null"}]})),
+            json!({"type": "string", "maxLength": 3})
+        );
+        assert_eq!(
+            export(json!({"enum": ["a", "b"], "anyOf": [{"type": "string", "maxLength": 1}, {"type": "null"}]})),
+            json!({"type": "string", "enum": ["a", "b"], "allOf": [{"type": "string", "maxLength": 1}]})
         );
         // Schemas that admit only null.
         assert_eq!(export(json!({"type": "null"})), null());

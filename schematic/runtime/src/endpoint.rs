@@ -65,8 +65,10 @@ pub trait EndpointSpec: Send + 'static {
     ///
     /// ## Errors
     ///
-    /// Returns [`InvalidArgument`] when a parameter cannot be encoded; the
-    /// runtime reports it before any network work.
+    /// Returns [`InvalidArgument`] when a parameter cannot be encoded or the
+    /// request breaks one of its declared value rules (see
+    /// [`validate`](crate::validate)); the runtime reports it before any
+    /// credential or network work.
     fn into_parts(self) -> Result<RequestParts, InvalidArgument>;
 }
 

@@ -4,7 +4,20 @@
 # nested-only, recursive, alias-typed), a component shared by two endpoints,
 # and a response-only component. Bounds include OpenAPI 3.0 Boolean
 # exclusive flags, `const`, an integer beyond u64, and decimal divisors that
-# no f64 holds exactly.
+# no f64 holds exactly. `Item` also holds the positions whose emitted Rust
+# type is not a primitive: a map's values, a free-form value, a `format`
+# annotation, a map's whole value, a model's root (`Settings`) and its extra
+# properties (`Extras`), a rule beside a model reference, and the items of
+# an inline-object array and of a model array. The `mixed_*` fields and
+# `MixedExtras` hold an object whose extra values are checked beside a
+# declared property without rules (`label`) at every free-form position:
+# a value's root, nested property, and items, its extra values, a map
+# field's values, inline array items, and a struct's flattened extra values.
+# Each of those objects also declares `owner`, a reference to `Owner`, whose
+# rule is reached through the free-form value, and `nullable_probe` and
+# `allof_probe`, which reach `Owner` through a nullable alternative and a
+# one-member `allOf`; `linked_value` references `Owner` as a free-form
+# value's items and extra values, and beside a rule.
 openapi: 3.0.3
 info:
   title: Constraint Preservation
@@ -154,7 +167,7 @@ components:
       maximum: 500
     Item:
       type: object
-      required: [display-name, kind]
+      required: [display-name, kind, owner]
       properties:
         display-name:
           type: string
@@ -183,6 +196,171 @@ components:
             maxLength: 20
         root:
           $ref: "#/components/schemas/Node"
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 3
+        free_value:
+          maxLength: 3
+        identifier:
+          type: string
+          format: uuid
+        palette:
+          type: object
+          additionalProperties:
+            type: string
+          enum:
+            - primary: red
+        owner:
+          $ref: "#/components/schemas/Owner"
+          const:
+            name: boss
+        settings:
+          $ref: "#/components/schemas/Settings"
+        extras:
+          $ref: "#/components/schemas/Extras"
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+            const:
+              code: x
+        owners:
+          type: array
+          items:
+            $ref: "#/components/schemas/Owner"
+            const:
+              name: boss
+        mixed_value:
+          properties:
+            label: {type: string}
+            code: {type: string, maxLength: 2}
+            owner: {$ref: "#/components/schemas/Owner"}
+            nullable_probe:
+              anyOf:
+                - {$ref: "#/components/schemas/Owner"}
+                - {type: string, nullable: true, enum: [null]}
+            allof_probe:
+              allOf: [{$ref: "#/components/schemas/Owner"}]
+            inner:
+              properties:
+                label: {type: string}
+                code: {type: string, maxLength: 2}
+                owner: {$ref: "#/components/schemas/Owner"}
+                nullable_probe:
+                  anyOf:
+                    - {$ref: "#/components/schemas/Owner"}
+                    - {type: string, nullable: true, enum: [null]}
+                allof_probe:
+                  allOf: [{$ref: "#/components/schemas/Owner"}]
+              additionalProperties: {type: string, maxLength: 3}
+          items:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+            additionalProperties: {type: string, maxLength: 3}
+          additionalProperties: {type: string, maxLength: 3}
+        mixed_map:
+          additionalProperties:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_attributes:
+          type: object
+          additionalProperties:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_entries:
+          type: array
+          items:
+            type: object
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_extras:
+          $ref: "#/components/schemas/MixedExtras"
+        linked_value:
+          properties:
+            pinned:
+              $ref: "#/components/schemas/Owner"
+              const: {name: boss}
+          items:
+            $ref: "#/components/schemas/Owner"
+          additionalProperties:
+            $ref: "#/components/schemas/Owner"
+    Owner:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 10
+    Settings:
+      type: object
+      properties:
+        version:
+          type: string
+      const:
+        version: "1"
+    Extras:
+      type: object
+      properties:
+        id:
+          type: string
+      additionalProperties:
+        type: string
+        maxLength: 3
+    MixedExtras:
+      type: object
+      properties:
+        id: {type: string}
+      additionalProperties:
+        properties:
+          label: {type: string}
+          code: {type: string, maxLength: 2}
+          owner: {$ref: "#/components/schemas/Owner"}
+          nullable_probe:
+            anyOf:
+              - {$ref: "#/components/schemas/Owner"}
+              - {type: string, nullable: true, enum: [null]}
+          allof_probe:
+            allOf: [{$ref: "#/components/schemas/Owner"}]
+        additionalProperties: {type: string, maxLength: 3}
     Node:
       type: object
       required: [name]

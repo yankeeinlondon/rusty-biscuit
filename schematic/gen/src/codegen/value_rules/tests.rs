@@ -135,6 +135,51 @@ fn a_shared_recursive_component_is_emitted_once_and_refers_to_its_own_plan() {
 }
 
 #[test]
+fn a_nullable_type_keeps_its_enum_on_the_plan_null_is_checked_against() {
+    // A nullable type (2020-12 `type` array or OpenAPI 3.0 `nullable`) puts
+    // the enum on the nullable plan itself, where the runtime checks null
+    // against it; a null alternative puts the member's enum behind the
+    // reference that null skips.
+    let item = json!({"type": "object", "properties": {
+        "status": {"type": ["string", "null"], "enum": ["ok"]},
+        "legacy": {"type": "string", "nullable": true, "enum": ["ok"]},
+        "option": {"anyOf": [{"type": "string", "enum": ["ok"]}, {"type": "null"}]},
+    }});
+    let api = api(vec![json_body("CreateItem", "Item")], vec![("Item", item)]);
+    let code = squash(&module_code(&api));
+    let own = r#"Plan::new().nullable().allowed_values(&[Literal::String("ok")])"#;
+    for property in ["status", "legacy"] {
+        assert!(code.contains(&format!(r#"Property::new("{property}",&{own}"#)), "{property}: {code}");
+    }
+    assert!(
+        code.contains(r#"Property::new("option",&Plan::reference(&Plan::new().allowed_values(&[Literal::String("ok")]),).nullable()"#),
+        "{code}"
+    );
+}
+
+#[test]
+fn a_one_member_all_of_is_its_reference_and_keeps_the_rule_beside_it() {
+    // Schemars' OpenAPI 3.0 form of `extend("enum" = [..])` on a field typed
+    // by a model; a two-member `allOf` stays a composition.
+    let owner = json!({"type": "object", "properties": {"name": {"type": "string", "maxLength": 10}}});
+    let item = json!({"type": "object", "properties": {
+        "owner": {"allOf": [{"$ref": "#/components/schemas/Owner"}], "enum": [{"name": "boss"}]},
+    }});
+    let api = api(vec![json_body("CreateItem", "Item")], vec![("Item", item), ("Owner", owner.clone())]);
+    let code = squash(&module_code(&api));
+    assert!(api_findings(&api).is_empty(), "{:?}", api_findings(&api).iter().map(|(_, finding)| finding.message()).collect::<Vec<_>>());
+    let property = &code[code.find(r#"Property::new("owner""#).expect("owner is planned")..];
+    assert!(property.starts_with(r#"Property::new("owner",&Plan::reference(&Plan::reference(&COMPONENT_1_OWNER)).allowed_values("#), "{property}");
+    assert!(code.contains(r#"Property::new("name",&Plan::new().max_length(10u64))"#), "{code}");
+
+    let composed = json!({"type": "object", "properties": {
+        "owner": {"allOf": [{"$ref": "#/components/schemas/Owner"}, {"type": "object"}]},
+    }});
+    let findings = api_findings(&self::api(vec![json_body("CreateItem", "Item")], vec![("Item", composed), ("Owner", owner)]));
+    assert!(findings.iter().any(|(_, finding)| finding.severity == Severity::Error && finding.keyword == "maxLength"), "{:?}", findings.len());
+}
+
+#[test]
 fn unenforced_rules_are_findings_with_their_severity() {
     let mut list = endpoint("ListItems", RestMethod::Get, "/items");
     list.params = Some(EndpointParams {
@@ -202,4 +247,104 @@ fn snake_case_keeps_acronyms_together() {
     assert_eq!(snake_case("HTTPServer2Api"), "http_server2_api");
     assert_eq!(snake_case("x-tag"), "x_tag");
     assert_eq!(screaming_case("ListItemsRequest"), "LIST_ITEMS_REQUEST");
+}
+
+#[test]
+fn pruning_keeps_declared_names_while_an_extra_value_plan_survives() {
+    let limited = Node { max_length: Some(3), ..Node::default() };
+    let unchecked_label = ("label".to_string(), Node { nullable: true, ..Node::default() });
+    let mixed = Node { properties: vec![unchecked_label.clone()], values: Some(Box::new(limited.clone())), ..Node::default() };
+    let pruned = prune(&mixed, &[]).expect("the extra-value plan checks something");
+    assert_eq!(pruned.properties, [("label".to_string(), Node::default())]);
+    assert_eq!(pruned.values.as_deref(), Some(&limited));
+
+    // Without an extra-value plan, membership decides nothing.
+    let declared = Node { properties: vec![unchecked_label, ("code".to_string(), limited.clone())], ..Node::default() };
+    let pruned = prune(&declared, &[]).expect("`code` checks something");
+    assert_eq!(pruned.properties, [("code".to_string(), limited)]);
+}
+
+#[test]
+fn an_unchecked_declared_property_stays_out_of_the_extra_value_plan_at_every_level() {
+    let mixed = json!({
+        "type": "object",
+        "properties": {"label": {"type": "string"}},
+        "additionalProperties": {"type": "string", "maxLength": 3},
+    });
+    let outer = json!({"type": "object", "properties": {
+        "inner": {"$ref": "#/components/schemas/Mixed"},
+        "note": {"type": "string"},
+    }});
+    let mut upload = endpoint("Upload", RestMethod::Post, "/upload");
+    upload.request = Some(ApiRequest::FormData {
+        fields: vec![schematic_define::FormField::json("meta", TypeRef::Named("Mixed".into()))],
+    });
+    let api = api(vec![json_body("CreateOuter", "Outer"), upload], vec![("Mixed", mixed), ("Outer", outer)]);
+    let code = squash(&module_code(&api));
+    let component = &code[code.find("staticCOMPONENT_").expect("a component plan is emitted")..];
+    assert!(
+        component.contains(r#".properties(&[Property::new("label",&Plan::new())]).values(&Plan::new().max_length(3u64))"#),
+        "{component}"
+    );
+    // `Outer` has no extra-value plan, so its unchecked `note` is pruned.
+    assert!(!code.contains(r#"Property::new("note""#), "{code}");
+    assert!(code.contains("UPLOAD_REQUEST_FORM_META"), "the multipart JSON field is checked: {code}");
+}
+
+/// The `(endpoint, severity, place, keyword)` of every finding in `api`.
+fn located_findings(api: &RestApi) -> Vec<(Option<String>, Severity, String, String)> {
+    api_findings(api).into_iter().map(|(endpoint, finding)| (endpoint, finding.severity, finding.place, finding.keyword)).collect()
+}
+
+/// `api` whose `CreateItem` posts the component `Item` as its JSON body and
+/// whose `Upload` sends it as the multipart JSON field `meta`.
+fn body_and_form_field(item: serde_json::Value) -> RestApi {
+    let mut upload = endpoint("Upload", RestMethod::Post, "/upload");
+    upload.request = Some(ApiRequest::FormData { fields: vec![schematic_define::FormField::json("meta", TypeRef::Named("Item".into()))] });
+    api(vec![json_body("CreateItem", "Item"), upload], vec![("Item", item)])
+}
+
+#[test]
+fn a_rule_in_positional_items_is_a_generation_error_for_body_and_form_field_alike() {
+    for keyword in ["items", "prefixItems"] {
+        let item = json!({"type": "object", "properties": {"pair": {"type": "array", keyword: [{"type": "string", "maxLength": 3}, {"type": "integer"}]}}});
+        let api = body_and_form_field(item);
+        let place = format!("component `Item` at `#/properties/pair/{keyword}/0`");
+        assert_eq!(located_findings(&api), [
+            (Some("CreateItem".to_string()), Severity::Error, format!("body ({place})"), "maxLength".to_string()),
+            (Some("Upload".to_string()), Severity::Error, format!("body.meta ({place})"), "maxLength".to_string()),
+        ], "{keyword}");
+        let finding = &api_findings(&api)[0].1;
+        assert_eq!(
+            finding.message(),
+            format!(
+                "body ({place}) `maxLength` is not enforced: beneath the `{keyword}` at `#/properties/pair` of component `Item`, \
+                 which the client does not traverse; the client cannot check it, so remove the rule or restructure the schema"
+            )
+        );
+    }
+}
+
+#[test]
+fn a_rule_beneath_a_nested_composition_is_an_error_for_body_and_form_field_alike() {
+    let item = json!({"type": "object", "properties": {"value": {"anyOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]}}});
+    let place = "component `Item` at `#/properties/value/anyOf/0`";
+    assert_eq!(located_findings(&body_and_form_field(item)), [
+        (Some("CreateItem".to_string()), Severity::Error, format!("body ({place})"), "maxLength".to_string()),
+        (Some("Upload".to_string()), Severity::Error, format!("body.meta ({place})"), "maxLength".to_string()),
+    ]);
+}
+
+#[test]
+fn item_objects_and_nullable_any_of_stay_enforced_without_findings() {
+    let item = json!({"type": "object", "properties": {
+        "tags": {"type": "array", "items": {"type": "string", "maxLength": 3}},
+        "note": {"anyOf": [{"type": "string", "maxLength": 5}, {"enum": [null], "nullable": true}]},
+    }});
+    let api = body_and_form_field(item);
+    assert_eq!(located_findings(&api), []);
+    let code = squash(&module_code(&api));
+    assert!(code.contains(".items(&Plan::new().max_length(3u64))"), "{code}");
+    assert!(code.contains(".max_length(5u64)"), "{code}");
+    assert!(code.contains("UPLOAD_REQUEST_FORM_META"), "the multipart JSON field is checked: {code}");
 }

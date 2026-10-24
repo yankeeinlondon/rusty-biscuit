@@ -37,14 +37,17 @@ const FORM_EXPLODE_DEFAULT_APIS: &[&str] = &["openai"];
 
 // Imported before the importer kept value rules: their snapshots carry no
 // parameter, form-field, or body `constraints`, and their registered models
-// had no Schemars `extend` rules on fields. The current definition is
-// compared with both removed (see `without_value_rules`); its rules are
-// checked by artifact_drift and the import_overlay re-import test.
+// had no Schemars `extend` rules on fields or roots, so every field carried
+// the format Schemars implies for its Rust type and a `serde_json::Value`
+// field carried no nested rule objects. The current definition is compared
+// with all of these undone (see `without_value_rules`); its rules are checked
+// by artifact_drift and the import_overlay re-import test.
 const VALUE_RULE_APIS: &[&str] = &["openai"];
 
 /// The keywords `import --definitions-out` adds to a model field through
 /// `#[schemars(extend(..))]`; schemars writes none of them on a field of the
-/// types OpenAI's models use.
+/// types OpenAI's models use. `format` is not listed: the rebuild replaces it
+/// rather than adding it, and [`schemars_format`] restores it.
 const FIELD_RULE_KEYWORDS: &[&str] = &[
     "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "multipleOf", "minItems", "maxItems", "uniqueItems", "enum", "const", "x-schematic-exact",
@@ -52,12 +55,15 @@ const FIELD_RULE_KEYWORDS: &[&str] = &[
 
 /// `api` as a [`VALUE_RULE_APIS`] snapshot recorded it: no endpoint
 /// constraints, and no field rules in any component schema. Other APIs are
-/// returned unchanged.
-fn without_value_rules(key: &str, api: &RestApi) -> RestApi {
+/// returned unchanged. `source` is the vendored document a
+/// [`VALUE_RULE_APIS`] key was imported from.
+fn without_value_rules(key: &str, api: &RestApi, source: Option<&std::path::Path>) -> RestApi {
     let mut api = api.clone();
     if !VALUE_RULE_APIS.contains(&key) {
         return api;
     }
+    let source = source.unwrap_or_else(|| panic!("the {key} baseline test passes its vendored document"));
+    let free_form = free_form_fields(source);
     for endpoint in &mut api.endpoints {
         endpoint.request_constraints = None;
         if let Some(params) = &mut endpoint.params {
@@ -72,40 +78,173 @@ fn without_value_rules(key: &str, api: &RestApi) -> RestApi {
         }
     }
     for component in &mut api.schemas {
-        strip_field_rules(&mut component.schema);
+        let fields = free_form.get(&component.name).cloned().unwrap_or_default();
+        strip_field_rules(&mut component.schema, &fields);
     }
     api
 }
 
+/// The wire names of each struct's fields that the importer types as
+/// free-form JSON (`serde_json::Value`, also emitted for an inline
+/// composition), by struct. Schemars writes no composition on such a field,
+/// so an `anyOf` or `allOf` there is the rebuild's; on any other field it
+/// may be Schemars' own `Option` of a model, identical once registered. An
+/// `allOf` model is a struct flattening its members, whose properties
+/// Schemars merges, so it has every named member's free-form fields.
+fn free_form_fields(source: &std::path::Path) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    use schematic_define::models::{ModelDef, PrimitiveType, TypeRef};
+    use schematic_define::openapi::{OpenApiImport, OpenApiSource};
+
+    let imported = OpenApiImport::new(OpenApiSource::path(source)).prefer_json().build().unwrap();
+    let mut fields: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    for model in &imported.models.types {
+        let ModelDef::Struct(def) = model else { continue };
+        let names = def.fields.iter().filter_map(|field| {
+            let mut field_type = &field.field_type;
+            while let TypeRef::Optional(inner) = field_type {
+                field_type = inner;
+            }
+            matches!(field_type, TypeRef::Primitive(PrimitiveType::Json) | TypeRef::Unknown | TypeRef::OneOf(_) | TypeRef::AnyOf(_) | TypeRef::AllOf(_))
+                .then(|| field.serde_rename.clone().unwrap_or_else(|| field.name.clone()))
+        });
+        fields.insert(def.name.clone(), names.collect());
+    }
+    let composed: Vec<(&str, Vec<&str>)> = imported
+        .models
+        .types
+        .iter()
+        .filter_map(|model| match model {
+            ModelDef::Alias(alias) => match &alias.target {
+                TypeRef::AllOf(members) => Some((
+                    alias.name.as_str(),
+                    members.iter().filter_map(|member| match member { TypeRef::Named(name) => Some(name.as_str()), _ => None }).collect(),
+                )),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    loop {
+        let mut grew = false;
+        for (name, members) in &composed {
+            let merged: std::collections::HashSet<String> = members.iter().filter_map(|member| fields.get(*member)).flatten().cloned().collect();
+            let entry = fields.entry((*name).to_owned()).or_default();
+            let before = entry.len();
+            entry.extend(merged);
+            grew |= entry.len() != before;
+        }
+        if !grew {
+            return fields;
+        }
+    }
+}
+
+/// The `format` Schemars writes for the Rust type the importer emits for a
+/// schema of JSON `type`: every integer is an `i64`, every number an `f64`
+/// (`model_gen.rs`, `base_schema`), and no other emitted type carries one.
+fn schemars_format(object: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    match object.get("type").and_then(Value::as_str) {
+        Some("integer") => Some("int64"),
+        Some("number") => Some("double"),
+        _ => None,
+    }
+}
+
+/// Whether `key: child` is a nested rule slot as the rebuild writes it onto an
+/// untyped (`serde_json::Value`) field once its rules are stripped: a
+/// `properties` map or an `items` or `additionalProperties` schema whose own
+/// keys are again only such slots, down to `{}` or a reference to a model
+/// with rules (its `$ref`, and `nullable: true` beside it), and the
+/// [`rebuilt_wrapper`]s around them. Schemars writes no nested schema
+/// beneath an untyped field, so every reference and composition there is
+/// the rebuild's.
+fn rule_only(key: &str, child: &Value) -> bool {
+    match (key, child) {
+        ("properties", Value::Object(properties)) => properties.values().all(rule_slot),
+        ("items" | "additionalProperties", schema) => rule_slot(schema),
+        _ => false,
+    }
+}
+
+/// Whether `schema` holds only [`rule_only`] slots, a reference leaf, and
+/// [`rebuilt_wrapper`]s.
+fn rule_slot(schema: &Value) -> bool {
+    schema.as_object().is_some_and(|object| {
+        let reference = object.get("$ref").is_some_and(Value::is_string);
+        object.iter().all(|(key, child)| match key.as_str() {
+            "$ref" => reference,
+            "nullable" => reference && child == &Value::Bool(true),
+            _ => rule_only(key, child) || rebuilt_wrapper(key, child),
+        })
+    })
+}
+
+/// Whether `key: child` is a nullable alternative (a [`rule_slot`] beside a
+/// null-only member) or a one-member `allOf` of a rule slot, the two
+/// compositions the rebuild keeps on a free-form value.
+fn rebuilt_wrapper(key: &str, child: &Value) -> bool {
+    let null_only = |member: &Value| {
+        member.as_object().is_some_and(|object| {
+            object.get("enum").and_then(Value::as_array).is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_null))
+                && object.keys().all(|key| matches!(key.as_str(), "enum" | "type" | "nullable"))
+        })
+    };
+    match (key, child.as_array().map(Vec::as_slice)) {
+        ("anyOf", Some([first, second])) => (null_only(first) && rule_slot(second)) || (rule_slot(first) && null_only(second)),
+        ("allOf", Some([member])) => rule_slot(member),
+        _ => false,
+    }
+}
+
 /// Removes [`FIELD_RULE_KEYWORDS`] from every property schema below
 /// `schema`, from its `items`, and from the members of a nullable `anyOf`.
-/// An `enum` of only `null` is schemars' own null branch and stays.
-fn strip_field_rules(schema: &mut Value) {
-    fn strip_property(property: &mut Value) {
+/// An `enum` of only `null` is schemars' own null branch and stays. On the
+/// same schemas an existing `format` is reset to [`schemars_format`] (or
+/// removed where it implies none), and an untyped schema without `$ref`
+/// loses the `properties`, `items`, and `additionalProperties` that are
+/// [`rule_only`] once stripped. A [`rebuilt_wrapper`] is removed there too
+/// where Schemars writes no composition: on the items of an array and on a
+/// top-level property named in `free_form` (see [`free_form_fields`]).
+fn strip_field_rules(schema: &mut Value, free_form: &std::collections::HashSet<String>) {
+    fn strip_property(property: &mut Value, composed: bool) {
         if let Some(object) = property.as_object_mut() {
             object.retain(|key, value| {
                 let null_branch = key == "enum" && value.as_array().is_some_and(|values| values.iter().all(Value::is_null));
                 null_branch || !FIELD_RULE_KEYWORDS.contains(&key.as_str())
             });
-            if let Some(items) = object.get_mut("items") {
-                strip_property(items);
+            if object.contains_key("format") {
+                match schemars_format(object) {
+                    Some(format) => { object.insert("format".into(), Value::from(format)); }
+                    None => { object.remove("format"); }
+                }
             }
-            if let Some(Value::Array(members)) = object.get_mut("anyOf") {
-                members.iter_mut().for_each(strip_property);
+            if let Some(items) = object.get_mut("items") {
+                strip_property(items, true);
+            }
+            for composition in ["anyOf", "allOf"] {
+                if let Some(Value::Array(members)) = object.get_mut(composition) {
+                    members.iter_mut().for_each(|member| strip_property(member, false));
+                }
             }
         }
-        strip_field_rules(property);
+        strip_field_rules(property, &Default::default());
+        if let Some(object) = property.as_object_mut()
+            && !object.contains_key("type") && !object.contains_key("$ref") {
+            object.retain(|key, child| !rule_only(key, child) && !(composed && rebuilt_wrapper(key, child)));
+        }
     }
     match schema {
         Value::Object(object) => {
             for (key, child) in object.iter_mut() {
                 match (key.as_str(), child) {
-                    ("properties", Value::Object(properties)) => properties.values_mut().for_each(strip_property),
-                    (_, child) => strip_field_rules(child),
+                    ("properties", Value::Object(properties)) => {
+                        properties.iter_mut().for_each(|(name, property)| strip_property(property, free_form.contains(name)));
+                    }
+                    (_, child) => strip_field_rules(child, &Default::default()),
                 }
             }
         }
-        Value::Array(items) => items.iter_mut().for_each(strip_field_rules),
+        Value::Array(items) => items.iter_mut().for_each(|item| strip_field_rules(item, &Default::default())),
         _ => {}
     }
 }
@@ -339,11 +478,89 @@ fn apply_form_explode_default(historical: &mut Value) {
     }
 }
 
+/// The components `api`'s rebuilt value rules reference from inside an
+/// untyped field (the references [`without_value_rules`] removes from
+/// `stripped`), with every component they reach in `stripped`. Schemars
+/// registers a component where it is first reached, so these references can
+/// move these components, and only these, earlier in the registry.
+fn rebuild_reached(api: &RestApi, stripped: &RestApi) -> std::collections::HashSet<String> {
+    fn references(value: &Value, found: &mut Vec<String>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(name) = object.get("$ref").and_then(Value::as_str).and_then(|reference| reference.strip_prefix("#/components/schemas/")) {
+                    found.push(name.to_owned());
+                }
+                object.values().for_each(|child| references(child, found));
+            }
+            Value::Array(values) => values.iter().for_each(|child| references(child, found)),
+            _ => {}
+        }
+    }
+    let counts = |api: &RestApi| {
+        let mut found = Vec::new();
+        api.schemas.iter().for_each(|component| references(&component.schema, &mut found));
+        found.into_iter().fold(std::collections::HashMap::<String, usize>::new(), |mut counts, name| {
+            *counts.entry(name).or_default() += 1;
+            counts
+        })
+    };
+    let kept = counts(stripped);
+    let mut reached: Vec<String> =
+        counts(api).into_iter().filter(|(name, count)| kept.get(name).copied().unwrap_or(0) < *count).map(|(name, _)| name).collect();
+    let mut seen: std::collections::HashSet<String> = reached.iter().cloned().collect();
+    while let Some(name) = reached.pop() {
+        let Some(component) = stripped.component(&name) else { continue };
+        let mut found = Vec::new();
+        references(&component.schema, &mut found);
+        for target in found {
+            if seen.insert(target.clone()) {
+                reached.push(target);
+            }
+        }
+    }
+    seen
+}
+
+/// Places the `moved` entries of `current`'s registry where `historical`
+/// lists them; every other entry keeps its current relative order, which is
+/// still compared slot by slot. An entry `historical` does not list stays at
+/// the end, to be reported at its own leaf.
+fn in_historical_order(historical: &Value, current: &mut Value, moved: &std::collections::HashSet<String>) {
+    if moved.is_empty() {
+        return;
+    }
+    let mut entries: Vec<Value> = current["registry"].as_array_mut().map(std::mem::take).unwrap_or_default();
+    let name = |entry: &Value| entry["name"].as_str().unwrap_or_default().to_owned();
+    let mut ordered = Vec::with_capacity(entries.len());
+    for slot in historical["registry"].as_array().into_iter().flatten() {
+        let wanted = name(slot);
+        let position = if moved.contains(&wanted) {
+            entries.iter().position(|entry| name(entry) == wanted)
+        } else {
+            entries.iter().position(|entry| !moved.contains(&name(entry)))
+        };
+        if let Some(position) = position {
+            ordered.push(entries.remove(position));
+        }
+    }
+    ordered.append(&mut entries);
+    current["registry"] = Value::Array(ordered);
+}
+
 /// The unexplained-before-[`EXPLAINED`] differences between a historical
 /// snapshot and `api`, after normalization and the migration allow-lists.
 fn historical_differences(key: &str, historical: Value, api: &RestApi) -> Vec<String> {
-    let expected = canonical(without_migrated_components(key, normalize_historical(key, historical)));
-    let current = snapshot(&without_value_rules(key, api));
+    historical_differences_from(key, historical, api, None)
+}
+
+/// [`historical_differences`] for a [`VALUE_RULE_APIS`] key, whose vendored
+/// document is `source`.
+fn historical_differences_from(key: &str, historical: Value, api: &RestApi, source: Option<&std::path::Path>) -> Vec<String> {
+    let historical = normalize_historical(key, historical);
+    let stripped = without_value_rules(key, api, source);
+    let mut current = snapshot(&stripped);
+    in_historical_order(&historical, &mut current, &rebuild_reached(api, &stripped));
+    let expected = canonical(without_migrated_components(key, historical));
     for (api, name, reason) in MIGRATED_COMPONENTS.iter().filter(|(api, ..)| *api == key) {
         assert!(!reason.trim().is_empty(), "missing reason for {api} {name}");
         assert!(current["registry"].as_array().unwrap().iter().any(|entry| entry["name"] == *name), "stale migrated component: {api} {name}");
@@ -355,7 +572,11 @@ fn historical_differences(key: &str, historical: Value, api: &RestApi) -> Vec<St
 }
 
 fn assert_baseline(key: &str, text: &str) {
-    let changed = historical_differences(key, serde_json::from_str(text).unwrap(), &resolve_api(key).unwrap());
+    assert_baseline_from(key, text, None);
+}
+
+fn assert_baseline_from(key: &str, text: &str, source: Option<&std::path::Path>) {
+    let changed = historical_differences_from(key, serde_json::from_str(text).unwrap(), &resolve_api(key).unwrap(), source);
     let prefix = format!("{key}/");
     let explained: Vec<_> = EXPLAINED.iter().copied().filter(|(path, _)| path.starts_with(&prefix)).collect();
     let changed = unexplained(changed, &explained);
@@ -439,7 +660,8 @@ fn ollama_openai() {
 
 #[test]
 fn openai() {
-    assert_baseline("openai", include_str!("../fixtures/definition-baseline/openai.json"));
+    let source = biscuit_test_harness::manifest_dir!().join("../specs/openai/openapi.yaml");
+    assert_baseline_from("openai", include_str!("../fixtures/definition-baseline/openai.json"), Some(&source));
 }
 
 #[test]

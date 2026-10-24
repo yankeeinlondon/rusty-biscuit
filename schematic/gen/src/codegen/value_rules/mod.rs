@@ -10,7 +10,8 @@
 //!
 //! A rule the client cannot enforce is a [`Finding`]: a format (an
 //! annotation only), a pattern outside the enforced subset, or a rule
-//! beneath a composition. Findings become generation diagnostics and
+//! beneath a composition or a keyword the plans do not enter (see
+//! `unenforceable_rules`). Findings become generation diagnostics and
 //! rustdoc labels; a rule beneath a composition is an error unless it
 //! sits inside a member of a union that is itself a component, the shape
 //! of a Rust enum type. Rules Schemars writes for a Rust enum's own variants
@@ -552,7 +553,7 @@ impl<'a> ApiValueRules<'a> {
             if rules.pattern_unenforced {
                 self.warn(place, "pattern", "the imported pattern is outside the enforced subset".to_owned());
             } else {
-                node.pattern = self.admitted(source, place);
+                node.pattern = self.admitted(source, place, false);
             }
         }
         if let Some(format) = &rules.format
@@ -566,17 +567,18 @@ impl<'a> ApiValueRules<'a> {
         node
     }
 
-    /// The translated source of an enforceable pattern; otherwise records
-    /// why it is not enforced and returns `None`.
-    fn admitted(&mut self, source: &str, place: &str) -> Option<String> {
+    /// The translated source of an enforceable pattern, or `None`.
+    ///
+    /// Only a valid pattern outside the enforced subset in a component
+    /// schema (`report_unsupported`) is a warning here. Generator validation
+    /// already refuses an invalid pattern anywhere, and an endpoint pattern
+    /// outside the subset that is not marked unenforced, as definition errors
+    /// (`constraint_problems`), so reporting either again would duplicate it.
+    fn admitted(&mut self, source: &str, place: &str, report_unsupported: bool) -> Option<String> {
         match admit_pattern(source) {
             PatternAdmission::Enforced { translated } => Some(translated),
-            PatternAdmission::Unsupported { reason } => {
+            PatternAdmission::Unsupported { reason } if report_unsupported => {
                 self.warn(place, "pattern", format!("outside the enforced subset: {reason}"));
-                None
-            }
-            PatternAdmission::Invalid { reason } => {
-                self.warn(place, "pattern", format!("invalid pattern: {reason}"));
                 None
             }
             _ => None,
@@ -591,8 +593,8 @@ impl<'a> ApiValueRules<'a> {
     /// `component` (`None` for a wire schema); `root` is the component's
     /// own root.
     ///
-    /// Compositions other than an `Option` are not entered: their rules are
-    /// reported by [`Self::composition_findings`].
+    /// Compositions other than an `Option` or a one-member `allOf` are not
+    /// entered: their rules are reported by [`Self::composition_findings`].
     fn schema_node(&mut self, value: &Value, component: Option<usize>, root: bool, place: &str) -> Node {
         let Some(object) = value.as_object() else { return Node::default() };
         let mut node = Node {
@@ -600,7 +602,10 @@ impl<'a> ApiValueRules<'a> {
                 || object.get("type").and_then(Value::as_array).is_some_and(|types| types.iter().any(|kind| kind == "null")),
             ..Node::default()
         };
-        let mut rules = Constraints::from_schema(object);
+        // Generator validation refuses a malformed component rule
+        // (`constraint_problems`) before any plan is emitted, so a schema
+        // whose keywords do not read lowers no rules rather than some.
+        let mut rules = Constraints::from_schema(object).unwrap_or_default();
         rules.items = None;
         for keyword in ["minimum", "maximum"] {
             if is_width_bound(object, keyword) {
@@ -630,12 +635,12 @@ impl<'a> ApiValueRules<'a> {
             node.pattern = match component {
                 Some(index) => {
                     let before = self.findings.len();
-                    let pattern = self.admitted(source, place);
+                    let pattern = self.admitted(source, place, true);
                     let found: Vec<Finding> = self.findings.drain(before..).collect();
                     self.component_findings.entry(index).or_default().extend(found);
                     pattern
                 }
-                None => self.admitted(source, place),
+                None => self.admitted(source, place, true),
             };
         }
 
@@ -657,6 +662,15 @@ impl<'a> ApiValueRules<'a> {
             if node.reference.is_none() {
                 node.reference = Some(Target::Inline(Box::new(inner)));
             }
+        }
+        // Schemars writes a `$ref` with sibling keywords (a rule beside a
+        // model reference) as a one-member `allOf` holding the `$ref`.
+        if let Some(Value::Array(members)) = object.get("allOf")
+            && let [member] = members.as_slice()
+            && node.reference.is_none()
+        {
+            let inner = self.schema_node(member, component, false, place);
+            node.reference = Some(Target::Inline(Box::new(inner)));
         }
         if let Some(Value::Object(properties)) = object.get("properties") {
             let mut names: Vec<&String> = properties.keys().collect();
@@ -690,8 +704,9 @@ impl<'a> ApiValueRules<'a> {
         index
     }
 
-    /// The rules of `endpoint`'s JSON values that sit beneath a composition
-    /// or beside an unresolved reference.
+    /// The rules of `endpoint`'s JSON values that sit beneath a composition,
+    /// beneath a keyword the plans do not enter (a positional `items` list,
+    /// `prefixItems`, `contains`, ...), or beside an unresolved reference.
     fn composition_findings(&self, endpoint: &Endpoint) -> Vec<Finding> {
         let mut references: Vec<(String, &TypeRef)> = Vec::new();
         match &endpoint.request {
@@ -725,8 +740,10 @@ impl<'a> ApiValueRules<'a> {
                     keyword: rule.keyword.to_owned(),
                     reason: if union_member {
                         format!("{}, a union whose members are not checked", rule.reason)
-                    } else {
+                    } else if rule.composition.is_some() {
                         format!("{}; the client cannot check it, so remove the rule or the composition", rule.reason)
+                    } else {
+                        format!("{}; the client cannot check it, so remove the rule or restructure the schema", rule.reason)
                     },
                 });
             }
@@ -966,18 +983,27 @@ fn is_live(node: &Node, live: &[bool]) -> bool {
 
 /// `node` without the children and references that check nothing; `None`
 /// when nothing is left.
+///
+/// While the extra-value plan survives, every declared property is kept,
+/// with an empty plan when its own checks nothing: the runtime gives a key
+/// absent from the property list the extra-value plan.
 fn prune(node: &Node, live: &[bool]) -> Option<Node> {
     if !is_live(node, live) {
         return None;
     }
+    let values = node.values.as_deref().and_then(|values| prune(values, live)).map(Box::new);
+    let keep_declared = values.is_some();
     Some(Node {
         items: node.items.as_deref().and_then(|items| prune(items, live)).map(Box::new),
-        values: node.values.as_deref().and_then(|values| prune(values, live)).map(Box::new),
         properties: node
             .properties
             .iter()
-            .filter_map(|(name, child)| prune(child, live).map(|child| (name.clone(), child)))
+            .filter_map(|(name, child)| match prune(child, live) {
+                Some(child) => Some((name.clone(), child)),
+                None => keep_declared.then(|| (name.clone(), Node::default())),
+            })
             .collect(),
+        values,
         reference: match &node.reference {
             Some(Target::Component(index)) if live[*index] => Some(Target::Component(*index)),
             Some(Target::Inline(inner)) => prune(inner, live).map(|inner| Target::Inline(Box::new(inner))),

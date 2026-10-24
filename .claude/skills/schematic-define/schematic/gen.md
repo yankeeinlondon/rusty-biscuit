@@ -238,18 +238,25 @@ carry value rules (`codegen/value_rules/`) gets:
 - plans as `static`s in one private `{api_snake}_value_rules` module per API
   (`COMPONENT_{n}_{NAME}`, `{REQUEST}_{LOCATION}_{FIELD}`, `PATTERN_{n}`);
   a component reached by several requests is emitted once and recursion is
-  `Plan::reference(&ITS_OWN_STATIC)`;
+  `Plan::reference(&ITS_OWN_STATIC)`; `prune` drops what checks nothing,
+  except that a declared property beside a surviving `values` plan stays as
+  `Plan::new()`, since the runtime gives an unlisted key the `values` plan;
 - rustdoc: per-parameter "Value rules checked before sending: ..." / "Not
   checked: ..." lines and a `## Value rules` section on the request.
 
 Skipped as the Rust type's own: Schemars integer-width bounds
 (`is_width_bound`) and string `enum`/`const` that are a unit enum's value set
 or a Rust enum's variant/tag. `validate_rust_client` reports `type-constraint`
-from `value_rules::api_findings`: **error** for a rule beneath a composition
-or beside an unresolved `$ref`; **warning** for `format` (not `int32`/
-`int64`/`float`/`double`), a pattern outside the subset, and a rule inside a
+from `value_rules::api_findings`: **error** for a rule beneath a composition,
+beneath an untraversed keyword (positional `items` list, `prefixItems` — a
+tuple —, `contains`, `patternProperties`, `propertyNames`, `if`/`then`/`else`,
+`dependentSchemas`, `additionalItems`, `unevaluated*`), or beside an
+unresolved `$ref`; **warning** for `format` (not `int32`/
+`int64`/`float`/`double`), a component pattern outside the subset or an
+endpoint one marked unenforced (an invalid pattern, or an unmarked endpoint
+one outside the subset, is only the `constraint_problems` error), and a rule inside a
 member of a union component (`anyOf`/`oneOf` at a component's root — OpenAI
-`CreateResponse` has 42, pinned in `output_validation::UNCHECKED_VALUE_RULES`).
+`CreateResponse` has 50, `Getinputtokencounts` 50, `CreateConversation` 13, pinned in `output_validation::UNCHECKED_VALUE_RULES`).
 Pager-adopted parameters are not request fields; the pager checks them.
 
 ### API Client Struct

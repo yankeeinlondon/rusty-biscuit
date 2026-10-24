@@ -11,8 +11,9 @@
 //! with its bound agree, `const: c` equals `enum: [c]`, a component used
 //! only as a primitive alias contributes its rules where it is referenced,
 //! a nullable wrapper contributes the rules of its non-null member, and
-//! component nodes compare without `format` (an annotation schemars writes
-//! from the Rust type).
+//! component nodes compare without the `format` values `int64` and
+//! `double`, the annotations Schemars writes for a model field's `i64` and
+//! `f64` where the source wrote none.
 
 use std::collections::BTreeMap;
 
@@ -25,8 +26,9 @@ pub type Rules = BTreeMap<&'static str, String>;
 
 /// Every non-empty rule set of `api`: parameters (`param:{endpoint}:{in}.{name}`),
 /// form fields (`form:{endpoint}:{name}`), body roots (`body:{endpoint}`), and
-/// each component node (`schema:{component}{path}`) for the components
-/// named in `components`.
+/// each component node (`schema:{component}{path}`, through `properties`,
+/// `items`, and `additionalProperties`) for the components named in
+/// `components`.
 pub fn rule_map(api: &RestApi, components: &[&str]) -> BTreeMap<String, Rules> {
     let mut map = BTreeMap::new();
     for endpoint in &api.endpoints {
@@ -81,8 +83,10 @@ fn walk_children(api: &RestApi, object: &Map<String, Value>, at: &str, map: &mut
             walk(api, property, &format!("{at}/properties/{name}"), map);
         }
     }
-    if let Some(items) = object.get("items") {
-        walk(api, items, &format!("{at}/items"), map);
+    for keyword in ["items", "additionalProperties"] {
+        if let Some(child) = object.get(keyword) {
+            walk(api, child, &format!("{at}/{keyword}"), map);
+        }
     }
 }
 
@@ -105,11 +109,7 @@ fn nullable_member<'a>(object: &'a Map<String, Value>, keyword: &str) -> Option<
 /// it references (directly or as the only `allOf` member).
 fn node_rules(api: &RestApi, object: &Map<String, Value>) -> Rules {
     let mut rules = normalize(&schema_rules(object));
-    // Schemars writes the format a model field's Rust type implies (`int64`,
-    // `double`), and the definitions-out route does not rebuild a source
-    // format there; both are annotations, so component nodes compare without
-    // them.
-    rules.remove("format");
+    drop_type_format(&mut rules);
     let reference = object.get("$ref").or_else(|| object.get("allOf")?.as_array()?.first()?.get("$ref"));
     if let Some(name) = reference.and_then(Value::as_str).and_then(|reference| reference.rsplit('/').next())
         && let Some(target) = api.schemas.iter().find(|component| component.name == name)
@@ -118,9 +118,18 @@ fn node_rules(api: &RestApi, object: &Map<String, Value>) -> Rules {
         && matches!(target.get("type").and_then(Value::as_str), Some("integer" | "number" | "string" | "boolean"))
     {
         rules.extend(normalize(&schema_rules(target)));
-        rules.remove("format");
+        drop_type_format(&mut rules);
     }
     rules
+}
+
+/// Removes a `format` Schemars writes for the Rust type of a model field
+/// (`i64`, `f64`) where the source wrote none; a source `format` is rebuilt
+/// and compared.
+fn drop_type_format(rules: &mut Rules) {
+    if rules.get("format").is_some_and(|format| format == "int64" || format == "double") {
+        rules.remove("format");
+    }
 }
 
 /// `Constraints::from_schema`, except that a schema's `items` are compared
@@ -128,7 +137,7 @@ fn node_rules(api: &RestApi, object: &Map<String, Value>) -> Rules {
 fn schema_rules(object: &Map<String, Value>) -> Constraints {
     let mut object = object.clone();
     object.remove("items");
-    let mut rules = Constraints::from_schema(&object);
+    let mut rules = Constraints::from_schema(&object).expect("compared schemas carry well-formed rules");
     // A nullable enum lists `null`; whether the value is nullable is the
     // type's business, not the rule's.
     if let Some(values) = &mut rules.allowed_values {

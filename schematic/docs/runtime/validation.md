@@ -158,9 +158,9 @@ const VERSION: Plan = Plan::new().constant(&Literal::Number("2"));
 | Plan method | Meaning |
 | --- | --- |
 | `properties(&[Property::new("name", &plan), ..])` | each **present** property is checked by its serialized name; an absent one is not |
-| `values(&plan)` | every entry that is not a declared property (a map's values) |
+| `values(&plan)` | every entry that is not a declared property (a map's values); beside it, list every declared property, with `Plan::new()` when it checks nothing, or its entries are checked as map values |
 | `Plan::reference(&NAMED)` | check against another plan, typically a named `static`: local references and recursive models |
-| `nullable()` | JSON `null` passes every rule of this plan, including `enum`, `const`, and a reference |
+| `nullable()` | JSON `null` skips the plan's reference (a null alternative such as Schemars' `Option` of a referenced type); the plan's own `enum` and `const` still apply to it |
 
 Recursion is followed only as deep as the submitted value goes, so a
 recursive model's plan is finite:
@@ -180,8 +180,14 @@ static TREE: Plan = Plan::new().properties(&[
 | --- | --- |
 | an absent optional property or parameter | not checked |
 | a present empty string `""` or array `[]` | checked: `""` fails `min_length(1)` |
-| `null` under a `nullable()` plan | passes |
+| `null` under a `nullable()` plan | passes the kind rules and skips the reference; it must still be a member of the plan's own `enum`, or equal its `const`, when one is declared |
 | `null` otherwise | passes the kind rules (it is not a string, number, or array); it must be a member of an `enum` that declares `Literal::Null`, or equal a `const` of null |
+
+A nullable type admits the null kind; it does not add null to an
+independently declared `enum`. `{"type": ["string", "null"], "enum": ["ok"]}`
+refuses `null`, `{"type": ["string", "null"], "enum": ["ok", null]}` accepts
+it, and `{"anyOf": [{"type": "string", "enum": ["ok"]}, {"type": "null"}]}`
+accepts it because null is the other alternative.
 
 Schema `default` values are never injected.
 

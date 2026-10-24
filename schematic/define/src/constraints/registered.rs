@@ -5,7 +5,9 @@
 //! `schematic/docs/typed-registration.md#value-rules-on-registered-models`).
 //! [`unenforceable_rules`] walks a JSON body's schema through those
 //! components and lists the rules beneath a composition other than an
-//! `Option`, or beside a reference that names no component.
+//! `Option` or a one-member `allOf`, beneath a keyword the generated checks do not enter (a
+//! positional `items` list, `prefixItems`, `contains`, `patternProperties`,
+//! `if`/`then`/`else`, ...), or beside a reference that names no component.
 
 use std::collections::HashSet;
 
@@ -19,6 +21,18 @@ const RULE_KEYWORDS: [&str; 13] = [
     "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
     "multipleOf", "minItems", "maxItems", "uniqueItems", "enum", "const",
 ];
+
+/// Keywords holding subschemas that a generated client's checks do not
+/// enter, so a rule beneath one cannot be enforced. `items` is listed for
+/// its positional (list) form only; an `items` object is walked.
+const UNTRAVERSED_KEYWORDS: [&str; 13] = [
+    "items", "prefixItems", "additionalItems", "contains", "unevaluatedItems", "patternProperties", "propertyNames",
+    "unevaluatedProperties", "dependentSchemas", "dependencies", "if", "then", "else",
+];
+
+/// The [`UNTRAVERSED_KEYWORDS`] whose object value maps names to
+/// subschemas rather than being one.
+const SCHEMA_MAP_KEYWORDS: [&str; 3] = ["patternProperties", "dependentSchemas", "dependencies"];
 
 /// Prefixes of a local reference to a stored component. Schemars writes
 /// `#/components/schemas/` under the repository's settings; the other two
@@ -45,7 +59,7 @@ pub struct UnenforceableRule {
     /// Why it cannot be enforced, naming the composition or reference.
     pub reason: String,
     /// The composition the rule sits beneath; `None` when it sits beside
-    /// an unresolved reference instead.
+    /// an unresolved reference or beneath an untraversed keyword instead.
     pub composition: Option<CompositionSite>,
 }
 
@@ -70,15 +84,22 @@ struct Blocked {
     site: Option<CompositionSite>,
 }
 
-/// Every rule of the JSON body `body` that sits beneath `oneOf`, `allOf`,
-/// `not`, or an `anyOf` other than an `Option`, or beside a `$ref` that names
-/// no component of `api.schemas`, in walk order.
+/// Every rule of the JSON body `body` that sits beneath `oneOf`, `not`, an
+/// `allOf` of more than one member, an `anyOf` other than an `Option`, or a
+/// keyword whose subschemas the generated checks do not enter, or beside a
+/// `$ref` that names no component of `api.schemas`, in walk order.
+///
+/// The untraversed keywords are a positional `items` list, `prefixItems`,
+/// `additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`,
+/// `propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema
+/// form of `dependencies`, and `if`/`then`/`else`.
 ///
 /// The walk starts at `body`'s wire schema and follows component references
 /// (`#/components/schemas/{name}`, `#/$defs/{name}`, `#/definitions/{name}`,
-/// and a component's `#` to itself), `properties`, `items`, and
+/// and a component's `#` to itself), `properties`, an `items` object, and
 /// `additionalProperties`. An `anyOf` is an `Option`, and is walked through,
-/// only when it has exactly two members and one admits only `null`. Each
+/// only when it has exactly two members and one admits only `null`; an
+/// `allOf` with exactly one member is walked through too. Each
 /// component is walked at most once outside a composition and once beneath
 /// one, so a recursive model terminates.
 ///
@@ -153,24 +174,52 @@ impl<'a> Walk<'a> {
                 pointer.truncate(length);
             }
         }
+        // Only an `items` object is an array's item schema; an `items` list
+        // is positional (draft-07's spelling of `prefixItems`) and is walked
+        // with the untraversed keywords below.
         for key in ["items", "additionalProperties"] {
+            if let Some(child @ Value::Object(_)) = object.get(key) {
+                let length = push_token(pointer, key);
+                self.schema(child, component, pointer, blocked);
+                pointer.truncate(length);
+            }
+        }
+        for key in UNTRAVERSED_KEYWORDS {
+            let Some(child) = object.get(key) else { continue };
+            if key == "items" && child.is_object() {
+                continue;
+            }
+            let here = Blocked { reason: format!("beneath the `{key}` at {}, which the client does not traverse", place(component, pointer)), site: None };
+            let inner = Some(blocked.unwrap_or(&here));
             let length = push_token(pointer, key);
-            match object.get(key) {
-                // OpenAPI 3.0 settings rewrite `prefixItems` as an `items` list.
-                Some(Value::Array(members)) => self.members(members, component, pointer, blocked),
-                Some(child) => self.schema(child, component, pointer, blocked),
-                None => {}
+            match child {
+                Value::Array(members) => self.members(members, component, pointer, inner),
+                Value::Object(map) if SCHEMA_MAP_KEYWORDS.contains(&key) => {
+                    for (name, member) in map {
+                        let length = push_token(pointer, name);
+                        self.schema(member, component, pointer, inner);
+                        pointer.truncate(length);
+                    }
+                }
+                child => self.schema(child, component, pointer, inner),
             }
             pointer.truncate(length);
         }
         for key in ["anyOf", "oneOf", "allOf", "not"] {
             let Some(child) = object.get(key) else { continue };
-            let option = key == "anyOf" && child.as_array().is_some_and(|members| members.len() == 2 && members.iter().any(admits_only_null));
+            // An `Option`, and the one-member `allOf` Schemars writes for a
+            // `$ref` with sibling keywords, constrain nothing beyond their
+            // member, which the generated checks enter.
+            let transparent = match (key, child.as_array()) {
+                ("anyOf", Some(members)) => members.len() == 2 && members.iter().any(admits_only_null),
+                ("allOf", Some(members)) => members.len() == 1,
+                _ => false,
+            };
             let here = Blocked {
                 reason: format!("beneath the `{key}` at {}", place(component, pointer)),
                 site: Some(CompositionSite { component: component.map(str::to_owned), pointer: pointer.clone(), keyword: key }),
             };
-            let inner = if option { blocked } else { Some(blocked.unwrap_or(&here)) };
+            let inner = if transparent { blocked } else { Some(blocked.unwrap_or(&here)) };
             let length = push_token(pointer, key);
             match child {
                 Value::Array(members) => self.members(members, component, pointer, inner),

@@ -119,13 +119,22 @@ component body, file field, binary/form body, or WebSocket handshake param is
 an error. Numeric limits are decimal text (`"18446744073709551616"`, `"0.1"`;
 serialized as JSON strings). Endpoint/API build, bundle load, and the
 generator's `type-constraint` check all run `constraint_problems`
-(`DefinitionError::InvalidConstraint { api, problem: Box<ConstraintProblem> }`).
+(`DefinitionError::InvalidConstraint { api, problem: Box<ConstraintProblem> }`,
+`problem.site` an endpoint or a schema component). It also walks every stored
+component with `schema_rule_problems` (wrong JSON types, `null`,
+contradictions, and a rule fitting none of a declared `type`'s names;
+enum/const members are data, never filtered; import removes a component's
+type-mismatched rule with a WARN instead), and the strict
+`Constraints::from_schema` returns `Result`, so a malformed component rule is
+an error however it arrived (Schemars, import, bundle JSON).
 `admit_pattern` decides the enforced ECMAScript subset (table and test:
 `schematic/docs/value-constraints.md`); `format` is annotation-only. A pager-
 adopted page-size param takes `minimum`/`maximum` from the strategy
 (`page_size_constraints`, `adopted_page_size`); its own differing bounds or
 other rules are `page-size-constraint-conflict`. `unenforceable_rules` finds
-model rules beneath unsupported composition or unresolved refs. Generated
+model rules beneath unsupported composition, untraversed keywords (a tuple's
+`prefixItems`, positional `items`, `contains`, `patternProperties`, ...), or
+unresolved refs. Generated
 requests enforce them: a request with rules gets `validate() ->
 Result<(), schematic_runtime::validate::Violations>`, and its `into_parts`
 runs the same checks before encoding, so every send refuses with

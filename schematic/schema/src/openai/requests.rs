@@ -1158,6 +1158,10 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
 }
 /// Request for `CreateChatCompletion` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1177,6 +1181,26 @@ impl CreateChatCompletionRequest {
         body: ::schematic_definitions::openai::CreateChatCompletionRequest2,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_CHAT_COMPLETION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateChatCompletionRequest2>
@@ -1199,6 +1223,20 @@ impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_CHAT_COMPLETION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/chat/completions".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -1208,7 +1246,7 @@ impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -15917,6 +15955,10 @@ impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
 }
 /// Request for `CreateRealtimeClientSecret` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -15936,6 +15978,26 @@ impl CreateRealtimeClientSecretRequest {
         body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_REALTIME_CLIENT_SECRET_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::RealtimeCreateClientSecretRequest>
@@ -15958,6 +16020,20 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_REALTIME_CLIENT_SECRET_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/realtime/client_secrets".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -15967,7 +16043,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -16179,6 +16255,10 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
 }
 /// Request for `CreateRealtimeTranslationClientSecret` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16198,6 +16278,26 @@ impl CreateRealtimeTranslationClientSecretRequest {
         body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest,
     ) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_REALTIME_TRANSLATION_CLIENT_SECRET_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest>
@@ -16220,6 +16320,20 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_REALTIME_TRANSLATION_CLIENT_SECRET_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/realtime/translations/client_secrets".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -16229,7 +16343,7 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -16260,14 +16374,18 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 /// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
 /// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
 /// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
@@ -16280,7 +16398,9 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 /// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
@@ -16288,6 +16408,8 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 /// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 /// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
 ///
 /// ## Example
@@ -16345,6 +16467,14 @@ impl CreateResponseRequest {
                 );
             }
         }
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_RESPONSE_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
         violations.into_result()
     }
     /// Sets the `beta` query parameter.
@@ -16395,6 +16525,18 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
                 );
             }
         }
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_RESPONSE_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
         violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
@@ -16417,7 +16559,7 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -18671,6 +18813,26 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
 }
 /// Request for `CreateConversation` endpoint.
 ///
+/// ## Value rules
+///
+/// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `EasyInputMessage` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `EasyInputMessage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `CompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `ProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+///
 /// ## Example
 ///
 /// ```no_run
@@ -18688,6 +18850,26 @@ impl CreateConversationRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(body: ::schematic_definitions::openai::CreateConversationBody) -> Self {
         Self { body }
+    }
+    /// Checks the request's declared value rules, as every send does
+    /// before any network work, and returns every violation.
+    ///
+    /// A violation names the value's location, the rule's keyword, and
+    /// a reason; it never holds the submitted value. A send reports
+    /// the same violations as one `InvalidArgument`. A JSON value is
+    /// checked as it serializes; one that cannot be serialized is not
+    /// reported here, and sending it fails instead.
+    pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::CREATE_CONVERSATION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
+        violations.into_result()
     }
 }
 impl From<::schematic_definitions::openai::CreateConversationBody>
@@ -18708,6 +18890,20 @@ impl schematic_runtime::EndpointSpec for CreateConversationRequest {
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let mut violations = schematic_runtime::validate::Violations::new();
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::CREATE_CONVERSATION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
+        violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/conversations".to_string();
         let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
@@ -18717,7 +18913,7 @@ impl schematic_runtime::EndpointSpec for CreateConversationRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -20220,6 +20416,59 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
+/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+///
 /// ## Example
 ///
 /// ```no_run
@@ -20275,6 +20524,14 @@ impl GetinputtokencountsRequest {
                 );
             }
         }
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::GETINPUTTOKENCOUNTS_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
         violations.into_result()
     }
     /// Sets the `beta` query parameter.
@@ -20325,6 +20582,18 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
                 );
             }
         }
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::GETINPUTTOKENCOUNTS_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
         violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses/input_tokens".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
@@ -20347,7 +20616,7 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -20420,6 +20689,14 @@ impl CompactconversationRequest {
                 );
             }
         }
+        if let Ok(body) = serde_json::to_value(&self.body) {
+            schematic_runtime::validate::check_value(
+                &body,
+                &open_ai_value_rules::COMPACTCONVERSATION_REQUEST_BODY,
+                &[schematic_runtime::validate::PathSegment::Name("body")],
+                &mut violations,
+            );
+        }
         violations.into_result()
     }
     /// Sets the `beta` query parameter.
@@ -20472,6 +20749,18 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
                 );
             }
         }
+        let body = serde_json::to_value(&self.body)
+            .map_err(|_| {
+                schematic_runtime::InvalidArgument::new(
+                    "the request body cannot be serialized as JSON",
+                )
+            })?;
+        schematic_runtime::validate::check_value(
+            &body,
+            &open_ai_value_rules::COMPACTCONVERSATION_REQUEST_BODY,
+            &[schematic_runtime::validate::PathSegment::Name("body")],
+            &mut violations,
+        );
         violations.into_result().map_err(schematic_runtime::InvalidArgument::from)?;
         let path = "/responses/compact".to_string();
         let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
@@ -20494,7 +20783,7 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
+                serde_json::to_string(&body)
                     .map_err(|_| {
                         schematic_runtime::InvalidArgument::new(
                             "the request body cannot be serialized as JSON",
@@ -21557,6 +21846,9 @@ mod open_ai_value_rules {
     pub(super) static CREATE_BATCH_REQUEST_BODY: Plan = Plan::reference(
         &COMPONENT_3_CREATE_BATCH_REQUEST2,
     );
+    pub(super) static CREATE_CHAT_COMPLETION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_6_CREATE_CHAT_COMPLETION_REQUEST2,
+    );
     pub(super) static CREATE_COMPLETION_REQUEST_BODY: Plan = Plan::reference(
         &COMPONENT_8_CREATE_COMPLETION_REQUEST2,
     );
@@ -21757,14 +22049,23 @@ mod open_ai_value_rules {
     pub(super) static ACCEPT_REALTIME_CALL_REQUEST_BODY: Plan = Plan::reference(
         &COMPONENT_57_REALTIME_SESSION_CREATE_REQUEST_GA,
     );
+    pub(super) static CREATE_REALTIME_CLIENT_SECRET_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_68_REALTIME_CREATE_CLIENT_SECRET_REQUEST,
+    );
     pub(super) static CREATE_REALTIME_SESSION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_65_REALTIME_SESSION_CREATE_REQUEST,
+        &COMPONENT_69_REALTIME_SESSION_CREATE_REQUEST,
     );
     pub(super) static CREATE_REALTIME_TRANSCRIPTION_SESSION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_66_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST,
+        &COMPONENT_70_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST,
+    );
+    pub(super) static CREATE_REALTIME_TRANSLATION_CLIENT_SECRET_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_71_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST,
     );
     pub(super) static CREATE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static CREATE_RESPONSE_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_73_BETA_CREATE_RESPONSE,
+    );
     pub(super) static GET_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static DELETE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
@@ -21774,44 +22075,53 @@ mod open_ai_value_rules {
     pub(super) static LIST_INPUT_ITEMS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static CREATE_UPLOAD_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_80_CREATE_UPLOAD_REQUEST2,
+        &COMPONENT_83_CREATE_UPLOAD_REQUEST2,
     );
     pub(super) static CREATE_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_83_CREATE_VECTOR_STORE_REQUEST2,
+        &COMPONENT_86_CREATE_VECTOR_STORE_REQUEST2,
     );
     pub(super) static CREATE_VECTOR_STORE_FILE_BATCH_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_86_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2,
+        &COMPONENT_89_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2,
     );
     pub(super) static SEARCH_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_90_VECTOR_STORE_SEARCH_REQUEST,
+        &COMPONENT_93_VECTOR_STORE_SEARCH_REQUEST,
+    );
+    pub(super) static CREATE_CONVERSATION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_94_CREATE_CONVERSATION_BODY,
     );
     pub(super) static UPDATEORGANIZATIONSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_93_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY,
+        &COMPONENT_97_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY,
     );
     pub(super) static UPDATEPROJECTSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_94_UPDATE_PROJECT_SPEND_LIMIT_BODY,
+        &COMPONENT_98_UPDATE_PROJECT_SPEND_LIMIT_BODY,
     );
     pub(super) static CREATE_VIDEO_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_96_CREATE_VIDEO_JSON_BODY,
+        &COMPONENT_100_CREATE_VIDEO_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_CHARACTER_REQUEST_FORM_NAME: Plan = Plan::new()
         .min_length(1u64)
         .max_length(80u64);
     pub(super) static CREATE_VIDEO_EDIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_101_CREATE_VIDEO_EDIT_JSON_BODY,
+        &COMPONENT_105_CREATE_VIDEO_EDIT_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_EXTEND_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_103_CREATE_VIDEO_EXTEND_JSON_BODY,
+        &COMPONENT_107_CREATE_VIDEO_EXTEND_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_REMIX_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_104_CREATE_VIDEO_REMIX_BODY,
+        &COMPONENT_108_CREATE_VIDEO_REMIX_BODY,
     );
     pub(super) static GETINPUTTOKENCOUNTS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static GETINPUTTOKENCOUNTS_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_109_BETA_TOKEN_COUNTS_BODY,
+    );
     pub(super) static COMPACTCONVERSATION_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
+    pub(super) static COMPACTCONVERSATION_REQUEST_BODY: Plan = Plan::reference(
+        &COMPONENT_115_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY,
+    );
     pub(super) static CREATE_CHAT_SESSION_METHOD_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_113_CREATE_CHAT_SESSION_BODY,
+        &COMPONENT_125_CREATE_CHAT_SESSION_BODY,
     );
     pub(super) static LIST_THREADS_METHOD_REQUEST_QUERY_USER: Plan = Plan::new()
         .min_length(1u64)
@@ -21836,7 +22146,6 @@ mod open_ai_value_rules {
                                 Literal::String("flac"),
                                 Literal::String("wav"),
                                 Literal::String("pcm"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -21849,11 +22158,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("sse"),
-                                Literal::String("audio"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("sse"), Literal::String("audio")],
                         ),
                 ),
             ],
@@ -21900,6 +22205,37 @@ mod open_ai_value_rules {
                 Property::new("seconds", &Plan::new().minimum("3600").maximum("2592000")),
             ],
         );
+    pub(super) static COMPONENT_6_CREATE_CHAT_COMPLETION_REQUEST2: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt_cache_retention",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("in_memory"), Literal::String("24h")],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "safety_identifier",
+                    &Plan::reference(&Plan::new().max_length(64u64)).nullable(),
+                ),
+                Property::new(
+                    "temperature",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("2")).nullable(),
+                ),
+                Property::new(
+                    "top_logprobs",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("20")).nullable(),
+                ),
+                Property::new(
+                    "top_p",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("1")).nullable(),
+                ),
+            ],
+        );
     pub(super) static COMPONENT_8_CREATE_COMPLETION_REQUEST2: Plan = Plan::new()
         .properties(
             &[
@@ -21932,6 +22268,19 @@ mod open_ai_value_rules {
         .properties(
             &[
                 Property::new(
+                    "expires_after",
+                    &Plan::new()
+                        .properties(
+                            &[
+                                Property::new(
+                                    "anchor",
+                                    &Plan::new()
+                                        .allowed_values(&[Literal::String("last_active_at")]),
+                                ),
+                            ],
+                        ),
+                ),
+                Property::new(
                     "memory_limit",
                     &Plan::new()
                         .nullable()
@@ -21941,7 +22290,6 @@ mod open_ai_value_rules {
                                 Literal::String("4g"),
                                 Literal::String("16g"),
                                 Literal::String("64g"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -21956,11 +22304,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("float"),
-                                Literal::String("base64"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("float"), Literal::String("base64")],
                         ),
                 ),
             ],
@@ -22035,7 +22379,6 @@ mod open_ai_value_rules {
                                 Literal::String("low"),
                                 Literal::String("medium"),
                                 Literal::String("high"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -22045,6 +22388,20 @@ mod open_ai_value_rules {
         .properties(
             &[
                 Property::new(
+                    "background",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("transparent"),
+                                        Literal::String("opaque"),
+                                        Literal::String("auto"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
                     "images",
                     &Plan::new()
                         .min_items(1u64)
@@ -22052,13 +22409,85 @@ mod open_ai_value_rules {
                         .items(&Plan::reference(&COMPONENT_28_IMAGE_REF_PARAM)),
                 ),
                 Property::new(
+                    "input_fidelity",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("high"), Literal::String("low")],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
                     "mask",
                     &Plan::reference(&Plan::reference(&COMPONENT_28_IMAGE_REF_PARAM))
                         .nullable(),
                 ),
                 Property::new(
+                    "moderation",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("low"), Literal::String("auto")],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "n",
+                    &Plan::reference(&Plan::new().minimum("1").maximum("10")).nullable(),
+                ),
+                Property::new(
+                    "output_compression",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("100")).nullable(),
+                ),
+                Property::new(
+                    "output_format",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("png"),
+                                        Literal::String("jpeg"),
+                                        Literal::String("webp"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
                     "prompt",
                     &Plan::new().min_length(1u64).max_length(32000u64),
+                ),
+                Property::new(
+                    "quality",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("low"),
+                                        Literal::String("medium"),
+                                        Literal::String("high"),
+                                        Literal::String("auto"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "size",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("auto"),
+                                        Literal::String("1024x1024"),
+                                        Literal::String("1536x1024"),
+                                        Literal::String("1024x1536"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
                 ),
             ],
         );
@@ -22083,7 +22512,6 @@ mod open_ai_value_rules {
                                 Literal::String("transparent"),
                                 Literal::String("opaque"),
                                 Literal::String("auto"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -22092,11 +22520,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("low"),
-                                Literal::String("auto"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("low"), Literal::String("auto")],
                         ),
                 ),
                 Property::new("n", &Plan::new().nullable().minimum("1").maximum("10")),
@@ -22109,7 +22533,6 @@ mod open_ai_value_rules {
                                 Literal::String("png"),
                                 Literal::String("jpeg"),
                                 Literal::String("webp"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -22125,7 +22548,6 @@ mod open_ai_value_rules {
                                 Literal::String("medium"),
                                 Literal::String("high"),
                                 Literal::String("auto"),
-                                Literal::Null,
                             ],
                         ),
                 ),
@@ -22134,11 +22556,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("url"),
-                                Literal::String("b64_json"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("url"), Literal::String("b64_json")],
                         ),
                 ),
                 Property::new(
@@ -22146,11 +22564,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("vivid"),
-                                Literal::String("natural"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("vivid"), Literal::String("natural")],
                         ),
                 ),
             ],
@@ -22192,6 +22606,25 @@ mod open_ai_value_rules {
     pub(super) static COMPONENT_40_INVITE_REQUEST: Plan = Plan::new()
         .properties(
             &[
+                Property::new(
+                    "projects",
+                    &Plan::new()
+                        .nullable()
+                        .items(
+                            &Plan::new()
+                                .properties(
+                                    &[
+                                        Property::new(
+                                            "role",
+                                            &Plan::new()
+                                                .allowed_values(
+                                                    &[Literal::String("member"), Literal::String("owner")],
+                                                ),
+                                        ),
+                                    ],
+                                ),
+                        ),
+                ),
                 Property::new(
                     "role",
                     &Plan::new()
@@ -22243,11 +22676,7 @@ mod open_ai_value_rules {
                     &Plan::new()
                         .nullable()
                         .allowed_values(
-                            &[
-                                Literal::String("member"),
-                                Literal::String("owner"),
-                                Literal::Null,
-                            ],
+                            &[Literal::String("member"), Literal::String("owner")],
                         ),
                 ),
             ],
@@ -22283,6 +22712,38 @@ mod open_ai_value_rules {
         .properties(
             &[
                 Property::new(
+                    "audio",
+                    &Plan::new()
+                        .properties(
+                            &[
+                                Property::new(
+                                    "input",
+                                    &Plan::new()
+                                        .properties(
+                                            &[
+                                                Property::new(
+                                                    "transcription",
+                                                    &Plan::reference(&COMPONENT_60_AUDIO_TRANSCRIPTION),
+                                                ),
+                                            ],
+                                        ),
+                                ),
+                                Property::new(
+                                    "output",
+                                    &Plan::new()
+                                        .properties(
+                                            &[
+                                                Property::new(
+                                                    "speed",
+                                                    &Plan::new().minimum("0.25").maximum("1.5"),
+                                                ),
+                                            ],
+                                        ),
+                                ),
+                            ],
+                        ),
+                ),
+                Property::new(
                     "include",
                     &Plan::new()
                         .nullable()
@@ -22312,16 +22773,84 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_65_REALTIME_SESSION_CREATE_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_60_AUDIO_TRANSCRIPTION: Plan = Plan::new()
         .properties(
             &[
+                Property::new(
+                    "delay",
+                    &Plan::new()
+                        .nullable()
+                        .allowed_values(
+                            &[
+                                Literal::String("minimal"),
+                                Literal::String("low"),
+                                Literal::String("medium"),
+                                Literal::String("high"),
+                                Literal::String("xhigh"),
+                            ],
+                        ),
+                ),
+                Property::new("languages", &Plan::new().nullable().min_items(1u64)),
+            ],
+        );
+    pub(super) static COMPONENT_68_REALTIME_CREATE_CLIENT_SECRET_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "expires_after",
+                    &Plan::new()
+                        .properties(
+                            &[
+                                Property::new(
+                                    "anchor",
+                                    &Plan::new()
+                                        .allowed_values(&[Literal::String("created_at")]),
+                                ),
+                                Property::new(
+                                    "seconds",
+                                    &Plan::new().minimum("10").maximum("7200"),
+                                ),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_69_REALTIME_SESSION_CREATE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "modalities",
+                    &Plan::new()
+                        .items(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("text"), Literal::String("audio")],
+                                ),
+                        ),
+                ),
                 Property::new(
                     "speed",
                     &Plan::new().nullable().minimum("0.25").maximum("1.5"),
                 ),
+                Property::new(
+                    "tools",
+                    &Plan::new()
+                        .nullable()
+                        .items(
+                            &Plan::new()
+                                .properties(
+                                    &[
+                                        Property::new(
+                                            "type",
+                                            &Plan::new().allowed_values(&[Literal::String("function")]),
+                                        ),
+                                    ],
+                                ),
+                        ),
+                ),
             ],
         );
-    pub(super) static COMPONENT_66_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_70_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22346,45 +22875,89 @@ mod open_ai_value_rules {
                                 Literal::String("pcm16"),
                                 Literal::String("g711_ulaw"),
                                 Literal::String("g711_alaw"),
-                                Literal::Null,
                             ],
                         ),
                 ),
                 Property::new(
                     "input_audio_transcription",
-                    &Plan::reference(&Plan::reference(&COMPONENT_67_AUDIO_TRANSCRIPTION))
+                    &Plan::reference(&Plan::reference(&COMPONENT_60_AUDIO_TRANSCRIPTION))
                         .nullable(),
                 ),
-            ],
-        );
-    pub(super) static COMPONENT_67_AUDIO_TRANSCRIPTION: Plan = Plan::new()
-        .properties(
-            &[
                 Property::new(
-                    "delay",
+                    "turn_detection",
                     &Plan::new()
-                        .nullable()
-                        .allowed_values(
+                        .properties(
                             &[
-                                Literal::String("minimal"),
-                                Literal::String("low"),
-                                Literal::String("medium"),
-                                Literal::String("high"),
-                                Literal::String("xhigh"),
-                                Literal::Null,
+                                Property::new(
+                                    "type",
+                                    &Plan::new()
+                                        .allowed_values(&[Literal::String("server_vad")]),
+                                ),
                             ],
                         ),
                 ),
-                Property::new("languages", &Plan::new().nullable().min_items(1u64)),
             ],
         );
-    pub(super) static COMPONENT_80_CREATE_UPLOAD_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_71_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "expires_after",
+                    &Plan::new()
+                        .properties(
+                            &[
+                                Property::new(
+                                    "anchor",
+                                    &Plan::new()
+                                        .allowed_values(&[Literal::String("created_at")]),
+                                ),
+                                Property::new(
+                                    "seconds",
+                                    &Plan::new().minimum("10").maximum("7200"),
+                                ),
+                            ],
+                        ),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_73_BETA_CREATE_RESPONSE: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt_cache_retention",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[Literal::String("in_memory"), Literal::String("24h")],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "safety_identifier",
+                    &Plan::reference(&Plan::new().max_length(64u64)).nullable(),
+                ),
+                Property::new(
+                    "temperature",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("2")).nullable(),
+                ),
+                Property::new(
+                    "top_logprobs",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("20")).nullable(),
+                ),
+                Property::new(
+                    "top_p",
+                    &Plan::reference(&Plan::new().minimum("0").maximum("1")).nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_83_CREATE_UPLOAD_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_81_FILE_EXPIRATION_AFTER),
+                            &Plan::reference(&COMPONENT_84_FILE_EXPIRATION_AFTER),
                         )
                         .nullable(),
                 ),
@@ -22402,7 +22975,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_81_FILE_EXPIRATION_AFTER: Plan = Plan::new()
+    pub(super) static COMPONENT_84_FILE_EXPIRATION_AFTER: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22412,20 +22985,20 @@ mod open_ai_value_rules {
                 Property::new("seconds", &Plan::new().minimum("3600").maximum("2592000")),
             ],
         );
-    pub(super) static COMPONENT_83_CREATE_VECTOR_STORE_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_86_CREATE_VECTOR_STORE_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_84_VECTOR_STORE_EXPIRATION_AFTER),
+                            &Plan::reference(&COMPONENT_87_VECTOR_STORE_EXPIRATION_AFTER),
                         )
                         .nullable(),
                 ),
                 Property::new("file_ids", &Plan::new().nullable().max_items(500u64)),
             ],
         );
-    pub(super) static COMPONENT_84_VECTOR_STORE_EXPIRATION_AFTER: Plan = Plan::new()
+    pub(super) static COMPONENT_87_VECTOR_STORE_EXPIRATION_AFTER: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22435,7 +23008,7 @@ mod open_ai_value_rules {
                 Property::new("days", &Plan::new().minimum("1").maximum("365")),
             ],
         );
-    pub(super) static COMPONENT_86_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_89_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22448,16 +23021,48 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_90_VECTOR_STORE_SEARCH_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_93_VECTOR_STORE_SEARCH_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "max_num_results",
                     &Plan::new().nullable().minimum("1").maximum("50"),
                 ),
+                Property::new(
+                    "ranking_options",
+                    &Plan::new()
+                        .properties(
+                            &[
+                                Property::new(
+                                    "ranker",
+                                    &Plan::new()
+                                        .allowed_values(
+                                            &[
+                                                Literal::String("none"),
+                                                Literal::String("auto"),
+                                                Literal::String("default-2024-11-15"),
+                                            ],
+                                        ),
+                                ),
+                                Property::new(
+                                    "score_threshold",
+                                    &Plan::new().minimum("0").maximum("1"),
+                                ),
+                            ],
+                        ),
+                ),
             ],
         );
-    pub(super) static COMPONENT_93_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_94_CREATE_CONVERSATION_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "items",
+                    &Plan::reference(&Plan::new().max_items(20u64)).nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_97_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22471,7 +23076,7 @@ mod open_ai_value_rules {
                 Property::new("threshold_amount", &Plan::new().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_94_UPDATE_PROJECT_SPEND_LIMIT_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_98_UPDATE_PROJECT_SPEND_LIMIT_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22485,12 +23090,12 @@ mod open_ai_value_rules {
                 Property::new("threshold_amount", &Plan::new().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_96_CREATE_VIDEO_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_100_CREATE_VIDEO_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "input_reference",
-                    &Plan::reference(&Plan::reference(&COMPONENT_97_IMAGE_REF_PARAM2))
+                    &Plan::reference(&Plan::reference(&COMPONENT_101_IMAGE_REF_PARAM2))
                         .nullable(),
                 ),
                 Property::new(
@@ -22499,7 +23104,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_97_IMAGE_REF_PARAM2: Plan = Plan::new()
+    pub(super) static COMPONENT_101_IMAGE_REF_PARAM2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22508,7 +23113,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_101_CREATE_VIDEO_EDIT_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_105_CREATE_VIDEO_EDIT_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22517,7 +23122,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_103_CREATE_VIDEO_EXTEND_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_107_CREATE_VIDEO_EXTEND_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22526,7 +23131,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_104_CREATE_VIDEO_REMIX_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_108_CREATE_VIDEO_REMIX_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22535,47 +23140,113 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_113_CREATE_CHAT_SESSION_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_109_BETA_TOKEN_COUNTS_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "reasoning",
+                    &Plan::reference(&Plan::reference(&COMPONENT_111_BETA_REASONING))
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_111_BETA_REASONING: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "context",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("auto"),
+                                        Literal::String("current_turn"),
+                                        Literal::String("all_turns"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "generate_summary",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("auto"),
+                                        Literal::String("concise"),
+                                        Literal::String("detailed"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "summary",
+                    &Plan::reference(
+                            &Plan::new()
+                                .allowed_values(
+                                    &[
+                                        Literal::String("auto"),
+                                        Literal::String("concise"),
+                                        Literal::String("detailed"),
+                                    ],
+                                ),
+                        )
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_115_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "prompt_cache_key",
+                    &Plan::reference(&Plan::new().max_length(64u64)).nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_125_CREATE_CHAT_SESSION_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "chatkit_configuration",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_114_CHATKIT_CONFIGURATION_PARAM),
+                            &Plan::reference(&COMPONENT_126_CHATKIT_CONFIGURATION_PARAM),
                         )
                         .nullable(),
                 ),
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_118_EXPIRES_AFTER_PARAM),
+                            &Plan::reference(&COMPONENT_130_EXPIRES_AFTER_PARAM),
                         )
                         .nullable(),
                 ),
                 Property::new(
                     "rate_limits",
-                    &Plan::reference(&Plan::reference(&COMPONENT_119_RATE_LIMITS_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_131_RATE_LIMITS_PARAM))
                         .nullable(),
                 ),
                 Property::new("user", &Plan::new().min_length(1u64)),
             ],
         );
-    pub(super) static COMPONENT_114_CHATKIT_CONFIGURATION_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_126_CHATKIT_CONFIGURATION_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "file_upload",
-                    &Plan::reference(&Plan::reference(&COMPONENT_116_FILE_UPLOAD_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_128_FILE_UPLOAD_PARAM))
                         .nullable(),
                 ),
                 Property::new(
                     "history",
-                    &Plan::reference(&Plan::reference(&COMPONENT_117_HISTORY_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_129_HISTORY_PARAM))
                         .nullable(),
                 ),
             ],
         );
-    pub(super) static COMPONENT_116_FILE_UPLOAD_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_128_FILE_UPLOAD_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22585,11 +23256,11 @@ mod open_ai_value_rules {
                 Property::new("max_files", &Plan::new().nullable().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_117_HISTORY_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_129_HISTORY_PARAM: Plan = Plan::new()
         .properties(
             &[Property::new("recent_threads", &Plan::new().nullable().minimum("1"))],
         );
-    pub(super) static COMPONENT_118_EXPIRES_AFTER_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_130_EXPIRES_AFTER_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22599,7 +23270,7 @@ mod open_ai_value_rules {
                 Property::new("seconds", &Plan::new().minimum("1").maximum("600")),
             ],
         );
-    pub(super) static COMPONENT_119_RATE_LIMITS_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_131_RATE_LIMITS_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(

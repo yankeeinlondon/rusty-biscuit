@@ -117,11 +117,47 @@ stored component schema keeps a value no JSON number holds exactly in an
 `x-schematic-exact` member that `openapi::serialize` writes back, Boolean
 3.0 exclusive bounds become numeric ones, and `const` is kept. Rules land in
 `ParamDef`/`FormField`/`request_constraints`; see
-`schematic/docs/io/import-openapi.md#value-constraints`.
+`schematic/docs/io/import-openapi.md#value-constraints`. A malformed or
+contradictory rule (`schema_rule_problems`: low bound above high, empty
+interval, `multipleOf <= 0`, empty `enum`, invalid pattern) in any parameter,
+body, form field, or component fails the import in either mode
+(`OpenApiError::Validation` at the keyword; first one recorded via
+`RefResolver::reject`). Only a rule that does not fit its input's type is
+dropped, one keyword at a time, with a WARN. The source capture also records
+the 3.1 subschema keywords `openapiv3` drops (`DROPPED_KEYWORDS`: `if`,
+`prefixItems`, `contains`, ...) so they are warned, not lost: a parameter,
+form field, or body rule warns its own, and the builder warns every other
+captured pointer (components, nested body and form schemas, responses).
 `--definitions-out` re-emits them: endpoint rules as `Constraints` builder
-calls (numbers as text), model-field rules as one `#[schemars(extend(..))]`
-read from the stored component schema (never native `length`/`range`, which
-drop silently on mismatched types). Export writes every rule in 3.0 spelling,
+calls (numbers as text), model rules as `#[schemars(extend(..))]` read from
+the stored component schema (never native `length`/`range`, which drop
+silently on mismatched types): per field, and per model for root and
+extra-property (`additionalProperties`) rules. The Rust type picks where a
+rule goes, and (except beneath a free-form value, below) never whether it stays: `format` (annotation), map values and
+array items (over the Schemars slot schema, `$ref` for a model), a rule
+beside a model `$ref` (written on the field, so Schemars' `RemoveRefSiblings`
+makes a one-member `allOf` that `unenforceable_rules` and the value-rule
+plans treat as the reference), and every nested `properties`/`items`/
+`additionalProperties` rule of a `serde_json::Value` field, untyped. Beneath
+a `serde_json::Value` field, a `$ref` to a model with rules stays a
+reference (written by a `schema_with` function calling
+`generator.subschema_for::<Model>()`, so the model is registered wherever the
+type is reached). The two wrappers the value-rule plans pass through are
+rebuilt in source shape when their member has rules: a nullable alternative
+(two-member `anyOf`, exactly one member `admits_only_null`, copied as
+written) and a one-member `allOf` without a sibling `$ref`; nested wrappers
+recurse. Any other `allOf`/`anyOf`/`oneOf`/`not` beneath a
+`serde_json::Value` field is not rebuilt, `$ref`s inside it included: its
+rules are not in the rebuilt definition, so a client generated from it
+neither checks nor reports them (the direct import errors on them). A
+rebuilt nullable `anyOf [{$ref}, null]` registers byte-identical to
+Schemars' own `Option<Model>`, so `definition_baseline` undoes it only on
+fields the importer types as free-form. `--definitions-out` fails the
+import (`RuleSource::finish`, before writing) for a ruled plain alias
+reached again through a free-form value, and for a plain-alias JSON body
+whose rules reach past root and item rules (`properties`,
+`additionalProperties`, a ruled `$ref`), since `Constraints` cannot hold
+them; the fix is naming the item/object schema. Export writes every rule in 3.0 spelling,
 including an adopted page size's strategy bounds. An imported page-size
 parameter's source bounds must agree with the overlay's strategy
 (`openai_pagination::align_page_size_bounds`). Acceptance:
@@ -209,7 +245,8 @@ rules and examples in `schematic/docs/io/export-openapi.md#how-component-schemas
 - Both schemars dialects convert: root `nullable`, nested 2020-12 `type: [T, "null"]`,
   `const` (→ one-value `enum`), `{type: "null"}` members.
 - Nullable `$ref`/composition → `anyOf: [X, {type: object, nullable: true, enum: [null]}]`;
-  nullable enum keeps `null` in `enum`; several types → `anyOf` (never `oneOf`).
+  an `enum` keeps its members (a nullable type never adds `null`; only a merged
+  `anyOf` member beside a null alternative does); several types → `anyOf` (never `oneOf`).
 - A bare `$ref` stays bare; one with siblings becomes `allOf: [{$ref}]` + siblings.
 - `"default": null` is dropped (openapiv3 reparse would lose it anyway).
 - An inexpressible keyword fails export with `OpenApiError::UnsupportedFeature`

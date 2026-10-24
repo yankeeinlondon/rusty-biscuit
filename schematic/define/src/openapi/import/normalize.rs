@@ -7,7 +7,7 @@
 //! parseable. The importer reads constraint values from the capture, never
 //! from the narrowed parse.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use biscuit_file::serde_yaml_ng;
@@ -24,13 +24,25 @@ use crate::constraints::{ConstraintNumber, NUMERIC_KEYWORDS, is_data_keyword, se
 pub(crate) struct SourceKeywords {
     numbers: BTreeMap<String, String>,
     constants: BTreeMap<String, Value>,
+    /// Pointers of the [`DROPPED_KEYWORDS`] present in the source.
+    dropped: BTreeSet<String>,
 }
 
 /// The capture of a document that was not read from text.
-pub(crate) static NO_SOURCE_KEYWORDS: SourceKeywords = SourceKeywords { numbers: BTreeMap::new(), constants: BTreeMap::new() };
+pub(crate) static NO_SOURCE_KEYWORDS: SourceKeywords =
+    SourceKeywords { numbers: BTreeMap::new(), constants: BTreeMap::new(), dropped: BTreeSet::new() };
+
+/// JSON Schema keywords holding subschemas that OpenAPI 3.0 does not
+/// define, so `openapiv3` drops them without a trace. The capture records
+/// where each appears, so a rule they carry is reported, not lost silently.
+pub(crate) const DROPPED_KEYWORDS: [&str; 12] = [
+    "prefixItems", "additionalItems", "contains", "unevaluatedItems", "patternProperties", "propertyNames",
+    "unevaluatedProperties", "dependentSchemas", "dependencies", "if", "then", "else",
+];
 
 /// Value keywords that `openapiv3` reads as an `Option`, so an explicit
-/// `null` would silently read as absent; the capture refuses one instead.
+/// `null` would silently read as absent; the capture refuses one instead,
+/// and an empty `enum`, which `openapiv3` likewise does not write back.
 const NULL_CHECKED: &[&str] = &["minLength", "maxLength", "minItems", "maxItems", "uniqueItems", "pattern", "format", "enum"];
 
 /// Object keys whose children are names, not schema keywords: a property
@@ -75,6 +87,18 @@ impl SourceKeywords {
         self.restore(&mut value, pointer);
         crate::constraints::normalize_exclusive_flags(&mut value);
         value
+    }
+
+    /// The [`DROPPED_KEYWORDS`] written directly in the source schema
+    /// object at `pointer`, in keyword order.
+    pub(crate) fn dropped_at(&self, pointer: &str) -> Vec<&'static str> {
+        DROPPED_KEYWORDS.into_iter().filter(|keyword| self.dropped.contains(&format!("{pointer}/{keyword}"))).collect()
+    }
+
+    /// The pointer of every [`DROPPED_KEYWORDS`] entry in the source, in
+    /// pointer order.
+    pub(crate) fn dropped(&self) -> impl Iterator<Item = &str> {
+        self.dropped.iter().map(String::as_str)
     }
 
     /// Restores captured values throughout the subtree `value` found at
@@ -155,8 +179,15 @@ impl<'de> Visitor<'de> for Walker<'_> {
                 };
                 self.record_number(pointer, &text).map_err(A::Error::custom)?;
             } else if !self.names && NULL_CHECKED.contains(&key.as_str()) {
-                if map.next_value_seed(ValueSeed)?.is_null() {
-                    let message = format!("`{key}` is null; a keyword is either absent or holds a value");
+                let value = map.next_value_seed(ValueSeed)?;
+                // `openapiv3` writes no `enum` for an empty list, which
+                // would turn "no value is allowed" into "any value is".
+                let refused = match &value {
+                    Value::Null => Some(format!("`{key}` is null; a keyword is either absent or holds a value")),
+                    Value::Array(values) if key == "enum" && values.is_empty() => Some("`enum` must list at least one value".to_owned()),
+                    _ => None,
+                };
+                if let Some(message) = refused {
                     self.state.unrepresentable = Some((pointer, message.clone()));
                     return Err(A::Error::custom(message));
                 }
@@ -166,6 +197,9 @@ impl<'de> Visitor<'de> for Walker<'_> {
             } else if !self.names && is_data_keyword(&key) {
                 map.next_value::<IgnoredAny>()?;
             } else {
+                if !self.names && DROPPED_KEYWORDS.contains(&key.as_str()) {
+                    self.state.keywords.dropped.insert(pointer.clone());
+                }
                 let names = !self.names && NAME_MAPS.contains(&key.as_str());
                 map.next_value_seed(Walker { state: &mut *self.state, pointer, names, json: self.json })?;
             }

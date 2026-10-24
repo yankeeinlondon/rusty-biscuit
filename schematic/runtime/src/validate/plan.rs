@@ -99,13 +99,15 @@ impl Plan {
         plan
     }
 
-    /// JSON `null` passes every rule of this plan, including `enum`,
-    /// `const`, and a reference: the schema admits null alongside its
-    /// constrained kind (`nullable: true`, `type: [T, "null"]`, or an
-    /// `anyOf` of the value and null).
+    /// JSON `null` skips this plan's [reference](Plan::reference): the
+    /// schema admits null as an alternative to the referenced one (an
+    /// `anyOf` of the value and null, or a nullable `$ref`).
     ///
-    /// Without it, `null` is checked like any value: it passes the kind
-    /// rules and must be a member of an `enum` that declares one.
+    /// Null passes the kind rules either way, since it is not a string,
+    /// number, or array. This plan's own `enum` and `const` still apply: a
+    /// nullable type (`nullable: true`, `type: [T, "null"]`) admits the JSON
+    /// kind but does not add null to an independently declared `enum`, so
+    /// null must be one of its members.
     pub const fn nullable(mut self) -> Self {
         self.nullable = true;
         self

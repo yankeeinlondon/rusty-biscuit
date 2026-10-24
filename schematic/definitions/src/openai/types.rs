@@ -11,6 +11,7 @@ use std::collections::HashMap;
 #[derive(JsonSchema)]
 pub struct AddUploadPartRequest2 {
     ///The chunk of bytes for this Part.
+    #[schemars(extend("format" = "binary"))]
     pub data: String,
 }
 impl schematic_define::Registration for AddUploadPartRequest2 {
@@ -38,10 +39,14 @@ pub struct AdminApiKey {
     ///The redacted value of the API key
     pub redacted_value: String,
     ///The Unix timestamp (in seconds) of when the API key was created
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub expires_at: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub last_used_at: Option<serde_json::Value>,
+    #[schemars(extend("properties" = {"created_at":{"format":"unixtime"}}))]
     pub owner: serde_json::Value,
 }
 impl schematic_define::Registration for AdminApiKey {
@@ -107,8 +112,10 @@ pub struct AssignedRoleDetails {
     ///Description of the role.
     pub description: serde_json::Value,
     ///When the role was created.
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub created_at: serde_json::Value,
     ///When the role was last updated.
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub updated_at: serde_json::Value,
     ///Identifier of the actor who created the role.
     pub created_by: serde_json::Value,
@@ -137,24 +144,53 @@ pub struct AssistantObject {
     #[schemars(extend("enum" = ["assistant"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the assistant was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(extend("anyOf" = [{"maxLength":256u64}, {"type":"null"}]))]
     pub name: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"maxLength":512u64}, {"type":"null"}]))]
     pub description: serde_json::Value,
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
     pub model: String,
+    #[schemars(extend("anyOf" = [{"maxLength":256000u64}, {"type":"null"}]))]
     pub instructions: serde_json::Value,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[schemars(extend("maxItems" = 128u64))]
     pub tools: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     pub metadata: Metadata,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":2u64, "minimum":0u64}, {"type":"null"}]))]
     pub temperature: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":1u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_p: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "AssistantObject::field_rules_schema_response_format")]
     pub response_format: Option<serde_json::Value>,
+}
+impl AssistantObject {
+    fn field_rules_schema_response_format(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiResponseFormatOption>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for AssistantObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssistantObject));
@@ -332,7 +368,26 @@ pub struct AssistantToolsFileSearch {
     pub type_: String,
     ///Overrides for the file search tool.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "AssistantToolsFileSearch::field_rules_schema_file_search")]
     pub file_search: Option<serde_json::Value>,
+}
+impl AssistantToolsFileSearch {
+    fn field_rules_schema_file_search(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FileSearchRankingOptions>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "max_num_results" : { "maximum" : 50u64, "minimum" : 1u64 },
+                    "ranking_options" : reference_0 }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for AssistantToolsFileSearch {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -517,7 +572,7 @@ Prompt is not supported with `gpt-realtime-whisper` in GA Realtime sessions.*/
 Higher values can improve transcription accuracy at the cost of latency.
 Only supported with `gpt-realtime-whisper` in GA Realtime sessions.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["minimal", "low", "medium", "high", "xhigh", null]))]
+    #[schemars(extend("enum" = ["minimal", "low", "medium", "high", "xhigh"]))]
     pub delay: Option<String>,
 }
 impl schematic_define::Registration for AudioTranscription {
@@ -564,11 +619,14 @@ pub struct AuditLog {
     #[serde(rename = "type")]
     pub type_: AuditLogEventType,
     ///The Unix timestamp (in seconds) of the event.
+    #[schemars(extend("format" = "unixtime"))]
     pub effective_at: i64,
     ///The project that the action was scoped to. Absent for actions not scoped to projects. Note that any admin actions taken via Admin API keys are associated with the default project.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "AuditLog::field_rules_schema_actor")]
     pub actor: Option<serde_json::Value>,
     ///The details for events with this `type`.
     #[serde(rename = "api_key.created")]
@@ -717,10 +775,28 @@ pub struct AuditLog {
     ///The details for events with this `type`.
     #[serde(rename = "role.bound_to_resource")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"source":{"enum":["role_toggle",
+            "role_connector_update",
+            "role_delete",
+            "workspace_permissions",
+            "connector_publish"]}}
+        )
+    )]
     pub role_bound_to_resource: Option<serde_json::Value>,
     ///The details for events with this `type`.
     #[serde(rename = "role.unbound_from_resource")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"source":{"enum":["role_toggle",
+            "role_connector_update",
+            "role_delete",
+            "workspace_permissions",
+            "connector_publish"]}}
+        )
+    )]
     pub role_unbound_from_resource: Option<serde_json::Value>,
     ///The details for events with this `type`.
     #[serde(rename = "service_account.created")]
@@ -791,6 +867,20 @@ pub struct AuditLog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub certificates_deactivated: Option<serde_json::Value>,
 }
+impl AuditLog {
+    fn field_rules_schema_actor(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AuditLogActor>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+}
 impl schematic_define::Registration for AuditLog {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLog));
     fn register(
@@ -806,7 +896,7 @@ pub struct AuditLogActor {
     ///The type of actor. Is either `session` or `api_key`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["session", "api_key", null]))]
+    #[schemars(extend("enum" = ["session", "api_key"]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<AuditLogActorSession>,
@@ -831,7 +921,7 @@ pub struct AuditLogActorApiKey {
     ///The type of API key. Can be either `user` or `service_account`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["user", "service_account", null]))]
+    #[schemars(extend("enum" = ["user", "service_account"]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<AuditLogActorUser>,
@@ -1262,30 +1352,39 @@ guide](/docs/models) to browse and compare available models.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_file_id: Option<String>,
     ///The Unix timestamp (in seconds) for when the batch was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The Unix timestamp (in seconds) for when the batch started processing.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub in_progress_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch will expire.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch started finalizing.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub finalizing_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch was completed.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub completed_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch failed.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub failed_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch expired.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expired_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch started cancelling.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub cancelling_at: Option<i64>,
     ///The Unix timestamp (in seconds) for when the batch was cancelled.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub cancelled_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_counts: Option<BatchRequestCounts>,
@@ -1335,7 +1434,7 @@ pub struct BatchFileExpirationAfter {
     #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
-    #[schemars(extend("maximum" = 2592000u64, "minimum" = 3600u64))]
+    #[schemars(extend("format" = "int64", "maximum" = 2592000u64, "minimum" = 3600u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for BatchFileExpirationAfter {
@@ -1389,7 +1488,14 @@ pub struct Certificate {
     ///The name of the certificate.
     pub name: serde_json::Value,
     ///The Unix timestamp (in seconds) of when the certificate was uploaded.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(
+        extend(
+            "properties" = {"expires_at":{"format":"unixtime"},
+            "valid_at":{"format":"unixtime"}}
+        )
+    )]
     pub certificate_details: serde_json::Value,
     ///Whether the certificate is currently active at the specified scope. Not returned when getting details for a specific certificate.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1621,7 +1727,7 @@ pub struct ChatCompletionMessageToolCallChunk {
     ///The type of the tool. Currently, only `function` is supported.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["function", null]))]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
@@ -2012,6 +2118,7 @@ pub struct ChatCompletionRequestMessageContentPartAudio {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
+    #[schemars(extend("properties" = {"format":{"enum":["wav", "mp3"]}}))]
     pub input_audio: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
@@ -2056,6 +2163,14 @@ pub struct ChatCompletionRequestMessageContentPartImage {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
+    #[schemars(
+        extend(
+            "properties" = {"detail":{"enum":["auto",
+            "low",
+            "high"]},
+            "url":{"format":"uri"}}
+        )
+    )]
     pub image_url: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
@@ -2275,6 +2390,12 @@ pub struct ChatCompletionResponseMessage {
     /**Annotations for the message, when applicable, as when using the
 [web search tool](/docs/guides/tools-web-search?api-mode=chat).*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"enum":["url_citation"]},
+            "url_citation":{"properties":{"url":{"format":"uri"}}}}}
+        )
+    )]
     pub annotations: Option<Vec<serde_json::Value>>,
     ///The role of the author of this message.
     #[schemars(extend("enum" = ["assistant"]))]
@@ -2283,6 +2404,12 @@ pub struct ChatCompletionResponseMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"expires_at":{"format":"unixtime"}}},
+            {"type":"null"}]
+        )
+    )]
     pub audio: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for ChatCompletionResponseMessage {
@@ -2357,9 +2484,7 @@ pub struct ChatCompletionStreamResponseDelta {
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCallChunk>>,
     ///The role of the author of this message.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(
-        extend("enum" = ["developer", "system", "user", "assistant", "tool", null])
-    )]
+    #[schemars(extend("enum" = ["developer", "system", "user", "assistant", "tool"]))]
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<serde_json::Value>,
@@ -2501,7 +2626,25 @@ specifies uploaded file IDs to make available to your code, along with an
 optional `memory_limit` setting.*/
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CodeInterpreterTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl CodeInterpreterTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CodeInterpreterTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CodeInterpreterTool));
@@ -2725,6 +2868,7 @@ always set to `computer_screenshot`.*/
     pub type_: String,
     ///The URL of the screenshot image.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub image_url: Option<String>,
     ///The identifier of an uploaded file that contains the screenshot.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2793,7 +2937,7 @@ developer.*/
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for ComputerToolCallOutput {
@@ -2859,6 +3003,7 @@ pub struct ContainerFileResource {
     ///The container this file belongs to.
     pub container_id: String,
     ///Unix timestamp (in seconds) when the file was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Size of the file in bytes.
     pub bytes: i64,
@@ -2912,23 +3057,27 @@ pub struct ContainerResource {
     ///Name of the container.
     pub name: String,
     ///Unix timestamp (in seconds) when the container was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Status of the container (e.g., active, deleted).
     pub status: String,
     ///Unix timestamp (in seconds) when the container was last active.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub last_active_at: Option<i64>,
     /**The container will expire after this time period.
 The anchor is the reference point for the expiration.
 The minutes is the number of minutes after the anchor before the container expires.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("properties" = {"anchor":{"enum":["last_active_at"]}}))]
     pub expires_after: Option<serde_json::Value>,
     ///The memory limit configured for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g", null]))]
+    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g"]))]
     pub memory_limit: Option<String>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("properties" = {"type":{"enum":["allowlist", "disabled"]}}))]
     pub network_policy: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for ContainerResource {
@@ -3185,10 +3334,13 @@ pub struct CreateAssistantRequest2 {
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
     pub model: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":256u64}, {"type":"null"}]))]
     pub name: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":512u64}, {"type":"null"}]))]
     pub description: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":256000u64}, {"type":"null"}]))]
     pub instructions: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -3197,15 +3349,44 @@ pub struct CreateAssistantRequest2 {
     #[schemars(extend("maxItems" = 128u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64},
+            "vector_stores":{"items":{"properties":{"file_ids":{"maxItems":100000000u64}}},
+            "maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":2u64, "minimum":0u64}, {"type":"null"}]))]
     pub temperature: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":1u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_p: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateAssistantRequest2::field_rules_schema_response_format"
+    )]
     pub response_format: Option<serde_json::Value>,
+}
+impl CreateAssistantRequest2 {
+    fn field_rules_schema_response_format(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiResponseFormatOption>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateAssistantRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3281,8 +3462,10 @@ pub struct CreateChatCompletionResponse {
     ///A unique identifier for the chat completion.
     pub id: String,
     ///A list of chat completion choices. Can be more than one if `n` is greater than 1.
+    #[schemars(schema_with = "CreateChatCompletionResponse::field_rules_schema_choices")]
     pub choices: Vec<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the chat completion was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created: i64,
     ///The model used for the chat completion.
     pub model: String,
@@ -3299,7 +3482,41 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateChatCompletionResponse::field_rules_schema_moderation"
+    )]
     pub moderation: Option<serde_json::Value>,
+}
+impl CreateChatCompletionResponse {
+    fn field_rules_schema_choices(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionResponseMessage>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "properties" : { "finish_reason" : { "enum" : ["stop", "length",
+                    "tool_calls", "content_filter", "function_call"] }, "message" :
+                    reference_0 } }
+                ),
+            );
+        schema
+    }
+    fn field_rules_schema_moderation(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionModeration>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateChatCompletionResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3321,8 +3538,12 @@ pub struct CreateChatCompletionStreamResponse {
     pub id: String,
     /**A list of chat completion choices. Can contain more than one elements if `n` is greater than 1. Can also be empty for the
 last chunk if you set `stream_options: {"include_usage": true}`.*/
+    #[schemars(
+        schema_with = "CreateChatCompletionStreamResponse::field_rules_schema_choices"
+    )]
     pub choices: Vec<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the chat completion was created. Each chunk has the same timestamp.
+    #[schemars(extend("format" = "unixtime"))]
     pub created: i64,
     ///The model to generate the completion.
     pub model: String,
@@ -3338,7 +3559,41 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateChatCompletionStreamResponse::field_rules_schema_moderation"
+    )]
     pub moderation: Option<serde_json::Value>,
+}
+impl CreateChatCompletionStreamResponse {
+    fn field_rules_schema_choices(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionStreamResponseDelta>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "properties" : { "delta" : reference_0, "finish_reason" : { "enum"
+                    : ["stop", "length", "tool_calls", "content_filter", "function_call"]
+                    } } }
+                ),
+            );
+        schema
+    }
+    fn field_rules_schema_moderation(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionModeration>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateChatCompletionStreamResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3411,6 +3666,7 @@ The token count of your prompt plus `max_tokens` cannot exceed the model's conte
 
 Determinism is not guaranteed, and you should refer to the `system_fingerprint` response parameter to monitor changes in the backend.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "int64"))]
     pub seed: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<StopConfiguration>,
@@ -3457,8 +3713,16 @@ pub struct CreateCompletionResponse {
     ///A unique identifier for the completion.
     pub id: String,
     ///The list of completion choices the model generated for the input prompt.
+    #[schemars(
+        extend(
+            "items" = {"properties":{"finish_reason":{"enum":["stop",
+            "length",
+            "content_filter"]}}}
+        )
+    )]
     pub choices: Vec<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the completion was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created: i64,
     ///The model used for completion.
     pub model: String,
@@ -3493,13 +3757,14 @@ pub struct CreateContainerBody {
     pub file_ids: Option<Vec<String>>,
     ///Container expiration time in seconds relative to the 'anchor' time.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("properties" = {"anchor":{"enum":["last_active_at"]}}))]
     pub expires_after: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<serde_json::Value>>,
     ///Optional memory limit for the container. Defaults to "1g".
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g", null]))]
+    #[schemars(extend("enum" = ["1g", "4g", "16g", "64g"]))]
     pub memory_limit: Option<String>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3521,6 +3786,7 @@ pub struct CreateContainerFileBody {
     pub file_id: Option<String>,
     ///The File object (not file name) to be uploaded.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "binary"))]
     pub file: Option<String>,
 }
 impl schematic_define::Registration for CreateContainerFileBody {
@@ -3542,7 +3808,7 @@ pub struct CreateEmbeddingRequest2 {
     pub model: serde_json::Value,
     ///The format to return the embeddings in. Can be either `float` or [`base64`](https://pypi.org/project/pybase64/).
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["float", "base64", null]))]
+    #[schemars(extend("enum" = ["float", "base64"]))]
     pub encoding_format: Option<String>,
     ///The number of dimensions the resulting output embeddings should have. Only supported in `text-embedding-3` and later models.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3597,12 +3863,34 @@ pub struct CreateEvalCompletionsRunDataSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_messages: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateEvalCompletionsRunDataSource::field_rules_schema_sampling_params"
+    )]
     pub sampling_params: Option<serde_json::Value>,
     ///The name of the model to use for generating completions (e.g. "o3-mini").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     ///Determines what populates the `item` namespace in this run's data source.
     pub source: serde_json::Value,
+}
+impl CreateEvalCompletionsRunDataSource {
+    fn field_rules_schema_sampling_params(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ReasoningEffort>();
+        let reference_1 = generator.subschema_for::<ChatCompletionTool>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "reasoning_effort" : reference_0, "tools" : { "items" : reference_1
+                    } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalCompletionsRunDataSource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3750,12 +4038,35 @@ pub struct CreateEvalResponsesRunDataSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_messages: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateEvalResponsesRunDataSource::field_rules_schema_sampling_params"
+    )]
     pub sampling_params: Option<serde_json::Value>,
     ///The name of the model to use for generating completions (e.g. "o3-mini").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     ///Determines what populates the `item` namespace in this run's data source.
     pub source: serde_json::Value,
+}
+impl CreateEvalResponsesRunDataSource {
+    fn field_rules_schema_sampling_params(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ReasoningEffort>();
+        let reference_1 = generator.subschema_for::<TextResponseFormatConfiguration>();
+        let reference_2 = generator.subschema_for::<Tool>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "reasoning_effort" : reference_0, "text" : { "properties" : {
+                    "format" : reference_1 } }, "tools" : { "items" : reference_2 } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalResponsesRunDataSource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3814,6 +4125,7 @@ impl schematic_define::Registration for CreateEvalStoredCompletionsDataSourceCon
 #[derive(JsonSchema)]
 pub struct CreateFileRequest2 {
     ///The File object (not file name) to be uploaded.
+    #[schemars(extend("format" = "binary"))]
     pub file: String,
     /**The intended purpose of the uploaded file. One of:
 - `assistants`: Used in the Assistants API
@@ -3968,6 +4280,7 @@ For `dall-e-2`, you can only provide one image, and it should be a square
     pub prompt: String,
     ///An additional image whose fully transparent areas (e.g. where alpha is zero) indicate where `image` should be edited. If there are multiple images provided, the mask will be applied on the first image. Must be a valid PNG file, less than 4MB, and have the same dimensions as `image`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "binary"))]
     pub mask: Option<String>,
     /**Allows to set transparency for the background of the generated image(s).
 This parameter is only supported for the GPT image models. Must be one of
@@ -3977,7 +4290,7 @@ model will automatically determine the best background for the image.
 If `transparent`, the output format needs to support transparency, so it
 should be set to either `png` (default value) or `webp`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: Option<String>,
     ///The model to use for image generation. Defaults to `gpt-image-1.5`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3991,13 +4304,13 @@ should be set to either `png` (default value) or `webp`.*/
     pub size: Option<serde_json::Value>,
     ///The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated. This parameter is only supported for `dall-e-2` (default is `url` for `dall-e-2`), as GPT image models always return base64-encoded images.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["url", "b64_json", null]))]
+    #[schemars(extend("enum" = ["url", "b64_json"]))]
     pub response_format: Option<String>,
     /**The format in which the generated images are returned. This parameter is
 only supported for the GPT image models. Must be one of `png`, `jpeg`, or `webp`.
 The default value is `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["png", "jpeg", "webp", null]))]
+    #[schemars(extend("enum" = ["png", "jpeg", "webp"]))]
     pub output_format: Option<String>,
     /**The compression level (0-100%) for the generated images. This parameter
 is only supported for the GPT image models with the `webp` or `jpeg` output
@@ -4008,6 +4321,10 @@ formats, and defaults to 100.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateImageEditRequest2::field_rules_schema_input_fidelity"
+    )]
     pub input_fidelity: Option<serde_json::Value>,
     /**Edit the image in streaming mode. Defaults to `false`. See the
 [Image generation guide](/docs/guides/image-generation) for more information.*/
@@ -4017,8 +4334,22 @@ formats, and defaults to 100.*/
     pub partial_images: Option<PartialImages>,
     ///The quality of the image that will be generated for GPT image models. Defaults to `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["standard", "low", "medium", "high", "auto", null]))]
+    #[schemars(extend("enum" = ["standard", "low", "medium", "high", "auto"]))]
     pub quality: Option<String>,
+}
+impl CreateImageEditRequest2 {
+    fn field_rules_schema_input_fidelity(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputFidelity>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateImageEditRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4049,17 +4380,15 @@ pub struct CreateImageRequest2 {
 - `hd` and `standard` are supported for `dall-e-3`.
 - `standard` is the only option for `dall-e-2`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(
-        extend("enum" = ["standard", "hd", "low", "medium", "high", "auto", null])
-    )]
+    #[schemars(extend("enum" = ["standard", "hd", "low", "medium", "high", "auto"]))]
     pub quality: Option<String>,
     ///The format in which generated images with `dall-e-2` and `dall-e-3` are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated. This parameter isn't supported for the GPT image models, which always return base64-encoded images.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["url", "b64_json", null]))]
+    #[schemars(extend("enum" = ["url", "b64_json"]))]
     pub response_format: Option<String>,
     ///The format in which the generated images are returned. This parameter is only supported for the GPT image models. Must be one of `png`, `jpeg`, or `webp`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["png", "jpeg", "webp", null]))]
+    #[schemars(extend("enum" = ["png", "jpeg", "webp"]))]
     pub output_format: Option<String>,
     ///The compression level (0-100%) for the generated images. This parameter is only supported for the GPT image models with the `webp` or `jpeg` output formats, and defaults to 100.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4076,7 +4405,7 @@ This parameter is only supported for the GPT image models.*/
     pub size: Option<serde_json::Value>,
     ///Control the content-moderation level for images generated by the GPT image models. Must be either `low` for less restrictive filtering or `auto` (default value).
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "auto", null]))]
+    #[schemars(extend("enum" = ["low", "auto"]))]
     pub moderation: Option<String>,
     /**Allows to set transparency for the background of the generated image(s).
 This parameter is only supported for the GPT image models. Must be one of
@@ -4086,11 +4415,11 @@ model will automatically determine the best background for the image.
 If `transparent`, the output format needs to support transparency, so it
 should be set to either `png` (default value) or `webp`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: Option<String>,
     ///The style of the generated images. This parameter is only supported for `dall-e-3`. Must be one of `vivid` or `natural`. Vivid causes the model to lean towards generating hyper-real and dramatic images. Natural causes the model to produce more natural, less hyper-real looking images.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["vivid", "natural", null]))]
+    #[schemars(extend("enum" = ["vivid", "natural"]))]
     pub style: Option<String>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4108,6 +4437,7 @@ impl schematic_define::Registration for CreateImageRequest2 {
 #[derive(JsonSchema)]
 pub struct CreateImageVariationRequest2 {
     ///The image to use as the basis for the variation(s). Must be a valid PNG file, less than 4MB, and square.
+    #[schemars(extend("format" = "binary"))]
     pub image: String,
     ///The model to use for image generation. Only `dall-e-2` is supported at this time.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4118,11 +4448,11 @@ pub struct CreateImageVariationRequest2 {
     pub n: Option<i64>,
     ///The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["url", "b64_json", null]))]
+    #[schemars(extend("enum" = ["url", "b64_json"]))]
     pub response_format: Option<String>,
     ///The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["256x256", "512x512", "1024x1024", null]))]
+    #[schemars(extend("enum" = ["256x256", "512x512", "1024x1024"]))]
     pub size: Option<String>,
     ///A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4211,6 +4541,29 @@ pub struct CreateModerationResponse {
     ///The model used to generate the moderation results.
     pub model: String,
     ///A list of moderation objects.
+    #[schemars(
+        extend(
+            "items" = {"properties":{"category_applied_input_types":{"properties":{"harassment":{"items":{"enum":["text"]}},
+            "harassment/threatening":{"items":{"enum":["text"]}},
+            "hate":{"items":{"enum":["text"]}},
+            "hate/threatening":{"items":{"enum":["text"]}},
+            "illicit":{"items":{"enum":["text"]}},
+            "illicit/violent":{"items":{"enum":["text"]}},
+            "self-harm":{"items":{"enum":["text",
+            "image"]}},
+            "self-harm/instructions":{"items":{"enum":["text",
+            "image"]}},
+            "self-harm/intent":{"items":{"enum":["text",
+            "image"]}},
+            "sexual":{"items":{"enum":["text",
+            "image"]}},
+            "sexual/minors":{"items":{"enum":["text"]}},
+            "violence":{"items":{"enum":["text",
+            "image"]}},
+            "violence/graphic":{"items":{"enum":["text",
+            "image"]}}}}}}
+        )
+    )]
     pub results: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for CreateModerationResponse {
@@ -4319,7 +4672,7 @@ pub struct CreateSpeechRequest2 {
     pub voice: VoiceIdsOrCustomVoice,
     ///The format to audio in. Supported formats are `mp3`, `opus`, `aac`, `flac`, `wav`, and `pcm`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["mp3", "opus", "aac", "flac", "wav", "pcm", null]))]
+    #[schemars(extend("enum" = ["mp3", "opus", "aac", "flac", "wav", "pcm"]))]
     pub response_format: Option<String>,
     ///The speed of the generated audio. Select a value from `0.25` to `4.0`. `1.0` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4327,7 +4680,7 @@ pub struct CreateSpeechRequest2 {
     pub speed: Option<f64>,
     ///The format to stream the audio in. Supported formats are `sse` and `audio`. `sse` is not supported for `tts-1` or `tts-1-hd`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["sse", "audio", null]))]
+    #[schemars(extend("enum" = ["sse", "audio"]))]
     pub stream_format: Option<String>,
 }
 impl schematic_define::Registration for CreateSpeechRequest2 {
@@ -4447,6 +4800,12 @@ pub struct CreateThreadAndRunRequest2 {
     pub tools: Option<Vec<serde_json::Value>>,
     ///A set of resources that are used by the assistant's tools. The resources are specific to the type of tool. For example, the `code_interpreter` tool requires a list of file IDs, while the `file_search` tool requires a list of vector store IDs.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64}}}}
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -4499,6 +4858,15 @@ pub struct CreateThreadRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Vec<CreateMessageRequest2>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64},
+            "vector_stores":{"items":{"properties":{"file_ids":{"maxItems":100000000u64}}},
+            "maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -4515,6 +4883,7 @@ impl schematic_define::Registration for CreateThreadRequest2 {
 #[derive(JsonSchema)]
 pub struct CreateTranscriptionRequest2 {
     ///The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.
+    #[schemars(extend("format" = "binary"))]
     pub file: String,
     ///ID of the model to use. The options are `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `whisper-1` (which is powered by our open source Whisper V2 model), and `gpt-4o-transcribe-diarize`.
     pub model: serde_json::Value,
@@ -4579,6 +4948,7 @@ pub struct CreateTranscriptionResponseDiarizedJson {
     #[schemars(extend("enum" = ["transcribe"]))]
     pub task: String,
     ///Duration of the input audio in seconds.
+    #[schemars(extend("format" = "double"))]
     pub duration: f64,
     ///The concatenated transcript text for the entire audio input.
     pub text: String,
@@ -4703,6 +5073,7 @@ pub struct CreateTranscriptionResponseVerboseJson {
     ///The language of the input audio.
     pub language: String,
     ///The duration of the input audio.
+    #[schemars(extend("format" = "double"))]
     pub duration: f64,
     ///The transcribed text.
     pub text: String,
@@ -4729,6 +5100,7 @@ impl schematic_define::Registration for CreateTranscriptionResponseVerboseJson {
 #[derive(JsonSchema)]
 pub struct CreateTranslationRequest2 {
     ///The audio file object (not file name) translate, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.
+    #[schemars(extend("format" = "binary"))]
     pub file: String,
     ///ID of the model to use. Only `whisper-1` (which is powered by our open source Whisper V2 model) is currently available.
     pub model: serde_json::Value,
@@ -4737,7 +5109,7 @@ pub struct CreateTranslationRequest2 {
     pub prompt: Option<String>,
     ///The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["json", "text", "srt", "verbose_json", "vtt", null]))]
+    #[schemars(extend("enum" = ["json", "text", "srt", "verbose_json", "vtt"]))]
     pub response_format: Option<String>,
     ///The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4774,6 +5146,7 @@ pub struct CreateTranslationResponseVerboseJson {
     ///The language of the output translation (always `english`).
     pub language: String,
     ///The duration of the input audio.
+    #[schemars(extend("format" = "double"))]
     pub duration: f64,
     ///The translated text.
     pub text: String,
@@ -4907,6 +5280,7 @@ pub struct CreateVoiceConsentRequest2 {
 
 Supported MIME types:
 `audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.*/
+    #[schemars(extend("format" = "binary"))]
     pub recording: String,
     ///The BCP 47 language tag for the consent phrase (for example, `en-US`).
     pub language: String,
@@ -4930,6 +5304,7 @@ pub struct CreateVoiceRequest2 {
 
 Supported MIME types:
 `audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.*/
+    #[schemars(extend("format" = "binary"))]
     pub audio_sample: String,
     ///The consent recording ID (for example, `cons_1234`).
     pub consent: String,
@@ -4956,6 +5331,8 @@ pub struct CustomToolCall {
     ///An identifier used to map this custom tool call to a tool call output.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CustomToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     ///The namespace of the custom tool being called.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4964,6 +5341,20 @@ pub struct CustomToolCall {
     pub name: String,
     ///The input for the custom tool call generated by the model.
     pub input: String,
+}
+impl CustomToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CustomToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolCall));
@@ -4987,10 +5378,26 @@ pub struct CustomToolCallOutput {
     ///The call ID, used to map this custom tool call output to a custom tool call.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CustomToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     /**The output from the custom tool call generated by your code.
 Can be a string or an list of output content.*/
     pub output: serde_json::Value,
+}
+impl CustomToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CustomToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolCallOutput));
@@ -5282,12 +5689,28 @@ pub struct EasyInputMessage {
 Can also contain previous assistant responses.*/
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "EasyInputMessage::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", null]))]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: Option<String>,
+}
+impl EasyInputMessage {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessagePhase>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for EasyInputMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EasyInputMessage));
@@ -5319,15 +5742,29 @@ For GPT image models, you can provide up to 16 images.*/
     pub prompt: String,
     ///The number of edited images to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":10u64, "minimum":1u64}, {"type":"null"}]))]
     pub n: Option<serde_json::Value>,
     ///Output quality for GPT image models.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["low", "medium", "high", "auto"]}, {"type":"null"}])
+    )]
     pub quality: Option<serde_json::Value>,
     ///Controls fidelity to the original input image(s).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["high", "low"]}, {"type":"null"}]))]
     pub input_fidelity: Option<serde_json::Value>,
     ///Requested output image size.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"enum":["auto",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536"]},
+            {"type":"null"}]
+        )
+    )]
     pub size: Option<serde_json::Value>,
     /**A unique identifier representing your end-user, which can help OpenAI
 monitor and detect abuse.*/
@@ -5335,15 +5772,21 @@ monitor and detect abuse.*/
     pub user: Option<String>,
     ///Output image format. Supported for GPT image models.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["png", "jpeg", "webp"]}, {"type":"null"}]))]
     pub output_format: Option<serde_json::Value>,
     ///Compression level for `jpeg` or `webp` output.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":100u64, "minimum":0u64}, {"type":"null"}]))]
     pub output_compression: Option<serde_json::Value>,
     ///Moderation level for GPT image models.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["low", "auto"]}, {"type":"null"}]))]
     pub moderation: Option<serde_json::Value>,
     ///Background behavior for generated image output.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["transparent", "opaque", "auto"]}, {"type":"null"}])
+    )]
     pub background: Option<serde_json::Value>,
     ///Stream partial image results as events.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5368,6 +5811,7 @@ pub struct Embedding {
     ///The index of the embedding in the list of embeddings.
     pub index: i64,
     ///The embedding vector, which is a list of floats. The length of vector depends on the model as listed in the [embedding guide](/docs/guides/embeddings).
+    #[schemars(extend("items" = {"format":"float", "type":"number"}))]
     pub embedding: Vec<f64>,
     ///The object type, which is always "embedding".
     #[schemars(extend("enum" = ["embedding"]))]
@@ -5448,6 +5892,7 @@ pub struct Eval {
     ///A list of testing criteria.
     pub testing_criteria: Vec<serde_json::Value>,
     ///The Unix timestamp (in seconds) for when the eval was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub metadata: Metadata,
 }
@@ -5522,7 +5967,7 @@ pub struct EvalItem {
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", null]))]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: Option<String>,
 }
 impl schematic_define::Registration for EvalItem {
@@ -5615,6 +6060,7 @@ pub struct EvalItemInputImage {
     #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     ///The URL of the image input.
+    #[schemars(extend("format" = "uri"))]
     pub image_url: String,
     ///The detail level of the image to be sent to the model. One of `high`, `low`, or `auto`. Defaults to `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5734,10 +6180,14 @@ pub struct EvalResponsesSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions_search: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"minimum":0u64}, {"type":"null"}]))]
     pub created_after: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"minimum":0u64}, {"type":"null"}]))]
     pub created_before: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "EvalResponsesSource::field_rules_schema_reasoning_effort")]
     pub reasoning_effort: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<serde_json::Value>,
@@ -5747,6 +6197,20 @@ pub struct EvalResponsesSource {
     pub users: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<serde_json::Value>,
+}
+impl EvalResponsesSource {
+    fn field_rules_schema_reasoning_effort(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ReasoningEffort>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for EvalResponsesSource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalResponsesSource));
@@ -5774,8 +6238,10 @@ pub struct EvalRun {
     ///The name of the evaluation run.
     pub name: String,
     ///Unix timestamp (in seconds) when the evaluation run was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The URL to the rendered evaluation run report on the UI dashboard.
+    #[schemars(extend("format" = "uri"))]
     pub report_url: String,
     ///Counters summarizing the outcomes of the evaluation run.
     pub result_counts: serde_json::Value,
@@ -5834,6 +6300,7 @@ pub struct EvalRunOutputItem {
     ///The identifier of the evaluation group.
     pub eval_id: String,
     ///Unix timestamp (in seconds) when the evaluation run was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The status of the evaluation run.
     pub status: String,
@@ -5972,7 +6439,7 @@ pub struct FileExpirationAfter {
     #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
-    #[schemars(extend("maximum" = 2592000u64, "minimum" = 3600u64))]
+    #[schemars(extend("format" = "int64", "maximum" = 2592000u64, "minimum" = 3600u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for FileExpirationAfter {
@@ -6070,7 +6537,26 @@ pub struct FileSearchToolCall {
     ///The queries used to search for files.
     pub queries: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FileSearchToolCall::field_rules_schema_results")]
     pub results: Option<serde_json::Value>,
+}
+impl FileSearchToolCall {
+    fn field_rules_schema_results(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<VectorStoreFileAttributes>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "properties" : { "attributes" : reference_0, "score" :
+                    { "format" : "float" } } } }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FileSearchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileSearchToolCall));
@@ -6161,7 +6647,7 @@ pub struct FineTuneReinforcementHyperparameters {
     pub n_epochs: Option<serde_json::Value>,
     ///Level of reasoning effort.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["default", "low", "medium", "high", null]))]
+    #[schemars(extend("enum" = ["default", "low", "medium", "high"]))]
     pub reasoning_effort: Option<String>,
     ///Multiplier on amount of compute used for exploring search space during training.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6250,6 +6736,7 @@ pub struct FineTuningCheckpointPermission {
     ///The permission identifier, which can be referenced in the API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the permission was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The project identifier that the permission is for.
     pub project_id: String,
@@ -6296,9 +6783,11 @@ pub struct FineTuningJob {
     ///The object identifier, which can be referenced in the API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the fine-tuning job was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub error: serde_json::Value,
     pub fine_tuned_model: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub finished_at: serde_json::Value,
     ///The hyperparameters used for the fine-tuning job. This value will only be returned when running `supervised` jobs.
     pub hyperparameters: serde_json::Value,
@@ -6328,10 +6817,12 @@ pub struct FineTuningJob {
     pub training_file: String,
     pub validation_file: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxItems":5u64}, {"type":"null"}]))]
     pub integrations: Option<serde_json::Value>,
     ///The seed used for the fine-tuning job.
     pub seed: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub estimated_finish: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method: Option<FineTuneMethod>,
@@ -6353,6 +6844,7 @@ pub struct FineTuningJobCheckpoint {
     ///The checkpoint identifier, which can be referenced in the API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the checkpoint was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The name of the fine-tuned checkpoint model that is created.
     pub fine_tuned_model_checkpoint: String,
@@ -6386,6 +6878,7 @@ pub struct FineTuningJobEvent {
     ///The object identifier.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the fine-tuning job was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The log level of the event.
     #[schemars(extend("enum" = ["info", "warn", "error"]))]
@@ -6395,7 +6888,7 @@ pub struct FineTuningJobEvent {
     ///The type of event.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", "metrics", null]))]
+    #[schemars(extend("enum" = ["message", "metrics"]))]
     pub type_: Option<String>,
     ///The data associated with the event.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6528,6 +7021,8 @@ pub struct FunctionToolCall {
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     ///The namespace of the function to run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6539,8 +7034,22 @@ pub struct FunctionToolCall {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
+}
+impl FunctionToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionToolCall));
@@ -6571,6 +7080,8 @@ is returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     /**The output from the function call generated by your code.
 Can be a string or an list of output content.*/
@@ -6578,8 +7089,22 @@ Can be a string or an list of output content.*/
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
+}
+impl FunctionToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -6714,12 +7239,31 @@ pub struct GraderScoreModel {
     pub model: String,
     ///The sampling parameters for the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "GraderScoreModel::field_rules_schema_sampling_params")]
     pub sampling_params: Option<serde_json::Value>,
     ///The input messages evaluated by the grader. Supports text, output text, input image, and input audio content blocks, and may include template strings.
     pub input: Vec<EvalItem>,
     ///The range of the score. Defaults to `[0, 1]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<Vec<f64>>,
+}
+impl GraderScoreModel {
+    fn field_rules_schema_sampling_params(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ReasoningEffort>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "max_completions_tokens" : { "anyOf" : [{ "minimum" : 1u64 }, {
+                    "type" : "null" }] }, "reasoning_effort" : reference_0 }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for GraderScoreModel {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderScoreModel));
@@ -6809,6 +7353,7 @@ pub struct Group {
     ///Display name of the group.
     pub name: String,
     ///Unix timestamp (in seconds) when the group was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Whether the group is managed through SCIM.
     pub scim_managed: bool,
@@ -6898,6 +7443,7 @@ pub struct GroupResourceWithSuccess {
     ///Updated display name for the group.
     pub name: String,
     ///Unix timestamp (in seconds) when the group was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Whether the group is managed through SCIM and controlled by your identity provider.
     pub is_scim_managed: bool,
@@ -6921,6 +7467,7 @@ pub struct GroupResponse {
     ///Display name of the group.
     pub name: String,
     ///Unix timestamp (in seconds) when the group was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Whether the group is managed through SCIM and controlled by your identity provider.
     pub is_scim_managed: bool,
@@ -7053,6 +7600,7 @@ pub struct Image {
     pub b64_json: Option<String>,
     ///When using `dall-e-2` or `dall-e-3`, the URL of the generated image if `response_format` is set to `url` (default value). Unsupported for the GPT image models.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub url: Option<String>,
     ///For `dall-e-3` only, the revised prompt that was used to generate the image.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7077,6 +7625,7 @@ pub struct ImageEditCompletedEvent {
     ///Base64-encoded final edited image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The size of the edited image.
     #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
@@ -7113,6 +7662,7 @@ pub struct ImageEditPartialImageEvent {
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The size of the requested edited image.
     #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
@@ -7212,6 +7762,7 @@ pub struct ImageGenCompletedEvent {
     ///Base64-encoded image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The size of the generated image.
     #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
@@ -7248,6 +7799,7 @@ pub struct ImageGenPartialImageEvent {
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub b64_json: String,
     ///The Unix timestamp when the event was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The size of the requested image.
     #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", "auto"]))]
@@ -7349,7 +7901,7 @@ pub struct ImageGenTool {
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "medium", "high", "auto", null]))]
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7357,7 +7909,7 @@ or `auto`. Default: `auto`.*/
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: Option<String>,
     ///Compression level for the output image. Default: 100.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7365,14 +7917,16 @@ or `auto`. Default: `auto`.*/
     pub output_compression: Option<i64>,
     ///Moderation level for the generated image. Default: `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["auto", "low", null]))]
+    #[schemars(extend("enum" = ["auto", "low"]))]
     pub moderation: Option<String>,
     /**Background type for the generated image. One of `transparent`,
 `opaque`, or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ImageGenTool::field_rules_schema_input_fidelity")]
     pub input_fidelity: Option<serde_json::Value>,
     /**Optional mask for inpainting. Contains `image_url`
 (string, optional) and `file_id` (string, optional).*/
@@ -7384,6 +7938,20 @@ or `auto`. Default: `auto`.*/
     pub partial_images: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<ImageGenActionEnum>,
+}
+impl ImageGenTool {
+    fn field_rules_schema_input_fidelity(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputFidelity>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ImageGenTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenTool));
@@ -7423,7 +7991,7 @@ Provide exactly one of `image_url` or `file_id`.*/
 pub struct ImageRefParam {
     ///A fully qualified URL or base64-encoded data URL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxLength" = 20971520u64))]
+    #[schemars(extend("format" = "uri", "maxLength" = 20971520u64))]
     pub image_url: Option<String>,
     ///The File API ID of an uploaded image to use as input.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -7442,25 +8010,26 @@ impl schematic_define::Registration for ImageRefParam {
 #[derive(JsonSchema)]
 pub struct ImagesResponse {
     ///The Unix timestamp (in seconds) of when the image was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created: i64,
     ///The list of generated images.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Vec<Image>>,
     ///The background parameter used for the image generation. Either `transparent` or `opaque`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["transparent", "opaque", null]))]
+    #[schemars(extend("enum" = ["transparent", "opaque"]))]
     pub background: Option<String>,
     ///The output format of the image generation. Either `png`, `webp`, or `jpeg`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: Option<String>,
     ///The size of the image generated. Either `1024x1024`, `1024x1536`, or `1536x1024`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024", null]))]
+    #[schemars(extend("enum" = ["1024x1024", "1024x1536", "1536x1024"]))]
     pub size: Option<String>,
     ///The quality of the image generated. Either `low`, `medium`, or `high`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
+    #[schemars(extend("enum" = ["low", "medium", "high"]))]
     pub quality: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ImageGenUsage>,
@@ -7502,6 +8071,7 @@ pub struct InputAudio {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
+    #[schemars(extend("properties" = {"format":{"enum":["mp3", "wav"]}}))]
     pub input_audio: serde_json::Value,
 }
 impl schematic_define::Registration for InputAudio {
@@ -7604,7 +8174,7 @@ pub struct InputMessage {
     ///The type of the message input. Always set to `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", null]))]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: Option<String>,
     ///The role of the message input. One of `user`, `system`, or `developer`.
     #[schemars(extend("enum" = ["user", "system", "developer"]))]
@@ -7612,7 +8182,7 @@ pub struct InputMessage {
     /**The status of item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
     pub content: InputMessageContentList,
 }
@@ -7690,14 +8260,18 @@ pub struct Invite {
     #[schemars(extend("enum" = ["accepted", "expired", "pending"]))]
     pub status: String,
     ///The Unix timestamp (in seconds) of when the invite was sent.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The Unix timestamp (in seconds) of when the invite expires.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub expires_at: Option<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the invite was accepted.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub accepted_at: Option<serde_json::Value>,
     ///The projects that were granted membership upon acceptance of the invite.
+    #[schemars(extend("items" = {"properties":{"role":{"enum":["member", "owner"]}}}))]
     pub projects: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for Invite {
@@ -7778,6 +8352,7 @@ pub struct InviteRequest {
     pub role: String,
     ///An array of projects to which membership is granted at the same time the org invite is accepted. If omitted, the user will be invited to the default project for compatibility with legacy behavior. If empty list is passed, the user will not be invited to any projects, including the default one.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"properties":{"role":{"enum":["member", "owner"]}}}))]
     pub projects: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for InviteRequest {
@@ -8281,6 +8856,14 @@ pub struct LocalShellToolCallOutput {
     ///A JSON string of the output of the local shell tool call.
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"enum":["in_progress",
+            "completed",
+            "incomplete"]},
+            {"type":"null"}]
+        )
+    )]
     pub status: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for LocalShellToolCallOutput {
@@ -8449,6 +9032,7 @@ pub struct MCPTool {
     /**The URL for the MCP server. One of `server_url`, `connector_id`, or
 `tunnel_id` must be provided.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub server_url: Option<String>,
     /**Identifier for service connectors, like those available in ChatGPT. One of
 `server_url`, `connector_id`, or `tunnel_id` must be provided. Learn more
@@ -8474,8 +9058,7 @@ Currently supported `connector_id` values are:
             "connector_microsoftteams",
             "connector_outlookcalendar",
             "connector_outlookemail",
-            "connector_sharepoint",
-            null]
+            "connector_sharepoint"]
         )
     )]
     pub connector_id: Option<String>,
@@ -8497,12 +9080,30 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_tools: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "MCPTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_approval: Option<serde_json::Value>,
     ///Whether this MCP tool is deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
+}
+impl MCPTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for MCPTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPTool));
@@ -8574,6 +9175,7 @@ pub struct MessageContentImageFileObject {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["image_file"]))]
     pub type_: String,
+    #[schemars(extend("properties" = {"detail":{"enum":["auto", "low", "high"]}}))]
     pub image_file: serde_json::Value,
 }
 impl schematic_define::Registration for MessageContentImageFileObject {
@@ -8594,6 +9196,14 @@ pub struct MessageContentImageUrlObject {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
+    #[schemars(
+        extend(
+            "properties" = {"detail":{"enum":["auto",
+            "low",
+            "high"]},
+            "url":{"format":"uri"}}
+        )
+    )]
     pub image_url: serde_json::Value,
 }
 impl schematic_define::Registration for MessageContentImageUrlObject {
@@ -8709,6 +9319,7 @@ pub struct MessageDeltaContentImageFileObject {
     #[schemars(extend("enum" = ["image_file"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("properties" = {"detail":{"enum":["auto", "low", "high"]}}))]
     pub image_file: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for MessageDeltaContentImageFileObject {
@@ -8732,6 +9343,14 @@ pub struct MessageDeltaContentImageUrlObject {
     #[schemars(extend("enum" = ["image_url"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"detail":{"enum":["auto",
+            "low",
+            "high"]},
+            "url":{"format":"uri"}}
+        )
+    )]
     pub image_url: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for MessageDeltaContentImageUrlObject {
@@ -8866,6 +9485,7 @@ pub struct MessageDeltaObject {
     #[schemars(extend("enum" = ["thread.message.delta"]))]
     pub object: String,
     ///The delta containing the fields that have changed on the Message.
+    #[schemars(extend("properties" = {"role":{"enum":["user", "assistant"]}}))]
     pub delta: serde_json::Value,
 }
 impl schematic_define::Registration for MessageDeltaObject {
@@ -8886,14 +9506,27 @@ pub struct MessageObject {
     #[schemars(extend("enum" = ["thread.message"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the message was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The [thread](/docs/api-reference/threads) ID that this message belongs to.
     pub thread_id: String,
     ///The status of the message, which can be either `in_progress`, `incomplete`, or `completed`.
     #[schemars(extend("enum" = ["in_progress", "incomplete", "completed"]))]
     pub status: String,
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"reason":{"enum":["content_filter",
+            "max_tokens",
+            "run_cancelled",
+            "run_expired",
+            "run_failed"]}}},
+            {"type":"null"}]
+        )
+    )]
     pub incomplete_details: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub completed_at: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub incomplete_at: serde_json::Value,
     ///The entity that produced the message. One of `user` or `assistant`.
     #[schemars(extend("enum" = ["user", "assistant"]))]
@@ -9006,6 +9639,7 @@ pub struct Model {
     ///The model identifier, which can be referenced in the API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) when the model was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created: i64,
     ///The object type, which is always "model".
     #[schemars(extend("enum" = ["model"]))]
@@ -9113,10 +9747,13 @@ pub struct ModelResponseProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":20u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_logprobs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":2u64, "minimum":0u64}, {"type":"null"}]))]
     pub temperature: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":1u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_p: Option<serde_json::Value>,
     /**This field is being replaced by `safety_identifier` and `prompt_cache_key`. Use `prompt_cache_key` instead to maintain caching optimizations.
 A stable identifier for your end-users.
@@ -9124,12 +9761,14 @@ Used to boost cache hit rates by better bucketing similar requests and  to help 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":64u64}, {"type":"null"}]))]
     pub safety_identifier: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<ServiceTier>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["in_memory", "24h"]}, {"type":"null"}]))]
     pub prompt_cache_retention: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for ModelResponseProperties {
@@ -9151,25 +9790,55 @@ pub struct ModifyAssistantRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":256u64}, {"type":"null"}]))]
     pub name: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":512u64}, {"type":"null"}]))]
     pub description: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":256000u64}, {"type":"null"}]))]
     pub instructions: Option<serde_json::Value>,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("maxItems" = 128u64))]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":2u64, "minimum":0u64}, {"type":"null"}]))]
     pub temperature: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":1u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_p: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "ModifyAssistantRequest2::field_rules_schema_response_format"
+    )]
     pub response_format: Option<serde_json::Value>,
+}
+impl ModifyAssistantRequest2 {
+    fn field_rules_schema_response_format(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiResponseFormatOption>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ModifyAssistantRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -9232,6 +9901,13 @@ impl schematic_define::Registration for ModifyRunRequest2 {
 #[derive(JsonSchema)]
 pub struct ModifyThreadRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -9271,9 +9947,11 @@ pub struct OpenAIFile {
     ///The size of the file, in bytes.
     pub bytes: i64,
     ///The Unix timestamp (in seconds) for when the file was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The Unix timestamp (in seconds) for when the file will expire.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     ///The name of the file.
     pub filename: String,
@@ -9321,7 +9999,14 @@ pub struct OrganizationCertificate {
     ///The name of the certificate.
     pub name: serde_json::Value,
     ///The Unix timestamp (in seconds) of when the certificate was uploaded.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(
+        extend(
+            "properties" = {"expires_at":{"format":"unixtime"},
+            "valid_at":{"format":"unixtime"}}
+        )
+    )]
     pub certificate_details: serde_json::Value,
     ///Whether the certificate is currently active at the organization level.
     pub active: bool,
@@ -9413,7 +10098,14 @@ pub struct OrganizationProjectCertificate {
     ///The name of the certificate.
     pub name: serde_json::Value,
     ///The Unix timestamp (in seconds) of when the certificate was uploaded.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(
+        extend(
+            "properties" = {"expires_at":{"format":"unixtime"},
+            "valid_at":{"format":"unixtime"}}
+        )
+    )]
     pub certificate_details: serde_json::Value,
     ///Whether the certificate is currently active at the project level.
     pub active: bool,
@@ -9799,11 +10491,27 @@ pub struct OutputMessage {
     ///The content of the output message.
     pub content: Vec<OutputMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "OutputMessage::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
+}
+impl OutputMessage {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessagePhase>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for OutputMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputMessage));
@@ -9930,8 +10638,10 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the project was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub archived_at: Option<serde_json::Value>,
     ///`active` or `archived`
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9960,14 +10670,17 @@ pub struct ProjectApiKey {
     ///The name of the API key
     pub name: String,
     ///The Unix timestamp (in seconds) of when the API key was created
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The Unix timestamp (in seconds) of when the API key was last used.
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub last_used_at: serde_json::Value,
     ///The identifier, which can be referenced in API endpoints
     pub id: String,
     ///Whether the API key's owner currently has effective access to the project.
     #[schemars(extend("enum" = ["active", "inactive"]))]
     pub owner_project_access: String,
+    #[schemars(extend("properties" = {"type":{"enum":["user", "service_account"]}}))]
     pub owner: serde_json::Value,
 }
 impl schematic_define::Registration for ProjectApiKey {
@@ -10027,6 +10740,7 @@ pub struct ProjectApiKeyOwnerServiceAccount {
     ///The name of the service account.
     pub name: String,
     ///The Unix timestamp (in seconds) of when the service account was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The service account's project role.
     pub role: String,
@@ -10052,6 +10766,7 @@ pub struct ProjectApiKeyOwnerUser {
     ///The name of the user.
     pub name: String,
     ///The Unix timestamp (in seconds) of when the user was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The user's project role.
     pub role: String,
@@ -10132,6 +10847,7 @@ pub struct ProjectGroup {
     #[schemars(extend("enum" = ["group", "tenant_group"]))]
     pub group_type: String,
     ///Unix timestamp (in seconds) when the group was granted project access.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for ProjectGroup {
@@ -10422,6 +11138,7 @@ pub struct ProjectServiceAccount {
     #[schemars(extend("enum" = ["owner", "member", "none"]))]
     pub role: String,
     ///The Unix timestamp (in seconds) of when the service account was created
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for ProjectServiceAccount {
@@ -10442,6 +11159,7 @@ pub struct ProjectServiceAccountApiKey {
     pub object: String,
     pub value: String,
     pub name: String,
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub id: String,
 }
@@ -10483,8 +11201,26 @@ pub struct ProjectServiceAccountCreateResponse {
     ///Service accounts created with default project membership have role `member`. Accounts created with `create_service_account_only` have role `none`.
     #[schemars(extend("enum" = ["member", "none"]))]
     pub role: String,
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(
+        schema_with = "ProjectServiceAccountCreateResponse::field_rules_schema_api_key"
+    )]
     pub api_key: serde_json::Value,
+}
+impl ProjectServiceAccountCreateResponse {
+    fn field_rules_schema_api_key(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ProjectServiceAccountApiKey>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ProjectServiceAccountCreateResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -10650,6 +11386,7 @@ pub struct ProjectUser {
     ///`owner` or `member`
     pub role: String,
     ///The Unix timestamp (in seconds) of when the project was added.
+    #[schemars(extend("format" = "unixtime"))]
     pub added_at: i64,
 }
 impl schematic_define::Registration for ProjectUser {
@@ -11250,7 +11987,7 @@ pub struct RealtimeBetaResponse {
     pub id: Option<String>,
     ///The object type, must be `realtime.response`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.response", null]))]
+    #[schemars(extend("enum" = ["realtime.response"]))]
     pub object: Option<String>,
     /**The final status of the response (`completed`, `cancelled`, `failed`, or
 `incomplete`, `in_progress`).*/
@@ -11261,13 +11998,24 @@ pub struct RealtimeBetaResponse {
             "cancelled",
             "failed",
             "incomplete",
-            "in_progress",
-            null]
+            "in_progress"]
         )
     )]
     pub status: Option<String>,
     ///Additional details about the status.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"reason":{"enum":["turn_detected",
+            "client_cancelled",
+            "max_output_tokens",
+            "content_filter"]},
+            "type":{"enum":["completed",
+            "cancelled",
+            "failed",
+            "incomplete"]}}
+        )
+    )]
     pub status_details: Option<serde_json::Value>,
     ///The list of output items generated by the response.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -11299,7 +12047,7 @@ could be responding in either text or audio.*/
     pub modalities: Option<Vec<String>>,
     ///The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw"]))]
     pub output_audio_format: Option<String>,
     ///Sampling temperature for the model, limited to [0.6, 1.2]. Defaults to 0.8.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -11344,10 +12092,11 @@ start of the session.*/
     pub voice: Option<VoiceIdsOrCustomVoice>,
     ///The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw"]))]
     pub output_audio_format: Option<String>,
     ///Tools (functions) available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"properties":{"type":{"enum":["function"]}}}))]
     pub tools: Option<Vec<serde_json::Value>>,
     /**How the model chooses tools. Provide one of the string modes or force a specific
 function/MCP tool.*/
@@ -11580,8 +12329,10 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment
     ///The detected speaker label for this segment.
     pub speaker: String,
     ///Start time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
 }
 impl schematic_define::Registration
@@ -11878,6 +12629,9 @@ pub struct RealtimeBetaServerEventRateLimitsUpdated {
     #[schemars(extend("enum" = ["rate_limits.updated"]))]
     pub type_: String,
     ///List of rate limit information.
+    #[schemars(
+        extend("items" = {"properties":{"name":{"enum":["requests", "tokens"]}}})
+    )]
     pub rate_limits: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeBetaServerEventRateLimitsUpdated {
@@ -12037,6 +12791,7 @@ pub struct RealtimeBetaServerEventResponseContentPartAdded {
     ///The index of the content part in the item's content array.
     pub content_index: i64,
     ///The content part that was added.
+    #[schemars(extend("properties" = {"type":{"enum":["audio", "text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for RealtimeBetaServerEventResponseContentPartAdded {
@@ -12069,6 +12824,7 @@ pub struct RealtimeBetaServerEventResponseContentPartDone {
     ///The index of the content part in the item's content array.
     pub content_index: i64,
     ///The content part that is done.
+    #[schemars(extend("properties" = {"type":{"enum":["audio", "text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for RealtimeBetaServerEventResponseContentPartDone {
@@ -12555,7 +13311,19 @@ pub struct RealtimeCallCreateRequest {
 created. Use the same parameters you would send in a [`create client secret`](/docs/api-reference/realtime-sessions/create-realtime-client-secret)
 request.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeCallCreateRequest::field_rules_schema_session")]
     pub session: Option<serde_json::Value>,
+}
+impl RealtimeCallCreateRequest {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateRequestGA>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("allOf".to_owned(), serde_json::json!([reference_0]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeCallCreateRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -13207,7 +13975,7 @@ pub struct RealtimeConversationItemFunctionCall {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     ///The type of the item. Always `function_call`.
     #[serde(rename = "type")]
@@ -13215,7 +13983,7 @@ pub struct RealtimeConversationItemFunctionCall {
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     ///The ID of the function call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13244,7 +14012,7 @@ pub struct RealtimeConversationItemFunctionCallOutput {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     ///The type of the item. Always `function_call_output`.
     #[serde(rename = "type")]
@@ -13252,7 +14020,7 @@ pub struct RealtimeConversationItemFunctionCallOutput {
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     ///The ID of the function call this output is for.
     pub call_id: String,
@@ -13278,7 +14046,7 @@ pub struct RealtimeConversationItemMessageAssistant {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
@@ -13286,12 +14054,18 @@ pub struct RealtimeConversationItemMessageAssistant {
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `assistant`.
     #[schemars(extend("enum" = ["assistant"]))]
     pub role: String,
     ///The content of the message.
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"enum":["output_text",
+            "output_audio"]}}}
+        )
+    )]
     pub content: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeConversationItemMessageAssistant {
@@ -13313,7 +14087,7 @@ pub struct RealtimeConversationItemMessageSystem {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
@@ -13321,12 +14095,13 @@ pub struct RealtimeConversationItemMessageSystem {
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `system`.
     #[schemars(extend("enum" = ["system"]))]
     pub role: String,
     ///The content of the message.
+    #[schemars(extend("items" = {"properties":{"type":{"enum":["input_text"]}}}))]
     pub content: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeConversationItemMessageSystem {
@@ -13348,7 +14123,7 @@ pub struct RealtimeConversationItemMessageUser {
     pub id: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`. Optional when creating a new item.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     ///The type of the item. Always `message`.
     #[serde(rename = "type")]
@@ -13356,12 +14131,23 @@ pub struct RealtimeConversationItemMessageUser {
     pub type_: String,
     ///The status of the item. Has no effect on the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     ///The role of the message sender. Always `user`.
     #[schemars(extend("enum" = ["user"]))]
     pub role: String,
     ///The content of the message.
+    #[schemars(
+        extend(
+            "items" = {"properties":{"detail":{"enum":["auto",
+            "low",
+            "high"]},
+            "image_url":{"format":"uri"},
+            "type":{"enum":["input_text",
+            "input_audio",
+            "input_image"]}}}
+        )
+    )]
     pub content: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeConversationItemMessageUser {
@@ -13389,24 +14175,22 @@ reference to any item that has previously existed in the conversation.*/
     ///The type of the item (`message`, `function_call`, `function_call_output`, `item_reference`).
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(
-        extend("enum" = ["message", "function_call", "function_call_output", null])
-    )]
+    #[schemars(extend("enum" = ["message", "function_call", "function_call_output"]))]
     pub type_: Option<String>,
     ///Identifier for the API object being returned - always `realtime.item`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.item", null]))]
+    #[schemars(extend("enum" = ["realtime.item"]))]
     pub object: Option<String>,
     /**The status of the item (`completed`, `incomplete`, `in_progress`). These have no effect
 on the conversation, but are accepted for consistency with the
 `conversation.item.created` event.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress", null]))]
+    #[schemars(extend("enum" = ["completed", "incomplete", "in_progress"]))]
     pub status: Option<String>,
     /**The role of the message sender (`user`, `assistant`, `system`), only
 applicable for `message` items.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["user", "assistant", "system", null]))]
+    #[schemars(extend("enum" = ["user", "assistant", "system"]))]
     pub role: Option<String>,
     /**The content of the message, applicable for `message` items.
 - Message items of role `system` support only `input_text` content
@@ -13414,6 +14198,14 @@ applicable for `message` items.*/
   content
 - Message items of role `assistant` support `text` content.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"enum":["input_audio",
+            "input_text",
+            "item_reference",
+            "text"]}}}
+        )
+    )]
     pub content: Option<Vec<serde_json::Value>>,
     /**The ID of the function call (for `function_call` and
 `function_call_output` items). If passed on a `function_call_output`
@@ -13452,6 +14244,14 @@ a client secret will no longer be valid for creating sessions. The session itsel
 continue after that time once started. A secret can be used to create multiple sessions
 until it expires.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"anchor":{"enum":["created_at"]},
+            "seconds":{"format":"int64",
+            "maximum":7200u64,
+            "minimum":10u64}}
+        )
+    )]
     pub expires_after: Option<serde_json::Value>,
     /**Session configuration to use for the client secret. Choose either a realtime
 session or a transcription session.*/
@@ -13475,6 +14275,7 @@ pub struct RealtimeCreateClientSecretResponse {
     ///The generated client secret value.
     pub value: String,
     ///Expiration timestamp for the client secret, in seconds since epoch.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     ///The session configuration for either a realtime or transcription session.
     pub session: serde_json::Value,
@@ -13495,7 +14296,7 @@ pub struct RealtimeFunctionTool {
     ///The type of the tool, i.e. `function`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["function", null]))]
+    #[schemars(extend("enum" = ["function"]))]
     pub type_: Option<String>,
     ///The name of the function.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13731,7 +14532,7 @@ pub struct RealtimeResponse {
     pub id: Option<String>,
     ///The object type, must be `realtime.response`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.response", null]))]
+    #[schemars(extend("enum" = ["realtime.response"]))]
     pub object: Option<String>,
     /**The final status of the response (`completed`, `cancelled`, `failed`, or
 `incomplete`, `in_progress`).*/
@@ -13742,13 +14543,24 @@ pub struct RealtimeResponse {
             "cancelled",
             "failed",
             "incomplete",
-            "in_progress",
-            null]
+            "in_progress"]
         )
     )]
     pub status: Option<String>,
     ///Additional details about the status.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"reason":{"enum":["turn_detected",
+            "client_cancelled",
+            "max_output_tokens",
+            "content_filter"]},
+            "type":{"enum":["completed",
+            "cancelled",
+            "failed",
+            "incomplete"]}}
+        )
+    )]
     pub status_details: Option<serde_json::Value>,
     ///The list of output items generated by the response.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13757,6 +14569,8 @@ pub struct RealtimeResponse {
     pub metadata: Option<Metadata>,
     ///Configuration for audio output.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeResponse::field_rules_schema_audio")]
     pub audio: Option<serde_json::Value>,
     /**Usage statistics for the Response, this will correspond to billing. A
 Realtime API session will maintain a conversation context and append new
@@ -13783,6 +14597,24 @@ inclusive of tool calls, that was used in this response.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<serde_json::Value>,
 }
+impl RealtimeResponse {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<VoiceIdsShared>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "output" : { "properties" : { "format" : reference_0, "voice" :
+                    reference_1 } } }
+                ),
+            );
+        schema
+    }
+}
 impl schematic_define::Registration for RealtimeResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeResponse));
     fn register(
@@ -13807,6 +14639,8 @@ Note that the server sets default instructions which will be used if this field 
     pub instructions: Option<String>,
     ///Configuration for audio input and output.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeResponseCreateParams::field_rules_schema_audio")]
     pub audio: Option<serde_json::Value>,
     ///Tools available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -13845,6 +14679,24 @@ Note that this can include references to items that previously appeared in the s
 using their id.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Vec<RealtimeConversationItem>>,
+}
+impl RealtimeResponseCreateParams {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<VoiceIdsOrCustomVoice>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "output" : { "properties" : { "format" : reference_0, "voice" :
+                    reference_1 } } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeResponseCreateParams {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -14467,8 +15319,10 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionSegment {
     ///The detected speaker label for this segment.
     pub speaker: String,
     ///Start time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
 }
 impl schematic_define::Registration
@@ -14895,6 +15749,9 @@ pub struct RealtimeServerEventRateLimitsUpdated {
     #[schemars(extend("enum" = ["rate_limits.updated"]))]
     pub type_: String,
     ///List of rate limit information.
+    #[schemars(
+        extend("items" = {"properties":{"name":{"enum":["requests", "tokens"]}}})
+    )]
     pub rate_limits: Vec<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeServerEventRateLimitsUpdated {
@@ -15052,6 +15909,7 @@ pub struct RealtimeServerEventResponseContentPartAdded {
     ///The index of the content part in the item's content array.
     pub content_index: i64,
     ///The content part that was added.
+    #[schemars(extend("properties" = {"type":{"enum":["audio", "text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for RealtimeServerEventResponseContentPartAdded {
@@ -15084,6 +15942,7 @@ pub struct RealtimeServerEventResponseContentPartDone {
     ///The index of the content part in the item's content array.
     pub content_index: i64,
     ///The content part that is done.
+    #[schemars(extend("properties" = {"type":{"enum":["audio", "text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for RealtimeServerEventResponseContentPartDone {
@@ -15549,11 +16408,12 @@ pub struct RealtimeSession {
     pub id: Option<String>,
     ///The object type. Always `realtime.session`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["realtime.session", null]))]
+    #[schemars(extend("enum" = ["realtime.session"]))]
     pub object: Option<String>,
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"]}))]
     pub modalities: Option<serde_json::Value>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -15579,14 +16439,18 @@ start of the session.*/
 For `pcm16`, input audio must be 16-bit PCM at a 24kHz sample rate,
 single channel (mono), and little-endian byte order.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw"]))]
     pub input_audio_format: Option<String>,
     /**The format of output audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
 For `pcm16`, output audio is sampled at a rate of 24kHz.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw"]))]
     pub output_audio_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSession::field_rules_schema_input_audio_transcription"
+    )]
     pub input_audio_transcription: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_detection: Option<RealtimeTurnDetection>,
@@ -15594,6 +16458,10 @@ For `pcm16`, output audio is sampled at a rate of 24kHz.*/
 Noise reduction filters audio added to the input audio buffer before it is sent to VAD and the model.
 Filtering the audio can improve VAD and turn detection accuracy (reducing false positives) and model performance by improving perception of the input audio.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSession::field_rules_schema_input_audio_noise_reduction"
+    )]
     pub input_audio_noise_reduction: Option<serde_json::Value>,
     /**The speed of the model's spoken response. 1.0 is the default speed. 0.25 is
 the minimum speed. 1.5 is the maximum speed. This value can only be changed
@@ -15621,11 +16489,58 @@ given model. Defaults to `inf`.*/
     pub max_response_output_tokens: Option<serde_json::Value>,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeSession::field_rules_schema_prompt")]
     pub prompt: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"items":{"enum":["item.input_audio_transcription.logprobs"]}},
+            {"type":"null"}]
+        )
+    )]
     pub include: Option<serde_json::Value>,
+}
+impl RealtimeSession {
+    fn field_rules_schema_input_audio_transcription(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AudioTranscriptionResponse>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "allOf" : [reference_0] }, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_input_audio_noise_reduction(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<NoiseReductionType>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "type" : reference_0 }),
+            );
+        schema
+    }
+    fn field_rules_schema_prompt(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<Prompt>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeSession {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeSession));
@@ -15641,10 +16556,12 @@ for keys is one minute.*/
 #[derive(JsonSchema)]
 pub struct RealtimeSessionCreateRequest {
     ///Ephemeral key returned by the API.
+    #[schemars(extend("properties" = {"expires_at":{"format":"unixtime"}}))]
     pub client_secret: serde_json::Value,
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"]}))]
     pub modalities: Option<serde_json::Value>,
     /**The default system instructions (i.e. system message) prepended to model calls. This field allows the client to guide the model on desired responses. The model can be instructed on response content and format, (e.g. "be extremely succinct", "act friendly", "here are examples of good responses") and on audio behavior (e.g. "talk quickly", "inject emotion into your voice", "laugh frequently"). The instructions are not guaranteed to be followed by the model, but they provide guidance to the model on the desired behavior.
 Note that the server sets default instructions which will be used if this field is not set and are visible in the `session.created` event at the start of the session.*/
@@ -15685,6 +16602,7 @@ audio volume and respond at the end of user speech.*/
     pub turn_detection: Option<serde_json::Value>,
     ///Tools (functions) available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"properties":{"type":{"enum":["function"]}}}))]
     pub tools: Option<Vec<serde_json::Value>>,
     /**How the model chooses tools. Options are `auto`, `none`, `required`, or
 specify a function.*/
@@ -15738,6 +16656,8 @@ Note that the server sets default instructions which will be used if this field 
     pub instructions: Option<String>,
     ///Configuration for input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeSessionCreateRequestGA::field_rules_schema_audio")]
     pub audio: Option<serde_json::Value>,
     /**Additional fields to include in server outputs.
 
@@ -15781,6 +16701,32 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
+impl RealtimeSessionCreateRequestGA {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<NoiseReductionType>();
+        let reference_2 = generator.subschema_for::<AudioTranscription>();
+        let reference_3 = generator.subschema_for::<RealtimeTurnDetection>();
+        let reference_4 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_5 = generator.subschema_for::<VoiceIdsOrCustomVoice>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "format" : reference_0,
+                    "noise_reduction" : { "properties" : { "type" : reference_1 } },
+                    "transcription" : reference_2, "turn_detection" : reference_3 } },
+                    "output" : { "properties" : { "format" : reference_4, "speed" : {
+                    "maximum" : 1.5f64, "minimum" : 0.25f64 }, "voice" : reference_5 } }
+                    }
+                ),
+            );
+        schema
+    }
+}
 impl schematic_define::Registration for RealtimeSessionCreateRequestGA {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
         stringify!(RealtimeSessionCreateRequestGA),
@@ -15803,6 +16749,7 @@ pub struct RealtimeSessionCreateResponse {
     pub object: Option<String>,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     /**Additional fields to include in server outputs.
 - `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
@@ -15820,6 +16767,7 @@ pub struct RealtimeSessionCreateResponse {
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"]}))]
     pub output_modalities: Option<serde_json::Value>,
     /**The default system instructions (i.e. system message) prepended to model
 calls. This field allows the client to guide the model on desired
@@ -15837,6 +16785,8 @@ start of the session.*/
     pub instructions: Option<String>,
     ///Configuration for input and output audio for the session.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeSessionCreateResponse::field_rules_schema_audio")]
     pub audio: Option<serde_json::Value>,
     /**Configuration options for tracing. Set to null to disable tracing. Once
 tracing is enabled for a session, the configuration cannot be modified.
@@ -15864,6 +16814,29 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<serde_json::Value>,
 }
+impl RealtimeSessionCreateResponse {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<NoiseReductionType>();
+        let reference_2 = generator.subschema_for::<AudioTranscriptionResponse>();
+        let reference_3 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_4 = generator.subschema_for::<VoiceIdsShared>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "format" : reference_0,
+                    "noise_reduction" : { "properties" : { "type" : reference_1 } },
+                    "transcription" : reference_2 } }, "output" : { "properties" : {
+                    "format" : reference_3, "voice" : reference_4 } } }
+                ),
+            );
+        schema
+    }
+}
 impl schematic_define::Registration for RealtimeSessionCreateResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
         stringify!(RealtimeSessionCreateResponse),
@@ -15889,6 +16862,7 @@ pub struct RealtimeSessionCreateResponseGA {
     pub object: String,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     /**The set of modalities the model can respond with. It defaults to `["audio"]`, indicating
 that the model will respond with audio plus a transcript. `["text"]` can be used to make
@@ -15906,6 +16880,10 @@ Note that the server sets default instructions which will be used if this field 
     pub instructions: Option<String>,
     ///Configuration for input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSessionCreateResponseGA::field_rules_schema_audio"
+    )]
     pub audio: Option<serde_json::Value>,
     /**Additional fields to include in server outputs.
 
@@ -15940,6 +16918,32 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
+impl RealtimeSessionCreateResponseGA {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<NoiseReductionType>();
+        let reference_2 = generator.subschema_for::<AudioTranscriptionResponse>();
+        let reference_3 = generator.subschema_for::<RealtimeTurnDetection>();
+        let reference_4 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_5 = generator.subschema_for::<VoiceIdsShared>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "format" : reference_0,
+                    "noise_reduction" : { "properties" : { "type" : reference_1 } },
+                    "transcription" : reference_2, "turn_detection" : reference_3 } },
+                    "output" : { "properties" : { "format" : reference_4, "speed" : {
+                    "maximum" : 1.5f64, "minimum" : 0.25f64 }, "voice" : reference_5 } }
+                    }
+                ),
+            );
+        schema
+    }
+}
 impl schematic_define::Registration for RealtimeSessionCreateResponseGA {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
         stringify!(RealtimeSessionCreateResponseGA),
@@ -15956,17 +16960,22 @@ impl schematic_define::Registration for RealtimeSessionCreateResponseGA {
 pub struct RealtimeTranscriptionSessionCreateRequest {
     ///Configuration for turn detection. Can be set to `null` to turn off. Server VAD means that the model will detect the start and end of speech based on audio volume and respond at the end of user speech.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("properties" = {"type":{"enum":["server_vad"]}}))]
     pub turn_detection: Option<serde_json::Value>,
     /**Configuration for input audio noise reduction. This can be set to `null` to turn off.
 Noise reduction filters audio added to the input audio buffer before it is sent to VAD and the model.
 Filtering the audio can improve VAD and turn detection accuracy (reducing false positives) and model performance by improving perception of the input audio.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeTranscriptionSessionCreateRequest::field_rules_schema_input_audio_noise_reduction"
+    )]
     pub input_audio_noise_reduction: Option<serde_json::Value>,
     /**The format of input audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
 For `pcm16`, input audio must be 16-bit PCM at a 24kHz sample rate,
 single channel (mono), and little-endian byte order.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw", null]))]
+    #[schemars(extend("enum" = ["pcm16", "g711_ulaw", "g711_alaw"]))]
     pub input_audio_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_audio_transcription: Option<AudioTranscription>,
@@ -15980,6 +16989,20 @@ single channel (mono), and little-endian byte order.*/
         )
     )]
     pub include: Option<Vec<String>>,
+}
+impl RealtimeTranscriptionSessionCreateRequest {
+    fn field_rules_schema_input_audio_noise_reduction(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<NoiseReductionType>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "type" : reference_0 }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16001,6 +17024,10 @@ pub struct RealtimeTranscriptionSessionCreateRequestGA {
     pub type_: String,
     ///Configuration for input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeTranscriptionSessionCreateRequestGA::field_rules_schema_audio"
+    )]
     pub audio: Option<serde_json::Value>,
     /**Additional fields to include in server outputs.
 
@@ -16013,6 +17040,27 @@ pub struct RealtimeTranscriptionSessionCreateRequestGA {
         )
     )]
     pub include: Option<Vec<String>>,
+}
+impl RealtimeTranscriptionSessionCreateRequestGA {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<NoiseReductionType>();
+        let reference_2 = generator.subschema_for::<AudioTranscription>();
+        let reference_3 = generator.subschema_for::<RealtimeTurnDetection>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "format" : reference_0,
+                    "noise_reduction" : { "properties" : { "type" : reference_1 } },
+                    "transcription" : reference_2, "turn_detection" : reference_3 } } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequestGA {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16034,10 +17082,12 @@ property is not present when a session is updated via the WebSocket API.*/
 pub struct RealtimeTranscriptionSessionCreateResponse {
     /**Ephemeral key returned by the API. Only present when the session is
 created on the server via REST API.*/
+    #[schemars(extend("properties" = {"expires_at":{"format":"unixtime"}}))]
     pub client_secret: serde_json::Value,
     /**The set of modalities the model can respond with. To disable audio,
 set this to ["text"].*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"enum":["text", "audio"]}))]
     pub modalities: Option<serde_json::Value>,
     ///The format of input audio. Options are `pcm16`, `g711_ulaw`, or `g711_alaw`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16074,6 +17124,7 @@ pub struct RealtimeTranscriptionSessionCreateResponseGA {
     pub object: String,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: Option<i64>,
     /**Additional fields to include in server outputs.
 - `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
@@ -16087,7 +17138,31 @@ pub struct RealtimeTranscriptionSessionCreateResponseGA {
     pub include: Option<Vec<String>>,
     ///Configuration for input audio for the session.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeTranscriptionSessionCreateResponseGA::field_rules_schema_audio"
+    )]
     pub audio: Option<serde_json::Value>,
+}
+impl RealtimeTranscriptionSessionCreateResponseGA {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeAudioFormats>();
+        let reference_1 = generator.subschema_for::<NoiseReductionType>();
+        let reference_2 = generator.subschema_for::<AudioTranscriptionResponse>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "format" : reference_0,
+                    "noise_reduction" : { "properties" : { "type" : reference_1 } },
+                    "transcription" : reference_2 } } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranscriptionSessionCreateResponseGA {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16280,6 +17355,14 @@ a client secret will no longer be valid for creating sessions. The session itsel
 continue after that time once started. A secret can be used to create multiple sessions
 until it expires.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"anchor":{"enum":["created_at"]},
+            "seconds":{"format":"int64",
+            "maximum":7200u64,
+            "minimum":10u64}}
+        )
+    )]
     pub expires_after: Option<serde_json::Value>,
     pub session: RealtimeTranslationSessionCreateRequest,
 }
@@ -16300,6 +17383,7 @@ pub struct RealtimeTranslationClientSecretCreateResponse {
     ///The generated client secret value.
     pub value: String,
     ///Expiration timestamp for the client secret, in seconds since epoch.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     pub session: RealtimeTranslationSession,
 }
@@ -16515,7 +17599,7 @@ pub struct RealtimeTranslationServerEventSessionOutputAudioDelta {
     pub channels: Option<i64>,
     ///Audio encoding for `delta`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["pcm16", null]))]
+    #[schemars(extend("enum" = ["pcm16"]))]
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<serde_json::Value>,
@@ -16595,12 +17679,32 @@ pub struct RealtimeTranslationSession {
     #[schemars(extend("enum" = ["translation"]))]
     pub type_: String,
     ///Expiration timestamp for the session, in seconds since epoch.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     /**The Realtime translation model used for this session. This field is set at
 session creation and cannot be changed with `session.update`.*/
     pub model: String,
     ///Configuration for translation input and output audio.
+    #[schemars(schema_with = "RealtimeTranslationSession::field_rules_schema_audio")]
     pub audio: serde_json::Value,
+}
+impl RealtimeTranslationSession {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<NoiseReductionType>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "noise_reduction" : { "anyOf" : [{
+                    "properties" : { "type" : reference_0 } }, { "type" : "null" }] } } }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranslationSession {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16621,7 +17725,29 @@ pub struct RealtimeTranslationSessionCreateRequest {
     pub model: String,
     ///Configuration for translation input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeTranslationSessionCreateRequest::field_rules_schema_audio"
+    )]
     pub audio: Option<serde_json::Value>,
+}
+impl RealtimeTranslationSessionCreateRequest {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<NoiseReductionType>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "noise_reduction" : { "anyOf" : [{
+                    "properties" : { "type" : reference_0 } }, { "type" : "null" }] } } }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranslationSessionCreateRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16639,7 +17765,29 @@ impl schematic_define::Registration for RealtimeTranslationSessionCreateRequest 
 pub struct RealtimeTranslationSessionUpdateRequest {
     ///Configuration for translation input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeTranslationSessionUpdateRequest::field_rules_schema_audio"
+    )]
     pub audio: Option<serde_json::Value>,
+}
+impl RealtimeTranslationSessionUpdateRequest {
+    fn field_rules_schema_audio(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<NoiseReductionType>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "input" : { "properties" : { "noise_reduction" : { "anyOf" : [{
+                    "properties" : { "type" : reference_0 } }, { "type" : "null" }] } } }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeTranslationSessionUpdateRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16711,10 +17859,24 @@ pub struct Reasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["auto", "concise", "detailed"]}, {"type":"null"}])
+    )]
     pub summary: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"enum":["auto",
+            "current_turn",
+            "all_turns"]},
+            {"type":"null"}]
+        )
+    )]
     pub context: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["auto", "concise", "detailed"]}, {"type":"null"}])
+    )]
     pub generate_summary: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for Reasoning {
@@ -16769,7 +17931,7 @@ pub struct ReasoningItem {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for ReasoningItem {
@@ -18123,6 +19285,7 @@ pub struct ResponseReasoningSummaryPartAddedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     ///The summary part that was added.
+    #[schemars(extend("properties" = {"type":{"enum":["summary_text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for ResponseReasoningSummaryPartAddedEvent {
@@ -18152,11 +19315,12 @@ pub struct ResponseReasoningSummaryPartDoneEvent {
     /**The completion status of the summary part. Omitted when the part completed
 normally and set to `incomplete` when generation was interrupted.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["incomplete", null]))]
+    #[schemars(extend("enum" = ["incomplete"]))]
     pub status: Option<String>,
     ///The sequence number of this event.
     pub sequence_number: i64,
     ///The completed summary part.
+    #[schemars(extend("properties" = {"type":{"enum":["summary_text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for ResponseReasoningSummaryPartDoneEvent {
@@ -19160,6 +20324,7 @@ pub struct RunObject {
     #[schemars(extend("enum" = ["thread.run"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the run was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The ID of the [thread](/docs/api-reference/threads) that was executed on as a part of this run.
     pub thread_id: String,
@@ -19181,20 +20346,39 @@ pub struct RunObject {
     )]
     pub status: String,
     ///Details on the action required to continue the run. Will be `null` if no action is required.
+    #[schemars(schema_with = "RunObject::field_rules_schema_required_action")]
     pub required_action: serde_json::Value,
     ///The last error associated with this run. Will be `null` if there are no errors.
+    #[schemars(
+        extend(
+            "properties" = {"code":{"enum":["server_error",
+            "rate_limit_exceeded",
+            "invalid_prompt"]}}
+        )
+    )]
     pub last_error: serde_json::Value,
     ///The Unix timestamp (in seconds) for when the run will expire.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     ///The Unix timestamp (in seconds) for when the run was started.
+    #[schemars(extend("format" = "unixtime"))]
     pub started_at: i64,
     ///The Unix timestamp (in seconds) for when the run was cancelled.
+    #[schemars(extend("format" = "unixtime"))]
     pub cancelled_at: i64,
     ///The Unix timestamp (in seconds) for when the run failed.
+    #[schemars(extend("format" = "unixtime"))]
     pub failed_at: i64,
     ///The Unix timestamp (in seconds) for when the run was completed.
+    #[schemars(extend("format" = "unixtime"))]
     pub completed_at: i64,
     ///Details on why the run is incomplete. Will be `null` if the run is not incomplete.
+    #[schemars(
+        extend(
+            "properties" = {"reason":{"enum":["max_completion_tokens",
+            "max_prompt_tokens"]}}
+        )
+    )]
     pub incomplete_details: serde_json::Value,
     ///The model that the [assistant](/docs/api-reference/assistants) used for this run.
     pub model: String,
@@ -19221,6 +20405,23 @@ pub struct RunObject {
     pub tool_choice: serde_json::Value,
     pub parallel_tool_calls: ParallelToolCalls,
     pub response_format: AssistantsApiResponseFormatOption,
+}
+impl RunObject {
+    fn field_rules_schema_required_action(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunToolCallObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "submit_tool_outputs" : { "properties" : { "tool_calls" : { "items"
+                    : reference_0 } } }, "type" : { "enum" : ["submit_tool_outputs"] } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunObject));
@@ -19536,7 +20737,30 @@ pub struct RunStepDetailsToolCallsFileSearchObject {
     #[schemars(extend("enum" = ["file_search"]))]
     pub type_: String,
     ///For now, this is always going to be an empty object.
+    #[schemars(
+        schema_with = "RunStepDetailsToolCallsFileSearchObject::field_rules_schema_file_search"
+    )]
     pub file_search: serde_json::Value,
+}
+impl RunStepDetailsToolCallsFileSearchObject {
+    fn field_rules_schema_file_search(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDetailsToolCallsFileSearchRankingOptionsObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDetailsToolCallsFileSearchResultObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "ranking_options" : reference_0, "results" : { "items" :
+                    reference_1 } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDetailsToolCallsFileSearchObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -19581,6 +20805,7 @@ pub struct RunStepDetailsToolCallsFileSearchResultObject {
     pub score: f64,
     ///The content of the result that was found. The content is only included if requested via the include query parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("items" = {"properties":{"type":{"enum":["text"]}}}))]
     pub content: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for RunStepDetailsToolCallsFileSearchResultObject {
@@ -19646,6 +20871,7 @@ pub struct RunStepObject {
     #[schemars(extend("enum" = ["thread.run.step"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the run step was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The ID of the [assistant](/docs/api-reference/assistants) associated with the run step.
     pub assistant_id: String,
@@ -19664,10 +20890,21 @@ pub struct RunStepObject {
     pub status: String,
     ///The details of the run step.
     pub step_details: serde_json::Value,
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code":{"enum":["server_error",
+            "rate_limit_exceeded"]}}},
+            {"type":"null"}]
+        )
+    )]
     pub last_error: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub expired_at: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub cancelled_at: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub failed_at: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub completed_at: serde_json::Value,
     pub metadata: Metadata,
     pub usage: RunStepCompletionUsage,
@@ -20023,7 +21260,15 @@ pub struct ThreadObject {
     #[schemars(extend("enum" = ["thread"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the thread was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
+            "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64}}}}},
+            {"type":"null"}]
+        )
+    )]
     pub tool_resources: serde_json::Value,
     pub metadata: Metadata,
 }
@@ -20440,8 +21685,10 @@ pub struct TranscriptTextSegmentEvent {
     ///Unique identifier for the segment.
     pub id: String,
     ///Start timestamp of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End timestamp of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
     ///Transcript text for this segment.
     pub text: String,
@@ -20467,6 +21714,7 @@ pub struct TranscriptTextUsageDuration {
     #[schemars(extend("enum" = ["duration"]))]
     pub type_: String,
     ///Duration of the input audio in seconds.
+    #[schemars(extend("format" = "double"))]
     pub seconds: f64,
 }
 impl schematic_define::Registration for TranscriptTextUsageDuration {
@@ -20523,8 +21771,10 @@ pub struct TranscriptionDiarizedSegment {
     ///Unique identifier for the segment.
     pub id: String,
     ///Start timestamp of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End timestamp of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
     ///Transcript text for this segment.
     pub text: String,
@@ -20581,20 +21831,26 @@ pub struct TranscriptionSegment {
     ///Seek offset of the segment.
     pub seek: i64,
     ///Start time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End time of the segment in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
     ///Text content of the segment.
     pub text: String,
     ///Array of token IDs for the text content.
     pub tokens: Vec<i64>,
     ///Temperature parameter used for generating the segment.
+    #[schemars(extend("format" = "float"))]
     pub temperature: f64,
     ///Average logprob of the segment. If the value is lower than -1, consider the logprobs failed.
+    #[schemars(extend("format" = "float"))]
     pub avg_logprob: f64,
     ///Compression ratio of the segment. If the value is greater than 2.4, consider the compression failed.
+    #[schemars(extend("format" = "float"))]
     pub compression_ratio: f64,
     ///Probability of no speech in the segment. If the value is higher than 1.0 and the `avg_logprob` is below -1, consider this segment silent.
+    #[schemars(extend("format" = "float"))]
     pub no_speech_prob: f64,
 }
 impl schematic_define::Registration for TranscriptionSegment {
@@ -20611,8 +21867,10 @@ pub struct TranscriptionWord {
     ///The text content of the word.
     pub word: String,
     ///Start time of the word in seconds.
+    #[schemars(extend("format" = "double"))]
     pub start: f64,
     ///End time of the word in seconds.
+    #[schemars(extend("format" = "double"))]
     pub end: f64,
 }
 impl schematic_define::Registration for TranscriptionWord {
@@ -20632,6 +21890,7 @@ pub struct TruncationObject {
     #[schemars(extend("enum" = ["auto", "last_messages"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"minimum":1u64}, {"type":"null"}]))]
     pub last_messages: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for TruncationObject {
@@ -20719,7 +21978,7 @@ pub struct UpdateProjectServiceAccountBody {
     pub name: Option<String>,
     ///The updated service account role.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["member", "owner", null]))]
+    #[schemars(extend("enum" = ["member", "owner"]))]
     pub role: Option<String>,
 }
 impl schematic_define::Registration for UpdateProjectServiceAccountBody {
@@ -20791,6 +22050,7 @@ pub struct Upload {
     ///The Upload unique identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the Upload was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The name of the file to be uploaded.
     pub filename: String,
@@ -20802,10 +22062,11 @@ pub struct Upload {
     #[schemars(extend("enum" = ["pending", "completed", "cancelled", "expired"]))]
     pub status: String,
     ///The Unix timestamp (in seconds) for when the Upload will expire.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     ///The object type, which is always "upload".
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["upload", null]))]
+    #[schemars(extend("enum" = ["upload"]))]
     pub object: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<serde_json::Value>,
@@ -20844,6 +22105,7 @@ pub struct UploadPart {
     ///The upload Part unique identifier, which can be referenced in API endpoints.
     pub id: String,
     ///The Unix timestamp (in seconds) for when the Part was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The ID of the Upload object that this Part was added to.
     pub upload_id: String,
@@ -20895,6 +22157,7 @@ pub struct UsageAudioTranscriptionsResult {
     #[schemars(extend("enum" = ["organization.usage.audio_transcriptions.result"]))]
     pub object: String,
     ///The number of seconds processed.
+    #[schemars(extend("format" = "int64"))]
     pub seconds: i64,
     ///The count of requests made to the model.
     pub num_model_requests: i64,
@@ -21230,15 +22493,24 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<serde_json::Value>,
     ///The Unix timestamp (in seconds) of when the user was added.
+    #[schemars(extend("format" = "unixtime"))]
     pub added_at: i64,
     ///Whether this is the organization's default user.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default: Option<bool>,
     ///The Unix timestamp (in seconds) of when the user was created.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "unixtime"))]
     pub created: Option<i64>,
     ///Nested user details.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"banned_at":{"anyOf":[{"format":"unixtime"},
+            {"type":"null"}]},
+            "object":{"enum":["user"]}}
+        )
+    )]
     pub user: Option<serde_json::Value>,
     ///Whether the user is a service account.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21251,6 +22523,7 @@ pub struct User {
     pub is_scim_managed: Option<bool>,
     ///The Unix timestamp (in seconds) of the user's last API key usage.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub api_key_last_used_at: Option<serde_json::Value>,
     ///The technical level metadata for the user.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21260,6 +22533,9 @@ pub struct User {
     pub developer_persona: Option<serde_json::Value>,
     ///Projects associated with the user, if included.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"properties":{"object":{"enum":["list"]}}}, {"type":"null"}])
+    )]
     pub projects: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for User {
@@ -21489,6 +22765,7 @@ pub struct VectorStoreFileBatchObject {
     #[schemars(extend("enum" = ["vector_store.files_batch"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the vector store files batch was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The ID of the [vector store](/docs/api-reference/vector-stores/object) that the [File](/docs/api-reference/files) is attached to.
     pub vector_store_id: String,
@@ -21542,12 +22819,21 @@ pub struct VectorStoreFileObject {
     ///The total vector store usage in bytes. Note that this may be different from the original file size.
     pub usage_bytes: i64,
     ///The Unix timestamp (in seconds) for when the vector store file was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The ID of the [vector store](/docs/api-reference/vector-stores/object) that the [File](/docs/api-reference/files) is attached to.
     pub vector_store_id: String,
     ///The status of the vector store file, which can be either `in_progress`, `completed`, `cancelled`, or `failed`. The status `completed` indicates that the vector store file is ready for use.
     #[schemars(extend("enum" = ["in_progress", "completed", "cancelled", "failed"]))]
     pub status: String,
+    #[schemars(
+        extend(
+            "anyOf" = [{"properties":{"code":{"enum":["server_error",
+            "unsupported_file",
+            "invalid_file"]}}},
+            {"type":"null"}]
+        )
+    )]
     pub last_error: serde_json::Value,
     ///The strategy used to chunk the file.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21575,6 +22861,7 @@ pub struct VectorStoreObject {
     #[schemars(extend("enum" = ["vector_store"]))]
     pub object: String,
     ///The Unix timestamp (in seconds) for when the vector store was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The name of the vector store.
     pub name: String,
@@ -21587,7 +22874,9 @@ pub struct VectorStoreObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<VectorStoreExpirationAfter>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub expires_at: Option<serde_json::Value>,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub last_active_at: serde_json::Value,
     pub metadata: Metadata,
 }
@@ -21616,6 +22905,15 @@ pub struct VectorStoreSearchRequest {
     pub filters: Option<serde_json::Value>,
     ///Ranking options for search.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"ranker":{"enum":["none",
+            "auto",
+            "default-2024-11-15"]},
+            "score_threshold":{"maximum":1u64,
+            "minimum":0u64}}
+        )
+    )]
     pub ranking_options: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for VectorStoreSearchRequest {
@@ -21771,6 +23069,7 @@ pub struct VoiceConsentResource {
     ///The BCP 47 language tag for the consent phrase (for example, `en-US`).
     pub language: String,
     ///The Unix timestamp (in seconds) for when the consent recording was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for VoiceConsentResource {
@@ -21838,6 +23137,7 @@ pub struct VoiceResource {
     ///The name of the voice.
     pub name: String,
     ///The Unix timestamp (in seconds) for when the voice was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for VoiceResource {
@@ -21857,6 +23157,7 @@ pub struct WebSearchActionFind {
     #[schemars(extend("enum" = ["find_in_page"]))]
     pub type_: String,
     ///The URL of the page searched for the pattern.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The pattern or text to search for within the page.
     pub pattern: String,
@@ -21879,6 +23180,7 @@ pub struct WebSearchActionOpenPage {
     pub type_: String,
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub url: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for WebSearchActionOpenPage {
@@ -21907,6 +23209,12 @@ pub struct WebSearchActionSearch {
     pub queries: Option<Vec<String>>,
     ///The sources used in the search.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"enum":["url"]},
+            "url":{"format":"uri"}}}
+        )
+    )]
     pub sources: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for WebSearchActionSearch {
@@ -22006,7 +23314,7 @@ pub struct WebSearchTool {
     pub user_location: Option<WebSearchApproximateLocation>,
     ///High level guidance for the amount of context window space to use for the search. One of `low`, `medium`, or `high`. `medium` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
+    #[schemars(extend("enum" = ["low", "medium", "high"]))]
     pub search_context_size: Option<String>,
 }
 impl schematic_define::Registration for WebSearchTool {
@@ -22048,6 +23356,7 @@ impl schematic_define::Registration for WebSearchToolCall {
 #[derive(JsonSchema)]
 pub struct WebhookBatchCancelled {
     ///The Unix timestamp (in seconds) of when the batch API request was cancelled.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22055,7 +23364,7 @@ pub struct WebhookBatchCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.cancelled`.
     #[serde(rename = "type")]
@@ -22077,6 +23386,7 @@ impl schematic_define::Registration for WebhookBatchCancelled {
 #[derive(JsonSchema)]
 pub struct WebhookBatchCompleted {
     ///The Unix timestamp (in seconds) of when the batch API request was completed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22084,7 +23394,7 @@ pub struct WebhookBatchCompleted {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.completed`.
     #[serde(rename = "type")]
@@ -22106,6 +23416,7 @@ impl schematic_define::Registration for WebhookBatchCompleted {
 #[derive(JsonSchema)]
 pub struct WebhookBatchExpired {
     ///The Unix timestamp (in seconds) of when the batch API request expired.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22113,7 +23424,7 @@ pub struct WebhookBatchExpired {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.expired`.
     #[serde(rename = "type")]
@@ -22133,6 +23444,7 @@ impl schematic_define::Registration for WebhookBatchExpired {
 #[derive(JsonSchema)]
 pub struct WebhookBatchFailed {
     ///The Unix timestamp (in seconds) of when the batch API request failed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22140,7 +23452,7 @@ pub struct WebhookBatchFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `batch.failed`.
     #[serde(rename = "type")]
@@ -22160,6 +23472,7 @@ impl schematic_define::Registration for WebhookBatchFailed {
 #[derive(JsonSchema)]
 pub struct WebhookEvalRunCanceled {
     ///The Unix timestamp (in seconds) of when the eval run was canceled.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22167,7 +23480,7 @@ pub struct WebhookEvalRunCanceled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.canceled`.
     #[serde(rename = "type")]
@@ -22189,6 +23502,7 @@ impl schematic_define::Registration for WebhookEvalRunCanceled {
 #[derive(JsonSchema)]
 pub struct WebhookEvalRunFailed {
     ///The Unix timestamp (in seconds) of when the eval run failed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22196,7 +23510,7 @@ pub struct WebhookEvalRunFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.failed`.
     #[serde(rename = "type")]
@@ -22216,6 +23530,7 @@ impl schematic_define::Registration for WebhookEvalRunFailed {
 #[derive(JsonSchema)]
 pub struct WebhookEvalRunSucceeded {
     ///The Unix timestamp (in seconds) of when the eval run succeeded.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22223,7 +23538,7 @@ pub struct WebhookEvalRunSucceeded {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `eval.run.succeeded`.
     #[serde(rename = "type")]
@@ -22245,6 +23560,7 @@ impl schematic_define::Registration for WebhookEvalRunSucceeded {
 #[derive(JsonSchema)]
 pub struct WebhookFineTuningJobCancelled {
     ///The Unix timestamp (in seconds) of when the fine-tuning job was cancelled.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22252,7 +23568,7 @@ pub struct WebhookFineTuningJobCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.cancelled`.
     #[serde(rename = "type")]
@@ -22274,6 +23590,7 @@ impl schematic_define::Registration for WebhookFineTuningJobCancelled {
 #[derive(JsonSchema)]
 pub struct WebhookFineTuningJobFailed {
     ///The Unix timestamp (in seconds) of when the fine-tuning job failed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22281,7 +23598,7 @@ pub struct WebhookFineTuningJobFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.failed`.
     #[serde(rename = "type")]
@@ -22303,6 +23620,7 @@ impl schematic_define::Registration for WebhookFineTuningJobFailed {
 #[derive(JsonSchema)]
 pub struct WebhookFineTuningJobSucceeded {
     ///The Unix timestamp (in seconds) of when the fine-tuning job succeeded.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22310,7 +23628,7 @@ pub struct WebhookFineTuningJobSucceeded {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `fine_tuning.job.succeeded`.
     #[serde(rename = "type")]
@@ -22334,6 +23652,7 @@ successful Realtime or Live accept endpoint selects the runtime surface.*/
 #[derive(JsonSchema)]
 pub struct WebhookLiveCallIncoming {
     ///The Unix timestamp (in seconds) of when the event was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22341,7 +23660,7 @@ pub struct WebhookLiveCallIncoming {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `live.call.incoming`.
     #[serde(rename = "type")]
@@ -22365,6 +23684,7 @@ successful Realtime or Live accept endpoint selects the runtime surface.*/
 #[derive(JsonSchema)]
 pub struct WebhookRealtimeCallIncoming {
     ///The Unix timestamp (in seconds) of when the model response was completed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22372,7 +23692,7 @@ pub struct WebhookRealtimeCallIncoming {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `realtime.call.incoming`.
     #[serde(rename = "type")]
@@ -22394,6 +23714,7 @@ impl schematic_define::Registration for WebhookRealtimeCallIncoming {
 #[derive(JsonSchema)]
 pub struct WebhookResponseCancelled {
     ///The Unix timestamp (in seconds) of when the model response was cancelled.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22401,7 +23722,7 @@ pub struct WebhookResponseCancelled {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.cancelled`.
     #[serde(rename = "type")]
@@ -22423,6 +23744,7 @@ impl schematic_define::Registration for WebhookResponseCancelled {
 #[derive(JsonSchema)]
 pub struct WebhookResponseCompleted {
     ///The Unix timestamp (in seconds) of when the model response was completed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22430,7 +23752,7 @@ pub struct WebhookResponseCompleted {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.completed`.
     #[serde(rename = "type")]
@@ -22452,6 +23774,7 @@ impl schematic_define::Registration for WebhookResponseCompleted {
 #[derive(JsonSchema)]
 pub struct WebhookResponseFailed {
     ///The Unix timestamp (in seconds) of when the model response failed.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22459,7 +23782,7 @@ pub struct WebhookResponseFailed {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.failed`.
     #[serde(rename = "type")]
@@ -22481,6 +23804,7 @@ impl schematic_define::Registration for WebhookResponseFailed {
 #[derive(JsonSchema)]
 pub struct WebhookResponseIncomplete {
     ///The Unix timestamp (in seconds) of when the model response was interrupted.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The unique ID of the event.
     pub id: String,
@@ -22488,7 +23812,7 @@ pub struct WebhookResponseIncomplete {
     pub data: serde_json::Value,
     ///The object of the event. Always `event`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["event", null]))]
+    #[schemars(extend("enum" = ["event"]))]
     pub object: Option<String>,
     ///The type of the event. Always `response.incomplete`.
     #[serde(rename = "type")]
@@ -22539,7 +23863,24 @@ pub struct ModerationResultBody {
     ///A dictionary of moderation categories to scores.
     pub category_scores: serde_json::Value,
     ///Which modalities of input are reflected by the score for each category.
+    #[schemars(
+        schema_with = "ModerationResultBody::field_rules_schema_category_applied_input_types"
+    )]
     pub category_applied_input_types: serde_json::Value,
+}
+impl ModerationResultBody {
+    fn field_rules_schema_category_applied_input_types(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationInputType>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "additionalProperties".to_owned(),
+                serde_json::json!({ "items" : reference_0 }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ModerationResultBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationResultBody));
@@ -22656,9 +23997,39 @@ impl schematic_define::Registration for ModerationConfigParam {
 #[derive(JsonSchema)]
 pub struct ModerationPolicyParam {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ModerationPolicyParam::field_rules_schema_input")]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ModerationPolicyParam::field_rules_schema_output")]
     pub output: Option<serde_json::Value>,
+}
+impl ModerationPolicyParam {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationConfigParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationConfigParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ModerationPolicyParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22677,7 +24048,23 @@ pub struct ModerationParam {
     ///The moderation model to use for moderated completions, e.g. 'omni-moderation-latest'.
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ModerationParam::field_rules_schema_policy")]
     pub policy: Option<serde_json::Value>,
+}
+impl ModerationParam {
+    fn field_rules_schema_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationPolicyParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ModerationParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationParam));
@@ -22978,6 +24365,7 @@ pub struct UrlCitationBody {
     #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The URL of the web resource.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The index of the first character of the URL citation in the message.
     pub start_index: i64,
@@ -23243,6 +24631,7 @@ pub struct InputImageContent {
     #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub image_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -23266,6 +24655,7 @@ pub struct ComputerScreenshotContent {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub image_url: serde_json::Value,
     pub file_id: serde_json::Value,
     pub detail: ImageDetail,
@@ -23321,6 +24711,7 @@ pub struct InputFileContent {
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointConfig>,
     ///The URL of the file to be sent to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub file_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<FileInputDetail>,
@@ -23365,7 +24756,23 @@ pub struct Message {
     ///The content of the message
     pub content: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "Message::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
+}
+impl Message {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessagePhase2>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for Message {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Message));
@@ -23971,7 +25378,23 @@ pub struct FunctionTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl FunctionTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "items" : reference_0 }, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionTool));
@@ -24070,7 +25493,23 @@ pub struct FileSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_options: Option<RankingOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FileSearchTool::field_rules_schema_filters")]
     pub filters: Option<serde_json::Value>,
+}
+impl FileSearchTool {
+    fn field_rules_schema_filters(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<Filters>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FileSearchTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileSearchTool));
@@ -24178,10 +25617,28 @@ pub struct AutoCodeInterpreterToolParam {
     #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "AutoCodeInterpreterToolParam::field_rules_schema_memory_limit"
+    )]
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
+}
+impl AutoCodeInterpreterToolParam {
+    fn field_rules_schema_memory_limit(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ContainerMemoryLimit>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for AutoCodeInterpreterToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -24277,6 +25734,8 @@ pub struct ContainerAutoParam {
     #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ContainerAutoParam::field_rules_schema_memory_limit")]
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24285,6 +25744,20 @@ pub struct ContainerAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<serde_json::Value>>,
+}
+impl ContainerAutoParam {
+    fn field_rules_schema_memory_limit(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ContainerMemoryLimit>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ContainerAutoParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ContainerAutoParam));
@@ -24365,7 +25838,27 @@ pub struct FunctionShellToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "FunctionShellToolParam::field_rules_schema_allowed_callers"
+    )]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl FunctionShellToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -24455,7 +25948,25 @@ pub struct CustomToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CustomToolParam::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl CustomToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CustomToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolParam));
@@ -24498,7 +26009,25 @@ pub struct FunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionToolParam::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl FunctionToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionToolParam));
@@ -24626,11 +26155,27 @@ pub struct WebSearchPreviewTool {
     #[schemars(extend("enum" = ["web_search_preview", "web_search_preview_2025_03_11"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "WebSearchPreviewTool::field_rules_schema_user_location")]
     pub user_location: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_context_size: Option<SearchContextSize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_content_types: Option<Vec<SearchContentType>>,
+}
+impl WebSearchPreviewTool {
+    fn field_rules_schema_user_location(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ApproximateLocation>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for WebSearchPreviewTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchPreviewTool));
@@ -24649,7 +26194,25 @@ pub struct ApplyPatchToolParam {
     #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ApplyPatchToolParam::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl ApplyPatchToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ApplyPatchToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApplyPatchToolParam));
@@ -24824,6 +26387,7 @@ pub struct CodeInterpreterOutputImage {
     #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     ///The URL of the image output from the code interpreter.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
 }
 impl schematic_define::Registration for CodeInterpreterOutputImage {
@@ -24952,6 +26516,8 @@ pub struct FunctionShellCall {
     ///The unique ID of the shell tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionShellCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub action: FunctionShellAction,
     pub status: FunctionShellCallStatus,
@@ -24959,6 +26525,20 @@ pub struct FunctionShellCall {
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl FunctionShellCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionShellCall));
@@ -25066,6 +26646,8 @@ pub struct FunctionShellCallOutput {
     ///The unique ID of the shell tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionShellCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: FunctionShellCallOutputStatusEnum,
     ///An array of shell call output contents
@@ -25074,6 +26656,20 @@ pub struct FunctionShellCallOutput {
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl FunctionShellCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25182,6 +26778,8 @@ pub struct ApplyPatchToolCall {
     ///The unique ID of the apply patch tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ApplyPatchToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: ApplyPatchCallStatus,
     ///One of the create_file, delete_file, or update_file operations applied via apply_patch.
@@ -25189,6 +26787,20 @@ pub struct ApplyPatchToolCall {
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl ApplyPatchToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ApplyPatchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApplyPatchToolCall));
@@ -25230,6 +26842,8 @@ pub struct ApplyPatchToolCallOutput {
     ///The unique ID of the apply patch tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ApplyPatchToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: ApplyPatchCallOutputStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25237,6 +26851,20 @@ pub struct ApplyPatchToolCallOutput {
     ///The ID of the entity that created this tool call output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl ApplyPatchToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ApplyPatchToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25330,7 +26958,23 @@ pub struct ComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledged_safety_checks: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ComputerCallOutputItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl ComputerCallOutputItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ComputerCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25354,7 +26998,25 @@ pub struct InputTextContentParam {
     #[schemars(extend("maxLength" = 10485760u64))]
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "InputTextContentParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl InputTextContentParam {
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<PromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for InputTextContentParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25375,13 +27037,50 @@ pub struct InputImageContentParamAutoParam {
     #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"format":"uri", "maxLength":20971520u64}, {"type":"null"}])
+    )]
     pub image_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "InputImageContentParamAutoParam::field_rules_schema_detail"
+    )]
     pub detail: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "InputImageContentParamAutoParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl InputImageContentParamAutoParam {
+    fn field_rules_schema_detail(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<DetailEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<PromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for InputImageContentParamAutoParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25425,13 +27124,33 @@ pub struct InputFileContentParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":73400320u64}, {"type":"null"}]))]
     pub file_data: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub file_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<FileDetailEnum>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "InputFileContentParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl InputFileContentParam {
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<PromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for InputFileContentParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25459,13 +27178,54 @@ pub struct FunctionCallOutputItemParam {
     ///Text, image, or file output of the function tool call.
     pub output: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":128u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub name: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"maxLength":64u64,
+            "minLength":1u64,
+            "pattern":"^[a-zA-Z0-9_-]+$"},
+            {"type":"null"}]
+        )
+    )]
     pub namespace: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionCallOutputItemParam::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionCallOutputItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl FunctionCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25514,6 +27274,7 @@ pub struct UrlCitationParam {
     #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The URL of the cited resource.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The title of the cited resource.
     pub title: String,
@@ -25562,6 +27323,9 @@ pub struct ToolSearchCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":64u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_call`.
     #[serde(rename = "type")]
@@ -25571,7 +27335,23 @@ pub struct ToolSearchCallItemParam {
     pub execution: Option<ToolSearchExecutionType>,
     pub arguments: EmptyModelParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ToolSearchCallItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl ToolSearchCallItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ToolSearchCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25589,6 +27369,9 @@ pub struct ToolSearchOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":64u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_output`.
     #[serde(rename = "type")]
@@ -25599,7 +27382,23 @@ pub struct ToolSearchOutputItemParam {
     ///The loaded tool definitions returned by the tool search output.
     pub tools: Vec<Tool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ToolSearchOutputItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl ToolSearchOutputItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ToolSearchOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25713,6 +27512,8 @@ pub struct FunctionShellCallItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionShellCallItemParam::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
@@ -25720,9 +27521,37 @@ pub struct FunctionShellCallItemParam {
     pub type_: String,
     pub action: FunctionShellActionParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionShellCallItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
+}
+impl FunctionShellCallItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionShellCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -25879,6 +27708,10 @@ pub struct FunctionShellCallOutputItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "FunctionShellCallOutputItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call_output`.
     #[serde(rename = "type")]
@@ -25887,9 +27720,39 @@ pub struct FunctionShellCallOutputItemParam {
     ///Captured chunks of stdout and stderr output, along with their associated outcomes.
     pub output: Vec<FunctionShellCallOutputContentParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "FunctionShellCallOutputItemParam::field_rules_schema_status"
+    )]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
+}
+impl FunctionShellCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionShellCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -26082,9 +27945,25 @@ pub struct ApplyPatchToolCallItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ApplyPatchToolCallItemParam::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: ApplyPatchCallStatusParam,
     pub operation: ApplyPatchOperationParam,
+}
+impl ApplyPatchToolCallItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ApplyPatchToolCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -26130,10 +28009,29 @@ pub struct ApplyPatchToolCallOutputItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "ApplyPatchToolCallOutputItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     pub status: ApplyPatchCallOutputStatusParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":10485760u64}, {"type":"null"}]))]
     pub output: Option<serde_json::Value>,
+}
+impl ApplyPatchToolCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ApplyPatchToolCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -26170,6 +28068,7 @@ impl schematic_define::Registration for CompactionTriggerItemParam {
 pub struct ItemReferenceParam {
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["item_reference"]}, {"type":"null"}]))]
     pub type_: Option<serde_json::Value>,
     ///The ID of the item to reference.
     pub id: String,
@@ -26267,6 +28166,7 @@ pub struct ConversationResource {
         Keys are strings with a maximum length of 64 characters. Values are strings         with a maximum length of 512 characters.*/
     pub metadata: serde_json::Value,
     ///The time at which the conversation was created, measured in seconds since the Unix epoch.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for ConversationResource {
@@ -26436,6 +28336,7 @@ pub struct ContextManagementParam {
     #[serde(rename = "type")]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"minimum":1000u64}, {"type":"null"}]))]
     pub compact_threshold: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for ContextManagementParam {
@@ -26522,7 +28423,25 @@ pub struct CreateConversationBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateConversationBody::field_rules_schema_items")]
     pub items: Option<serde_json::Value>,
+}
+impl CreateConversationBody {
+    fn field_rules_schema_items(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "maxItems" : 20u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateConversationBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -26814,6 +28733,7 @@ pub struct ServiceAccountApiKeyBody {
     ///The name of the API key.
     pub name: String,
     ///The Unix timestamp (in seconds) when the API key was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The identifier of the API key.
     pub id: String,
@@ -26832,6 +28752,7 @@ impl schematic_define::Registration for ServiceAccountApiKeyBody {
 #[derive(JsonSchema)]
 pub struct CreateContentProvenanceBody {
     ///The image or audio file to check for supported OpenAI provenance signals.
+    #[schemars(extend("format" = "binary"))]
     pub file: String,
 }
 impl schematic_define::Registration for CreateContentProvenanceBody {
@@ -26950,6 +28871,7 @@ impl schematic_define::Registration for SynthIDProvenanceResult {
 pub struct ProvenanceResource {
     pub object: ProvenanceCheckObject,
     ///The Unix timestamp, in seconds, when the provenance check was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The provenance results that apply to the uploaded file. Image results include C2PA and SynthID; audio results include SynthID.
     pub results: Vec<serde_json::Value>,
@@ -27073,8 +28995,11 @@ pub struct VideoResource {
     ///Approximate completion percentage for the generation task.
     pub progress: i64,
     ///Unix timestamp (seconds) for when the job was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub completed_at: serde_json::Value,
+    #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub expires_at: serde_json::Value,
     pub prompt: serde_json::Value,
     pub size: VideoSize,
@@ -27117,7 +29042,7 @@ impl schematic_define::Registration for VideoListResource {
 pub struct ImageRefParam2 {
     ///A fully qualified URL or base64-encoded data URL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxLength" = 20971520u64))]
+    #[schemars(extend("format" = "uri", "maxLength" = 20971520u64))]
     pub image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
@@ -27204,6 +29129,7 @@ impl schematic_define::Registration for CreateVideoJsonBody {
 #[derive(JsonSchema)]
 pub struct CreateVideoCharacterBody {
     ///Video file used to create a character.
+    #[schemars(extend("format" = "binary"))]
     pub video: String,
     ///Display name for this API character.
     #[schemars(extend("maxLength" = 80u64, "minLength" = 1u64))]
@@ -27225,6 +29151,7 @@ pub struct VideoCharacterResource {
     pub id: serde_json::Value,
     pub name: serde_json::Value,
     ///Unix timestamp (in seconds) when the character was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
 }
 impl schematic_define::Registration for VideoCharacterResource {
@@ -27435,10 +29362,16 @@ pub struct TokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "TokenCountsBody::field_rules_schema_tools")]
     pub tools: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "TokenCountsBody::field_rules_schema_text")]
     pub text: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "TokenCountsBody::field_rules_schema_reasoning")]
     pub reasoning: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<TruncationEnum>,
@@ -27449,9 +29382,61 @@ pub struct TokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "TokenCountsBody::field_rules_schema_tool_choice")]
     pub tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<serde_json::Value>,
+}
+impl TokenCountsBody {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<Tool>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "items" : reference_0 }, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_text(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ResponseTextParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_reasoning(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<Reasoning>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolChoiceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for TokenCountsBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TokenCountsBody));
@@ -27529,13 +29514,64 @@ pub struct CompactResponseMethodPublicBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":64u64}, {"type":"null"}]))]
     pub prompt_cache_key: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CompactResponseMethodPublicBody::field_rules_schema_prompt_cache_retention"
+    )]
     pub prompt_cache_retention: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CompactResponseMethodPublicBody::field_rules_schema_prompt_cache_options"
+    )]
     pub prompt_cache_options: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CompactResponseMethodPublicBody::field_rules_schema_service_tier"
+    )]
     pub service_tier: Option<serde_json::Value>,
+}
+impl CompactResponseMethodPublicBody {
+    fn field_rules_schema_prompt_cache_retention(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<PromptCacheRetentionEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_prompt_cache_options(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<PromptCacheOptionsParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_service_tier(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ServiceTierEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CompactResponseMethodPublicBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -27697,6 +29733,7 @@ pub struct CompactResource {
     ///The compacted list of output items.
     pub output: Vec<ItemField>,
     ///Unix timestamp (in seconds) when the compacted conversation was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub usage: ResponseUsage,
 }
@@ -27721,6 +29758,7 @@ pub struct SkillResource {
     ///Description of the skill.
     pub description: String,
     ///Unix timestamp (seconds) for when the skill was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Default version for the skill.
     pub default_version: String,
@@ -27816,6 +29854,7 @@ pub struct SkillVersionResource {
     ///Version number for this skill.
     pub version: String,
     ///Unix timestamp (seconds) for when the version was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Name of the skill version.
     pub name: String,
@@ -28043,6 +30082,7 @@ pub struct ChatSessionResource {
     #[schemars(extend("enum" = ["chatkit.session"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the session expires.
+    #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     ///Ephemeral client secret that authenticates session requests.
     pub client_secret: String,
@@ -28110,7 +30150,7 @@ pub struct ExpiresAfterParam {
     #[schemars(extend("enum" = ["created_at"]))]
     pub anchor: String,
     ///Number of seconds after the anchor when the session expires.
-    #[schemars(extend("maximum" = 600u64, "minimum" = 1u64))]
+    #[schemars(extend("format" = "int64", "maximum" = 600u64, "minimum" = 1u64))]
     pub seconds: i64,
 }
 impl schematic_define::Registration for ExpiresAfterParam {
@@ -28315,6 +30355,7 @@ pub struct Attachment {
     pub name: String,
     ///MIME type of the attachment.
     pub mime_type: String,
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub preview_url: serde_json::Value,
 }
 impl schematic_define::Registration for Attachment {
@@ -28365,6 +30406,7 @@ pub struct UserMessageItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28431,6 +30473,7 @@ pub struct UrlAnnotationSource {
     #[schemars(extend("enum" = ["url"]))]
     pub type_: String,
     ///URL referenced by the annotation.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
 }
 impl schematic_define::Registration for UrlAnnotationSource {
@@ -28490,6 +30533,7 @@ pub struct AssistantMessageItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28518,6 +30562,7 @@ pub struct WidgetMessageItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28563,6 +30608,7 @@ pub struct ClientToolCallItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28614,6 +30660,7 @@ pub struct TaskItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28660,6 +30707,7 @@ pub struct TaskGroupItem {
     #[schemars(extend("enum" = ["chatkit.thread_item"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the item was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///Identifier of the parent thread.
     pub thread_id: String,
@@ -28837,6 +30885,7 @@ pub struct ThreadResource {
     #[schemars(extend("enum" = ["chatkit.thread"]))]
     pub object: String,
     ///Unix timestamp (in seconds) for when the thread was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub title: serde_json::Value,
     ///Current status for the thread. Defaults to `active` for newly created threads.
@@ -28940,10 +30989,16 @@ pub struct BetaTokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaTokenCountsBody::field_rules_schema_tools")]
     pub tools: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaTokenCountsBody::field_rules_schema_text")]
     pub text: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaTokenCountsBody::field_rules_schema_reasoning")]
     pub reasoning: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<BetaTruncationEnum>,
@@ -28954,9 +31009,61 @@ pub struct BetaTokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaTokenCountsBody::field_rules_schema_tool_choice")]
     pub tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<serde_json::Value>,
+}
+impl BetaTokenCountsBody {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaTool>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "items" : reference_0 }, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_text(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaResponseTextParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_reasoning(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaReasoning>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolChoiceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaTokenCountsBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTokenCountsBody));
@@ -29309,10 +31416,24 @@ pub struct BetaReasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<BetaReasoningEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["auto", "concise", "detailed"]}, {"type":"null"}])
+    )]
     pub summary: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"enum":["auto",
+            "current_turn",
+            "all_turns"]},
+            {"type":"null"}]
+        )
+    )]
     pub context: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"enum":["auto", "concise", "detailed"]}, {"type":"null"}])
+    )]
     pub generate_summary: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaReasoning {
@@ -29651,7 +31772,27 @@ pub struct BetaApplyPatchToolParam {
     #[schemars(extend("enum" = ["apply_patch"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaApplyPatchToolParam::field_rules_schema_allowed_callers"
+    )]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaApplyPatchToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaApplyPatchToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29691,11 +31832,29 @@ pub struct BetaWebSearchPreviewTool {
     #[schemars(extend("enum" = ["web_search_preview", "web_search_preview_2025_03_11"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaWebSearchPreviewTool::field_rules_schema_user_location"
+    )]
     pub user_location: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_context_size: Option<BetaSearchContextSize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_content_types: Option<Vec<BetaSearchContentType>>,
+}
+impl BetaWebSearchPreviewTool {
+    fn field_rules_schema_user_location(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaApproximateLocation>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaWebSearchPreviewTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29876,7 +32035,25 @@ pub struct BetaCustomToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaCustomToolParam::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaCustomToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCustomToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCustomToolParam));
@@ -29966,7 +32143,27 @@ pub struct BetaFunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionToolParam::field_rules_schema_allowed_callers"
+    )]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaFunctionToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29989,7 +32186,27 @@ pub struct BetaFunctionShellToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellToolParam::field_rules_schema_allowed_callers"
+    )]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaFunctionShellToolParam {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -30073,6 +32290,8 @@ pub struct BetaContainerAutoParam {
     #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaContainerAutoParam::field_rules_schema_memory_limit")]
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30081,6 +32300,20 @@ pub struct BetaContainerAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("maxItems" = 200u64))]
     pub skills: Option<Vec<serde_json::Value>>,
+}
+impl BetaContainerAutoParam {
+    fn field_rules_schema_memory_limit(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaContainerMemoryLimit>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaContainerAutoParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -30283,7 +32516,7 @@ pub struct BetaImageGenTool {
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "medium", "high", "auto", null]))]
+    #[schemars(extend("enum" = ["low", "medium", "high", "auto"]))]
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30291,7 +32524,7 @@ or `auto`. Default: `auto`.*/
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["png", "webp", "jpeg", null]))]
+    #[schemars(extend("enum" = ["png", "webp", "jpeg"]))]
     pub output_format: Option<String>,
     ///Compression level for the output image. Default: 100.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30299,14 +32532,16 @@ or `auto`. Default: `auto`.*/
     pub output_compression: Option<i64>,
     ///Moderation level for the generated image. Default: `auto`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["auto", "low", null]))]
+    #[schemars(extend("enum" = ["auto", "low"]))]
     pub moderation: Option<String>,
     /**Background type for the generated image. One of `transparent`,
 `opaque`, or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["transparent", "opaque", "auto", null]))]
+    #[schemars(extend("enum" = ["transparent", "opaque", "auto"]))]
     pub background: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaImageGenTool::field_rules_schema_input_fidelity")]
     pub input_fidelity: Option<serde_json::Value>,
     /**Optional mask for inpainting. Contains `image_url`
 (string, optional) and `file_id` (string, optional).*/
@@ -30318,6 +32553,20 @@ or `auto`. Default: `auto`.*/
     pub partial_images: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<BetaImageGenActionEnum>,
+}
+impl BetaImageGenTool {
+    fn field_rules_schema_input_fidelity(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputFidelity>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaImageGenTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaImageGenTool));
@@ -30397,7 +32646,27 @@ specifies uploaded file IDs to make available to your code, along with an
 optional `memory_limit` setting.*/
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaCodeInterpreterTool::field_rules_schema_allowed_callers"
+    )]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaCodeInterpreterTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCodeInterpreterTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -30422,10 +32691,28 @@ pub struct BetaAutoCodeInterpreterToolParam {
     #[schemars(extend("maxItems" = 50u64))]
     pub file_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaAutoCodeInterpreterToolParam::field_rules_schema_memory_limit"
+    )]
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
+}
+impl BetaAutoCodeInterpreterToolParam {
+    fn field_rules_schema_memory_limit(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaContainerMemoryLimit>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaAutoCodeInterpreterToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -30451,6 +32738,7 @@ pub struct BetaMCPTool {
     /**The URL for the MCP server. One of `server_url`, `connector_id`, or
 `tunnel_id` must be provided.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub server_url: Option<String>,
     /**Identifier for service connectors, like those available in ChatGPT. One of
 `server_url`, `connector_id`, or `tunnel_id` must be provided. Learn more
@@ -30476,8 +32764,7 @@ Currently supported `connector_id` values are:
             "connector_microsoftteams",
             "connector_outlookcalendar",
             "connector_outlookemail",
-            "connector_sharepoint",
-            null]
+            "connector_sharepoint"]
         )
     )]
     pub connector_id: Option<String>,
@@ -30499,12 +32786,30 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_tools: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaMCPTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_approval: Option<serde_json::Value>,
     ///Whether this MCP tool is deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
+}
+impl BetaMCPTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : reference_0, "minItems" : 1u64 }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaMCPTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPTool));
@@ -30550,7 +32855,7 @@ pub struct BetaWebSearchTool {
     pub user_location: Option<BetaWebSearchApproximateLocation>,
     ///High level guidance for the amount of context window space to use for the search. One of `low`, `medium`, or `high`. `medium` is the default.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["low", "medium", "high", null]))]
+    #[schemars(extend("enum" = ["low", "medium", "high"]))]
     pub search_context_size: Option<String>,
 }
 impl schematic_define::Registration for BetaWebSearchTool {
@@ -30666,7 +32971,23 @@ pub struct BetaFileSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_options: Option<BetaRankingOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFileSearchTool::field_rules_schema_filters")]
     pub filters: Option<serde_json::Value>,
+}
+impl BetaFileSearchTool {
+    fn field_rules_schema_filters(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFilters>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFileSearchTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFileSearchTool));
@@ -30821,7 +33142,23 @@ pub struct BetaFunctionTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFunctionTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl BetaFunctionTool {
+    fn field_rules_schema_allowed_callers(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCallableToolAllowedCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "items" : reference_0 }, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionTool {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFunctionTool));
@@ -30956,6 +33293,7 @@ pub struct BetaItemReferenceParam {
     pub agent: Option<serde_json::Value>,
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["item_reference"]}, {"type":"null"}]))]
     pub type_: Option<serde_json::Value>,
     ///The ID of the item to reference.
     pub id: String,
@@ -31010,6 +33348,8 @@ pub struct BetaCustomToolCall {
     ///An identifier used to map this custom tool call to a tool call output.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaCustomToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     ///The namespace of the custom tool being called.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31018,6 +33358,20 @@ pub struct BetaCustomToolCall {
     pub name: String,
     ///The input for the custom tool call generated by the model.
     pub input: String,
+}
+impl BetaCustomToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCustomToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCustomToolCall));
@@ -31155,10 +33509,26 @@ pub struct BetaCustomToolCallOutput {
     ///The call ID, used to map this custom tool call output to a custom tool call.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaCustomToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     /**The output from the custom tool call generated by your code.
 Can be a string or an list of output content.*/
     pub output: serde_json::Value,
+}
+impl BetaCustomToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCustomToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -31258,6 +33628,7 @@ pub struct BetaInputFileContent {
     pub prompt_cache_breakpoint: Option<BetaPromptCacheBreakpointConfig>,
     ///The URL of the file to be sent to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub file_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<BetaFileInputDetail>,
@@ -31316,6 +33687,7 @@ pub struct BetaInputImageContent {
     #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub image_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
@@ -31668,10 +34040,29 @@ pub struct BetaApplyPatchToolCallOutputItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaApplyPatchToolCallOutputItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     pub status: BetaApplyPatchCallOutputStatusParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":10485760u64}, {"type":"null"}]))]
     pub output: Option<serde_json::Value>,
+}
+impl BetaApplyPatchToolCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaApplyPatchToolCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -31719,9 +34110,27 @@ pub struct BetaApplyPatchToolCallItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaApplyPatchToolCallItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     pub status: BetaApplyPatchCallStatusParam,
     pub operation: BetaApplyPatchOperationParam,
+}
+impl BetaApplyPatchToolCallItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaApplyPatchToolCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -31912,6 +34321,10 @@ pub struct BetaFunctionShellCallOutputItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellCallOutputItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call_output`.
     #[serde(rename = "type")]
@@ -31920,9 +34333,39 @@ pub struct BetaFunctionShellCallOutputItemParam {
     ///Captured chunks of stdout and stderr output, along with their associated outcomes.
     pub output: Vec<BetaFunctionShellCallOutputContentParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellCallOutputItemParam::field_rules_schema_status"
+    )]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
+}
+impl BetaFunctionShellCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionShellCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32105,6 +34548,10 @@ pub struct BetaFunctionShellCallItemParam {
     #[schemars(extend("maxLength" = 64u64, "minLength" = 1u64))]
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellCallItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     ///The type of the item. Always `shell_call`.
     #[serde(rename = "type")]
@@ -32112,9 +34559,39 @@ pub struct BetaFunctionShellCallItemParam {
     pub type_: String,
     pub action: BetaFunctionShellActionParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellCallItemParam::field_rules_schema_status"
+    )]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
+}
+impl BetaFunctionShellCallItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionShellCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32163,6 +34640,14 @@ pub struct BetaLocalShellToolCallOutput {
     ///A JSON string of the output of the local shell tool call.
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"enum":["in_progress",
+            "completed",
+            "incomplete"]},
+            {"type":"null"}]
+        )
+    )]
     pub status: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaLocalShellToolCallOutput {
@@ -32282,6 +34767,7 @@ pub struct BetaCodeInterpreterOutputImage {
     #[schemars(extend("enum" = ["image"]))]
     pub type_: String,
     ///The URL of the image output from the code interpreter.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
 }
 impl schematic_define::Registration for BetaCodeInterpreterOutputImage {
@@ -32393,7 +34879,7 @@ pub struct BetaReasoningItem {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaReasoningItem {
@@ -32481,6 +34967,9 @@ pub struct BetaToolSearchOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":64u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_output`.
     #[serde(rename = "type")]
@@ -32491,7 +34980,23 @@ pub struct BetaToolSearchOutputItemParam {
     ///The loaded tool definitions returned by the tool search output.
     pub tools: Vec<BetaTool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaToolSearchOutputItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl BetaToolSearchOutputItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaToolSearchOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32532,6 +35037,9 @@ pub struct BetaToolSearchCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":64u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub call_id: Option<serde_json::Value>,
     ///The item type. Always `tool_search_call`.
     #[serde(rename = "type")]
@@ -32541,7 +35049,23 @@ pub struct BetaToolSearchCallItemParam {
     pub execution: Option<BetaToolSearchExecutionType>,
     pub arguments: BetaEmptyModelParam,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaToolSearchCallItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
+}
+impl BetaToolSearchCallItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaToolSearchCallItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32649,6 +35173,7 @@ pub struct BetaUrlCitationParam {
     #[schemars(extend("minimum" = 0u64))]
     pub end_index: i64,
     ///The URL of the cited resource.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The title of the cited resource.
     pub title: String,
@@ -32801,13 +35326,50 @@ pub struct BetaInputImageContentParamAutoParam {
     #[schemars(extend("enum" = ["input_image"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"format":"uri", "maxLength":20971520u64}, {"type":"null"}])
+    )]
     pub image_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaInputImageContentParamAutoParam::field_rules_schema_detail"
+    )]
     pub detail: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaInputImageContentParamAutoParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl BetaInputImageContentParamAutoParam {
+    fn field_rules_schema_detail(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaDetailEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaPromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaInputImageContentParamAutoParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32870,7 +35432,25 @@ pub struct BetaInputTextContentParam {
     #[schemars(extend("maxLength" = 10485760u64))]
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaInputTextContentParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl BetaInputTextContentParam {
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaPromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaInputTextContentParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32900,13 +35480,58 @@ pub struct BetaFunctionCallOutputItemParam {
     ///Text, image, or file output of the function tool call.
     pub output: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"maxLength":128u64, "minLength":1u64}, {"type":"null"}])
+    )]
     pub name: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"maxLength":64u64,
+            "minLength":1u64,
+            "pattern":"^[a-zA-Z0-9_-]+$"},
+            {"type":"null"}]
+        )
+    )]
     pub namespace: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionCallOutputItemParam::field_rules_schema_caller"
+    )]
     pub caller: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionCallOutputItemParam::field_rules_schema_status"
+    )]
     pub status: Option<serde_json::Value>,
+}
+impl BetaFunctionCallOutputItemParam {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32931,13 +35556,33 @@ pub struct BetaInputFileContentParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":73400320u64}, {"type":"null"}]))]
     pub file_data: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub file_url: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<BetaFileDetailEnum>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaInputFileContentParam::field_rules_schema_prompt_cache_breakpoint"
+    )]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl BetaInputFileContentParam {
+    fn field_rules_schema_prompt_cache_breakpoint(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaPromptCacheBreakpointParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaInputFileContentParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32986,6 +35631,8 @@ pub struct BetaFunctionToolCall {
     ///The unique ID of the function tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFunctionToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     ///The namespace of the function to run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32997,8 +35644,22 @@ pub struct BetaFunctionToolCall {
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
+}
+impl BetaFunctionToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFunctionToolCall));
@@ -33048,6 +35709,7 @@ pub struct BetaWebSearchActionFind {
     #[schemars(extend("enum" = ["find_in_page"]))]
     pub type_: String,
     ///The URL of the page searched for the pattern.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The pattern or text to search for within the page.
     pub pattern: String,
@@ -33072,6 +35734,7 @@ pub struct BetaWebSearchActionOpenPage {
     pub type_: String,
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub url: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaWebSearchActionOpenPage {
@@ -33100,6 +35763,12 @@ pub struct BetaWebSearchActionSearch {
     pub queries: Option<Vec<String>>,
     ///The sources used in the search.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"enum":["url"]},
+            "url":{"format":"uri"}}}
+        )
+    )]
     pub sources: Option<Vec<serde_json::Value>>,
 }
 impl schematic_define::Registration for BetaWebSearchActionSearch {
@@ -33131,7 +35800,25 @@ pub struct BetaComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledged_safety_checks: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaComputerCallOutputItemParam::field_rules_schema_status"
+    )]
     pub status: Option<serde_json::Value>,
+}
+impl BetaComputerCallOutputItemParam {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionCallItemStatus>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaComputerCallOutputItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -33175,6 +35862,7 @@ always set to `computer_screenshot`.*/
     pub type_: String,
     ///The URL of the screenshot image.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "uri"))]
     pub image_url: Option<String>,
     ///The identifier of an uploaded file that contains the screenshot.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33568,7 +36256,26 @@ pub struct BetaFileSearchToolCall {
     ///The queries used to search for files.
     pub queries: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFileSearchToolCall::field_rules_schema_results")]
     pub results: Option<serde_json::Value>,
+}
+impl BetaFileSearchToolCall {
+    fn field_rules_schema_results(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaVectorStoreFileAttributes>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "properties" : { "attributes" : reference_0, "score" :
+                    { "format" : "float" } } } }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFileSearchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -33622,11 +36329,27 @@ pub struct BetaOutputMessage {
     ///The content of the output message.
     pub content: Vec<BetaOutputMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaOutputMessage::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: String,
+}
+impl BetaOutputMessage {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaMessagePhase>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaOutputMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaOutputMessage));
@@ -33925,6 +36648,7 @@ pub struct BetaUrlCitationBody {
     #[schemars(extend("enum" = ["url_citation"]))]
     pub type_: String,
     ///The URL of the web resource.
+    #[schemars(extend("format" = "uri"))]
     pub url: String,
     ///The index of the first character of the URL citation in the message.
     pub start_index: i64,
@@ -33976,7 +36700,7 @@ pub struct BetaInputMessage {
     ///The type of the message input. Always set to `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", null]))]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: Option<String>,
     ///The role of the message input. One of `user`, `system`, or `developer`.
     #[schemars(extend("enum" = ["user", "system", "developer"]))]
@@ -33984,7 +36708,7 @@ pub struct BetaInputMessage {
     /**The status of item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
     pub content: BetaInputMessageContentList,
 }
@@ -34077,12 +36801,28 @@ pub struct BetaEasyInputMessage {
 Can also contain previous assistant responses.*/
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaEasyInputMessage::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
     ///The type of the message input. Always `message`.
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["message", null]))]
+    #[schemars(extend("enum" = ["message"]))]
     pub type_: Option<String>,
+}
+impl BetaEasyInputMessage {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaMessagePhase>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaEasyInputMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaEasyInputMessage));
@@ -34103,13 +36843,64 @@ pub struct BetaCompactResponseMethodPublicBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":64u64}, {"type":"null"}]))]
     pub prompt_cache_key: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaCompactResponseMethodPublicBody::field_rules_schema_prompt_cache_retention"
+    )]
     pub prompt_cache_retention: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaCompactResponseMethodPublicBody::field_rules_schema_prompt_cache_options"
+    )]
     pub prompt_cache_options: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaCompactResponseMethodPublicBody::field_rules_schema_service_tier"
+    )]
     pub service_tier: Option<serde_json::Value>,
+}
+impl BetaCompactResponseMethodPublicBody {
+    fn field_rules_schema_prompt_cache_retention(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaPromptCacheRetentionEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_prompt_cache_options(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaPromptCacheOptionsParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_service_tier(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaServiceTierEnum>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCompactResponseMethodPublicBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -34624,6 +37415,8 @@ pub struct BetaApplyPatchToolCallOutput {
     ///The unique ID of the apply patch tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaApplyPatchToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: BetaApplyPatchCallOutputStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34631,6 +37424,20 @@ pub struct BetaApplyPatchToolCallOutput {
     ///The ID of the entity that created this tool call output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl BetaApplyPatchToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaApplyPatchToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -34676,6 +37483,8 @@ pub struct BetaApplyPatchToolCall {
     ///The unique ID of the apply patch tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaApplyPatchToolCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: BetaApplyPatchCallStatus,
     ///One of the create_file, delete_file, or update_file operations applied via apply_patch.
@@ -34683,6 +37492,20 @@ pub struct BetaApplyPatchToolCall {
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl BetaApplyPatchToolCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaApplyPatchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -34795,6 +37618,8 @@ pub struct BetaFunctionShellCallOutput {
     ///The unique ID of the shell tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFunctionShellCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub status: BetaFunctionShellCallOutputStatusEnum,
     ///An array of shell call output contents
@@ -34803,6 +37628,20 @@ pub struct BetaFunctionShellCallOutput {
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl BetaFunctionShellCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -34914,6 +37753,8 @@ pub struct BetaFunctionShellCall {
     ///The unique ID of the shell tool call generated by the model.
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFunctionShellCall::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     pub action: BetaFunctionShellAction,
     pub status: BetaFunctionShellCallStatus,
@@ -34921,6 +37762,20 @@ pub struct BetaFunctionShellCall {
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl BetaFunctionShellCall {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCaller>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -35344,6 +38199,7 @@ pub struct BetaComputerScreenshotContent {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["computer_screenshot"]))]
     pub type_: String,
+    #[schemars(extend("anyOf" = [{"format":"uri"}, {"type":"null"}]))]
     pub image_url: serde_json::Value,
     pub file_id: serde_json::Value,
     pub detail: BetaImageDetail,
@@ -35419,6 +38275,8 @@ is returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaFunctionToolCallOutput::field_rules_schema_caller")]
     pub caller: Option<serde_json::Value>,
     /**The output from the function call generated by your code.
 Can be a string or an list of output content.*/
@@ -35426,8 +38284,22 @@ Can be a string or an list of output content.*/
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
+}
+impl BetaFunctionToolCallOutput {
+    fn field_rules_schema_caller(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaToolCallCallerParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -35520,7 +38392,7 @@ developer.*/
     /**The status of the message input. One of `in_progress`, `completed`, or
 `incomplete`. Populated when input items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete", null]))]
+    #[schemars(extend("enum" = ["in_progress", "completed", "incomplete"]))]
     pub status: Option<String>,
 }
 impl schematic_define::Registration for BetaComputerToolCallOutput {
@@ -35562,6 +38434,7 @@ pub struct BetaCompactResource {
     ///The compacted list of output items.
     pub output: Vec<BetaItemField>,
     ///Unix timestamp (in seconds) when the compacted conversation was created.
+    #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub usage: BetaResponseUsage,
 }
@@ -35780,7 +38653,23 @@ pub struct BetaMessage {
     ///The content of the message
     pub content: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaMessage::field_rules_schema_phase")]
     pub phase: Option<serde_json::Value>,
+}
+impl BetaMessage {
+    fn field_rules_schema_phase(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaMessagePhase2>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessage));
@@ -36003,7 +38892,24 @@ pub struct BetaModerationResultBody {
     ///A dictionary of moderation categories to scores.
     pub category_scores: serde_json::Value,
     ///Which modalities of input are reflected by the score for each category.
+    #[schemars(
+        schema_with = "BetaModerationResultBody::field_rules_schema_category_applied_input_types"
+    )]
     pub category_applied_input_types: serde_json::Value,
+}
+impl BetaModerationResultBody {
+    fn field_rules_schema_category_applied_input_types(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationInputType>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "additionalProperties".to_owned(),
+                serde_json::json!({ "items" : reference_0 }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaModerationResultBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -36391,10 +39297,13 @@ pub struct BetaModelResponseProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<BetaMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":20u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_logprobs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":2u64, "minimum":0u64}, {"type":"null"}]))]
     pub temperature: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maximum":1u64, "minimum":0u64}, {"type":"null"}]))]
     pub top_p: Option<serde_json::Value>,
     /**This field is being replaced by `safety_identifier` and `prompt_cache_key`. Use `prompt_cache_key` instead to maintain caching optimizations.
 A stable identifier for your end-users.
@@ -36402,12 +39311,14 @@ Used to boost cache hit rates by better bucketing similar requests and  to help 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"maxLength":64u64}, {"type":"null"}]))]
     pub safety_identifier: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<BetaServiceTier>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"enum":["in_memory", "24h"]}, {"type":"null"}]))]
     pub prompt_cache_retention: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaModelResponseProperties {
@@ -36988,11 +39899,12 @@ pub struct BetaResponseReasoningSummaryPartDoneEvent {
     /**The completion status of the summary part. Omitted when the part completed
 normally and set to `incomplete` when generation was interrupted.*/
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("enum" = ["incomplete", null]))]
+    #[schemars(extend("enum" = ["incomplete"]))]
     pub status: Option<String>,
     ///The sequence number of this event.
     pub sequence_number: i64,
     ///The completed summary part.
+    #[schemars(extend("properties" = {"type":{"enum":["summary_text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for BetaResponseReasoningSummaryPartDoneEvent {
@@ -37025,6 +39937,7 @@ pub struct BetaResponseReasoningSummaryPartAddedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     ///The summary part that was added.
+    #[schemars(extend("properties" = {"type":{"enum":["summary_text"]}}))]
     pub part: serde_json::Value,
 }
 impl schematic_define::Registration for BetaResponseReasoningSummaryPartAddedEvent {
@@ -38027,6 +40940,7 @@ pub struct BetaInputAudio {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["input_audio"]))]
     pub type_: String,
+    #[schemars(extend("properties" = {"format":{"enum":["mp3", "wav"]}}))]
     pub input_audio: serde_json::Value,
 }
 impl schematic_define::Registration for BetaInputAudio {
@@ -38246,6 +41160,12 @@ pub struct BetaResponseInjectFailedEvent {
     ///The raw input items that were not committed.
     pub input: Vec<BetaInputItem>,
     ///Information about why the input was not committed.
+    #[schemars(
+        extend(
+            "properties" = {"code":{"enum":["response_already_completed",
+            "response_not_found"]}}
+        )
+    )]
     pub error: serde_json::Value,
     ///The sequence number for this event.
     pub sequence_number: i64,
@@ -38781,6 +41701,7 @@ pub struct BetaContextManagementParam {
     #[serde(rename = "type")]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("anyOf" = [{"minimum":1000u64}, {"type":"null"}]))]
     pub compact_threshold: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for BetaContextManagementParam {
@@ -38823,7 +41744,23 @@ pub struct BetaModerationParam {
     ///The moderation model to use for moderated completions, e.g. 'omni-moderation-latest'.
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaModerationParam::field_rules_schema_policy")]
     pub policy: Option<serde_json::Value>,
+}
+impl BetaModerationParam {
+    fn field_rules_schema_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationPolicyParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaModerationParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModerationParam));
@@ -38838,9 +41775,39 @@ impl schematic_define::Registration for BetaModerationParam {
 #[derive(JsonSchema)]
 pub struct BetaModerationPolicyParam {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaModerationPolicyParam::field_rules_schema_input")]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaModerationPolicyParam::field_rules_schema_output")]
     pub output: Option<serde_json::Value>,
+}
+impl BetaModerationPolicyParam {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationConfigParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationConfigParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaModerationPolicyParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(

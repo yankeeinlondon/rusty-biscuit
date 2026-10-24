@@ -212,7 +212,15 @@ fn typed_losses(source: &Value, output: &Value) -> Vec<&'static str> {
 /// Classifies one exported position against its schemars source.
 fn classify(source: &Value, output: &Value) -> Fidelity {
     if is_untyped(output) {
-        return if is_free_form(source) { Fidelity::Deliberate } else { Fidelity::Lost(source_constraints(source)) };
+        if is_free_form(source) {
+            return Fidelity::Deliberate;
+        }
+        // A rule-only source (value rules on a free-form value, no typing
+        // keyword) is kept when the export carries every one of its rules.
+        if output.is_object() && is_untyped(source) && typed_losses(source, output).is_empty() {
+            return Fidelity::Kept;
+        }
+        return Fidelity::Lost(source_constraints(source));
     }
     let dropped = typed_losses(source, output);
     if dropped.is_empty() { Fidelity::Kept } else { Fidelity::TypedLoss(dropped) }

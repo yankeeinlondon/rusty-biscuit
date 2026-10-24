@@ -13,7 +13,7 @@ use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions, OpenApiImport, OpenApiSource, export, serialize};
 
 /// Components the fixture defines that every route keeps under their own name.
-const COMPONENTS: &[&str] = &["Item", "Node", "Stats"];
+const COMPONENTS: &[&str] = &["Item", "Node", "Stats", "Owner", "Settings", "Extras"];
 
 fn import(source: OpenApiSource) -> RestApi {
     OpenApiImport::new(source).api_name("ConstraintPreservation").build().expect("fixture imports").api
@@ -48,6 +48,16 @@ fn the_fixture_imports_every_rule_exactly() {
     assert_eq!(get("schema:Node/properties/name")["pattern"], "^[A-Za-z]+$");
     assert_eq!(get("schema:Node/properties/children")["maxItems"], "8");
     assert_eq!(get("schema:Stats/properties/ratio")["maximum"], "1e0", "a response-only component keeps its rules");
+    assert_eq!(get("schema:Item/properties/attributes/additionalProperties")["maxLength"], "3", "a map's value rule");
+    assert_eq!(get("schema:Item/properties/free_value")["maxLength"], "3", "a free-form value's rule");
+    assert_eq!(get("schema:Item/properties/identifier")["format"], "uuid");
+    assert_eq!(get("schema:Item/properties/palette")["enum"], r#"{"primary":"red"}"#, "a map's whole-value rule");
+    assert_eq!(get("schema:Item/properties/owner")["enum"], r#"{"name":"boss"}"#, "a rule beside a model reference");
+    assert!(!rules.contains_key("schema:Owner"), "the referenced component is not constrained by the occurrence");
+    assert_eq!(get("schema:Settings")["enum"], r#"{"version":"1"}"#, "a model root's rule");
+    assert_eq!(get("schema:Extras/additionalProperties")["maxLength"], "3", "a model's extra-property rule");
+    assert_eq!(get("schema:Item/properties/entries/items")["enum"], r#"{"code":"x"}"#, "an inline-object item's rule");
+    assert_eq!(get("schema:Item/properties/owners/items")["enum"], r#"{"name":"boss"}"#, "a rule beside a model item reference");
 }
 
 #[test]
