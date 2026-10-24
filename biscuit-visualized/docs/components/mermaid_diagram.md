@@ -299,7 +299,8 @@ if let Err(MermaidRenderError::NoImageSupport) = diagram.try_render(&term) {
 ### Public API Notes
 
 - Use `MermaidDiagram::try_render(&Terminal)` when you need the rendered output plus metadata (`png_path`, `cache_hit`).
-- Use the `Renderable` implementation when you want graceful fallback to a fenced Mermaid code block on terminals without image support.
+- Use the `Renderable` implementation when you want graceful fallback: on a terminal whose graphics route has no pixels it draws the diagram as text when it can, and otherwise shows a `mermaid` code block of the source. `MermaidDiagram::present(&Terminal)` returns that choice as an image result or as render-tree nodes, so a program can lay the nodes out with its own code renderer: render them at `MermaidDiagram::text_columns(term.width())` columns, then apply the component's layout (`apply_block_layout`), as `render` does.
+- `with_fallback_policy(MermaidFallbackPolicy)` controls the text fallback: `TextFallback::{Allowed, NoPartial, Never}` and whether the partial note is shown. A setting left unset reads `MERMAID_FALLBACK` at render time (`code-block`, in any case, means never text), and otherwise takes its default (text allowed, note shown).
 
 ## Mermaid fences in a render tree
 
@@ -309,9 +310,20 @@ if let Err(MermaidRenderError::NoImageSupport) = diagram.try_render(&term) {
 With the hook installed, a fence is offered to it only when the render asks
 for it (`TerminalMermaidMode::Image` at `GraphicsMode::Rich`, or
 `TerminalMermaidMode::Automatic` at `Rich` or `Vector`), and the hook is
-consulted before any code-block hook. The hook draws images only at `Rich`; at
-`Vector` it declines and the fence renders as an ordinary code block, with no
-diagnostic.
+consulted before any code-block hook.
+
+- In `Image` mode the hook draws the image, or fails.
+- In `Automatic` mode it draws the image at `Rich` when the terminal's graphics
+  route has pixels. Otherwise it draws the diagram as text: a `txt` code block,
+  then the partial note, exactly as the component does at the same width.
+  When the source should show instead (the family is not drawn as a diagram,
+  the drawing does not fit, or the fallback policy forbids text), it
+  *declines*, and the fence renders as an ordinary code block with no
+  diagnostic under every strictness. A parse error, a Merman failure, or an
+  exceeded time budget is an error, which the strictness below handles.
+
+Set the policy on the hook as on the component:
+`TerminalDiagramRenderer::default().with_fallback_policy(policy)`.
 
 ```rust
 use std::rc::Rc;
@@ -323,7 +335,7 @@ use renderable::tree::{GraphicsMode, RenderNode, RenderStrictness, TerminalMerma
 
 let term = Terminal::new();
 let mut options = TerminalRenderOptions::new(&term, RenderStrictness::Warn)
-    .with_diagram_renderer(Rc::new(TerminalDiagramRenderer));
+    .with_diagram_renderer(Rc::new(TerminalDiagramRenderer::default()));
 options.context.graphics_mode = GraphicsMode::Rich;
 options.context.mermaid_mode = TerminalMermaidMode::Image;
 
@@ -371,3 +383,4 @@ bt erd "CUSTOMER ||--o{ ORDER : places"
 ```
 
 All diagram commands support `--json` for JSON output, `--meta` for render metadata, `--width` for sizing, and layout args (`--margin-left`, `--alignment`, etc.).
+Without images they print the text drawing or the source, highlighted like `md`'s code blocks, and `--feature` changes that choice; see [the `bt` CLI reference](../../../biscuit-terminal/docs/cli.md).

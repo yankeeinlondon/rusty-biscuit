@@ -112,7 +112,8 @@ Full doc: `darkmatter/docs/rendering/mermaid.md#embedded-font`.
 
 - `HtmlOptions::embed_mermaid_font` / `DarkmatterPage::with_embed_mermaid_font`
   (default `false`; MarkdownPlus keeps it off). Acts only with
-  `MermaidMode::Image`. No frontmatter key. `md --feature
+  `MermaidMode::Image` or `Automatic` (both static SVG in the browser). No
+  frontmatter key. `md --feature
   embed-mermaid-font` (`args::Feature`, lowered by
   `render::apply_features` inside `artifact::html_page`) sets it on every
   HTML page `md` builds (`render`, implicit render, `compose --output html`);

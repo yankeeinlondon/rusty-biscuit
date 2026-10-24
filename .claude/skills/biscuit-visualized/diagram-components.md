@@ -9,7 +9,7 @@ never depends on this crate, so never add a re-export of these types there.
 
 | Component | Module | Wraps | Description |
 |-----------|--------|-------|-------------|
-| `MermaidDiagram` | `components/mermaid.rs` | `mermaid::MermaidDiagram` | Mermaid diagram as a terminal image; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG's root `viewBox` (`natural_size`) before rasterizing; `with_time_budget` passes through to the library (default 2 s); falls back to the fenced source on any render failure, a time-budget overrun included (logged as a warning) |
+| `MermaidDiagram` | `components/mermaid.rs` | `mermaid::MermaidDiagram` | Mermaid diagram as a terminal image; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG's root `viewBox` (`natural_size`) before rasterizing; `with_time_budget` passes through to the library (default 2 s); on a terminal whose route has no pixels it draws text (see below); falls back to a `mermaid` code node of the source on any image failure, a time-budget overrun included (logged as a warning) |
 | `GraphExpression` | `components/graph_expression.rs` | `graph::GraphDiagram` | Expression or DOT graph as a terminal image; also `BrowserRenderable` |
 | `GitGraph` | `components/git_graph.rs` | `components::MermaidDiagram` | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule, merges, the no-substitution rule, and fits the terminal by trimming commits and lanes (see below) |
 | `TerminalDiagramRenderer` | `components/render_hook.rs` | `components::MermaidDiagram` | The `biscuit_terminal::render_tree::DiagramRenderer` hook that draws Mermaid fences in a render tree |
@@ -57,6 +57,42 @@ the PNG bytes unchanged). `MermaidRenderer::render_to_cached_png_at_width`
 `GraphExpression::render_to_cached_png_at_width(target_width)` is unchanged
 (no row padding).
 
+## Text fallback (component)
+
+`components::MermaidDiagram::present(&Terminal) -> MermaidPresentation`
+(`Image(MermaidRenderResult)` | `Text(nodes)` | `Source(nodes)`) is the
+selection; `render` lays the nodes out with the plain code block
+(`TerminalRenderOptions::new(term, Lossy)`) at the text columns, then applies
+margins and alignment once. A caller with its own code renderer (`bt`
+installs darkmatter's highlighter) calls `present`, lays the nodes out at the
+public `text_columns(term_width)` with `with_code_renderer`, and applies the
+layout itself. Rules:
+
+- image route iff `TerminalImage::route_has_pixels(term)` (biscuit-terminal,
+  the encoder's own test), decided before any SVG/font/artifact work; an image
+  failure shows the source and is never retried through text
+- text columns = `resolve_scaled_dimensions_for(width, layout, term_width,
+  None, None).image_width` (so `Scale` takes the available columns and
+  measures no SVG), less `TEXT_BLOCK_CHROME_COLUMNS` (2) for a highlighting
+  code renderer's padding; charset Unicode iff `term.supports_unicode`
+- policy (`components/fallback_policy.rs`): `MermaidFallbackPolicy`
+  (`with_text_fallback(TextFallback::{Allowed, NoPartial, Never})`,
+  `with_show_partial_note(bool)`), resolved per render by `resolve()` /
+  `resolve_with(env)`; unset text fallback reads `MERMAID_FALLBACK`
+  (`code-block`, any case → `Never`); the note setting never reads it. A
+  policy that refuses the family's coverage (`Never`, or `NoPartial` on a
+  partial family) makes **no** Merman request. `MermaidFallbackFeature`
+  (feature `clap`) + `MermaidFallbackPolicy::from_features` fold CLI
+  `--feature` names, most restrictive wins
+- nodes: `txt` code node (trailing newlines trimmed, row spaces kept), then
+  `partial_note()` (block quote: strong `Note:`, `dim` span with emphasized
+  `PARTIAL_NOTE_ID`) for partial coverage when shown; source = one `mermaid`
+  code node; an explicit `with_title` leads text and source as a strong
+  paragraph unless a source line gives that title (`title X`, `title: X`,
+  `pie title X`)
+- tests: `src/src/tests/component_fallback_tests.rs` (counters, env seam
+  via `present_with`) and `tests/l1/render_tree_diagram_hook.rs` (hook)
+
 Two `MermaidDiagram` types exist on purpose: `mermaid::MermaidDiagram` makes
 SVG/PNG artifacts and knows nothing about terminals;
 `components::MermaidDiagram` is the terminal component built on it. Import the
@@ -65,13 +101,19 @@ component from `components`.
 ## Render-tree hook
 
 Install `TerminalDiagramRenderer` with
-`TerminalRenderOptions::with_diagram_renderer(Rc::new(TerminalDiagramRenderer))`.
-At `GraphicsMode::Rich` it answers `DiagramOutcome::Rendered` with exactly
+`TerminalRenderOptions::with_diagram_renderer(Rc::new(TerminalDiagramRenderer::default()))`
+(`.with_fallback_policy(MermaidFallbackPolicy)` for the D3 policy). The image
+route answers `DiagramOutcome::Rendered` with exactly
 `MermaidDiagram::new(source).try_render(terminal)`, with the terminal's
 `fixed_width` set to `DiagramRenderRequest::available_width` (the fence's
-columns: a list item's or quote's inner width). Below `Rich` (an `Automatic`
-render at `Vector`) it returns `DiagramOutcome::Declined`, so the fence stays
-code and never carries an image. A fragment it returns (`DiagramOutcome::Nodes`)
+columns: a list item's or quote's inner width). It is taken for
+`mermaid_mode == Image` at `Rich`, and for `Automatic` at `Rich` when
+`TerminalImage::route_has_pixels(terminal)`; an image failure is `Err`.
+Otherwise `Automatic` answers `DiagramOutcome::Nodes` with the component's
+text nodes (`MermaidDiagram::text_nodes`: `txt` code node, then the partial
+note block quote), or `Declined` when the source should show (policy, family,
+fit), or `Err` for a parse/Merman/budget/limit failure. `Image` mode below
+`Rich` declines. A fragment it returns (`DiagramOutcome::Nodes`)
 is rendered by biscuit-terminal with promotion off, so it cannot re-promote its
 own fence. When and how
 biscuit-terminal consults it (and the strictness rules on failure) is in the

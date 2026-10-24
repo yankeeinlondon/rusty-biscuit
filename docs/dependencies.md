@@ -7,6 +7,14 @@
 
 ## Recent Dependency Notes
 
+- `darkmatter/lib` vendors the MIT-licensed SublimeText/Mermaid syntax
+  (2026-10-24, commit `a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859`, Copyright
+  (c) 2017 Peng Wang) as one flattened syntax under
+  `darkmatter/lib/assets/syntaxes/mermaid/`, with its `LICENSE`; no crate is
+  added. `darkmatter/cli` adds a path dependency on `biscuit-visualized` with
+  its `clap` feature (2026-10-24) for the shared Mermaid fallback `--feature`
+  names; `biscuit-visualized` was already in its graph through darkmatter, and
+  `clap` already a dependency.
 - `biscuit-visualized` adds, under its `image` feature (2026-10-24),
   `allsorts` 0.17.0 (Apache-2.0; `default-features = false`, feature
   `flate2_rust`, so no C zlib) to subset the font its Mermaid embedded-font
@@ -453,6 +461,13 @@
 - `biscuit-terminal/cli` adds a path dependency on `sniff/lib` for
   `bt about [APP]` install detection. The library remains sniff-free; this
   dependency is CLI-only._
+- `biscuit-terminal/cli` adds a path dependency on `darkmatter/lib` (which has
+  no default features) and installs its syntax-highlighting code renderer in
+  every command that renders code blocks, so `bt` and `md` highlight
+  identically. Neither `biscuit-terminal/lib` nor `biscuit-visualized` depends
+  on darkmatter or syntect (`cargo tree -p biscuit-visualized -p
+  biscuit-terminal` lists neither), so the chain `bt` → darkmatter →
+  biscuit-visualized → biscuit-terminal has no cycle.
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
@@ -513,7 +528,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
-- `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
+- `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`) (darkmatter for code highlighting)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
 - `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
@@ -1571,6 +1586,12 @@ This is a Rust workspace with the following modules:
     _Extra syntect syntaxes and themes curated by bat. Includes TOML, TypeScript, Dockerfile, and more._
 
     _Tags: syntax, highlighting, themes_
+
+- [SublimeText/Mermaid](https://github.com/SublimeText/Mermaid) _vendored at `a5c6d45d1b0a`_
+
+    _The Mermaid syntax definition, not a crate: `darkmatter/lib` vendors it, flattened into one self-contained `.sublime-syntax` (`darkmatter/lib/assets/syntaxes/mermaid/`), so `mermaid` and `mmd` code blocks are highlighted. MIT license, Copyright (c) 2017 Peng Wang; the license text and the flattening notes sit beside the file. See [darkmatter dependencies](../darkmatter/docs/dependencies.md#vendored-mermaid-syntax)._
+
+    _Tags: syntax, highlighting, mermaid, vendored_
 
 ### System Information
 

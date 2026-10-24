@@ -18,8 +18,10 @@ DiagramRenderRequest, DiagramOutcome, DiagramRenderError}`) on
   at `GraphicsMode::Rich`, and with `TerminalMermaidMode::Automatic` at `Rich`
   or `Vector`; never at `Off`, never in `Code` mode
 - the request carries the source, node attrs (layout is `attrs.layout`), the
-  `force_graphics`-applied terminal, `available_width`, and `graphics_mode`
-  (the ceiling: a hook never answers with an image at `Vector`); it is
+  `force_graphics`-applied terminal, `available_width`, `graphics_mode`
+  (the ceiling: a hook never answers with an image at `Vector`), and
+  `mermaid_mode` (`Image` = image or error, `Automatic` = may answer with
+  text); it is
   `#[non_exhaustive]`, so only this crate constructs it
 - `Ok(DiagramOutcome::Rendered(s))`: `s` printed verbatim (an image)
 - `Ok(DiagramOutcome::Nodes(fragment))`: laid out in place at the fence's
@@ -37,7 +39,11 @@ DiagramRenderRequest, DiagramOutcome, DiagramRenderError}`) on
 - user-facing page: `biscuit-terminal/docs/render-tree.md`
 
 `biscuit_visualized::components::TerminalDiagramRenderer` is the real hook;
-darkmatter installs it. It sizes the diagram to `available_width` (the
+darkmatter installs it. It decides image availability with
+`TerminalImage::route_has_pixels(&Terminal)` (true iff `render_with_route`
+would pick a pixel encoder: the format is not `None` and a Zellij route has a
+measured cell size); use that, never a bare `image_support()`, to choose an
+image route up front. It sizes the diagram to `available_width` (the
 fence's columns: a list item's or quote's inner width), not the full terminal
 width. The diagram components rasterize at that display size (width =
 columns × cell width, height padded to whole cell rows) and hand the PNG to

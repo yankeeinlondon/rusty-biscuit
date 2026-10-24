@@ -332,12 +332,15 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - No Node.js, npm, Chromium, or Mermaid CLI (`mmdc`) is required
 - Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
+**Without images:**
+- A terminal that cannot show images gets the diagram drawn as text when Merman can draw it and it fits, otherwise the diagram's source, both as highlighted code blocks on stdout (plain fences without color), and the exit code is 0. `--feature` changes that choice; see [the `bt` CLI reference](../docs/cli.md#mermaid-text-fallback)
+- Without images, a diagram that does not parse also shows its source and exits 0
+
 **Error handling:**
-- A terminal that cannot show images gets the diagram's source as a fenced `mermaid` code block on stdout, and the exit code is 0
-- A diagram that cannot be drawn (it does not parse, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero
+- When the terminal can show images, a diagram that cannot be drawn (it does not parse, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero
 
 ```bash
-bt flowchart "A -->"    # does not parse: the error and the source go to stderr, exit code 1
+bt flowchart "A -->"    # in a terminal with images: the error and the source go to stderr, exit code 1
 ```
 
 ### Quadrant Chart Rendering
@@ -562,6 +565,10 @@ All diagram commands support:
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON for scripting
 - `--meta`: Output rendering metadata to stderr (filename, cache hit, file size, render time)
+
+The Mermaid commands (all of the above except `graph-expression`) also take
+`--feature <NAME>` to control the text fallback; see
+[the `bt` CLI reference](../docs/cli.md#--feature).
 
 ### Shell Completions
 

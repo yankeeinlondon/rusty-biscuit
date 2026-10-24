@@ -38,8 +38,10 @@ renderer, when `context.mermaid_mode` and `context.graphics_mode` allow it:
 
 `DiagramRenderRequest` carries `source`, `attrs`, the capability snapshot
 `terminal` (with `force_graphics` applied), `available_width` (the fence's
-columns, narrowed inside list items and quotes), and `graphics_mode`, the
-ceiling the hook must not exceed. The hook answers:
+columns, narrowed inside list items and quotes), `graphics_mode`, the
+ceiling the hook must not exceed, and `mermaid_mode`, the mode that offered the
+fence (`Image` asks for an image only; `Automatic` may be answered with text).
+The hook answers:
 
 | Answer | What the renderer prints |
 | --- | --- |

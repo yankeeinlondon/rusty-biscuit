@@ -197,9 +197,10 @@ The terminal renderer draws no diagrams itself. A program that wants them
 installs a `DiagramRenderer` hook (`TerminalRenderOptions::with_diagram_renderer`;
 `biscuit-visualized`'s `TerminalDiagramRenderer` is the one in this repository).
 The hook's request carries the fence source, the node's attributes, the
-capability snapshot, the available width, and the `graphics_mode` ceiling. A
-hook must not exceed that ceiling: at `Vector` it may answer with text, never
-with an image.
+capability snapshot, the available width, the `graphics_mode` ceiling, and the
+`mermaid_mode` that offered the fence. A hook must not exceed that ceiling: at
+`Vector` it may answer with text, never with an image; and it answers an
+`Image` request with an image or an error, never with text.
 
 The hook answers with one of three outcomes, or an error:
 

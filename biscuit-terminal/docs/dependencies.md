@@ -167,11 +167,24 @@
 
 - [biscuit-visualized](../../biscuit-visualized) _v0.1.0_ (CLI only; features: `clap`, `terminal`)
 
-    _The diagram components behind the `bt` diagram commands (`mermaid`,
-    `flowchart`, `graph-expression`, `git-graph`, ...). The library does not
-    depend on it: `biscuit-visualized` depends on the library._
+    _The diagram components behind the `bt` diagram commands (`flowchart`,
+    `pie-chart`, `graph-expression`, `git-graph`, ...), and the `--feature`
+    names of the Mermaid commands (`clap`). The library does not depend on
+    it: `biscuit-visualized` depends on the library._
 
     _Tags: workspace, visualization_
+
+- [darkmatter](../../darkmatter/lib) _v0.1.0_ (CLI only; no default features to disable)
+
+    _Syntax-highlighted code blocks: `bt` installs darkmatter's code renderer
+    (syntect with two-face themes, plus its Mermaid syntax) for every command
+    that renders code blocks, so Mermaid text and source fallbacks and fenced
+    code in `quote` look exactly as `md` shows them. This lengthens the CLI's
+    build and enlarges its binary. No cycle: darkmatter depends on
+    `biscuit-visualized` and on this library, and neither of those depends on
+    darkmatter or syntect._
+
+    _Tags: workspace, highlighting_
 
 - [sniff](../../sniff/lib) _v0.1.0_
 

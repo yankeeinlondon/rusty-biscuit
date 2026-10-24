@@ -12,7 +12,7 @@ Pure-Rust visualization rendering backend for diagrams and graphs. Generates SVG
 1. **Render, don't display**: produces file artifacts (SVG/PNG); display is the consumer's (or the `terminal` components') job
 2. **Cache by content**: xxHash content-addressed keys avoid redundant renders
 3. **Measure what you draw**: one font-resolution chain serves Merman's text measurer and the rasterizer
-4. **Graceful fallback**: every diagram type provides `fallback_code_block()`; any Mermaid failure (parse error, unsupported family, time budget) falls back to it
+4. **Graceful fallback**: on a terminal without images the Mermaid component draws the diagram as text when Merman's metadata allows it and it fits (policy: `MermaidFallbackPolicy`, `MERMAID_FALLBACK`); otherwise, and on any Mermaid failure (parse error, unsupported family, time budget), it shows the source as a `mermaid` code node
 
 ## Quick Start
 
