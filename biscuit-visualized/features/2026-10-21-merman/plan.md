@@ -2,8 +2,7 @@
 total_phases: 7
 created: 2026-10-21
 updated: 2026-10-22
-phase: 1
-start_phase: 8
+phase: 8
 agent: claude/sonnet
 yolo: true
 rulings_decided_on: 2026-10-22

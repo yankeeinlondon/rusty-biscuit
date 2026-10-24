@@ -1,6 +1,6 @@
 ---
 total_phases: 6
-start_phase: 2
+start_phase: 1
 packages:
   - claudine-catalog-types
   - claudine-gen

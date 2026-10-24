@@ -14,7 +14,7 @@ $schema:
 yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
@@ -42,8 +42,8 @@ initialize:
           - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
     - when: "total_phases && phase > total_phases"
       then:
-          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`start_phase` is {{phase}} of {{total_phases}})"
-          - error: "nothing to implement: the plan ({{plan}}) records `start_phase: {{phase}}`, past its last phase ({{total_phases}})"
+          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"
+          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
 
 start:
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
@@ -66,9 +66,10 @@ success:
       then:
         - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
         - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
-    # Persisted before the commit so a rerun resumes after this phase rather
-    # than at the plan's `phase`; the loop's counter lives only in memory.
-    - shell: "md set --save {{plan}} start_phase {{phase + 1}}"
+    # Persisted before the commit so a rerun resumes after this phase; the
+    # loop's counter lives only in memory. Not a `shell` action: those resolve
+    # at pre-flight from the plan on disk, not this iteration's `phase`.
+    - set_frontmatter: ["{{plan}}", "phase", "{{phase + 1}}"]
     - when: "ctx.dirty_files && !commit_message"
       then:
         - message: |-
