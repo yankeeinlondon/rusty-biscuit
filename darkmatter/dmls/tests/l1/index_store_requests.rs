@@ -338,7 +338,7 @@ fn oracle_referrers(oracle: &Oracle, target: &Path) -> BTreeSet<PathBuf> {
         for kind in [EdgeKind::References, EdgeKind::Transcludes] {
             for edge in graph.incoming(node, kind) {
                 let source = graph.node(edge.source).unwrap().document;
-                referrers.insert(graph.document(source).unwrap().path.clone());
+                referrers.insert(graph.document(source).unwrap().path.to_path_buf());
             }
         }
     }

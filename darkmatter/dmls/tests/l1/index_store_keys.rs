@@ -20,21 +20,21 @@ use crate::common::oracle::Corpus;
 fn true_referrers(graph: &WorkspaceGraph) -> BTreeMap<PathBuf, BTreeSet<PathBuf>> {
     let mut out = BTreeMap::new();
     for record in graph.documents() {
-        let document = graph.document_id(&record.path).expect("document id");
+        let document = graph.document_id(record.path).expect("document id");
         let targets = std::iter::once(record.root).chain(graph.headings(document).map(|(id, _)| id));
         let mut referrers = BTreeSet::new();
         for node in targets {
             for kind in [EdgeKind::References, EdgeKind::Transcludes] {
                 for edge in graph.incoming(node, kind) {
                     let source = graph.node(edge.source).expect("edge source").document;
-                    let path = &graph.document(source).expect("source document").path;
-                    if path != &record.path {
-                        referrers.insert(path.clone());
+                    let path = graph.document(source).expect("source document").path;
+                    if path != record.path {
+                        referrers.insert(path.to_path_buf());
                     }
                 }
             }
         }
-        out.insert(record.path.clone(), referrers);
+        out.insert(record.path.to_path_buf(), referrers);
     }
     out
 }
