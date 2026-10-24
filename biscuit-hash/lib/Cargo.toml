@@ -14,6 +14,9 @@ default = ["xx_hash"]
 xx_hash = ["dep:xxhash-rust"]
 blake3 = ["dep:blake3"]
 argon2id = ["dep:argon2", "dep:rand", "dep:thiserror"]
+# Canonical JSON rendering. Deliberately independent of `xx_hash`/`blake3` and
+# of serde_json's `preserve_order`: the renderer sorts keys itself.
+json = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
 # xxHash - fast non-cryptographic hashing (default)
@@ -27,8 +30,15 @@ argon2 = { version = "0.5.3", features = ["rand"], optional = true }
 rand = { version = "0.8", optional = true }
 thiserror = { version = "2", optional = true }
 
+# Canonical JSON rendering
+serde = { version = "1", optional = true }
+serde_json = { version = "1", optional = true }
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+# Tests build maps with explicit insertion order to prove the renderer neither
+# depends on nor mutates it; never a normal-dependency feature.
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [[bench]]
 name = "hashing"

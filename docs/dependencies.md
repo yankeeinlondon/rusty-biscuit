@@ -7,6 +7,12 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-hash` adds an optional `json` feature (2026-10-23) that enables
+  optional `serde` 1 and `serde_json` 1 for canonical (key-sorted) JSON
+  rendering and hashing. Both crates were already in the workspace graph; no
+  version changed. `json` does not request serde_json's `preserve_order`; the
+  crate's dev-dependency on `serde_json` does, so its own tests can build maps
+  with explicit insertion order.
 - `biscuit-visualized` drops `mermaid-rs-renderer` (2026-10-22): Merman,
   already in the graph under its `image` feature, is now its only Mermaid
   backend. `merman` is a git dependency on Ken's fork
