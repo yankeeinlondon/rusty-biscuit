@@ -5,25 +5,31 @@ created: "2026-10-23T14:39:35-07:00"
 spec: 2026-10-23-removal-store-size/spec.md
 fix: 2026-10-23-removal-store-size/review-1.md
 implemented: true
-implemented_by: claude/opus
 description: "A **fix** review of `2026-10-23-removal-store-size/spec.md`"
-ready: true
-findings: []
-observations:
-    - Existing unreadable-journal diagnostics omit the journal filename
-    - Existing graph tests exceed the L1 time budget
+ready: false
+findings:
+    - "R1-F1 (medium): unreadable-journal diagnostics omit the journal filename and disagree on exit class"
+    - "R1-F2 (medium): graph L1 tests exceed the five-second L1 time budget"
 human_in_the_loop: null
 human-in-the-loop: false
-human_review: false
-human_review_items: []
+human_review: true
+human_review_items:
+    - "R1-F1: name-lookup store errors now take the library's exit class (storage/IO exit 4, unusable record/journal/report exit 3; both were exit 1)"
+    - "R1-F1: StoreError::Journal carries the journal path instead of the operation id (the path contains the id)"
+    - "R1-F2: commands::git_graph and commands::list unit tests run only in the worktree-cli lib target (lib_target_tests!), not twice"
+    - "R1-F2: root Cargo.toml test profile optimizes merman, merman-core, merman-render, fontdb, ttf-parser; may widen CI scope"
+    - "R1-F2: the remaining local graph-test overrun is CoreText listing a 212k-entry target/debug/deps; tests take 1.3-2.4 s from a small directory; no code change for it"
 has_blocked_findings: false
 blocked: false
 recurrence: false
+implemented_by: claude/opus
+next: 2026-10-23-removal-store-size/review-2.md
+log: /Volumes/coding/wt/rusty-biscuit/feat-merman/worktree/fixes/2026-10-23-removal-store-size/log.md
 ---
 
 # Review 1: removal store size
 
-The fix is production ready. No high, medium, or low findings were identified. This is the first implementation review, so there are no previous findings to carry forward.
+The fix is not production ready: two findings remain open (R1-F1, R1-F2). Both were first recorded as observations about code this fix did not change; under the current review rules every defect the review finds is a finding, and every finding blocks readiness. This is the first implementation review, so there are no previous findings to carry forward.
 
 ## Decisions and deferred scope
 
@@ -74,12 +80,12 @@ The smell check found no permissive default on a newly load-bearing report or ba
 - `git diff --check -- worktree/fixes/2026-10-23-removal-store-size`: passed.
 - Cross-OS results were not rerun as a readiness gate. The implementation log records Windows library verification; this review's fresh execution is on macOS.
 
-## Observations
+## Findings
 
-### Existing unreadable-journal diagnostics omit the journal filename
+### R1-F1 (medium): unreadable-journal diagnostics omit the journal filename and disagree on exit class
 
-An unreadable journal error gives a line number but does not distinguish `journal.jsonl` from an archived `journal-<n>.jsonl`. Pending-operation lookup also reports exit 1 while the library's refusal classification uses exit 3. These behaviors predate this fix and do not violate its contract. Naming the file would help someone inspect a stopped removal; the author can schedule that separately.
+An unreadable journal error gives a line number but does not distinguish `journal.jsonl` from an archived `journal-<n>.jsonl`. Pending-operation lookup also reports exit 1 while the library's refusal classification uses exit 3. These behaviors predate this fix and do not violate its contract. Naming the file would help someone inspect a stopped removal, and the lookup and the library classification must agree on one exit class.
 
-### Existing graph tests exceed the L1 time budget
+### R1-F2 (medium): graph L1 tests exceed the five-second L1 time budget
 
-The fresh full suite reported 21 slow tests in graph behavior outside this fix's changed code. Although nextest reported them as passing, their durations exceed the repository's five-second L1 budget. They are outside this review's repair boundary and do not block removal-store readiness.
+The fresh full suite reported 21 slow tests in graph behavior outside this fix's changed code. Although nextest reported them as passing, their durations exceed the repository's five-second L1 budget. Every graph L1 test must finish within the budget.
