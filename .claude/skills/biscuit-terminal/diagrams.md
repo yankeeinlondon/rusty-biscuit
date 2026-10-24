@@ -77,8 +77,30 @@ commands; the library does not. Rendering is pure Rust (Merman, a
 Mermaid.js 12.2.0 reimplementation, and `layout-rs`); no Node.js or `mmdc` is
 involved. Diagrams use the terminal-derived palette above; `--inverse` swaps
 in the opposite fixed theme (`MermaidDiagram::inverted`) on a solid
-background. `bt` does not auto-fallback to code blocks on render errors; it
-reports the error and exits non-zero.
+background.
+
+Without images (`TerminalImage::route_has_pixels(term)` false), `bt` takes
+the component's `MermaidDiagram::present` and lays the text drawing (`txt`
+node + partial note) or the source (`mermaid` node) out with darkmatter's code
+renderer at `text_columns`, then applies margins once
+(`commands/mermaid.rs::render_mermaid_fallback`); this exits 0, even for a
+source that does not parse. With images, the image route is unchanged: an
+image-export failure reports the error and exits non-zero, and
+`--meta`/`--debug` describe images only. Every Mermaid subcommand takes
+`--feature` (`no-mermaid-fallbacks`, `no-mermaid-partial-fallbacks`,
+`no-mermaid-partial-warning`; shared `MermaidFeatureArgs` in `cli/src/args.rs`)
+folded into the component's `MermaidFallbackPolicy`; with none,
+`MERMAID_FALLBACK=code-block` means source. User docs:
+`biscuit-terminal/docs/cli.md`.
+
+**Code highlighting in `bt`.** The CLI (not the library) depends on
+darkmatter's library and installs its code renderer
+(`commands/shared.rs::darkmatter_code_renderer`, the one allowed use of the
+deprecated `TerminalCodeRenderer`) in the Mermaid fallback, `quote`, and
+`block`, so `bt` and `md` highlight identically, Mermaid syntax included. The
+chain `bt` → darkmatter → biscuit-visualized → biscuit-terminal has no cycle;
+`cargo tree -p biscuit-visualized -p biscuit-terminal` must list neither
+darkmatter nor syntect.
 
 ### Shared options
 

@@ -22,8 +22,8 @@ built-in unhighlighted code block.
 
 This includes code nodes a diagram hook returns: a text drawing (`txt`) and a
 source fallback (`mermaid`) are highlighted by whatever code renderer the
-program installed. `md` installs darkmatter's; a program that installs none
-gets plain code blocks.
+program installed. `md` and `bt` install darkmatter's; a program that installs
+none gets plain code blocks.
 
 ## The diagram hook
 
@@ -50,7 +50,8 @@ The hook answers:
 | `Ok(DiagramOutcome::Declined)` | the ordinary code block, with no diagnostic under any strictness |
 | `Err(e)` | `Strict`: the render fails with `LossyRejected`. `Warn`: a lossy diagnostic, then the code block. `Lossy`: the code block |
 
-A minimal hook that shows the source unless images are allowed:
+A minimal hook that leaves the fence a code block when images are allowed, and
+answers a lower ceiling with a placeholder `txt` node:
 
 ```rust
 use biscuit_terminal::render_tree::{

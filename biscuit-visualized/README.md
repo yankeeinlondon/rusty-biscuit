@@ -25,7 +25,7 @@ biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["termi
 |---------|---------|-------------|
 | `image` | No | SVG rasterization and Mermaid rendering (`resvg`, Merman) |
 | `terminal` | No | The diagram components and the render-tree diagram hook; enables `image` and depends on `biscuit-terminal` |
-| `clap` | No | Derive `clap::ValueEnum` on [`QuadrantTheme`](src/src/mermaid/config.rs), so a CLI can take a quadrant theme as an argument |
+| `clap` | No | Derive `clap::ValueEnum` on [`QuadrantTheme`](src/src/mermaid/config.rs), so a CLI can take a quadrant theme as an argument, and (with `terminal`) add [`MermaidFallbackFeature`](src/src/components/fallback_policy.rs), the `--feature` names that set the Mermaid text-fallback policy |
 
 Without `image` only the `artifact` and `cache` modules are compiled.
 
@@ -53,7 +53,7 @@ println!("{}", artifact.path.display());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-This writes a cached PNG and returns its path. A diagram that cannot be drawn is an error, and its source can be shown as a code block instead; the terminal component does that for you. See [Merman rendering](docs/merman.md) for the pipeline, themes, fonts, and [when a diagram falls back to its source](docs/merman.md#when-a-diagram-falls-back-to-its-source), and [Mermaid gitGraph tag spacing](docs/mermaid-gitgraph.md) for how gitGraph tags are kept apart.
+This writes a cached PNG and returns its path. A diagram that cannot be drawn is an error, and its source can be shown as a code block instead; the terminal component does that for you, and on a terminal without images it draws the diagram as text where Merman can (see [the text fallback](docs/components/mermaid_diagram.md#without-images-the-text-fallback)). See [Merman rendering](docs/merman.md) for the pipeline, themes, fonts, and [when a diagram falls back to its source](docs/merman.md#when-a-diagram-falls-back-to-its-source), and [Mermaid gitGraph tag spacing](docs/mermaid-gitgraph.md) for how gitGraph tags are kept apart.
 
 ## Graph Example
 

@@ -71,7 +71,9 @@ What decides between the two:
 - Only diagrams that Merman, the Rust Mermaid engine behind these commands,
   draws as a diagram become text: today that includes flowcharts, state
   diagrams, and entity relationship diagrams. Pie charts, quadrant charts,
-  timelines, and git graphs always show their source.
+  timelines, and git graphs always show their source. So do bar and line
+  charts: Merman draws an XY chart as text only when its y-axis states a
+  range, and the source these commands generate states none.
 - A drawing wider than the available columns shows the source instead. The
   columns are the terminal width, narrowed by `--width` and the margin flags,
   less two columns for the code block's padding.

@@ -135,15 +135,22 @@ md render notes.md --output html --feature no-mermaid-rendering   # no Mermaid.j
   (a pie chart, for example) stays its highlighted `mermaid` code block.
 - **`TERMINAL_IMAGES=0`:** every fence stays a code block.
 
-```text
-$ md --mermaid flow.md          # in a terminal without image support
+````text
+$ NO_COLOR=1 md --mermaid flow.md          # in a terminal without image support
+```txt
 ┌───────┐     ┌──────┐
+│       │     │      │
 │ Alpha ├────►│ Beta │
+│       │     │      │
 └───────┘     └──────┘
-
-▐   Note: this textual representation is provided because the current
-▐   terminal settings do not allow for a graphical image to be used. …
 ```
+
+▐   Note: this textual representation is provided because the current terminal
+▐   settings do not allow for a graphical image to be used. …
+````
+
+With color, the drawing sits in a highlighted code panel instead of between
+fences.
 
 The fallback features above choose whether text may replace the code block
 and whether the note is shown. Without a fallback feature, the

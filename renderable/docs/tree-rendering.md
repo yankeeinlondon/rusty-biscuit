@@ -235,8 +235,9 @@ flowchart TD
 **Highlighting is the program's choice.** Every code node, whether it was a
 fence, a declined fence, or part of a hook's fragment, goes through the
 `code_renderer` slot (`TerminalRenderOptions::with_code_renderer`, any
-`renderable::tree::CodeRenderer`). Darkmatter's code renderer highlights; with
-none installed, code nodes render unhighlighted.
+`renderable::tree::CodeRenderer`). Darkmatter's code renderer highlights (`md`
+and `bt` both install it); with none installed, code nodes render
+unhighlighted.
 
 ```rust
 use std::rc::Rc;
@@ -245,7 +246,7 @@ use biscuit_visualized::components::TerminalDiagramRenderer;
 use renderable::tree::{GraphicsMode, RenderNode, RenderStrictness, TerminalMermaidMode};
 
 let mut opts = TerminalRenderOptions::new(&terminal, RenderStrictness::Strict)
-    .with_diagram_renderer(Rc::new(TerminalDiagramRenderer));
+    .with_diagram_renderer(Rc::new(TerminalDiagramRenderer::default()));
 opts.context.mermaid_mode = TerminalMermaidMode::Automatic;
 opts.context.graphics_mode = GraphicsMode::Vector; // text at most
 let fence = RenderNode::code(Some("mermaid".into()), None, "flowchart LR\n  A --> B");

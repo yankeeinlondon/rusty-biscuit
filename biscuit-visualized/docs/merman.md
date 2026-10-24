@@ -24,10 +24,12 @@ let artifact = diagram.render(&RenderRequest::default())?; // a cached PNG
 ```
 
 Merman is pinned to an exact commit on a fork that adds one gitGraph setting,
-`commitSpacing`, which [tag spacing](#gitgraph-tag-spacing) needs. Only its
-SVG pipeline is compiled in: its PNG output, native font loading, ELK layout,
-and math rendering are off, because this crate draws and measures text with
-its own font chain. See [Dependencies](./dependencies.md).
+`commitSpacing`, which [tag spacing](#gitgraph-tag-spacing) needs. Its SVG
+pipeline and its text target (`ascii`, which draws a diagram with box-drawing
+characters for a terminal without images) are compiled in: its PNG output,
+native font loading, ELK layout, and math rendering are off, because this
+crate draws and measures text with its own font chain. See
+[Dependencies](./dependencies.md).
 
 ## What Merman is
 
@@ -180,7 +182,9 @@ let diagram = MermaidDiagram::new(source).with_time_budget(Duration::from_millis
 
 These are render failures (`MermaidError::RenderFailed`). The terminal
 component, the render-tree hook, and `fallback_code_block()` show the Mermaid
-source as a code block instead:
+source as a code block instead (on a terminal without images the component
+first tries a text drawing, and shows the source when the family has none or
+it does not fit; see [the text fallback](./components/mermaid_diagram.md#without-images-the-text-fallback)):
 
 - the source does not parse, or its diagram type is unknown;
 - a ZenUML diagram, recognized by its `zenuml` header. Merman could draw it,
@@ -872,12 +876,6 @@ stock Merman in its own change, the goldens are reviewed again, and if
 upstream's setting differs in name or meaning, the [tag
 spacing](#gitgraph-tag-spacing) code adapts in that same change.
 
-### Possible later work
-
-- **A text-art fallback.** Merman can also write diagrams as Unicode or ASCII
-  art. That could replace the code-block fallback on terminals that cannot
-  show images.
-
 ### Merman churn and rev bumps
 
 Merman is pre-1.0 and changes often. Moving to a newer Merman commit is
@@ -886,8 +884,10 @@ always its own change:
 1. update the pinned commit in `src/Cargo.toml` (rebasing the fork's
    `commitSpacing` patch while the fork is still used);
 2. run the suite; the family-registry test fails if Merman added a family,
-   and the theme guard tests fail if Merman changed how its styles take
-   precedence;
+   the theme guard tests fail if Merman changed how its styles take
+   precedence, and the text-eligibility snapshot fails if Merman changed which
+   families it draws as text (review that change: it changes what a terminal
+   without images shows);
 3. review and regenerate the [goldens](#golden-tests);
 4. update the rev part of the [backend id](#cache-identity), so no artifact
    drawn by the old Merman is served.

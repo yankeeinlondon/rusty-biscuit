@@ -1,6 +1,6 @@
 # MermaidDiagram
 
-Renders Mermaid diagrams inline in the terminal as raster images. [`MermaidDiagram`](../../src/src/components/mermaid.rs) is the terminal component: it styles the diagram with the terminal's own colors, has it drawn by this crate's Mermaid renderer ([Merman](../merman.md), a pure-Rust port of Mermaid.js 12.2.0, reached through the library-level [`mermaid::MermaidDiagram`](../../src/src/mermaid/render.rs)), and displays the PNG through `biscuit-terminal`'s [`TerminalImage`](../../../biscuit-terminal/docs/components/terminal_image.md) using the terminal's image protocol (Kitty, iTerm2, or Sixel). Falls back to a code block on terminals without image support and for any diagram that cannot be drawn.
+Renders Mermaid diagrams inline in the terminal as raster images. [`MermaidDiagram`](../../src/src/components/mermaid.rs) is the terminal component: it styles the diagram with the terminal's own colors, has it drawn by this crate's Mermaid renderer ([Merman](../merman.md), a pure-Rust port of Mermaid.js 12.2.0, reached through the library-level [`mermaid::MermaidDiagram`](../../src/src/mermaid/render.rs)), and displays the PNG through `biscuit-terminal`'s [`TerminalImage`](../../../biscuit-terminal/docs/components/terminal_image.md) using the terminal's image protocol (Kitty, iTerm2, or Sixel). On a terminal that cannot show images it draws the diagram as text when it can (see [Without images: the text fallback](#without-images-the-text-fallback)), and otherwise shows the source as a `mermaid` code block, as it does for any diagram that cannot be drawn.
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`.
 
@@ -57,8 +57,11 @@ let diagram = MermaidDiagram::new("pie title Distribution\n    \"A\" : 40\n    \
 | `.with_embedded_font(bool)` | With `MermaidTarget::HtmlStatic`, measure labels in a face the page can embed (default off; see [Embedded font](../mermaid-embedded-font.md)). Ignored for any other target and for the terminal's PNG |
 | `.inverted(is_dark)` | The opposite fixed palette of the color mode, on its opaque background |
 | `.resolve_dimensions(term_width, cell)` | The columns the image will occupy, measuring the diagram for `Scale` |
-| `.try_render(&Terminal)` | Fallible render returning [`MermaidRenderResult`](../../src/src/components/mermaid.rs) (`output`, `png_path`, `cache_hit`, `width_cells`) |
-| `.render(&Terminal)` | Infallible render (falls back to code block) |
+| `.with_fallback_policy(MermaidFallbackPolicy)` | Whether a terminal without images gets a text drawing, and whether the partial note follows it (see [Fallback policy](#fallback-policy-and-mermaid_fallback)) |
+| `.try_render(&Terminal)` | Fallible, image-only render returning [`MermaidRenderResult`](../../src/src/components/mermaid.rs) (`output`, `png_path`, `cache_hit`, `width_cells`); never returns text |
+| `.render(&Terminal)` | Infallible render: the image, else the text drawing, else the source code block |
+| `.present(&Terminal)` | The choice `render` makes, as [`MermaidPresentation`](../../src/src/components/mermaid.rs): `Image(result)`, `Text(nodes)`, or `Source(nodes)` |
+| `.text_columns(term_width)` | The columns a text or source presentation is laid out in (the width limit inside the margins) |
 | `.render_to_svg()` | The diagram as an SVG string, for a browser |
 | `.render_to_svg_with_font()` | `render_to_svg` plus the diagram's `DiagramFont`, which is `Some` only when the embedded-font opt-in applied; pass every diagram's font to `mermaid::page_font` |
 | `.fallback_code_block()` | The source as a fenced `mermaid` code block |
@@ -95,18 +98,18 @@ MERMAID_FONT=Inter bt flowchart "A --> B --> C"   # the same layout on macOS, Li
 
 ### Error Handling
 
-`try_render` returns a [`MermaidRenderError`](../../src/src/components/mermaid.rs): `Visualization` when the diagram cannot be drawn (it does not parse, it is a ZenUML or math diagram, or Merman exceeds the time budget), `NoImageSupport` when the terminal shows no images, and `DisplayError` when the image cannot be shown. `render` turns every one of them into the fenced source; a time budget exceeded also logs a warning.
+`try_render` returns a [`MermaidRenderError`](../../src/src/components/mermaid.rs): `Visualization` when the diagram cannot be drawn (it does not parse, it is a ZenUML or math diagram, or Merman exceeds the time budget), `NoImageSupport` when the terminal shows no images, and `DisplayError` when the image cannot be shown. `render` checks for images first: without them it takes the [text fallback](#without-images-the-text-fallback) and never calls `try_render`. With them, any `try_render` error becomes the `mermaid` source code block, never text; a time budget exceeded also logs a warning.
 
 ```mermaid
 flowchart TD
-    S[Mermaid source] --> M["Merman draws it<br/>(within the time budget)"]
+    T{"terminal shows images?"} -- no --> X["text drawing or source<br/>(text fallback)"]
+    T -- yes --> M["Merman draws it<br/>(within the time budget)"]
     M -- fails --> V[Visualization error]
     M -- ok --> P[PNG sized to the columns]
-    P --> T{"terminal shows images?"}
-    T -- no --> N[NoImageSupport]
-    T -- yes --> I[inline image]
-    V --> F["render: fenced source<br/>try_render: the error"]
-    N --> F
+    P -- shown --> I[inline image]
+    P -- display fails --> D[DisplayError]
+    V --> F["render: source code block<br/>try_render: the error"]
+    D --> F
 ```
 
 ```rust
@@ -286,21 +289,180 @@ let theme = MermaidTheme::for_color_mode(Terminal::new().color_mode() == ColorMo
 let inverse_theme = theme.inverse();  // For solid background rendering
 ```
 
-### Terminal check
-
-A diagram renders only when the terminal supports an image protocol; otherwise `try_render` returns an error and `render` falls back to the code block. Half-block character art is not used for diagrams.
-
-```rust
-if let Err(MermaidRenderError::NoImageSupport) = diagram.try_render(&term) {
-    println!("{}", diagram.fallback_code_block());
-}
-```
-
 ### Public API Notes
 
-- Use `MermaidDiagram::try_render(&Terminal)` when you need the rendered output plus metadata (`png_path`, `cache_hit`).
-- Use the `Renderable` implementation when you want graceful fallback: on a terminal whose graphics route has no pixels it draws the diagram as text when it can, and otherwise shows a `mermaid` code block of the source. `MermaidDiagram::present(&Terminal)` returns that choice as an image result or as render-tree nodes, so a program can lay the nodes out with its own code renderer: render them at `MermaidDiagram::text_columns(term.width())` columns, then apply the component's layout (`apply_block_layout`), as `render` does.
-- `with_fallback_policy(MermaidFallbackPolicy)` controls the text fallback: `TextFallback::{Allowed, NoPartial, Never}` and whether the partial note is shown. A setting left unset reads `MERMAID_FALLBACK` at render time (`code-block`, in any case, means never text), and otherwise takes its default (text allowed, note shown).
+- Use `MermaidDiagram::try_render(&Terminal)` when you need the image plus metadata (`png_path`, `cache_hit`). It is image-only: on a terminal without images it returns `NoImageSupport`, never text.
+- Use the `TerminalRenderable` implementation (`render`) when you want graceful fallback (see [Without images: the text fallback](#without-images-the-text-fallback)).
+- Half-block character art is never used for diagrams.
+
+## Without images: the text fallback
+
+When the terminal's graphics route has no pixels (no image protocol, graphics turned off, or a multiplexer that cannot pass images through), `render` does not try the image at all. It asks Merman, the same renderer that draws the image, to draw the diagram with text characters, and shows that drawing when all of these hold:
+
+1. Merman draws the diagram's family **as a diagram** (see [Which diagrams are drawn as text](#which-diagrams-are-drawn-as-text));
+2. the [fallback policy](#fallback-policy-and-mermaid_fallback) allows it;
+3. the drawing **fits** the columns (see [Width](#width)).
+
+Otherwise it shows the source as a `mermaid` code block. The decision is made before any SVG is measured, any font is loaded, or any file is written, and it costs at most one Merman request.
+
+```mermaid
+flowchart TD
+    R["render(&term)"] --> G{"graphics route has pixels?"}
+    G -- yes --> IMG["image (try_render)<br/>a failure shows the source"]
+    G -- no --> E{"family drawn as a diagram?"}
+    E -- no --> SRC["mermaid code block<br/>(the source)"]
+    E -- yes --> P{"policy allows text<br/>for this coverage?"}
+    P -- no --> SRC
+    P -- yes --> M["one Merman text request"]
+    M -- "error, report, or too wide" --> SRC
+    M -- "drawing that fits" --> TXT["txt code block"]
+    TXT --> N{"partial and note shown?"}
+    N -- yes --> NOTE["then the partial note"]
+```
+
+```rust
+use biscuit_terminal::prelude::*;
+use biscuit_visualized::components::MermaidDiagram;
+
+let diagram = MermaidDiagram::new("flowchart LR\n    A[Write spec] --> B{Approved?}\n    B -- yes --> C[Plan]\n    B -- no --> A");
+// On a terminal without images this prints the drawing below, then the note.
+println!("{}", diagram.render(&Terminal::new()));
+```
+
+Without color, the output is:
+
+````txt
+```txt
+┌────────────┐       ╭───────────╮        ┌──────┐
+│            │       ╱           ╲        │      │
+│ Write spec ├──────►< Approved? >──yes──►│ Plan │
+│            │       ╲           ╱        │      │
+└────────────┘       ╰───────────╯        └──────┘
+       ▲                   │
+       └────────no─────────┘
+```
+
+│ Note: this textual representation is provided because the current terminal
+│ settings do not allow for a graphical image to be used. This fallback
+│ representation, while never arbitrary or speculative, might be missing
+│ attributes that would have been visible in the image's representation [id:
+│ mermaid-partial-warning].
+````
+
+### Which diagrams are drawn as text
+
+Merman publishes, for every diagram family, what its text output is (`merman::ascii::ascii_capabilities()`), and that metadata is the only thing that decides. There is no list of family names in this crate; a Merman upgrade that draws a new family as a diagram makes it eligible, and the eligibility snapshot test shows the change in review. Merman's text output comes in two kinds, called *projections*:
+
+- a **diagrammatic** projection is a drawing: boxes, lines, and arrows, like the flowchart above;
+- a **structured-text** projection is a report *about* the diagram. It is faithful, but harder to read than the source, so it never replaces the source. This mindmap:
+
+  ```mermaid
+  mindmap
+    root((Merman))
+      Rendering
+        SVG
+      Text
+  ```
+
+  would come back as a report such as `node(bytes=6)="Merman" id(bytes=4)="root" …` with one indented line per child, so the component shows the mindmap's source instead.
+
+A diagram is drawn as text only when its family's primary projection is diagrammatic **and** the render it gets back is diagrammatic too: a dense class or ER diagram whose drawing Merman abandons for a `relations:` list shows the source. A family Merman lists with no text output, or with a value this crate does not recognize, also shows the source.
+
+At the pinned Merman revision the eligible families are flowchart, sequence, state, class, ER, XY chart (`xychart`), and swimlane. Gantt, gitGraph, journey, kanban, mindmap, packet, timeline, and tree view are structured text; every other family (pie, quadrant, architecture, ZenUML, …) has no text output. An XY chart is drawn only when its y-axis states a range (`y-axis 0 --> 5`); without one Merman reports no drawing and the source shows, and a drawn XY chart begins with a line Merman adds, such as `xDomain: band categories=[bytes=1="a", …]`. [`text_eligibility`](../../src/src/mermaid/text.rs) answers the question for one family:
+
+```rust
+use biscuit_visualized::mermaid::{TextCoverage, text_eligibility};
+
+assert_eq!(text_eligibility("flowchart").unwrap().coverage(), TextCoverage::Partial);
+assert!(text_eligibility("pie").is_none()); // a pie chart always shows its source
+```
+
+### The partial note
+
+Merman also says how much of a family survives in text: **full** coverage, or **partial**, meaning some features are dropped or approximated (a flowchart's `click` links vanish, icons print as raw codes such as `fa:fa-book`). Every eligible family is partial today. A partial drawing is followed by a blank line and this note, so the reader knows the drawing may be incomplete:
+
+> **Note:** this textual representation is provided because the current terminal settings do not allow for a graphical image to be used. This fallback representation, while never arbitrary or speculative, might be missing attributes that would have been visible in the image's representation [<dim>id: <i>mermaid-partial-warning</i></dim>].
+
+`Note:` is bold, the bracketed `id: mermaid-partial-warning` is dim, and the id itself is italic; a terminal without bold, dim, or italic shows plain text. The note wraps to the terminal width like any block quote (the drawing never wraps). It never follows a source code block or an image. The id is [`PARTIAL_NOTE_ID`](../../src/src/components/mermaid.rs), and [`partial_note()`](../../src/src/components/mermaid.rs) builds the note's render-tree node.
+
+### Fallback policy and `MERMAID_FALLBACK`
+
+[`MermaidFallbackPolicy`](../../src/src/components/fallback_policy.rs) has two independent settings:
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| text fallback | `TextFallback::Allowed`, `TextFallback::NoPartial` (no text for a partial family), `TextFallback::Never` | `Allowed` |
+| show partial note | `true`, `false` | `true` |
+
+A setting you set is final. A text-fallback setting you leave unset reads the `MERMAID_FALLBACK` environment variable at render time: `code-block` (in any letter case) means `Never`; any other value, or no variable, means the default. The variable never changes the note setting. So the precedence for each setting is **explicit setting > environment > default**, and a CLI that turns its flags into explicit settings makes a flag beat the variable.
+
+```rust
+use biscuit_visualized::components::{MermaidDiagram, MermaidFallbackPolicy, TextFallback};
+
+// Never draw text, whatever MERMAID_FALLBACK says.
+let source_only = MermaidDiagram::new(source)
+    .with_fallback_policy(MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Never));
+
+// Draw text, but without the note; MERMAID_FALLBACK still decides the text setting.
+let quiet = MermaidDiagram::new(source)
+    .with_fallback_policy(MermaidFallbackPolicy::default().with_show_partial_note(false));
+```
+
+```sh
+MERMAID_FALLBACK=code-block bt flowchart "A --> B"   # shows the source
+```
+
+`NoPartial` behaves like `Never` today, because every eligible family is partial; the two differ once Merman draws a family with full coverage. With the `clap` feature, [`MermaidFallbackFeature`](../../src/src/components/fallback_policy.rs) is a ready-made CLI value enum (`no-mermaid-fallbacks`, `no-mermaid-partial-fallbacks`, `no-mermaid-partial-warning`), and `MermaidFallbackPolicy::from_features` folds a list of them into a policy, the more restrictive text setting winning. `bt` and `md` take them as `--feature` flags (see the [`bt` CLI reference](../../../biscuit-terminal/docs/cli.md)).
+
+### Width
+
+The drawing must fit the columns available to the component: the terminal width less the margins (in a Markdown render, the [hook](#mermaid-fences-in-a-render-tree) uses the width at the fence's position), limited by an explicit `ImageWidth::Characters`, `Percent`, or `Fill`, less two columns for a highlighting code renderer's padding ([`TEXT_BLOCK_CHROME_COLUMNS`](../../src/src/components/mermaid.rs)). The default `ImageWidth::Scale` uses every available column; text cells do not scale. Width is measured in terminal display cells, so a wide CJK label counts twice.
+
+Flowchart, sequence, and swimlane diagrams (the families whose metadata admits Merman's `auto` layout) are drawn in their ordinary layout first and, if that is too wide, once more in a compact layout, all within one request. Other families get their ordinary layout only. A drawing that is still too wide shows the source; it is never clipped, wrapped, or turned to a different direction:
+
+```sh
+bt flowchart --width 10 "A[Write spec] --> B{Approved?}"   # too narrow: shows the source
+```
+
+### Drawing characters
+
+The drawing uses Unicode box-drawing characters when the terminal supports Unicode (biscuit-terminal's `Terminal::supports_unicode`), and plain ASCII borders and connectors otherwise. Only what Merman generates changes; the labels you wrote are kept exactly, accents and emoji included:
+
+```txt
++------+     +---+
+|      |     |   |
+| Café |---->| B |
+|      |     |   |
++------+     +---+
+```
+
+Control characters inside labels are neutralized before the drawing reaches the terminal, so a label cannot move the cursor or change colors.
+
+### Errors on the text route
+
+`render` never fails. A source that does not parse, a Merman failure, an exceeded [time budget](#error-handling) (the same `with_time_budget` applies to text requests), a resource limit, or an empty drawing all show the source code block; the text route never falls back to the image, and the image route never falls back to text. A title set with `with_title` is shown once, as a bold line above the drawing or the source, unless the source already gives the same title (`title X`, a frontmatter `title:`, or `pie title X`).
+
+### Laying the nodes out yourself
+
+The text and source presentations are render-tree nodes (a `txt` or `mermaid` code node, then the note's block quote), so the program displaying them decides how code is highlighted. `render` lays them out with biscuit-terminal's plain code block. To highlight them, as `bt` does with darkmatter's highlighter, take [`present`](../../src/src/components/mermaid.rs) and render the nodes yourself at `text_columns`, then apply the component's layout:
+
+```rust
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use biscuit_visualized::components::MermaidPresentation;
+use renderable::tree::{RenderNode, RenderStrictness};
+
+match diagram.present(&term) {
+    MermaidPresentation::Image(result) => print!("{}", result.output),
+    presentation => {
+        let nodes = presentation.nodes().unwrap_or_default().to_vec();
+        let mut options = TerminalRenderOptions::new(&term, RenderStrictness::Lossy)
+            .with_code_renderer(code_renderer.clone()); // an Rc<dyn renderable::tree::CodeRenderer>
+        options.context = options.context.with_width(diagram.text_columns(term.width()));
+        let rendered = render_terminal_node(&RenderNode::root(nodes), &options)?;
+        print!("{}", diagram.layout().apply_block_layout(&rendered.output, term.width()));
+    }
+}
+```
 
 ## Mermaid fences in a render tree
 
@@ -343,25 +505,29 @@ let fence = RenderNode::code(Some("mermaid".into()), None, "flowchart LR\n    A 
 let rendered = render_terminal_node(&fence, &options)?;
 ```
 
-The hook renders exactly what `MermaidDiagram::try_render` would, sized to
-the columns available at the fence's position (a list item's or block quote's
-inner width, not the whole terminal), in the terminal's palette and with the
-default time budget. When it
-cannot (no image support, invalid source, ZenUML or math, the time budget
-exceeded), the render's strictness decides:
-`Strict` rejects the render, `Warn` records a lossy diagnostic and shows the
-fence as code, and `Lossy` shows it as code silently. Darkmatter installs the
-hook for its terminal output.
+The hook's image is exactly what `MermaidDiagram::try_render` would draw, and
+its text drawing exactly what the component's text fallback would draw, sized
+to the columns available at the fence's position (a list item's or block
+quote's inner width, not the whole terminal), in the terminal's palette and
+with the default time budget. When it fails (no image support in `Image` mode,
+invalid source, ZenUML or math, the time budget exceeded), the render's
+strictness decides: `Strict` rejects the render, `Warn` records a lossy
+diagnostic and shows the fence as code, and `Lossy` shows it as code silently.
+A *declined* fence is not a failure: it renders as code under every
+strictness. Darkmatter installs the hook for its terminal output, and
+`md --mermaid` asks for `Automatic` mode.
 
 ```mermaid
 flowchart TD
-    F[mermaid fence] --> P{Image mode at Rich?}
+    F[mermaid fence] --> P{"Image mode at Rich, or<br/>Automatic at Rich or Vector?"}
     P -- no --> C[code block]
     P -- yes --> H{diagram hook installed?}
     H -- no --> C
-    H -- yes --> R{hook renders?}
-    R -- yes --> D[diagram]
-    R -- no --> S{strictness}
+    H -- yes --> R{hook}
+    R -- image --> D[diagram]
+    R -- "text (Automatic)" --> T["txt code block,<br/>then the partial note"]
+    R -- "declined (Automatic)" --> C
+    R -- fails --> S{strictness}
     S -- Strict --> E[render error]
     S -- Warn / Lossy --> C
 ```
