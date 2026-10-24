@@ -4,26 +4,29 @@ plan: "darkmatter/features/2026-10-22-dmls-incremental-graph-updates/plan.md"
 implemented_by: "claude/opus"
 started_phase: "1"
 message_to_agent: |-
-  Phase 1 is in place: `WorkspaceIndex::wiki_universe` caches the universe
-  by `WikiUniverseInputs` and prepopulates dependency slots as unmatchable.
-  `WikiUniverse::portability_key(slot)` holds the per-slot keys.
-  `WikiDoc::is_unmatchable` marks dependency slots. The four counters exist.
-  `record_document_table` is currently called once per `assemble_listed`.
-  When you add `DocumentTable`, move that call into actual table
-  construction, so reuse reads 0. In `assemble_listed` and
-  `portability_collisions`, a document whose *supplied* slot is unmatchable
-  (a request graph built over the live universe that contains a live
-  dependency as an ordinary document; see `router/facts.rs::request_graph`)
-  keeps `WikiDoc::for_path` facts and a computed key. Keep that fallback
-  when you move facts into the table. Phase 1 tests to update when Phase 2
-  lands: `test_a_content_edit_reuses_the_universe_a_retained_snapshot_shares`
-  asserts `wiki_path_facts == 1` (the dependency's real facts) on a content
-  edit, which Phase 2 should make 0. Watch out: another session (the
-  frontmatter-key-order fix) is editing `darkmatter/lib`, `biscuit-hash`,
-  and `dmls/src/overlay/mod.rs` in this same worktree. Its uncommitted
-  key-order work makes 44 darkmatter/darkmatter-cli L1 tests fail
-  (`schemas_convert_snapshots`, JSON5 formatting, and others). Those
-  failures are not caused by the `dmls` changes. Do not edit those files.
+  Phase 2 is in place. `graph/arena.rs` now has a private `DocumentTable`
+  (path records, `by_path`, `slot_documents`, basename `KeyIndex`,
+  portability collisions, the universe `Arc`, and `Listing`) shared by
+  `Arc` between snapshots, plus a per-snapshot `Vec<DocumentState>`
+  (hash, parsed). `DocumentRecord<'a>` is a borrowed `Copy` view
+  (`path: &PathBuf`, `canonical: &Vec<String>`); `documents()` returns an
+  `ExactSizeIterator + DoubleEndedIterator`. Roots are allocated first, so
+  `DocumentId(d)`'s root is `NodeId(d)`. Only `WorkspaceIndex::rebuild`
+  calls `build_listed_reusing`; the public builders always build a fresh
+  table, so they are the uncached oracle for Phase 3. Reuse needs equal
+  sorted paths, equal dependency flags, equal `Listing`, and the *same*
+  universe `Arc` (`DocumentTable::matches`). For tests inside the crate,
+  `WorkspaceGraph::shares_document_table` (`#[cfg(test)]`) checks table
+  identity. Found while testing: opening a dependency's buffer with
+  byte-identical text returns `Unchanged` and does not rebuild, so the
+  snapshot keeps that document marked as a dependency until the next
+  rebuild. That behavior predates this change, and rule 12 says to keep
+  publication behavior, so it is unchanged and listed in
+  `decisions_for_review`. Phase 3's transition harness should change the
+  text when it opens a dependency, or assert that quirk explicitly. Other
+  sessions are still editing `darkmatter/lib`, `claudine`, and
+  `biscuit-hash` in this worktree; their uncommitted work causes the
+  non-`dmls` failures recorded under Phase 2 Gates.
 source_files_during_phase_1:
   - darkmatter/dmls/src/work_counters.rs
   - darkmatter/dmls/src/wiki/universe.rs
@@ -61,6 +64,48 @@ decisions_for_review:
     collisions and rename spellings for dependency targets. Undoing this
     decision would mean deleting the fallback arms in `assemble_listed` and
     `portability_collisions`.
+  - |-
+    The plan gives `build_listed_reusing` "the same arguments" as
+    `build_listed` plus `previous`. Its universe parameter is a concrete
+    `Arc<WikiUniverse>` rather than `impl Into<Arc<WikiUniverse>>`. Table
+    reuse compares the universe by pointer identity, and only an `Arc` the
+    caller keeps can ever match; a converted value would always be new. The
+    only caller (the live index) already holds an `Arc`. Changing it back to
+    `impl Into` is a one-line signature change.
+  - |-
+    The plan calls `GraphAssembly`, `assemble`, and `finalize` crate-visible.
+    Nothing outside `graph/arena.rs` calls them, and they now take the
+    private table, so they are private. The two passes, assembly and then
+    reverse-index finalization, are kept. Making them `pub(crate)` again
+    would also mean exposing `DocumentTable`.
+  - |-
+    Opening a referenced dependency's buffer with byte-identical text
+    returns `Unchanged` without rebuilding. The snapshot then still marks
+    the document as a dependency, so it is not a wiki candidate, until the
+    next rebuild. This behavior predates this change. Plan rule 12 says to
+    keep the unchanged-content short-circuit, so I left it alone; the tests
+    open dependencies with different text. The fix would be to rebuild in
+    `open_buffer` when the path was a dependency before it was opened, even
+    for unchanged text. That is a small, separate change to publication
+    behavior, which a reviewer may want to schedule.
+source_files_during_phase_2:
+  - darkmatter/dmls/src/graph/arena.rs
+  - darkmatter/dmls/src/graph/invalidate.rs
+  - darkmatter/dmls/src/providers/completion.rs
+  - darkmatter/dmls/src/providers/definition.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/location.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/rename.rs
+  - darkmatter/dmls/src/providers/symbols.rs
+  - darkmatter/dmls/src/providers/wiki.rs
+  - darkmatter/dmls/tests/l1/entry_point_parity.rs
+  - darkmatter/dmls/tests/l1/index_store_keys.rs
+  - darkmatter/dmls/tests/l1/index_store_requests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Implementation Log for 2026-10-22-dmls-incremental-graph-updates (4 phases)
@@ -179,3 +224,144 @@ sources.
   `canonicalize_simplified` temp roots. I did not run a `just cross-check`;
   CI covers the other operating systems.
 
+
+## Phase 2
+
+### Work done
+
+- **Split snapshot state** (`dmls/src/graph/arena.rs`).
+  - New private `DocumentTable` holds the path-derived part of a snapshot:
+    `DocumentPathRecord { path, canonical, workspace_id, dependency,
+    wiki_slot }` in path order, `by_path`, `slot_documents`, the wiki
+    **basename** `KeyIndex`, portability collisions, the universe `Arc`,
+    and `Listing`. `WorkspaceGraph` holds `Arc<DocumentTable>` plus a dense
+    `Vec<DocumentState { content_hash, parsed }>`, nodes, edges, the
+    reverse index, the generation, and awaited paths. The old `WikiSlots`
+    struct and the owned `documents`/`by_path`/`keys`/`portability`/
+    `listing` fields are gone.
+  - `DocumentTable::build` is the only place that counts
+    `document_tables`, computes dependency path facts, appends to a supplied
+    universe that lacks a document (through `Arc::make_mut`), and groups
+    collisions. The Phase 1 fallback is kept: a document whose supplied
+    slot is unmatchable gets `WikiDoc::for_path` facts and a computed key.
+    A request graph's table keeps the universe as finally extended.
+  - `DocumentTable::matches` merges the sorted parsed and listed paths into
+    a temporary vector of references, then compares paths and dependency
+    flags record by record. It also compares `Listing` by equality and the
+    universe by `Arc::ptr_eq`. It never builds records, maps, canonical
+    strings, or collision buckets just to compare them.
+  - `build`, `build_with_roots`, and `build_listed` keep their signatures
+    and always build a new table. The crate-private `build_listed_reusing`
+    adds `previous: &WorkspaceGraph`, and only `WorkspaceIndex::rebuild`
+    calls it. Both routes go through one `build_from(…, Option<&WorkspaceGraph>)`.
+  - Assembly allocates every root first (`DocumentId(d)` → root `NodeId(d)`).
+    It then appends content for each parsed index in `BTreeMap` order, in
+    the same node sequence per document as before, and fills each document's
+    state by ID. Heading facts exist only for parsed documents; a missing
+    entry reads as `HeadingMissing`, and the explicit parsed flag still
+    leaves unparsed targets unchecked. Frontmatter keys, `key_by_name`,
+    headings, references, wiki outcomes, reverse edges, and awaited paths
+    are rebuilt for every snapshot.
+  - `ReferenceResolver`, `resolve_link`, `resolve_file_edge`, and
+    `resolve_wiki_link` read the table and the state slice, and derive a
+    document's root from its ID.
+  - `DocumentRecord<'a>` is now a `Copy` view (`path: &PathBuf`,
+    `canonical: &Vec<String>`, the same scalar fields).
+    `document(id) -> Option<DocumentRecord<'_>>`;
+    `documents() -> impl ExactSizeIterator + DoubleEndedIterator`.
+  - The module docs on `arena.rs` and `invalidate.rs` now describe table
+    sharing.
+- **Callers** (rule 8): `.iter()` was removed after `documents()` in
+  `providers/{completion,frontmatter,symbols,wiki}.rs` and
+  `tests/l1/entry_point_parity.rs`. Owned paths taken from a record now use
+  `.to_path_buf()` (`providers/{mod,definition,symbols}.rs`,
+  `graph/invalidate.rs`, three L1 tests). Clippy's `needless_borrow`
+  flagged the `&record.path` arguments in `providers/{dsl,frontmatter,
+  rename,completion,symbols,location}.rs`, which now pass `record.path`
+  directly. `tests/l1/index_store_keys.rs` used to borrow a field of a
+  temporary record, and now copies the view. `graph/node.rs` and the
+  `invalidate.rs` rustdoc links to `DocumentRecord::dependency` still
+  resolve, so they are unchanged.
+- **Phase 1 test updated:**
+  `test_a_content_edit_reuses_the_universe_a_retained_snapshot_shares` now
+  expects path facts, keys, universes, and tables all to be 0 on a content
+  edit (previously path facts were 1).
+
+### Departures and findings
+
+- `build_listed_reusing` takes `Arc<WikiUniverse>` rather than
+  `impl Into`, and `assemble`, `finalize`, and `GraphAssembly` are now
+  private. Both are recorded in `decisions_for_review`.
+- A pre-existing quirk turned up during testing. Opening a dependency's
+  buffer with byte-identical text short-circuits as `Unchanged`, so the
+  snapshot keeps the document flagged as a dependency until the next
+  rebuild. Rule 12 says to keep publication semantics, so I did not change
+  it; it is recorded in `decisions_for_review`.
+
+### Requirement-to-test mapping
+
+All tests are L1, fidelity F1: the boundary is in-process graph
+construction inside `dmls`. Table identity is private, so the tests live in
+the crate and use the `#[cfg(test)]` probe
+`WorkspaceGraph::shares_document_table`. No loader is involved, so the
+Input Robustness Matrix does not apply (rule 14).
+
+| Requirement | Test |
+|---|---|
+| Content edits (heading, link retarget, frontmatter-key rename) with a parsed source, a parsed dependency, and three unparsed listed docs share the table and universe; zero deltas on all four counters; hash and parsed state updated; link and `UsesVariable` targets rebuilt; roots-first per document; old snapshot unchanged | `graph::invalidate::tests::test_content_edits_share_the_document_table_and_rebuild_every_reference` |
+| Listed insertion and removal, ordered-root change, open-unlisted join and leave, dependency addition, dependency → open, open → dependency after preparation, dependency removal, dependency → listed: exactly one universe and one table each; path facts and keys = candidate slots + dependency records | `graph::invalidate::tests::test_each_structural_change_builds_one_universe_and_one_table` |
+| Listed unparsed → parsed, and a listed buffer closed back to unparsed, reuse the table while state changes; a listing-state change alone gives one table and no universe; equal roots, relink, and a repeated listing each publish a new generation over the same table; an awaited creation re-resolves the link (`EdgeTarget::File`) over the same table | `graph::invalidate::tests::test_parse_and_publication_changes_over_equal_paths_reuse_the_table` |
+| Unchanged text and an unreferenced build-output creation: no generation, no graph work | `graph::invalidate::tests::test_unchanged_text_and_unreferenced_creations_do_no_graph_work` |
+| A batch of three joins: one generation, one universe, one table | `graph::invalidate::tests::test_a_batch_of_joins_builds_one_universe_and_one_table` |
+| A retained snapshot keeps wiki ambiguity, portability twins, basename buckets, document IDs, and headings through an edit and a membership change that removes one member of each pair | `graph::invalidate::tests::test_a_retained_snapshot_keeps_its_lookups_through_edits_and_membership_changes` |
+| Roots-first numbering with parsed and unparsed documents interleaved; content in path order; `documents()` is double-ended; wiki resolution to a root | `graph::arena::tests::test_roots_are_numbered_first_and_content_follows_in_path_order` |
+| Public builders never reuse; reuse on an equal-input edit and on unparsed → parsed; a new table for each `Listing` state, for an equal but distinct universe `Arc`, and for a dependency-flag change; a request graph's extended universe is stored in its table and never mutates the supplied one | `graph::arena::tests::test_a_table_is_reused_only_for_equal_structural_inputs` |
+| Frontmatter keys are never cached (rule 6) | Phase 1's `test_a_renamed_frontmatter_key_re_resolves_its_variable_uses`, plus the key-rename step above |
+
+Focused checkpoint runs:
+
+- `cargo nextest run -p dmls --lib -E 'test(graph::) | test(wiki::) |
+  test(work_counters) | test(providers::) | test(router::) |
+  test(index_store::)'`: 359/359 passed before the new tests were added.
+- `cargo nextest run -p dmls --lib -E 'test(graph::)'`: 87/87 passed with
+  the new tests.
+- `cargo nextest run -p dmls --test l1 -E 'test(level1_graph_index) |
+  test(entry_point_parity) | test(index_store_keys) |
+  test(referenced_targets) | test(wiki_universe_equivalence) |
+  test(level1_wiki) | test(index_store_)'`: 151/151 passed.
+
+### Gates
+
+- `just lint` (darkmatter: lib, CLI, `dmls`, `zed-dmls`, and the wasm32
+  check) passed with exit code 0 once the clippy findings were fixed
+  (`needless_borrow` at callers, `manual_next_back`, `type_complexity` in a
+  test).
+- `just check-tier-coverage darkmatter`: 0 stranded tests.
+- `just test` (darkmatter) stopped at its first failure,
+  `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`. I reran
+  it as `just test --no-fail-fast` to list every failure (log at
+  `/tmp/dm-phase2-test-all.log`): **10643 run, 10600 passed, 43 failed,
+  10 skipped**. **None of the failures are in `dmls`**; all 1283 `dmls`
+  results passed. The 43 failures are the JSON/YAML key-order family that
+  Phase 1 recorded, caused by the concurrent frontmatter-key-order
+  session's uncommitted `darkmatter/lib` edits: 40
+  `schemas_convert_snapshots`,
+  `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata`,
+  `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`, and
+  `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`.
+  Neither `darkmatter` nor `darkmatter-cli` depends on `dmls`, so this
+  phase's edits cannot reach them. I did not touch those files.
+- Dependent packages: `cargo tree -i dmls --workspace` lists nothing but
+  `dmls` itself, so there was nothing downstream to test.
+- Affected scope (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` =
+  claudine, darkmatter, dmls, test-toolkit, darkmatter-cli; `change_class` =
+  package. The gates were required, so I ran them. The list is wide because
+  other sessions' uncommitted files share this working tree.
+- Cross-OS: production compares only `Path`/`PathBuf` values and adds no
+  OS-specific code or dependency. The tests use `abs()` logical paths or
+  `canonicalize_simplified` temp roots. I did not run a `just cross-check`;
+  CI covers the other operating systems.
+- Docs and skills: no `docs/` page or skill line describes record storage
+  or node numbering (the skill's `DocumentRecord::parsed`/`dependency`
+  references still hold). The topic docs are Phase 4's task.

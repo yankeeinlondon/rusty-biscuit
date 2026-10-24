@@ -14,7 +14,25 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
   - dmls
-start_phase: 2
+start_phase: 3
+source_files_during_phase_2:
+  - darkmatter/dmls/src/graph/arena.rs
+  - darkmatter/dmls/src/graph/invalidate.rs
+  - darkmatter/dmls/src/providers/completion.rs
+  - darkmatter/dmls/src/providers/definition.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/location.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/rename.rs
+  - darkmatter/dmls/src/providers/symbols.rs
+  - darkmatter/dmls/src/providers/wiki.rs
+  - darkmatter/dmls/tests/l1/entry_point_parity.rs
+  - darkmatter/dmls/tests/l1/index_store_keys.rs
+  - darkmatter/dmls/tests/l1/index_store_requests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # DMLS cheaper live graph rebuilds
@@ -85,7 +103,7 @@ Checkpoint: after both tasks integrate, run focused nextest tests for `wiki::uni
 
 ### Wave 2
 
-- [ ] **Split snapshot state**
+- [x] **Split snapshot state**
   - Own the production DMLS graph and provider changes. Implement rules 6–11 together so there is no intermediate production API with mixed ownership. Keep the private table types in `graph/arena.rs`; no new generic cache framework or public table API.
   - Move basename keys and portability into table construction. Keep all content-dependent heading, frontmatter, variable, reference, reverse-edge, and awaited-path state per snapshot. Route existing graph accessors through the table and dense state vector.
   - Check table reuse by streaming sorted structural inputs; do not reconstruct path records, maps, canonical strings, collision buckets, or per-unparsed-document heading vectors merely to compare them. A temporary sorted path-reference vector for comparing the parsed/listed union is acceptable; it owns no cloned paths. Populate the state vector with defaults and overwrite parsed entries by document ID.
@@ -94,7 +112,7 @@ Checkpoint: after both tasks integrate, run focused nextest tests for `wiki::uni
 
 ### Wave 3
 
-- [ ] **Prove table reuse**
+- [x] **Prove table reuse**
   - Add unit tests inside `graph/arena.rs` and `graph/invalidate.rs`, where private table pointer identity and exact inputs can be checked without a new public introspection API.
   - With one parsed source, a parsed referenced dependency, and several unparsed listed documents, change headings, links, and frontmatter keys. Assert shared table and universe `Arc`s, zero deltas in all four path-work counters, updated hashes/parsed flags, and rebuilt `UsesVariable`/reference targets. Check document roots satisfy `NodeId(d)` and each document's filtered node sequence stays root-first.
   - Individually cover listed insertion, removal, ordered-root change, dependency-to-open, open-to-dependency after target preparation, dependency-to-listed, dependency addition/removal, and an open-unlisted document joining/leaving. Each changed universe input produces exactly one universe and table at the final rebuild; path/key counts equal the slots and real dependency facts actually constructed, rather than a guessed global constant.
