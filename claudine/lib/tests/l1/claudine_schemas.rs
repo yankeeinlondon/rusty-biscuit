@@ -348,6 +348,15 @@ fn property_names(object: &Value) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
+/// The keys beside a single action that `uncounted-keys` leaves out of a
+/// category's one-verb count.
+const SIBLINGS: &[&str] = &["when", "no_error"];
+
+/// A category's verbs: its keys without the sibling keys.
+fn verb_names(object: &Value) -> BTreeSet<String> {
+    property_names(object).into_iter().filter(|key| !SIBLINGS.contains(&key.as_str())).collect()
+}
+
 fn is_closed_object(fragment: &Value) -> bool {
     fragment["type"] == "object" && fragment["additionalProperties"] == json!(false)
 }
@@ -419,7 +428,7 @@ fn hand_verbs_equal_the_parser_inventory() {
     let generated = generated_verbs();
     let hand: BTreeSet<String> = CATEGORIES
         .iter()
-        .flat_map(|category| property_names(&types[*category]))
+        .flat_map(|category| verb_names(&types[*category]))
         .filter(|verb| !generated.contains(verb))
         .collect();
     let parser = parser_hand_verbs();
@@ -432,7 +441,7 @@ fn hand_verbs_equal_the_parser_inventory() {
     // Every verb sits in exactly one category.
     let mut seen = BTreeMap::new();
     for category in CATEGORIES {
-        for verb in property_names(&types[*category]) {
+        for verb in verb_names(&types[*category]) {
             if let Some(previous) = seen.insert(verb.clone(), *category) {
                 panic!("`{verb}` is in both `{previous}` and `{category}`");
             }
@@ -484,7 +493,8 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
 
     // Each generated key names the projected per-verb types by reference: a
     // category takes the short and (when the verb has one) the long form, a
-    // bundle and a loose loop key the short form only.
+    // bundle and the loop's loose bundle the short form only, and the loop's
+    // single-action arm the category's forms.
     let projection = LifecycleSchemaProjection::shipped().expect("the shipped catalogs project");
     let projected: BTreeSet<String> = projection.verbs.iter().map(|(_, verb)| verb.name.clone()).collect();
     assert_eq!(projected, catalogs, "the projection covers the catalog verbs");
@@ -509,25 +519,31 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
             assert_eq!(action["types"][bundle][verb.name.as_str()], short, "`{bundle}.{}`", verb.name);
         }
         if verb.name != "max" {
-            assert_eq!(lifecycle["types"]["loop"][verb.name.as_str()], short, "`loop.{}`", verb.name);
+            assert_eq!(lifecycle["types"]["loop-bundle"][verb.name.as_str()], short, "`loop-bundle.{}`", verb.name);
+            assert_eq!(lifecycle["types"]["loop-single"][verb.name.as_str()], category, "`loop-single.{}`", verb.name);
         }
     }
 
     // The loop declares `max` once, as its iteration control, and every
-    // other catalog verb as a loose key.
-    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &["loop"]);
-    let loop_keys = property_names(&lifecycle["loop"]);
+    // other catalog verb as a loose key, in both arms.
+    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &["loop-bundle", "loop-single"]);
+    let loop_keys = property_names(&lifecycle["loop-bundle"]);
+    let single_keys = property_names(&lifecycle["loop-single"]);
     for verb in &catalogs {
-        assert!(loop_keys.contains(verb), "`loop` lists `{verb}`");
+        assert!(loop_keys.contains(verb) && single_keys.contains(verb), "both loop arms list `{verb}`");
     }
-    let max_arms = arms_of(&lifecycle["loop"]["properties"]["max"]);
-    assert_eq!(max_arms.len(), 2, "`loop.max` is a count or a template: {max_arms:?}");
-    assert!(max_arms.iter().any(|arm| arm["type"] == "integer"), "`loop.max` is the iteration count");
-    assert!(
-        max_arms.iter().any(|arm| arm["type"] == "string" && arm["pattern"].is_string()),
-        "`loop.max` may be a whole-value interpolation"
-    );
-    assert!(!loop_keys.contains("fail_fast"), "a loop has no `fail_fast`");
+    assert_eq!(single_keys, &loop_keys - &BTreeSet::from(["gate".to_string()]), "the arms differ only by `gate`");
+    for arm in ["loop-bundle", "loop-single"] {
+        let max_arms = arms_of(&lifecycle[arm]["properties"]["max"]);
+        assert_eq!(max_arms.len(), 2, "`{arm}.max` is a count or a template: {max_arms:?}");
+        assert!(max_arms.iter().any(|arm| arm["type"] == "integer"), "`{arm}.max` is the iteration count");
+        assert!(
+            max_arms.iter().any(|arm| arm["type"] == "string" && arm["pattern"].is_string()),
+            "`{arm}.max` may be a whole-value interpolation"
+        );
+        assert!(!property_names(&lifecycle[arm]).contains("fail_fast"), "a loop has no `fail_fast`");
+    }
+    assert!(!single_keys.contains("gate"), "a `gate` never sits beside a loose verb");
 }
 
 #[test]
@@ -571,6 +587,16 @@ fn bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error() {
         assert_eq!(present(&types[export]["properties"]["when"])["format"], "darkmatter-expression");
         assert_eq!(present(&types[export]["properties"]["no_error"])["type"], "boolean");
     }
+    // A category is a single-action dictionary: one verb, with `when` and
+    // `no_error` beside it and left out of the one-key count.
+    for category in CATEGORIES {
+        let object = &types[*category];
+        assert!(SIBLINGS.iter().all(|key| property_names(object).contains(*key)), "`{category}` takes `when` and `no_error`");
+        assert_eq!(present(&object["properties"]["when"])["format"], "darkmatter-expression");
+        assert_eq!(present(&object["properties"]["no_error"])["type"], "boolean");
+        assert!(object.get("maxProperties").is_none(), "`{category}` counts its verb apart from its siblings: {object}");
+        assert_eq!(object["allOf"].as_array().map(Vec::len), Some(4), "`{category}` bounds each sibling combination");
+    }
     assert!(
         !property_names(&types["initialize-bundle"]).contains("shell"),
         "the initialize bundle has no shell verb"
@@ -585,7 +611,7 @@ fn bundle_values_are_the_category_short_forms() {
     let generated = generated_verbs();
     let mut long_forms = 0;
     for category in CATEGORIES {
-        for verb in property_names(&types[*category]) {
+        for verb in verb_names(&types[*category]) {
             let declared = &types[*category]["properties"][verb.as_str()];
             let arms: Vec<Value> = arms_of(declared).iter().map(without_descriptions).collect();
             // A long form is a closed-object arm. A hand verb has at most one
@@ -920,9 +946,20 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "generated-verb-deferred-beside-extra-argument",
         "generated-verb-deferred-beside-bad-sibling",
         "generated-verb-malformed-template",
+        "generated-verb-malformed-string-template",
+        "handwritten-action-malformed-template",
         "optional-nonnullable-null",
         "ensure-file-overloads",
         "variadic-and-or",
+        "generated-verb-numeric-recovery",
+        "generated-verb-excluded-source",
+    ],
+    &[
+        "single-action-root-dictionary",
+        "single-action-branch-dictionaries",
+        "single-action-loop-loose",
+        "long-forms-in-loop-bundle",
+        "conditional-root-dictionary",
     ],
 ];
 
@@ -1192,10 +1229,64 @@ fn ac5_malformed_actions() {
     );
 }
 
+/// A single-action dictionary takes its verb's long form at a stack root, in
+/// either branch, beside `when` in a list item, and as a loop's one loose
+/// verb, as the parser does; several loose verbs beside a long form, and a
+/// conditional written as a stack's root dictionary, are refused by both.
+#[test]
+fn ac5_single_action_dictionaries() {
+    assert_ac5(
+        5,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
+            (
+                "single-action-root-dictionary",
+                include_str!("../fixtures/claudine-schemas/single-action-root-dictionary.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "single-action-branch-dictionaries",
+                include_str!("../fixtures/claudine-schemas/single-action-branch-dictionaries.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "single-action-loop-loose",
+                include_str!("../fixtures/claudine-schemas/single-action-loop-loose.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "long-forms-in-loop-bundle",
+                include_str!("../fixtures/claudine-schemas/long-forms-in-loop-bundle.md"),
+                CLAUDINE,
+                Invalid(&[("/loop/ensure_file", "file")]),
+                Rejects("long form"),
+            ),
+            (
+                "conditional-root-dictionary",
+                include_str!("../fixtures/claudine-schemas/conditional-root-dictionary.md"),
+                CLAUDINE,
+                Invalid(&[("/start", "anyOf")]),
+                Rejects("never carries `when`"),
+            ),
+        ],
+    );
+}
+
 /// A generated verb's value is typed by its catalog signature: convertible
 /// text and deferred templates pass, and a deferred operand never hides a
 /// mistake beside it (an unknown parameter, an extra argument, an invalid
-/// literal sibling). The parser's own operand rules are judged separately.
+/// literal sibling). The verb's runtime registration decides its literal
+/// operands where the types alone cannot (a numeric recovery fallback, a
+/// refused source type). The parser's own operand rules are judged
+/// separately.
 #[test]
 fn ac5_generated_operands() {
     assert_ac5(
@@ -1261,6 +1352,34 @@ fn ac5_generated_operands() {
                 Rejects("pr_list"),
             ),
             (
+                "generated-verb-malformed-string-template",
+                include_str!("../fixtures/claudine-schemas/generated-verb-malformed-string-template.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/ensure_file", "malformed template `{{ 1 + }}`"),
+                    ("/start/1/trim/text", "malformed template `hello {{ 1 + }}`"),
+                    ("/start/2/ensure_file/1", "malformed template `out/{{ 1 + }}.md`"),
+                ]),
+                Rejects("ensure_file"),
+            ),
+            (
+                // The same syntax problem wherever a hand-written verb's
+                // value is read as a template; the `$( … )` `set` value is
+                // a command, not one.
+                "handwritten-action-malformed-template",
+                include_str!("../fixtures/claudine-schemas/handwritten-action-malformed-template.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/say", "malformed template `{{ 1 + }}`"),
+                    ("/start/1/info/text", "malformed template `hello {{ 1 + }}`"),
+                    ("/start/2/set/round", "malformed template `{{ fm.round + }}`"),
+                    ("/start/3/shell", "malformed template `echo {{ 2 * }}`"),
+                    ("/start/4/then/0/error/reason", "malformed template `failed {{ 3 - }}`"),
+                    ("/start/4/else/0/proxy/with/note", "malformed template `next {{ 4 / }}`"),
+                ]),
+                Rejects("say"),
+            ),
+            (
                 "optional-nonnullable-null",
                 include_str!("../fixtures/claudine-schemas/optional-nonnullable-null.md"),
                 CLAUDINE,
@@ -1279,6 +1398,27 @@ fn ac5_generated_operands() {
                 include_str!("../fixtures/claudine-schemas/variadic-and-or.md"),
                 CLAUDINE,
                 Valid,
+                Accepts,
+            ),
+            (
+                // The runtime registration decides: a fallback recovers a
+                // subject the projected type rejects.
+                "generated-verb-numeric-recovery",
+                include_str!("../fixtures/claudine-schemas/generated-verb-numeric-recovery.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                // `length` refuses a boolean its projected `string` converts,
+                // at every depth.
+                "generated-verb-excluded-source",
+                include_str!("../fixtures/claudine-schemas/generated-verb-excluded-source.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/length/0", "does not accept a boolean"),
+                    ("/start/1/then/0/length/val", "does not accept a boolean"),
+                ]),
                 Accepts,
             ),
         ],
@@ -1975,4 +2115,233 @@ fn grandchild_cancelled_is_typed() {
         found.iter().any(|(path, _)| path == "/sequence/0/sequence/0/sequence/0/cancelled/0"),
         "a grandchild's forbidden `cancelled` action is rejected at its path: {found:?}"
     );
+}
+
+// ── Single-action dictionaries (review 1, R1-F2) ───────────────────────────
+
+/// The schema's and the lifecycle parser's verdicts on one frontmatter, with
+/// the schema's problems.
+struct SingleActionJudge {
+    repo: SchemaRepo,
+    discovered: Discovered,
+}
+
+impl SingleActionJudge {
+    fn new() -> Self {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let discovered = repo.discover().expect("the shipped bundle loads");
+        Self { repo, discovered }
+    }
+
+    fn verdicts(&self, frontmatter: &str) -> (bool, Vec<(String, String)>, Result<(), String>) {
+        let path = self.repo.write_document("single.md", &format!("---\n{frontmatter}\n---\n"));
+        let judged = self
+            .discovered
+            .judge(&path, include_str!("../../../schemas/claudine.yaml"), include_str!("../../../schemas/inline-compose.yaml"))
+            .expect("judged");
+        let markdown = Markdown::try_from(path.as_path()).expect("document loads");
+        let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path).map(|_| ()).map_err(|error| format!("{error} {error:?}"));
+        (judged.report.valid, problems(&judged.report), parsed)
+    }
+
+    /// Both the schema and the parser accept `frontmatter`.
+    fn assert_both_accept(&self, frontmatter: &str) {
+        let (valid, found, parsed) = self.verdicts(frontmatter);
+        assert!(valid, "the schema accepts `{frontmatter}`: {found:?}");
+        assert!(parsed.is_ok(), "the parser accepts `{frontmatter}`: {parsed:?}");
+    }
+
+    /// Both reject `frontmatter`: the schema at or below `pointer`, the
+    /// parser naming `needle`.
+    fn assert_both_reject(&self, frontmatter: &str, pointer: &str, needle: &str) {
+        let (valid, found, parsed) = self.verdicts(frontmatter);
+        assert!(!valid, "the schema rejects `{frontmatter}`");
+        assert!(
+            found.iter().any(|(path, _)| path == pointer || path.starts_with(&format!("{pointer}/"))),
+            "`{frontmatter}` is rejected at `{pointer}`: {found:?}"
+        );
+        let error = parsed.expect_err(&format!("the parser rejects `{frontmatter}`"));
+        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+    }
+}
+
+/// A single-action dictionary `body` as the root of `event`'s stack, as the
+/// `then` body of a guarded item, and as its `else` body, with the instance
+/// pointer of the dictionary in each.
+fn single_action_positions(event: &str, body: &str) -> [(String, String); 3] {
+    [
+        (format!("{event}: {body}"), format!("/{event}")),
+        (format!("{event}: [{{ when: \"fm.ready\", then: {body} }}]"), format!("/{event}/0/then")),
+        (format!("{event}: [{{ when: \"fm.ready\", then: [{{ info: hi }}], else: {body} }}]"), format!("/{event}/0/else")),
+    ]
+}
+
+/// Every event family accepts a single-action dictionary in long form at its
+/// root and in both branches, as the lifecycle parser does (R1-F2.1–R1-F2.3),
+/// and still refuses there what the family refuses as a list item.
+#[test]
+fn single_action_dictionaries_take_long_forms_at_every_stack_position() {
+    let judge = SingleActionJudge::new();
+    let ordinary = [
+        "{ ensure_file: { file: notes.md } }",
+        "{ say: { text: done } }",
+        "{ shell: { command: \"git status\" } }",
+        "{ error: { reason: failed } }",
+    ];
+    for event in ["start", "blocked", "success", "failure", "finalize"] {
+        for body in ordinary {
+            for (frontmatter, _) in single_action_positions(event, body) {
+                judge.assert_both_accept(&frontmatter);
+            }
+        }
+    }
+    for body in ["{ info: { text: preparing } }", "{ ensure_file: { file: notes.md } }", "{ skip: { no_error: true } }"] {
+        for (frontmatter, _) in single_action_positions("initialize", body) {
+            judge.assert_both_accept(&frontmatter);
+        }
+    }
+    for body in ["{ stop: { no_error: true } }", "{ shell: { command: \"git stash\" } }", "{ warn: { text: cancelled } }"] {
+        for (frontmatter, _) in single_action_positions("cancelled", body) {
+            judge.assert_both_accept(&frontmatter);
+        }
+    }
+
+    // Event restrictions hold in the new form: no shell in `initialize`, no
+    // recovery directive in `cancelled`.
+    for (frontmatter, pointer) in single_action_positions("initialize", "{ shell: { command: ls } }") {
+        judge.assert_both_reject(&frontmatter, &pointer, "shell");
+    }
+    for (frontmatter, pointer) in single_action_positions("cancelled", "{ retry: { max_attempts: 2 } }") {
+        judge.assert_both_reject(&frontmatter, &pointer, "retry");
+    }
+}
+
+/// Short dictionaries, one-element lists holding a long form, and bundles of
+/// short forms keep passing (R1-F2.6); several verbs beside a long form keep
+/// failing (R1-F2.7).
+#[test]
+fn single_action_controls_keep_their_verdicts() {
+    let judge = SingleActionJudge::new();
+    for event in ["initialize", "start", "blocked", "success", "failure", "cancelled", "finalize"] {
+        judge.assert_both_accept(&format!("{event}: {{ info: hi }}"));
+        judge.assert_both_accept(&format!("{event}: [{{ info: {{ text: hi }} }}]"));
+        judge.assert_both_accept(&format!("{event}: {{ info: hi, warn: careful }}"));
+    }
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", info: hi, warn: careful }");
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", gate: [{ ensure_file: { file: review.txt } }] }");
+
+    for (frontmatter, pointer) in [
+        ("start: { ensure_file: { file: a.md }, info: hi }", "/start"),
+        ("start: { ensure_file: { file: a.md }, ensure_dir: { dir: logs } }", "/start"),
+        ("start: { ensure_file: { file: a.md }, info: hi, no_error: true }", "/start"),
+        ("start: [{ when: \"fm.ready\", ensure_file: { file: a.md }, info: hi }]", "/start/0"),
+        ("start: [{ when: \"fm.ready\", then: { ensure_file: { file: a.md }, info: hi } }]", "/start/0/then"),
+        ("loop: { until: \"{{ true }}\", ensure_file: { file: a.md }, info: hi }", "/loop"),
+        ("loop: { until: \"{{ true }}\", ensure_file: { file: a.md }, ensure_dir: { dir: logs } }", "/loop"),
+    ] {
+        judge.assert_both_reject(frontmatter, pointer, "long form");
+    }
+}
+
+/// `no_error` beside a single long form, and `when` beside one in a list
+/// item, are the parser's single-action dictionaries too.
+#[test]
+fn single_action_dictionaries_take_their_sibling_keys() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "start: { ensure_file: { file: notes.md }, no_error: true }",
+        "success: [{ when: \"fm.ready\", then: { say: { text: done }, no_error: true } }]",
+        "failure: [{ when: \"fm.ready\", ensure_file: { file: failure.md } }]",
+        "failure: [{ when: \"fm.ready\", info: { text: failed }, no_error: true }]",
+        "finalize: [{ no_error: true, shell: { command: \"git status\" } }]",
+        "initialize: [{ when: \"fm.ready\", info: { text: ready } }]",
+        "cancelled: [{ when: \"fm.ready\", stop: { no_error: true } }]",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+}
+
+/// A loop's single loose verb takes its long form (R1-F2.4), and its gate is
+/// an ordinary stack whose root and branch dictionaries take long forms
+/// (R1-F2.5).
+#[test]
+fn loops_take_a_single_loose_long_form_and_gate_dictionaries() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "loop: { until: \"{{ true }}\", ensure_file: { file: review.txt } }",
+        "loop: { until: \"{{ true }}\", ensure_file: { file: review.txt }, no_error: true }",
+        "loop: { while: \"iteration < 3\", action: increment(iteration), max: 3, on_rate_limit: pause, say: { text: next } }",
+        "loop: { while: \"iteration < 3\", gate: { ensure_file: { file: pass.txt } } }",
+        "loop: { while: \"iteration < 3\", gate: [{ when: \"iteration == 3\", then: { warn: { text: cap } }, else: { ensure_file: { file: pass.txt } } }] }",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+    judge.assert_both_reject(
+        "loop: { until: \"{{ true }}\", gate: [stop], ensure_file: { file: review.txt } }",
+        "/loop/ensure_file",
+        "gate",
+    );
+}
+
+/// What the schema leaves to the parser at a dictionary: `when` beside the
+/// actions of a stack root or body, which a bundle admitted before
+/// single-action dictionaries were typed and a category admits now;
+/// `no_error` written both beside and inside a long form; and a guarded item
+/// holding no action, which the bundle type admits.
+#[test]
+fn single_action_placement_rules_stay_the_parsers() {
+    let judge = SingleActionJudge::new();
+    for (frontmatter, needle) in [
+        ("start: { when: \"fm.ready\", info: hi }", "never carries `when`"),
+        ("start: { when: \"fm.ready\", ensure_file: { file: a.md } }", "never carries `when`"),
+        ("start: { ensure_file: { file: a.md, no_error: true }, no_error: true }", "both beside"),
+        ("start: [{ when: \"fm.ready\", no_error: true }]", "needs `then` or sibling actions"),
+    ] {
+        let (valid, found, parsed) = judge.verdicts(frontmatter);
+        assert!(valid, "the schema leaves `{frontmatter}` to the parser: {found:?}");
+        let error = parsed.expect_err(frontmatter);
+        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+    }
+}
+
+
+/// A conditional is a list item only: in every family, a stack root or a
+/// `then`/`else` body written as a dictionary holding `then` is refused by
+/// the schema as by the parser, whose message names the misplaced `when`.
+#[test]
+fn a_conditional_is_never_a_stack_dictionary() {
+    let judge = SingleActionJudge::new();
+    for event in ["initialize", "start", "finalize", "cancelled"] {
+        for (frontmatter, pointer) in single_action_positions(event, "{ when: \"fm.ready\", then: [stop] }") {
+            judge.assert_both_reject(&frontmatter, &pointer, "when");
+        }
+    }
+    judge.assert_both_reject("loop: { until: \"{{ true }}\", gate: { when: \"fm.ready\", then: [stop] } }", "/loop", "when");
+}
+
+/// A single-action dictionary's long form is bound through the verb's
+/// runtime registration like a list item's: `number`'s numeric recovery binds
+/// a subject its types reject, and `length` refuses a boolean its types
+/// accept, at the root, in a branch, and as a loop's loose verb. The parser
+/// does not type-check literal operands, so it accepts all of them.
+#[test]
+fn single_action_long_forms_bind_through_the_registration() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "start: { number: { x: pear, fallback: 7 } }",
+        "success: [{ when: \"fm.ready\", then: { number: { x: pear, fallback: 7 } } }]",
+        "loop: { until: \"{{ true }}\", number: { x: pear, fallback: 7 } }",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+    for (frontmatter, pointer) in [
+        ("start: { length: { val: true } }", "/start/length/val"),
+        ("success: [{ when: \"fm.ready\", then: [{ info: hi }], else: { length: { val: true } } }]", "/success/0/else/length/val"),
+        ("loop: { until: \"{{ true }}\", length: { val: true } }", "/loop/length/val"),
+    ] {
+        let (valid, found, parsed) = judge.verdicts(frontmatter);
+        assert!(!valid, "the registration refuses `{frontmatter}`");
+        assert!(found.iter().any(|(path, _)| path == pointer), "`{frontmatter}` at `{pointer}`: {found:?}");
+        assert!(parsed.is_ok(), "the parser accepts `{frontmatter}`: {parsed:?}");
+    }
 }

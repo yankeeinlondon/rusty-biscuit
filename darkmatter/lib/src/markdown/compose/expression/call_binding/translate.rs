@@ -251,6 +251,7 @@ fn is_annotation(constraint: &Constraint) -> bool {
             | Constraint::Deferred
             | Constraint::Example(_)
             | Constraint::Category(_)
+            | Constraint::Operands(_)
             | Constraint::Eager
     )
 }
@@ -594,7 +595,9 @@ impl<'r> Translator<'r> {
         let value_constraints: Vec<Constraint> = atom
             .constraints
             .iter()
-            .filter(|constraint| !matches!(constraint, Constraint::Category(_) | Constraint::Deferred))
+            .filter(|constraint| {
+                !matches!(constraint, Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred)
+            })
             .cloned()
             .collect();
         let deferred_value = atom.constraints.contains(&Constraint::Deferred);
@@ -786,6 +789,7 @@ impl<'r> Translator<'r> {
             additional,
             min_properties: None,
             max_properties: None,
+            uncounted: Vec::new(),
         })
     }
 

@@ -8,11 +8,15 @@
 # so its categories and bundles hold exactly Darkmatter's neutral ones and
 # stay closed to unknown verbs.
 #
-# A category type holds exactly one verb, whose value is its short form or its
-# closed long form. A bundle holds several verbs in short form only, plus
-# `when` and `no_error`. The Darkmatter side-effect and expression-function
-# verbs are listed one key per name and reference the per-verb types
-# Darkmatter generates from their typed catalog signatures. Tests in
+# A category type is a single-action dictionary: exactly one verb, whose value
+# is its short form or its closed long form, plus `when` and `no_error`, which
+# `uncounted-keys` leaves out of the one-key count. A bundle holds several
+# verbs in short form only, plus `when` and `no_error`. The lifecycle parser
+# alone refuses `when` outside a list item.
+#
+# The Darkmatter side-effect and expression-function verbs are listed one key
+# per name and reference the per-verb types Darkmatter generates from their
+# typed catalog signatures. Tests in
 # claudine/lib/tests/l1 keep the bundles, the generated keys and their
 # references, and the parser's verb inventory aligned.
 kind: schema
@@ -50,9 +54,12 @@ types:
         success:
             - success-short@darkmatter:lifecycle
             - success-long@darkmatter:lifecycle
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     flow:
         stop:
             - stop-short@darkmatter:lifecycle
@@ -81,16 +88,22 @@ types:
         prep:
             - prep-short@darkmatter:lifecycle
             - prep-long@darkmatter:lifecycle
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     shell:
         shell:
             - shell-short@darkmatter:lifecycle
             - shell-long@darkmatter:lifecycle
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     expression:
         set: set-short@darkmatter:lifecycle
         append_frontmatter:
@@ -473,9 +486,12 @@ types:
         without_date:
             - without_date-short@darkmatter:lifecycle
             - without_date-long@darkmatter:lifecycle
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     bundle:
         say: say-short@darkmatter:lifecycle
         speak: speak-short@darkmatter:lifecycle
@@ -784,9 +800,12 @@ types:
             - null
             - "unknown[](max(0))"
             - stop-long@darkmatter:lifecycle
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     cancelled-bundle:
         say: say-short@darkmatter:lifecycle
         speak: speak-short@darkmatter:lifecycle

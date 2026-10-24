@@ -320,6 +320,9 @@ pub struct ObjectShape {
     pub additional: Additional,
     pub min_properties: Option<usize>,
     pub max_properties: Option<usize>,
+    /// Keys `min_properties` and `max_properties` do not count
+    /// (SimplifiedSchema `uncounted-keys`).
+    pub uncounted: Vec<String>,
 }
 
 impl ObjectShape {
@@ -332,6 +335,7 @@ impl ObjectShape {
             additional: Additional::Any,
             min_properties: None,
             max_properties: None,
+            uncounted: Vec::new(),
         }
     }
 
@@ -688,6 +692,9 @@ fn fmt_object(object: &ObjectShape, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut constraints = Vec::new();
     push_opt(&mut constraints, "min-keys", object.min_properties);
     push_opt(&mut constraints, "max-keys", object.max_properties);
+    if !object.uncounted.is_empty() {
+        constraints.push(format!("uncounted-keys({})", object.uncounted.join(", ")));
+    }
     fmt_constraints(&constraints, f)
 }
 

@@ -272,7 +272,9 @@ fn reference_fragment(
         Some(DefinitionOuter::Object) => {
             if let Some(other) = value_constraints
                 .iter()
-                .find(|constraint| !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_)))
+                .find(|constraint| {
+                    !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_))
+                })
             {
                 return Err(reference_constraint_error(name, key, other));
             }
@@ -299,6 +301,7 @@ fn is_reference_annotation(constraint: &Constraint) -> bool {
             | Constraint::Default(_)
             | Constraint::Example(_)
             | Constraint::Category(_)
+            | Constraint::Operands(_)
     )
 }
 
@@ -970,9 +973,11 @@ fn atom_fragment_without_null_wrap(
     // fragment builder as a constraint.
     let mut examples: Vec<String> = Vec::new();
     let mut category: Option<&str> = None;
+    let mut operands: Option<&str> = None;
     for c in atom.property_constraints() {
         match c {
             Constraint::Category(name) => category = Some(name),
+            Constraint::Operands(name) => operands = Some(name),
             Constraint::Default(v) => {
                 let value = normalize_json_number(v.clone());
                 match &default_val {
@@ -993,12 +998,14 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
-    // `category(...)` and `deferred` are annotations, not constraints any
-    // type builder checks.
+    // `category(...)`, `operands(...)`, and `deferred` are annotations, not
+    // constraints any type builder checks.
     let value_constraints: Vec<Constraint> = atom
         .constraints
         .iter()
-        .filter(|constraint| !matches!(constraint, Constraint::Category(_) | Constraint::Deferred))
+        .filter(|constraint| {
+            !matches!(constraint, Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred)
+        })
         .cloned()
         .collect();
     let deferred_value = atom.constraints.contains(&Constraint::Deferred);
@@ -1125,6 +1132,9 @@ fn atom_fragment_without_null_wrap(
         if let Some(category) = category {
             map.insert(DARKMATTER_CATEGORY_KEYWORD.into(), Value::String(category.to_string()));
         }
+        if let Some(operands) = operands {
+            map.insert(DARKMATTER_OPERANDS_KEYWORD.into(), Value::String(operands.to_string()));
+        }
     }
 
     Ok((fragment, required))
@@ -1132,6 +1142,20 @@ fn atom_fragment_without_null_wrap(
 
 /// The annotation a `category(Name)` lowers to on a data type.
 pub const DARKMATTER_CATEGORY_KEYWORD: &str = "x-darkmatter-category";
+
+/// The annotation `uncounted-keys` lowers to beside the `allOf` conditions
+/// that enforce it (see [`Constraint::UncountedKeys`]): `{ keys, min?, max? }`,
+/// the uncounted keys and the key bounds they leave out of the count. The
+/// coercion core reads it in place of those conditions, which it cannot
+/// model, so the count stays a modeled rule rather than an opaque assertion.
+pub const DARKMATTER_UNCOUNTED_KEYWORD: &str = "x-darkmatter-uncounted-keys";
+
+/// The annotation `operands(<verb>-short)` or `operands(<verb>-long)` lowers
+/// to (see [`Constraint::Operands`]): the generated verb type name. Like
+/// `x-darkmatter-deferred`, it stays on the typed node the arm lowers to,
+/// never on an optional property's `null` wrapper, so every copy of a verb's
+/// arm lowers identically.
+pub const DARKMATTER_OPERANDS_KEYWORD: &str = "x-darkmatter-operands";
 
 /// The annotation `deferred` lowers to: a `{{ … }}` template at this node is
 /// accepted unjudged (see [`Constraint::Deferred`]). It stays on the typed
@@ -1231,7 +1255,8 @@ fn inline_object_fragment(
             | Constraint::Example(_)
             | Constraint::Eager
             | Constraint::MinKeys(_)
-            | Constraint::MaxKeys(_) => {}
+            | Constraint::MaxKeys(_)
+            | Constraint::UncountedKeys(_) => {}
             other => {
                 return Err(SchemaError::Convert {
                     property: name.to_string(),
@@ -1261,15 +1286,15 @@ enum ObjectScope {
 }
 
 /// Rejects `$constraints` keys that have no meaning on the block's object.
-/// The block parser accepts every key the grammar knows; only `min-keys` /
-/// `max-keys` lower here.
+/// The block parser accepts every key the grammar knows; only `min-keys`,
+/// `max-keys`, and `uncounted-keys` lower here.
 fn reject_block_constraints(
     name: &str,
     shape: &SchemaShape,
     scope: ObjectScope,
 ) -> Result<(), SchemaError> {
     for c in &shape.constraints {
-        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_)) {
+        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_)) {
             let place = match scope {
                 ObjectScope::Inline => "an inline object",
                 ObjectScope::Root => "the root object",
@@ -1511,20 +1536,90 @@ pub(in crate::markdown::schemas) fn has_lookaround(pattern: &str) -> bool {
 /// postfix form are one scope, so repeated bounds from either surface merge
 /// as [`Bounds`] do. Other constraints are ignored here: they are hoisted
 /// (`required` / `default` / `generated`) or rejected elsewhere.
+///
+/// With `uncounted-keys`, the bounds move into one `allOf` condition per
+/// combination of the uncounted keys present, so the named keys never count
+/// toward them.
 fn apply_object_arity<'c>(
     name: &str,
     obj: &mut Map<String, Value>,
     constraints: impl Iterator<Item = &'c Constraint>,
 ) -> Result<(), SchemaError> {
     let mut keys = Bounds::default();
+    let mut uncounted: Vec<&str> = Vec::new();
     for c in constraints {
         match c {
             Constraint::MinKeys(n) => keys.lower(*n, c),
             Constraint::MaxKeys(n) => keys.upper(*n, c),
+            Constraint::UncountedKeys(names) => {
+                for key in names {
+                    if !uncounted.contains(&key.as_str()) {
+                        uncounted.push(key);
+                    }
+                }
+            }
             _ => {}
         }
     }
-    keys.emit(name, obj, "minProperties", "maxProperties", |n| json!(n))
+    if uncounted.is_empty() {
+        return keys.emit(name, obj, "minProperties", "maxProperties", |n| json!(n));
+    }
+    let convert = |message: String| SchemaError::Convert {
+        property: name.to_string(),
+        message,
+    };
+    if uncounted.len() > super::types::MAX_UNCOUNTED_KEYS {
+        return Err(convert(format!(
+            "`uncounted-keys` names at most {} keys, got {}",
+            super::types::MAX_UNCOUNTED_KEYS,
+            uncounted.len()
+        )));
+    }
+    let mut bounds = Map::new();
+    keys.emit(name, &mut bounds, "minProperties", "maxProperties", |n| json!(n))?;
+    if bounds.is_empty() {
+        return Err(convert("`uncounted-keys` needs `min-keys` or `max-keys` on the same object".to_string()));
+    }
+    // JSON Schema counts every key, so each combination of uncounted keys
+    // present raises both bounds by its size; absent keys are pinned with
+    // `false` so exactly one combination applies.
+    let mut annotation = Map::new();
+    annotation.insert("keys".into(), json!(uncounted));
+    for (keyword, short) in [("minProperties", "min"), ("maxProperties", "max")] {
+        if let Some(bound) = bounds.get(keyword) {
+            annotation.insert(short.into(), bound.clone());
+        }
+    }
+    obj.insert(DARKMATTER_UNCOUNTED_KEYWORD.into(), Value::Object(annotation));
+    let conditions = obj.entry("allOf").or_insert_with(|| Value::Array(Vec::new()));
+    let Value::Array(conditions) = conditions else {
+        return Err(convert("an object's `allOf` is not a list".to_string()));
+    };
+    for present in 0u32..(1 << uncounted.len()) {
+        let mut required = Vec::new();
+        let mut absent = Map::new();
+        for (bit, key) in uncounted.iter().enumerate() {
+            if present & (1 << bit) == 0 {
+                absent.insert((*key).to_string(), Value::Bool(false));
+            } else {
+                required.push(Value::String((*key).to_string()));
+            }
+        }
+        let extra = required.len() as u64;
+        let mut condition = Map::new();
+        if !required.is_empty() {
+            condition.insert("required".into(), Value::Array(required));
+        }
+        if !absent.is_empty() {
+            condition.insert("properties".into(), Value::Object(absent));
+        }
+        let then: Map<String, Value> = bounds
+            .iter()
+            .map(|(keyword, bound)| (keyword.clone(), json!(bound.as_u64().unwrap_or_default() + extra)))
+            .collect();
+        conditions.push(json!({ "if": condition, "then": then }));
+    }
+    Ok(())
 }
 
 /// Repeated bounds of one kind on one scope (string length, number, item
@@ -1627,6 +1722,7 @@ fn apply_array_constraints(
             | Constraint::Generated
             | Constraint::Example(_)
             | Constraint::Category(_)
+            | Constraint::Operands(_)
             | Constraint::Deferred
             | Constraint::Eager => {
                 // Hoisted to the property level by `atom_to_schema`, or (for
@@ -3664,6 +3760,11 @@ mod schema_plus_phase1 {
         to_json_schema(&parse_yaml_schema(&value).expect("schema parse")).expect("convert")
     }
 
+    fn schema_of_result(yaml: &str) -> Result<Value, SchemaError> {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
+        to_json_schema(&parse_yaml_schema(&value).expect("schema parse"))
+    }
+
     fn validator_of(schema: &Value) -> jsonschema::Validator {
         crate::markdown::schemas::validate::build_structural_validator(schema)
             .expect("build validator")
@@ -3749,6 +3850,61 @@ mod schema_plus_phase1 {
             !v.is_valid(&json!({ "parameter": { "a": 1, "b": 2 } })),
             "two keys fail max-keys"
         );
+    }
+
+    #[test]
+    fn uncounted_keys_are_left_out_of_the_key_bounds() {
+        // One verb, beside which `when` and `no_error` may sit.
+        let block = schema_of(
+            "action:\n  info: string\n  stop: null\n  when: string\n  no_error: boolean\n  $constraints:\n    min-keys: 1\n    max-keys: 1\n    uncounted-keys: [when, no_error]",
+        );
+        let postfix = schema_of("action: \"{ info: string, stop: null, when: string, no_error: boolean }(min-keys(1); max-keys(1); uncounted-keys(when, no_error))\"");
+        for schema in [block, postfix] {
+            let action = &schema["properties"]["action"]["anyOf"][1];
+            assert!(action.get("maxProperties").is_none(), "the bounds move into the conditions: {action}");
+            assert_eq!(action["allOf"].as_array().map(Vec::len), Some(4), "one condition per combination");
+            let v = validator_of(&schema);
+            for valid in [
+                json!({ "info": "hi" }),
+                json!({ "info": "hi", "when": "x" }),
+                json!({ "info": "hi", "no_error": true }),
+                json!({ "stop": null, "when": "x", "no_error": true }),
+            ] {
+                assert!(v.is_valid(&json!({ "action": valid })), "{valid}");
+            }
+            for invalid in [
+                json!({}),
+                json!({ "when": "x" }),
+                json!({ "when": "x", "no_error": true }),
+                json!({ "info": "hi", "stop": null }),
+                json!({ "info": "hi", "stop": null, "when": "x" }),
+                json!({ "info": "hi", "stop": null, "when": "x", "no_error": true }),
+            ] {
+                assert!(!v.is_valid(&json!({ "action": invalid })), "{invalid}");
+            }
+        }
+    }
+
+    #[test]
+    fn uncounted_keys_need_a_key_bound_and_a_short_list() {
+        let without_bound = schema_of_result(
+            "action:\n  info: string\n  when: string\n  $constraints:\n    uncounted-keys: [when]",
+        );
+        assert!(
+            matches!(&without_bound, Err(SchemaError::Convert { message, .. }) if message.contains("needs `min-keys` or `max-keys`")),
+            "{without_bound:?}"
+        );
+        for (block, needle) in [
+            ("[]", "at least one key"),
+            ("[when, when]", "names `when` twice"),
+            ("[a, b, c, d, e, f, g, h, i]", "at most 8 keys"),
+            ("when", "list of key names"),
+        ] {
+            let yaml = format!("action:\n  info: string\n  $constraints:\n    max-keys: 1\n    uncounted-keys: {block}");
+            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).unwrap();
+            let error = parse_yaml_schema(&value).expect_err(block);
+            assert!(error.to_string().contains(needle), "{block}: {error}");
+        }
     }
 
     // ── Feature D — content-format string types ──────────────────────────

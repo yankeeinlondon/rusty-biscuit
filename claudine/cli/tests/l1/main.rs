@@ -96,7 +96,9 @@ mod inline_completion_lifecycle;
 mod inline_compose_cli;
 mod inline_compose_hash;
 mod inline_compose_sequence_mismatch;
-#[cfg(unix)]
+// Installs the `claudine-fake-goose` fixture binary, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 mod launch_trigger_schemas;
 #[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;

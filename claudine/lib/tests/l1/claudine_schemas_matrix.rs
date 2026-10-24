@@ -7,10 +7,13 @@
 //! makes one edit to that field, writes the bundle in one syntax (block YAML,
 //! or JSON syntax inside the same `.yaml` files), and asserts the public
 //! result: trigger discovery or payload resolution fails visibly, or a pair of
-//! probe documents gets the stated verdicts or trigger selections. One test
-//! walks one column in one syntax; `matrix_tests_cover_the_table` keeps the
-//! generated tests equal to the table. `claudine_schemas_embedded.rs` walks
-//! the same table with the edited bundle supplied as an embedded bundle.
+//! probe documents gets the stated verdicts or trigger selections. Each column
+//! in each syntax is a module holding one test per cell (the unedited control
+//! and each shape), so a cell's discovery and validation cost is its own
+//! test's, and the table's growth adds tests rather than time to one;
+//! `matrix_tests_cover_the_table` keeps the generated tests equal to the
+//! table. `claudine_schemas_embedded.rs` walks the same table with the edited
+//! bundle supplied as an embedded bundle.
 
 use biscuit_file::Yaml;
 use claudine::composition::schema::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES};
@@ -44,7 +47,7 @@ pub(crate) enum Syntax {
 
 /// The malformed shapes, in table order.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Shape {
+pub(crate) enum Shape {
     Absent,
     Null,
     WrongTypeWhole,
@@ -205,10 +208,12 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: [Error, CONTROL, Error, Error, Error, Error, Error, Error],
     },
+    // `loop` is a union of `loop-bundle` and `loop-single`; the probes'
+    // loop is typed by the bundle arm, the mapping this column edits.
     Column {
         name: "lifecycle_loop",
         file: "lifecycle.yaml",
-        pointer: "/types/loop",
+        pointer: "/types/loop-bundle",
         probes: LIFECYCLE_PROBES,
         selection: false,
         outcomes: MAPPING_EXPORT,
@@ -540,38 +545,37 @@ pub(crate) fn column_names() -> Vec<&'static str> {
     COLUMNS.iter().map(|column| column.name).collect()
 }
 
-/// Walks one column in one syntax: the unedited control, then every shape.
-fn walk(column_name: &str, syntax: Syntax, shipped: &[BundleFile]) {
-    walk_from(column_name, syntax, shipped, Origin::Disk);
+fn column(column_name: &str) -> &'static Column {
+    COLUMNS.iter().find(|column| column.name == column_name).expect("a table column")
 }
 
-/// [`walk`] with the bundle read from `origin`. Both origins share the
-/// table: no cell's outcome depends on where the bundle is read from.
-pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile], origin: Origin) {
-    let column = COLUMNS.iter().find(|column| column.name == column_name).expect("a table column");
-    let control = bundle_in(shipped, syntax);
+/// One column's unedited control in one syntax, with the bundle read from
+/// `origin`. Both origins share the table: no cell's outcome depends on where
+/// the bundle is read from.
+pub(crate) fn walk_control(column_name: &str, syntax: Syntax, shipped: &[BundleFile], origin: Origin) {
+    let column = column(column_name);
     // A trigger may reject the shipped probe values only through the
     // payload, so the control of a selection column is a selection pair.
     let expected_control = if column.selection { Selects(true, false) } else { CONTROL };
-    assert_eq!(observe(&control, column, origin), expected_control, "{column_name} ({syntax:?}, {origin:?}): control");
+    let observed = observe(&bundle_in(shipped, syntax), column, origin);
+    assert_eq!(observed, expected_control, "{column_name} ({syntax:?}, {origin:?}): control");
+}
 
-    let source = as_json(text_of(shipped, column.file));
-    let mut failures = Vec::new();
-    for (shape, expected) in SHAPES.iter().zip(column.outcomes) {
-        let expected = unclaimed_trigger(column, *shape).unwrap_or(expected);
-        let mut document = source.clone();
-        let duplicate = edit(&mut document, column.pointer, *shape);
-        let edited = serialize(&document, syntax, duplicate.as_ref(), *shape == Shape::Trailing);
-        let bundle: Vec<BundleFile> = control
-            .iter()
-            .map(|(name, text)| (*name, if *name == column.file { edited.clone() } else { text.clone() }))
-            .collect();
-        let observed = observe(&bundle, column, origin);
-        if observed != expected {
-            failures.push(format!("{shape:?}: expected {expected:?}, observed {observed:?}"));
-        }
-    }
-    assert!(failures.is_empty(), "{column_name} ({syntax:?}, {origin:?}):\n{}", failures.join("\n"));
+/// One column's `shape` cell in one syntax, with the bundle read from
+/// `origin`: the unedited control bundle with that one edit.
+pub(crate) fn walk_shape(column_name: &str, syntax: Syntax, shape: Shape, shipped: &[BundleFile], origin: Origin) {
+    let column = column(column_name);
+    let index = SHAPES.iter().position(|table_shape| *table_shape == shape).expect("a table shape");
+    let expected = unclaimed_trigger(column, shape).unwrap_or(column.outcomes[index]);
+    let control = bundle_in(shipped, syntax);
+    let mut document = as_json(text_of(shipped, column.file));
+    let duplicate = edit(&mut document, column.pointer, shape);
+    let edited = serialize(&document, syntax, duplicate.as_ref(), shape == Shape::Trailing);
+    let bundle: Vec<BundleFile> = control
+        .into_iter()
+        .map(|(name, text)| (name, if name == column.file { edited.clone() } else { text }))
+        .collect();
+    assert_eq!(observe(&bundle, column, origin), expected, "{column_name} ({syntax:?}, {origin:?}): {shape:?}");
 }
 
 /// The outcome of a trigger file that a duplicate key or trailing garbage
@@ -586,17 +590,72 @@ fn unclaimed_trigger(column: &Column, shape: Shape) -> Option<Outcome> {
         .then_some(if column.selection { Selects(false, false) } else { UNCONSTRAINED })
 }
 
-macro_rules! matrix_tests {
-    ($($test:ident => ($column:literal, $syntax:ident);)*) => {
+/// The body of one column's module in one syntax read from one origin: a
+/// `control` test, one test per shape, and `CELLS`, the shapes it tests in
+/// order, which the table's coverage guards compare with [`SHAPES`].
+macro_rules! matrix_cells {
+    ($column:literal, $syntax:ident, $origin:ident) => {
+        #[test]
+        fn control() {
+            $crate::claudine_schemas_matrix::walk_control(
+                $column,
+                $crate::claudine_schemas_matrix::Syntax::$syntax,
+                &$crate::claudine_schemas::shipped_bundle!(),
+                $crate::claudine_schemas_matrix::Origin::$origin,
+            );
+        }
+
+        $crate::claudine_schemas_matrix::matrix_cells!(@shapes $column, $syntax, $origin;
+            absent => Absent,
+            null => Null,
+            wrong_type_whole => WrongTypeWhole,
+            wrong_type_one_element => WrongTypeOneElement,
+            wrong_type_every_element => WrongTypeEveryElement,
+            empty => Empty,
+            duplicate => Duplicate,
+            trailing => Trailing,
+        );
+    };
+    (@shapes $column:literal, $syntax:ident, $origin:ident; $($test:ident => $shape:ident,)*) => {
         $(
             #[test]
             fn $test() {
-                walk($column, Syntax::$syntax, &shipped_bundle!());
+                $crate::claudine_schemas_matrix::walk_shape(
+                    $column,
+                    $crate::claudine_schemas_matrix::Syntax::$syntax,
+                    $crate::claudine_schemas_matrix::Shape::$shape,
+                    &$crate::claudine_schemas::shipped_bundle!(),
+                    $crate::claudine_schemas_matrix::Origin::$origin,
+                );
             }
         )*
 
-        /// Every generated test, as `(column, syntax)`.
+        pub(super) const CELLS: &[$crate::claudine_schemas_matrix::Shape] =
+            &[$($crate::claudine_schemas_matrix::Shape::$shape),*];
+    };
+}
+pub(crate) use matrix_cells;
+
+/// Every shape list in `cells`, one per generated module, is the table's.
+pub(crate) fn assert_cells_are_the_shapes(cells: &[&[Shape]]) {
+    for module_cells in cells {
+        assert_eq!(*module_cells, &SHAPES[..], "one test per shape, in table order");
+    }
+}
+
+macro_rules! matrix_tests {
+    ($($test:ident => ($column:literal, $syntax:ident);)*) => {
+        $(
+            mod $test {
+                $crate::claudine_schemas_matrix::matrix_cells!($column, $syntax, Disk);
+            }
+        )*
+
+        /// Every generated module, as `(column, syntax)`.
         const GENERATED: &[(&str, Syntax)] = &[$(($column, Syntax::$syntax)),*];
+
+        /// Every generated module's shape cells.
+        const GENERATED_CELLS: &[&[Shape]] = &[$($test::CELLS),*];
     };
 }
 
@@ -645,8 +704,9 @@ fn matrix_tests_cover_the_table() {
         let generated: Vec<&str> =
             GENERATED.iter().filter(|(_, generated)| *generated == syntax).map(|(column, _)| *column).collect();
         let table: Vec<&str> = COLUMNS.iter().map(|column| column.name).collect();
-        assert_eq!(generated, table, "one {syntax:?} test per column");
+        assert_eq!(generated, table, "one {syntax:?} module per column");
     }
+    assert_cells_are_the_shapes(GENERATED_CELLS);
 }
 
 #[test]

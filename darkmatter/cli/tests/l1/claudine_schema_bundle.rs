@@ -202,6 +202,133 @@ fn lifecycle_defects_are_reported_at_their_event_and_key() {
     assert_record(&records, "long-form-in-root-dictionary", false, &[("/success/say", "text")]);
 }
 
+/// A single-action dictionary takes its verb's long form at the root of
+/// `start` (the review's reproduction), in either branch, and as a loop's one
+/// loose verb; a loose long form beside another loose verb is still refused,
+/// and so is a conditional written as a stack's root dictionary.
+#[test]
+fn single_action_dictionaries_validate_through_the_cli() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("single-action-root-dictionary", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-root-dictionary.md")),
+            ("single-action-branch-dictionaries", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-branch-dictionaries.md")),
+            ("single-action-loop-loose", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-loop-loose.md")),
+            ("long-forms-in-loop-bundle", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/long-forms-in-loop-bundle.md")),
+            ("conditional-root-dictionary", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/conditional-root-dictionary.md")),
+        ],
+    );
+    let (code, records) = validate(&process, &documents);
+    assert_eq!(code, Some(1), "{records:?}");
+    for name in ["single-action-root-dictionary", "single-action-branch-dictionaries", "single-action-loop-loose"] {
+        assert_record(&records, name, true, &[]);
+    }
+    assert_record(&records, "long-forms-in-loop-bundle", false, &[("/loop/ensure_file", "file")]);
+    assert_record(&records, "conditional-root-dictionary", false, &[("/start", "not valid under any of the schemas")]);
+}
+
+/// A malformed `{{ … }}` span in a string operand is a positioned syntax
+/// problem, though the parameter's type accepts the text: whole value, named
+/// operand with mixed text, and positional operand.
+#[test]
+fn malformed_templates_in_string_operands_are_positioned_problems() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let malformed =
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-string-template.md");
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("generated-verb-malformed-string-template", malformed),
+            ("generated-verb-deferred", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md")),
+        ],
+    );
+
+    let (code, records) = validate(&process, &documents);
+
+    assert_eq!(code, Some(1), "{records:?}");
+    assert_record(&records, "generated-verb-deferred", true, &[]);
+    let name = "generated-verb-malformed-string-template";
+    for (pointer, needle, located) in [
+        ("/start/0/ensure_file", "malformed template `{{ 1 + }}`", "\"{{ 1 + }}\""),
+        ("/start/1/trim/text", "malformed template `hello {{ 1 + }}`", "'hello"),
+        ("/start/2/ensure_file/1", "malformed template `out/{{ 1 + }}.md`", "'out/"),
+    ] {
+        assert_record(&records, name, false, &[(pointer, needle)]);
+        let problem = problem_at(&records, name, pointer);
+        let (line, column) = source_position(malformed, located);
+        assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+    }
+    assert_eq!(records[name]["problems"].as_array().map(Vec::len), Some(3), "{}", records[name]);
+}
+
+/// A malformed `{{ … }}` span in a hand-written verb's value (communication
+/// text, `set` value, `shell` command, directive string, `with` overlay) is a
+/// positioned syntax problem, as the lifecycle parser rejects it; the `set`
+/// value the parser reads as a command is not one.
+#[test]
+fn malformed_templates_in_hand_written_actions_are_positioned_problems() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let malformed =
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/handwritten-action-malformed-template.md");
+    let documents = repository(&process, &bundle, &[("handwritten-action-malformed-template", malformed)]);
+
+    let (code, records) = validate(&process, &documents);
+
+    assert_eq!(code, Some(1), "{records:?}");
+    let name = "handwritten-action-malformed-template";
+    let expected = [
+        ("/start/0/say", "malformed template `{{ 1 + }}`", "\"{{ 1 + }}\""),
+        ("/start/1/info/text", "malformed template `hello {{ 1 + }}`", "'hello"),
+        ("/start/2/set/round", "malformed template `{{ fm.round + }}`", "'{{ fm.round"),
+        ("/start/3/shell", "malformed template `echo {{ 2 * }}`", "'echo"),
+        ("/start/4/then/0/error/reason", "malformed template `failed {{ 3 - }}`", "'failed"),
+        ("/start/4/else/0/proxy/with/note", "malformed template `next {{ 4 / }}`", "'next"),
+    ];
+    for (pointer, needle, located) in expected {
+        assert_record(&records, name, false, &[(pointer, needle)]);
+        let problem = problem_at(&records, name, pointer);
+        let (line, column) = source_position(malformed, located);
+        assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+    }
+    assert_eq!(records[name]["problems"].as_array().map(Vec::len), Some(expected.len()), "{}", records[name]);
+}
+
 #[test]
 fn malformed_identifying_values_select_the_trigger_and_unrelated_data_does_not() {
     let process = CliProcessFixture::new();
@@ -337,6 +464,8 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     ];
     let wrong_verb = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md");
     let wrong_type = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md");
+    // A stored literal token holding `{{ fm.count }}` is data, judged as text.
+    let literal_token = "---\nstart:\n    - abs: \"{{!data:v1:e3sgZm0uY291bnQgfX0}}\"\n---\n# literal token\n";
     let documents = repository(
         &process,
         &bundle,
@@ -368,6 +497,7 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
             ("optional-nonnullable-null", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md")),
             ("ensure-file-overloads", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md")),
             ("variadic-and-or", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md")),
+            ("generated-verb-literal-token", literal_token),
         ],
     );
 
@@ -412,6 +542,10 @@ fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
     assert_no_problem_at(&records, "generated-verb-deferred-beside-bad-sibling", "/start/0/min/1");
     assert_record(&records, "generated-verb-malformed-template", false, &[("/start/0/pr_list", "{{ 1 + }}")]);
     assert_record(&records, "optional-nonnullable-null", false, &[("/start/0/ping/1", "null"), ("/start/1/ping/timeout", "null")]);
+    assert_record(&records, "generated-verb-literal-token", false, &[("/start/0/abs", "")]);
+    let problem = problem_at(&records, "generated-verb-literal-token", "/start/0/abs");
+    let (line, column) = source_position(literal_token, "\"{{!data:");
+    assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
 }
 
 /// The four depth-four container controls select `sequence.yaml` alone and
@@ -468,4 +602,58 @@ fn depth_four_container_controls_validate_and_their_innermost_defects_are_locate
     assert_record(&records, "seq-seq-misspelled-verb", false, &[(&format!("{seq_leaf}/start/0"), "sya")]);
     assert_record(&records, "seq-seq-cancelled-retry", false, &[(&format!("{seq_leaf}/cancelled/0"), "retry")]);
     assert_record(&records, "group-group-initialize-shell", false, &[(&format!("{group_leaf}/initialize/0"), "shell")]);
+}
+
+/// A generated verb's runtime registration decides its literal operands at
+/// every depth `md schema validate` reaches: a numeric-recovery fallback
+/// passes although the projected subject type rejects the text, and
+/// `length` refuses a boolean its projected `string` converts, positioned at
+/// the operand, in an event stack, a conditional branch, and the innermost
+/// container of a depth-four sequence.
+#[test]
+fn generated_verb_registration_rules_decide_through_the_cli() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let excluded = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-excluded-source.md");
+    let seq_seq = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md");
+    let innermost = "        start:\n        - info: start";
+    assert!(seq_seq.contains(innermost), "the control still holds its innermost `start`");
+    let nested_recovery = seq_seq.replacen(innermost, "        start:\n        - number: [pear, 7]", 1);
+    let nested_excluded = seq_seq.replacen(innermost, "        start:\n        - length: [true]", 1);
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("generated-verb-numeric-recovery", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-numeric-recovery.md")),
+            ("generated-verb-excluded-source", excluded),
+            ("seq-seq-numeric-recovery", &nested_recovery),
+            ("seq-seq-excluded-source", &nested_excluded),
+        ],
+    );
+
+    let (code, records) = validate(&process, &documents);
+    assert_eq!(code, Some(1), "{records:?}");
+    assert_record(&records, "generated-verb-numeric-recovery", true, &[]);
+    assert_record(&records, "seq-seq-numeric-recovery", true, &[]);
+    assert_record(
+        &records,
+        "generated-verb-excluded-source",
+        false,
+        &[("/start/0/length/0", "does not accept a boolean"), ("/start/1/then/0/length/val", "does not accept a boolean")],
+    );
+    let problem = problem_at(&records, "generated-verb-excluded-source", "/start/0/length/0");
+    let (line, column) = source_position(excluded, "true");
+    assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+    let seq_leaf = "/sequence/0/sequence/0/sequence/0/sequence/0";
+    assert_record(&records, "seq-seq-excluded-source", false, &[(&format!("{seq_leaf}/start/0/length/0"), "boolean")]);
 }

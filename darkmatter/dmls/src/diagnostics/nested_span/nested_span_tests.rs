@@ -376,15 +376,20 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
     let definition = |types: &serde_yaml_ng::Mapping, name: &str, key: &str| -> String {
         object(types, name).get(key).and_then(|value| value.as_str()).unwrap_or_else(|| panic!("{name}.{key}")).to_string()
     };
-    let verbs: BTreeSet<String> = ["communicate", "flow", "shell", "expression"]
-        .into_iter()
-        .flat_map(|category| keys_of(&object(&actions, category)))
-        .collect();
-
-    // A conditional item contributes `when`/`then`/`else`; a dictionary bundle
-    // contributes `when` and `no_error` beside its verbs.
+    // A conditional item contributes `when`/`then`/`else`; a single-action
+    // category and a dictionary bundle contribute `when` and `no_error`
+    // beside their verbs.
     let structural: BTreeSet<String> = STRUCTURAL_ITEM_KEYS.iter().map(|key| key.to_string()).collect();
     let mut authored_structural = BTreeSet::new();
+    let mut verbs = BTreeSet::new();
+    for category in ["communicate", "flow", "shell", "expression"] {
+        let keys = keys_of(&object(&actions, category));
+        let (siblings, category_verbs): (BTreeSet<String>, BTreeSet<String>) =
+            keys.into_iter().partition(|key| structural.contains(key));
+        assert!(siblings.contains("when") && siblings.contains("no_error"), "{category}: {siblings:?}");
+        authored_structural.extend(siblings);
+        verbs.extend(category_verbs);
+    }
     for conditional in ["conditional", "initialize-conditional", "cancelled-conditional"] {
         let keys = keys_of(&object(&lifecycle, conditional));
         assert!(keys.is_subset(&structural), "{conditional}: {keys:?}");
@@ -400,7 +405,11 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
     }
     assert_eq!(authored_structural, structural);
 
-    let loop_keys = keys_of(&object(&lifecycle, "loop"));
+    // `loop` is a bundle of loose verbs or a single loose action; the bundle
+    // arm declares every loop key, the single-action arm all but `gate`.
+    let loop_keys = keys_of(&object(&lifecycle, "loop-bundle"));
+    let single_keys = keys_of(&object(&lifecycle, "loop-single"));
+    assert_eq!(single_keys, loop_keys.iter().filter(|key| *key != "gate").cloned().collect(), "{single_keys:?}");
     // `fail_fast` is removed grammar: the parser still owns it so it can reject
     // it, so the schema must not offer it.
     let removed = "fail_fast";
@@ -413,14 +422,17 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
     assert!(loop_grammar.is_subset(&loop_keys), "{loop_keys:?}");
     let loose: BTreeSet<String> = loop_keys.difference(&loop_grammar).cloned().collect();
     assert!(loose.is_subset(&verbs), "loop keys that are neither grammar nor verbs: {:?}", loose.difference(&verbs));
-    assert!(definition(&lifecycle, "loop", "gate").starts_with("stack "), "loop.gate is a lifecycle stack");
-    assert!(definition(&lifecycle, "loop", "while").starts_with("expression"));
-    assert!(definition(&lifecycle, "loop", "until").starts_with("expression"));
+    assert!(definition(&lifecycle, "loop-bundle", "gate").starts_with("stack "), "loop.gate is a lifecycle stack");
+    for arm in ["loop-bundle", "loop-single"] {
+        assert!(definition(&lifecycle, arm, "while").starts_with("expression"), "{arm}");
+        assert!(definition(&lifecycle, arm, "until").starts_with("expression"), "{arm}");
+    }
 
     // Every communication verb is a single-pass surface wherever an event can
     // hold it: short form, long-form `text`, dictionary bundle, branch body,
     // and loose loop verb. Its long-form `no_error` flag is not text.
-    let communicate = keys_of(&object(&actions, "communicate"));
+    let communicate: BTreeSet<String> =
+        keys_of(&object(&actions, "communicate")).difference(&structural).cloned().collect();
     assert!(communicate.contains("say") && communicate.len() >= 10, "{communicate:?}");
     for verb in &communicate {
         let verb = verb.as_str();

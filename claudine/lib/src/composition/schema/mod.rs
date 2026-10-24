@@ -55,7 +55,7 @@ use super::prepare::{
     prepare_inline_selecting,
 };
 use super::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
-use darkmatter::markdown::schemas::{SchemaPhase, ValidationReport};
+use darkmatter::markdown::schemas::{PositionMap, SchemaPhase, ValidationReport};
 
 pub mod bundle;
 pub mod classify;
@@ -835,18 +835,19 @@ fn pre_validate_verdict(
         }
         Err(err) => return Err(err),
     };
-    let mut instance = crate::composition::closure::stored_text(&raw_instance);
+    // Darkmatter decodes the stored tokens itself, so it judges their text
+    // without ever deferring it as a template.
+    let mut instance = raw_instance.clone();
     normalize_file_array_values(&mut instance, Some(&effective));
-    let report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase).map_err(|error| {
+    let report = effective
+        .validate_stored(&instance, &PositionMap::new(), phase)
+        .map_err(|error| {
             schema_error_to_composition_error(
                 &source.resolved_path,
                 error.to_string(),
                 Some(&error),
             )
-        })?,
-        None => effective.validate(&instance),
-    };
+        })?;
     if report.valid {
         return Ok(PreValidatedSchema {
             source,
@@ -1071,11 +1072,17 @@ fn drop_invalid_optionals_with_origin(
         Ok(None) | Err(_) => return (source, set_overrides, dropped),
     };
 
-    // Judged on decoded text; only a judgment is made here, and the source
-    // handed on keeps its stored tokens.
-    let report = effective.validate(&crate::composition::closure::stored_text(
+    // Judged on the stored tokens' text, never deferred as a template; only
+    // a judgment is made here, and the source handed on keeps its tokens.
+    let report = match effective.validate_stored(
         &serde_json::Value::Object(instance.clone()),
-    ));
+        &PositionMap::new(),
+        None,
+    ) {
+        Ok(report) => report,
+        // Unphased validation projects nothing, so it cannot fail.
+        Err(_) => return (source, set_overrides, dropped),
+    };
     if report.valid {
         return (source, set_overrides, dropped);
     }

@@ -16,12 +16,19 @@
 //! mappings where the payload declares a scalar. A deferred generated-verb
 //! operand passes the verdict and is bound to its parameter type when its
 //! event fires, before the action dispatches.
+//!
+//! The marker provider is the compiled `claudine-fake-goose`, so every test
+//! that only asks whether the provider launched runs on every OS. The tests
+//! marked `#[cfg(unix)]` need a provider that records its prompt, edits the
+//! document, or acts as an inline agent, which only the shell stubs do.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common;
-use common::{CliProcessFixture, InlineAgentStub, launch_recorder, sh_quote, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi};
+#[cfg(unix)]
+use common::{InlineAgentStub, launch_recorder, sh_quote};
 
 /// The cleanup warning the launch cleaner prints when it drops a value.
 const DROPPED: &str = "dropped optional schema property";
@@ -38,15 +45,30 @@ struct Run {
     stderr: String,
 }
 
-/// A fixture whose `goose` writes a marker on any launch.
+/// The file the marker provider appends one line to per launch; [`run`] names
+/// it in `PROVIDER_MARKER` for every command.
+fn marker_path(fixture: &CliProcessFixture) -> PathBuf {
+    fixture.cwd().join("provider-launched.txt")
+}
+
+/// A fixture whose `goose` appends a line to [`marker_path`] on each launch.
+///
+/// A built binary, not a script: a `.cmd` shim cannot carry Claudine's prompt
+/// argument on Windows ("batch file arguments are invalid").
 fn marker_fixture(name: &str) -> (CliProcessFixture, PathBuf) {
     let fixture = CliProcessFixture::named(name);
-    let marker = fixture.cwd().join("provider-launched.txt");
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        &format!("#!/bin/sh\necho touched >> {}\nexit 0\n", sh_quote(&marker.display().to_string())),
-    );
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        fixture.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("the fake provider is built with `test-fixtures`");
+    let marker = marker_path(&fixture);
     (fixture, marker)
+}
+
+/// How many times the marker provider launched.
+fn provider_launches(marker: &Path) -> usize {
+    fs::read_to_string(marker).map_or(0, |log| log.lines().count())
 }
 
 fn write_doc(fixture: &CliProcessFixture, name: &str, content: &str) -> PathBuf {
@@ -58,6 +80,7 @@ fn write_doc(fixture: &CliProcessFixture, name: &str, content: &str) -> PathBuf 
 fn run(fixture: &CliProcessFixture, subcommand: &str, doc: &Path, extra: &[&str]) -> Run {
     let output = fixture
         .command()
+        .env("PROVIDER_MARKER", marker_path(fixture))
         .args([subcommand, "--goose", doc.to_str().unwrap()])
         .args(extra)
         .output()
@@ -77,6 +100,7 @@ fn events(fixture: &CliProcessFixture) -> Vec<String> {
 }
 
 /// The prompt goose received: the argument after `-t`.
+#[cfg(unix)]
 fn goose_prompt(argv: &[String]) -> &str {
     let at = argv.iter().position(|arg| arg == "-t").expect("goose run -t <prompt>");
     argv[at + 1].as_str()
@@ -135,6 +159,23 @@ const ROWS: &[Row] = &[
         name: "generated_verb_malformed_template",
         frontmatter: "start:\n    - pr_list: \"{{ 1 + }}\"\n",
         needles: &["/start/0/pr_list", "{{ 1 + }}"],
+    },
+    // The operand's type accepts text, so only the template's syntax is wrong.
+    Row {
+        name: "generated_verb_malformed_string_template",
+        frontmatter: "start:\n    - ensure_file: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/ensure_file", "malformed template `{{ 1 + }}`"],
+    },
+    // A verb the parser owns itself reads the same strings as templates.
+    Row {
+        name: "handwritten_verb_malformed_template",
+        frontmatter: "start:\n    - say: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/say", "malformed template `{{ 1 + }}`"],
+    },
+    Row {
+        name: "with_overlay_malformed_template",
+        frontmatter: "start:\n    - proxy: { target: next.md, with: { note: \"{{ 1 + }}\" } }\n",
+        needles: &["/start/0/proxy/with/note", "malformed template `{{ 1 + }}`"],
     },
     Row {
         name: "generated_verb_bad_sibling_beside_deferred",
@@ -199,6 +240,9 @@ invalid_control_rows!(
     numeric_loop,
     generated_verb_wrong_type,
     generated_verb_malformed_template,
+    generated_verb_malformed_string_template,
+    handwritten_verb_malformed_template,
+    with_overlay_malformed_template,
     generated_verb_bad_sibling_beside_deferred,
     optional_nonnullable_null,
 );
@@ -244,6 +288,7 @@ const DEFERRED_DOC: &str = "---\n$schema:\n  topic: string(required)\nprompt: Wr
 
 /// `SchemaPhase::Launch` still defers a required non-eager absence to the
 /// agent with the payload selected.
+#[cfg(unix)]
 #[test]
 fn inline_compose_defers_a_required_non_eager_property() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred");
@@ -294,6 +339,7 @@ fn inline_compose_rejects_a_missing_required_eager_property() {
 // ---------------------------------------------------------------------------
 
 /// Lifecycle stacks in both shapes, linking keys, and application data.
+#[cfg(unix)]
 const VALID_FRONTMATTER: &str = concat!(
     "start:\n    - info: hi\n",
     "success:\n    say: done\n",
@@ -303,6 +349,7 @@ const VALID_FRONTMATTER: &str = concat!(
     "ticket: 123\n",
 );
 
+#[cfg(unix)]
 #[test]
 fn compose_launches_a_valid_document_with_its_application_data() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-valid");
@@ -319,6 +366,7 @@ fn compose_launches_a_valid_document_with_its_application_data() {
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
 }
 
+#[cfg(unix)]
 #[test]
 fn inline_compose_launches_a_valid_document_and_keeps_its_application_data() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-valid-inline");
@@ -471,6 +519,7 @@ fn a_proxy_target_with_an_invalid_control_fails_before_its_provider() {
 /// A step document whose control only the launch schema rejects fails at its
 /// turn, before its provider. (A static `agent: []` is not used here: preflight
 /// rejects it before any step launches.)
+#[cfg(unix)]
 #[test]
 fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence");
@@ -496,6 +545,7 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
 /// embedded `sequence.yaml` payload, imports included, with no schema on
 /// disk: a malformed task field fails the run before any step launches. The
 /// unedited sequence launches its one step.
+#[cfg(unix)]
 #[test]
 fn a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence-root");
@@ -521,6 +571,7 @@ fn a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_ste
 /// The first attempt edits the document to carry an invalid control and fails;
 /// `failure: [retry]` re-reads it, and the retried attempt fails the verdict
 /// instead of launching.
+#[cfg(unix)]
 #[test]
 fn a_retried_attempt_rereads_the_document_through_the_verdict() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-retry");
@@ -549,11 +600,13 @@ fn a_retried_attempt_rereads_the_document_through_the_verdict() {
 
 /// The completion verdict's summary; a payload problem is listed beneath it
 /// by property.
+#[cfg(unix)]
 const COMPLETION_VERDICT: &str = "does not satisfy its schema at completion";
 
 /// The stderr of a completion verdict that failed on `property`, a property
 /// only the trigger payload declares: it is listed by name, and the block
 /// does not claim the document has a `$schema` or a raw JSON Schema.
+#[cfg(unix)]
 fn assert_completion_names(stderr: &str, property: &str) {
     assert!(stderr.contains(COMPLETION_VERDICT), "{stderr}");
     assert!(stderr.contains("Problems:"), "{stderr}");
@@ -564,6 +617,7 @@ fn assert_completion_names(stderr: &str, property: &str) {
 
 /// The agent's valid `model` passes completion and an invalid one fails it,
 /// so the payload frozen at launch judges what the agent wrote.
+#[cfg(unix)]
 #[test]
 fn inline_completion_rejects_an_invalid_control_the_agent_wrote() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-completion");
@@ -586,6 +640,7 @@ fn inline_completion_rejects_an_invalid_control_the_agent_wrote() {
 
 /// With an authored `$schema`, the completion block keeps its property table
 /// and still lists a problem on a property only the payload declares.
+#[cfg(unix)]
 #[test]
 fn inline_completion_lists_a_payload_problem_beside_the_authored_table() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-completion-authored");
@@ -606,6 +661,7 @@ fn inline_completion_lists_a_payload_problem_beside_the_authored_table() {
 }
 
 /// Make `dir` a repository by layout alone, so `{root}/schemas` is searched.
+#[cfg(unix)]
 fn write_git_skeleton(dir: &Path) {
     let git = dir.join(".git");
     fs::create_dir_all(git.join("objects")).unwrap();
@@ -616,11 +672,13 @@ fn write_git_skeleton(dir: &Path) {
 
 /// A disk `claudine.yaml` that replaces the embedded one and loosens
 /// `description` to any value.
+#[cfg(unix)]
 const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: schema-trigger\nmatch:\n    group:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
 
 /// An agent that loosens `description` on disk mid-run and writes a mapping
 /// into it: this run's completion verdict still uses the launch schema, and
 /// the next run reloads the disk file.
+#[cfg(unix)]
 #[test]
 fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-frozen");
@@ -675,6 +733,7 @@ fn a_templated_control_is_judged_after_composition() {
     assert!(!marker.exists(), "{}", rejected.stderr);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_templated_model_and_a_lifecycle_span_launch() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-spans");
@@ -733,8 +792,7 @@ const DEFERRED_SCALAR: &str = "start:\n    - ensure_file: \"{{ target }}\"\n";
 
 #[test]
 fn a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time() {
-    let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred-scalar");
-    let launches = launch_recorder::install(&fixture, "goose", "exit 0");
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-scalar");
     let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
 
     let result = run(&fixture, "compose", &doc, &[]);
@@ -742,7 +800,7 @@ fn a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time() {
     assert_eq!(result.code, Some(0), "{}", result.stderr);
     assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
     assert!(fixture.cwd().join("notes.md").is_file(), "the effect dispatched:\n{}", result.stderr);
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
 }
 
@@ -750,8 +808,7 @@ fn a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time() {
 /// deferred operand, evaluate to values of their parameters' types.
 #[test]
 fn deferred_structured_arguments_pass_preflight_and_bind_at_event_time() {
-    let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred-structured");
-    let launches = launch_recorder::install(&fixture, "goose", "exit 0");
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-structured");
     let doc = write_doc(
         &fixture,
         "prompt.md",
@@ -770,7 +827,7 @@ fn deferred_structured_arguments_pass_preflight_and_bind_at_event_time() {
     assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
     let written = fs::read_to_string(fixture.cwd().join("notes.md")).expect("the effect dispatched");
     assert_eq!(written.trim_end(), "# Notes");
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
 }
 
@@ -865,6 +922,7 @@ fn dry_run_shows_the_deferred_operand_as_authored() {
 
     let output = fixture
         .command()
+        .env("PROVIDER_MARKER", &marker)
         .args(["compose", "--goose", doc.to_str().unwrap(), "--dry-run"])
         .output()
         .unwrap();

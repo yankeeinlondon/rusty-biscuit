@@ -698,10 +698,11 @@ fn tuple_slot(tuple: &TupleShape, index: usize) -> Option<&Shape> {
 }
 
 fn object_count_constraint(object: &ObjectShape, map: &Map<String, Value>) -> Option<Constraint> {
-    if let Some(minimum) = object.min_properties.filter(|minimum| map.len() < *minimum) {
+    let counted = map.len() - object.uncounted.iter().filter(|key| map.contains_key(key.as_str())).count();
+    if let Some(minimum) = object.min_properties.filter(|minimum| counted < *minimum) {
         return Some(Constraint::MinProperties(minimum));
     }
-    if let Some(maximum) = object.max_properties.filter(|maximum| map.len() > *maximum) {
+    if let Some(maximum) = object.max_properties.filter(|maximum| counted > *maximum) {
         return Some(Constraint::MaxProperties(maximum));
     }
     None

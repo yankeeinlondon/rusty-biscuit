@@ -3160,7 +3160,7 @@ fn bound_count(n: f64, keyword: &str, property: &str) -> Result<usize, SchemaErr
 }
 
 fn is_key_bound(constraint: &Constraint) -> bool {
-    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_))
+    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_))
 }
 
 /// The kind a bound limits; bounds merge only within one kind.

@@ -672,9 +672,10 @@ fn build_problems(
 ) -> Vec<ValidationProblem> {
     if let ValidationErrorKind::AnyOf { context } = err.kind() {
         let parent = err.instance_path().as_str();
-        let mut deeper: Vec<ValidationProblem> = context
-            .iter()
-            .flat_map(|arm| arm.iter())
+        let mut branches = Vec::new();
+        union_branch_errors(context, parent, &mut branches);
+        let mut deeper: Vec<ValidationProblem> = branches
+            .into_iter()
             .filter(|nested| {
                 let path = nested.instance_path().as_str();
                 path.len() > parent.len() && path.starts_with(parent)
@@ -737,6 +738,25 @@ fn build_problems(
     match anchors {
         FileRefAnchors::Resolved { excused: Some(excused), .. } if excused(&problem) => Vec::new(),
         _ => vec![problem],
+    }
+}
+
+/// The errors of every arm of a failed `anyOf`, with an arm that is itself a
+/// failed union at the same location (a reference to a recursive union type,
+/// such as a lifecycle stack's shared `entry`) replaced by its own arms' errors,
+/// so the drill-down sees through nested unions as through one.
+fn union_branch_errors<'e>(
+    context: &'e [Vec<jsonschema::ValidationError<'static>>],
+    parent: &str,
+    out: &mut Vec<&'e jsonschema::ValidationError<'static>>,
+) {
+    for nested in context.iter().flat_map(|arm| arm.iter()) {
+        match nested.kind() {
+            ValidationErrorKind::AnyOf { context } if nested.instance_path().as_str() == parent => {
+                union_branch_errors(context, parent, out);
+            }
+            _ => out.push(nested),
+        }
     }
 }
 
@@ -1560,6 +1580,7 @@ const NON_ASSERTING_KEYWORDS: &[&str] = &[
     "x-darkmatter-generated",
     "x-darkmatter-suggest",
     "x-darkmatter-category",
+    "x-darkmatter-operands",
 ];
 
 /// `arm` alone when nothing in `beside` asserts anything, else `arm` and each

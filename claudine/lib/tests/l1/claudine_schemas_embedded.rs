@@ -39,7 +39,7 @@ use darkmatter::markdown::schemas::{
 };
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};
-use crate::claudine_schemas_matrix::{Origin, Syntax, assert_non_string_trigger_key_errors, column_names, walk_from};
+use crate::claudine_schemas_matrix::{Origin, Shape, Syntax, assert_cells_are_the_shapes, assert_non_string_trigger_key_errors, column_names};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -472,14 +472,16 @@ fn embedded_payloads_apply_without_disk_schemas() {
 macro_rules! embedded_matrix_tests {
     ($($test:ident => ($column:literal, $syntax:ident);)*) => {
         $(
-            #[test]
-            fn $test() {
-                walk_from($column, Syntax::$syntax, &shipped_bundle!(), Origin::Embedded);
+            mod $test {
+                $crate::claudine_schemas_matrix::matrix_cells!($column, $syntax, Embedded);
             }
         )*
 
-        /// Every generated test, as `(column, syntax)`.
+        /// Every generated module, as `(column, syntax)`.
         const EMBEDDED_GENERATED: &[(&str, Syntax)] = &[$(($column, Syntax::$syntax)),*];
+
+        /// Every generated module's shape cells.
+        const EMBEDDED_GENERATED_CELLS: &[&[Shape]] = &[$($test::CELLS),*];
     };
 }
 
@@ -530,8 +532,9 @@ fn embedded_matrix_tests_cover_the_table() {
             .filter(|(_, generated)| *generated == syntax)
             .map(|(column, _)| *column)
             .collect();
-        assert_eq!(generated, column_names(), "one embedded {syntax:?} test per column");
+        assert_eq!(generated, column_names(), "one embedded {syntax:?} module per column");
     }
+    assert_cells_are_the_shapes(EMBEDDED_GENERATED_CELLS);
 }
 
 /// The R3 cell, embedded: block YAML only, since every JSON key is a string.
@@ -1005,6 +1008,22 @@ fn retired_spelling_reports_removed_grammar() {
     }
 }
 
+/// A stored literal token is data: the launch verdict judges the text it
+/// holds as a generated verb's argument and never defers it as a template,
+/// while the same text authored directly is a template and is deferred.
+#[test]
+fn a_stored_literal_token_is_type_checked_at_launch() {
+    let locations = Locations::new();
+    let token = darkmatter::markdown::literal_token::encode("{{ fm.count }}");
+
+    let found = rejected(locations.verdict("token", &format!("start:\n    - abs: \"{token}\"")), "the stored token");
+    assert!(found.iter().any(|pointer| pointer == "/start/0/abs"), "a problem at the operand, got {found:?}");
+
+    assert_accepts(locations.verdict("authored", "start:\n    - abs: \"{{ fm.count }}\""), "the authored template");
+    let numeral = darkmatter::markdown::literal_token::encode("3");
+    assert_accepts(locations.verdict("numeral", &format!("start:\n    - abs: \"{numeral}\"")), "a token holding `3`");
+}
+
 // ── AC10: passive parity across the launch verdict and DMLS ────────────────
 
 /// For one fixture, Claudine's launch verdict over a disk bundle and
@@ -1120,12 +1139,30 @@ passive_parity_tests! {
         ("generated-verb-deferred-beside-bad-sibling", include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"));
     passive_parity_generated_verb_malformed_template =>
         ("generated-verb-malformed-template", include_str!("../fixtures/claudine-schemas/generated-verb-malformed-template.md"));
+    passive_parity_generated_verb_malformed_string_template =>
+        ("generated-verb-malformed-string-template", include_str!("../fixtures/claudine-schemas/generated-verb-malformed-string-template.md"));
+    passive_parity_handwritten_action_malformed_template =>
+        ("handwritten-action-malformed-template", include_str!("../fixtures/claudine-schemas/handwritten-action-malformed-template.md"));
     passive_parity_optional_nonnullable_null =>
         ("optional-nonnullable-null", include_str!("../fixtures/claudine-schemas/optional-nonnullable-null.md"));
     passive_parity_ensure_file_overloads =>
         ("ensure-file-overloads", include_str!("../fixtures/claudine-schemas/ensure-file-overloads.md"));
     passive_parity_variadic_and_or =>
         ("variadic-and-or", include_str!("../fixtures/claudine-schemas/variadic-and-or.md"));
+    passive_parity_generated_verb_numeric_recovery =>
+        ("generated-verb-numeric-recovery", include_str!("../fixtures/claudine-schemas/generated-verb-numeric-recovery.md"));
+    passive_parity_generated_verb_excluded_source =>
+        ("generated-verb-excluded-source", include_str!("../fixtures/claudine-schemas/generated-verb-excluded-source.md"));
+    passive_parity_single_action_root_dictionary =>
+        ("single-action-root-dictionary", include_str!("../fixtures/claudine-schemas/single-action-root-dictionary.md"));
+    passive_parity_single_action_branch_dictionaries =>
+        ("single-action-branch-dictionaries", include_str!("../fixtures/claudine-schemas/single-action-branch-dictionaries.md"));
+    passive_parity_single_action_loop_loose =>
+        ("single-action-loop-loose", include_str!("../fixtures/claudine-schemas/single-action-loop-loose.md"));
+    passive_parity_long_forms_in_loop_bundle =>
+        ("long-forms-in-loop-bundle", include_str!("../fixtures/claudine-schemas/long-forms-in-loop-bundle.md"));
+    passive_parity_conditional_root_dictionary =>
+        ("conditional-root-dictionary", include_str!("../fixtures/claudine-schemas/conditional-root-dictionary.md"));
 }
 
 #[test]

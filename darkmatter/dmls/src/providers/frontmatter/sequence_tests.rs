@@ -146,15 +146,15 @@ fn hover_text(hover: &Hover) -> &str {
 
 #[test]
 fn nested_shape_consumes_array_index_against_item_type() {
-    // A stack is `item[] | bundle`, a recursive definition: an index descends
-    // the array arm's item type, whose first inline-object arm is
-    // `communicate`; a bare key descends the `bundle` arm.
+    // A stack is `item[] | entry`, a recursive definition: an index descends
+    // the array arm's item type, whose first inline-object arm is the
+    // `communicate` category; a bare key descends the dictionary arm.
     let (root, definitions) = claudine_root_with_definitions();
     let item = nested_shape(&root, &[Key("initialize"), Index(0)], &definitions).expect("list item shape");
     for key in ["say", "notify", "info"] {
         assert!(item.properties.contains_key(key), "{key} on the list item");
     }
-    assert!(!item.properties.contains_key("no_error"), "the item is not the bundle arm");
+    assert!(!item.properties.contains_key("ensure_file"), "the item's first arm is a category, not the bundle");
     let bundle = nested_shape(&root, &[Key("failure")], &definitions).expect("bundle shape");
     assert!(is_expression_def(bundle.properties.get("when").expect("failure.when")));
     let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")], &definitions)
@@ -266,7 +266,7 @@ fn context_aware_walk_selects_discriminated_arm_inside_array_items() {
 #[test]
 fn transparent_crossing_serves_key_only_authoring_ancestry() {
     // `then` exists only on the conditional arm of `loop.gate`'s array items,
-    // never on its non-array `bundle` arm.
+    // never on its non-array `entry` (category or bundle) arm.
     let text = "---\nloop:\n  gate:\n    - when: ok\n      then: [stop]\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
         let shape = known_shape(ctx);

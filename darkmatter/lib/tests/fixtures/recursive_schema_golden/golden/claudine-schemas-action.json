@@ -49,7 +49,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "speak the text aloud through text-to-speech"
+                  "description": "speak the text aloud through text-to-speech",
+                  "x-darkmatter-operands": "say-short"
                 },
                 {
                   "type": "object",
@@ -71,7 +72,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "say-long"
                 }
               ]
             },
@@ -82,7 +84,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "alias of say"
+                  "description": "alias of say",
+                  "x-darkmatter-operands": "speak-short"
                 },
                 {
                   "type": "object",
@@ -104,7 +107,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "speak-long"
                 }
               ]
             },
@@ -115,7 +119,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "play the named sound effect from the effect catalog"
+                  "description": "play the named sound effect from the effect catalog",
+                  "x-darkmatter-operands": "effect-short"
                 },
                 {
                   "type": "object",
@@ -137,7 +142,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "effect-long"
                 }
               ]
             },
@@ -148,7 +154,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "send the text to the configured messaging routes"
+                  "description": "send the text to the configured messaging routes",
+                  "x-darkmatter-operands": "message-short"
                 },
                 {
                   "type": "object",
@@ -170,7 +177,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "message-long"
                 }
               ]
             },
@@ -181,7 +189,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "show the text as a desktop notification"
+                  "description": "show the text as a desktop notification",
+                  "x-darkmatter-operands": "notify-short"
                 },
                 {
                   "type": "object",
@@ -203,7 +212,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "notify-long"
                 }
               ]
             },
@@ -214,7 +224,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "write the text to standard error"
+                  "description": "write the text to standard error",
+                  "x-darkmatter-operands": "stderr-short"
                 },
                 {
                   "type": "object",
@@ -236,7 +247,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "stderr-long"
                 }
               ]
             },
@@ -247,7 +259,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "write the text to standard output"
+                  "description": "write the text to standard output",
+                  "x-darkmatter-operands": "stdout-short"
                 },
                 {
                   "type": "object",
@@ -269,7 +282,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "stdout-long"
                 }
               ]
             },
@@ -280,7 +294,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "print the text as an informational status line"
+                  "description": "print the text as an informational status line",
+                  "x-darkmatter-operands": "info-short"
                 },
                 {
                   "type": "object",
@@ -302,7 +317,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "info-long"
                 }
               ]
             },
@@ -313,7 +329,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "print the text as a warning status line"
+                  "description": "print the text as a warning status line",
+                  "x-darkmatter-operands": "warn-short"
                 },
                 {
                   "type": "object",
@@ -335,7 +352,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "warn-long"
                 }
               ]
             },
@@ -346,7 +364,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "print the text as a success status line"
+                  "description": "print the text as a success status line",
+                  "x-darkmatter-operands": "success-short"
                 },
                 {
                   "type": "object",
@@ -368,7 +387,8 @@
                   },
                   "required": [
                     "text"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "success-long"
                 }
               ]
             }
@@ -457,7 +477,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "fail the run with this reason"
+                  "description": "fail the run with this reason",
+                  "x-darkmatter-operands": "error-short"
                 },
                 {
                   "type": "object",
@@ -483,7 +504,8 @@
                         }
                       ]
                     }
-                  }
+                  },
+                  "x-darkmatter-operands": "error-long"
                 }
               ]
             },
@@ -494,7 +516,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
+                  "description": "hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation",
+                  "x-darkmatter-operands": "proxy-short"
                 },
                 {
                   "type": "object",
@@ -526,7 +549,8 @@
                   },
                   "required": [
                     "target"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "proxy-long"
                 }
               ]
             },
@@ -538,7 +562,8 @@
                 {
                   "type": "array",
                   "items": {},
-                  "maxItems": 0
+                  "maxItems": 0,
+                  "x-darkmatter-operands": "retry-short"
                 },
                 {
                   "minimum": 0,
@@ -616,7 +641,8 @@
                         }
                       ]
                     }
-                  }
+                  },
+                  "x-darkmatter-operands": "retry-long"
                 }
               ]
             },
@@ -627,7 +653,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "send this follow-up message into the live session"
+                  "description": "send this follow-up message into the live session",
+                  "x-darkmatter-operands": "resume-short"
                 },
                 {
                   "type": "object",
@@ -667,7 +694,8 @@
                   },
                   "required": [
                     "message"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "resume-long"
                 }
               ]
             },
@@ -678,7 +706,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
+                  "description": "planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet",
+                  "x-darkmatter-operands": "defer-short"
                 },
                 {
                   "type": "object",
@@ -710,7 +739,8 @@
                   },
                   "required": [
                     "delay"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "defer-long"
                 }
               ]
             },
@@ -726,7 +756,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event",
+                  "x-darkmatter-operands": "break-short"
                 },
                 {
                   "type": "object",
@@ -765,7 +796,8 @@
                         }
                       ]
                     }
-                  }
+                  },
+                  "x-darkmatter-operands": "break-long"
                 }
               ]
             },
@@ -777,7 +809,8 @@
                 {
                   "type": "string",
                   "pattern": "\\S",
-                  "description": "run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
+                  "description": "run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event",
+                  "x-darkmatter-operands": "prep-short"
                 },
                 {
                   "type": "object",
@@ -810,7 +843,8 @@
                   },
                   "required": [
                     "target"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "prep-long"
                 }
               ]
             }
@@ -837,7 +871,8 @@
                 {
                   "type": "string",
                   "format": "darkmatter-shell",
-                  "description": "run a shell command (never in initialize)"
+                  "description": "run a shell command (never in initialize)",
+                  "x-darkmatter-operands": "shell-short"
                 },
                 {
                   "type": "object",
@@ -870,7 +905,8 @@
                   },
                   "required": [
                     "command"
-                  ]
+                  ],
+                  "x-darkmatter-operands": "shell-long"
                 }
               ]
             }
@@ -895,7 +931,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "object"
+                  "type": "object",
+                  "x-darkmatter-operands": "set-short"
                 }
               ],
               "description": "assign runtime values: a mapping of destinations to values (no long form, no no_error)"
@@ -1305,7 +1342,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "say-short"
                 }
               ],
               "description": "speak the text aloud through text-to-speech"
@@ -1316,7 +1354,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "speak-short"
                 }
               ],
               "description": "alias of say"
@@ -1327,7 +1366,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "effect-short"
                 }
               ],
               "description": "play the named sound effect from the effect catalog"
@@ -1338,7 +1378,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "message-short"
                 }
               ],
               "description": "send the text to the configured messaging routes"
@@ -1349,7 +1390,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "notify-short"
                 }
               ],
               "description": "show the text as a desktop notification"
@@ -1360,7 +1402,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stderr-short"
                 }
               ],
               "description": "write the text to standard error"
@@ -1371,7 +1414,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stdout-short"
                 }
               ],
               "description": "write the text to standard output"
@@ -1382,7 +1426,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "info-short"
                 }
               ],
               "description": "print the text as an informational status line"
@@ -1393,7 +1438,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "warn-short"
                 }
               ],
               "description": "print the text as a warning status line"
@@ -1404,7 +1450,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "success-short"
                 }
               ],
               "description": "print the text as a success status line"
@@ -1447,7 +1494,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "fail the run with this reason"
+                  "description": "fail the run with this reason",
+                  "x-darkmatter-operands": "error-short"
                 }
               ]
             },
@@ -1457,7 +1505,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "proxy-short"
                 }
               ],
               "description": "hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
@@ -1470,7 +1519,8 @@
                 {
                   "type": "array",
                   "items": {},
-                  "maxItems": 0
+                  "maxItems": 0,
+                  "x-darkmatter-operands": "retry-short"
                 },
                 {
                   "minimum": 0,
@@ -1491,7 +1541,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "resume-short"
                 }
               ],
               "description": "send this follow-up message into the live session"
@@ -1502,7 +1553,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "defer-short"
                 }
               ],
               "description": "planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
@@ -1519,7 +1571,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event",
+                  "x-darkmatter-operands": "break-short"
                 }
               ]
             },
@@ -1530,7 +1583,8 @@
                 },
                 {
                   "type": "string",
-                  "pattern": "\\S"
+                  "pattern": "\\S",
+                  "x-darkmatter-operands": "prep-short"
                 }
               ],
               "description": "run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
@@ -1542,7 +1596,8 @@
                 },
                 {
                   "type": "string",
-                  "format": "darkmatter-shell"
+                  "format": "darkmatter-shell",
+                  "x-darkmatter-operands": "shell-short"
                 }
               ],
               "description": "run a shell command (never in initialize)"
@@ -1553,7 +1608,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "object"
+                  "type": "object",
+                  "x-darkmatter-operands": "set-short"
                 }
               ],
               "description": "assign runtime values: a mapping of destinations to values (no long form, no no_error)"
@@ -1984,7 +2040,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "say-short"
                 }
               ],
               "description": "speak the text aloud through text-to-speech"
@@ -1995,7 +2052,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "speak-short"
                 }
               ],
               "description": "alias of say"
@@ -2006,7 +2064,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "effect-short"
                 }
               ],
               "description": "play the named sound effect from the effect catalog"
@@ -2017,7 +2076,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "message-short"
                 }
               ],
               "description": "send the text to the configured messaging routes"
@@ -2028,7 +2088,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "notify-short"
                 }
               ],
               "description": "show the text as a desktop notification"
@@ -2039,7 +2100,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stderr-short"
                 }
               ],
               "description": "write the text to standard error"
@@ -2050,7 +2112,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stdout-short"
                 }
               ],
               "description": "write the text to standard output"
@@ -2061,7 +2124,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "info-short"
                 }
               ],
               "description": "print the text as an informational status line"
@@ -2072,7 +2136,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "warn-short"
                 }
               ],
               "description": "print the text as a warning status line"
@@ -2083,7 +2148,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "success-short"
                 }
               ],
               "description": "print the text as a success status line"
@@ -2126,7 +2192,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "fail the run with this reason"
+                  "description": "fail the run with this reason",
+                  "x-darkmatter-operands": "error-short"
                 }
               ]
             },
@@ -2136,7 +2203,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "proxy-short"
                 }
               ],
               "description": "hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
@@ -2149,7 +2217,8 @@
                 {
                   "type": "array",
                   "items": {},
-                  "maxItems": 0
+                  "maxItems": 0,
+                  "x-darkmatter-operands": "retry-short"
                 },
                 {
                   "minimum": 0,
@@ -2170,7 +2239,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "resume-short"
                 }
               ],
               "description": "send this follow-up message into the live session"
@@ -2181,7 +2251,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "defer-short"
                 }
               ],
               "description": "planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
@@ -2198,7 +2269,8 @@
                 },
                 {
                   "type": "string",
-                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+                  "description": "end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event",
+                  "x-darkmatter-operands": "break-short"
                 }
               ]
             },
@@ -2209,7 +2281,8 @@
                 },
                 {
                   "type": "string",
-                  "pattern": "\\S"
+                  "pattern": "\\S",
+                  "x-darkmatter-operands": "prep-short"
                 }
               ],
               "description": "run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
@@ -2220,7 +2293,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "object"
+                  "type": "object",
+                  "x-darkmatter-operands": "set-short"
                 }
               ],
               "description": "assign runtime values: a mapping of destinations to values (no long form, no no_error)"
@@ -2694,7 +2768,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "say-short"
                 }
               ],
               "description": "speak the text aloud through text-to-speech"
@@ -2705,7 +2780,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "speak-short"
                 }
               ],
               "description": "alias of say"
@@ -2716,7 +2792,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "effect-short"
                 }
               ],
               "description": "play the named sound effect from the effect catalog"
@@ -2727,7 +2804,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "message-short"
                 }
               ],
               "description": "send the text to the configured messaging routes"
@@ -2738,7 +2816,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "notify-short"
                 }
               ],
               "description": "show the text as a desktop notification"
@@ -2749,7 +2828,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stderr-short"
                 }
               ],
               "description": "write the text to standard error"
@@ -2760,7 +2840,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "stdout-short"
                 }
               ],
               "description": "write the text to standard output"
@@ -2771,7 +2852,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "info-short"
                 }
               ],
               "description": "print the text as an informational status line"
@@ -2782,7 +2864,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "warn-short"
                 }
               ],
               "description": "print the text as a warning status line"
@@ -2793,7 +2876,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "x-darkmatter-operands": "success-short"
                 }
               ],
               "description": "print the text as a success status line"
@@ -2818,7 +2902,8 @@
                 },
                 {
                   "type": "string",
-                  "format": "darkmatter-shell"
+                  "format": "darkmatter-shell",
+                  "x-darkmatter-operands": "shell-short"
                 }
               ],
               "description": "run a shell command (never in initialize)"
@@ -2829,7 +2914,8 @@
                   "type": "null"
                 },
                 {
-                  "type": "object"
+                  "type": "object",
+                  "x-darkmatter-operands": "set-short"
                 }
               ],
               "description": "assign runtime values: a mapping of destinations to values (no long form, no no_error)"

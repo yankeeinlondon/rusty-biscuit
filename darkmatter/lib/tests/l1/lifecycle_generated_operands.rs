@@ -1,8 +1,11 @@
 //! The generated lifecycle verb types judge operands through the public
 //! schema API the way a host references them (`expression[]@darkmatter:lifecycle`,
 //! `bundle[]@darkmatter:lifecycle`, `<verb>-short@darkmatter:lifecycle`), and
-//! their short forms reach the same verdict as the passive call binder
-//! (`validate_operands`) for every overloaded verb.
+//! reach the passive call binder's (`validate_operands`) verdict: their
+//! projected structure agrees with it for every overloaded verb, and schema
+//! validation binds each value through the verb's runtime registration, so
+//! the registration's own rules (numeric recovery, source exclusions,
+//! overload preference) decide where the structure alone cannot.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,7 +21,8 @@ use darkmatter::markdown::compose::expression::functions::function_registration;
 use darkmatter::markdown::compose::expression::{CallErrorKind, FunctionRegistration};
 use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
 use darkmatter::markdown::schemas::simplified::{
-    FunctionType, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, serialize_property_atom, serialize_property_def,
+    Constraint, FunctionType, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, serialize_property_atom,
+    serialize_property_def,
 };
 use darkmatter::markdown::schemas::validate::build_position_map;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
@@ -117,11 +121,203 @@ fn a_template_never_defers_the_long_form_keys() {
 }
 
 #[test]
-fn a_malformed_template_is_judged_as_text() {
+fn a_malformed_template_fails_a_numeric_operand() {
     let schema = host_schema();
 
     assert_action_fails_at(&schema, "{ pr_list: \"{{ 1 + }}\" }", "/pr_list");
     assert_action_fails_at(&schema, "{ abs: [\"{{ 1 + }}\"] }", "/abs/0");
+}
+
+/// The action fails with exactly one problem at or below `/actions/0{path}`:
+/// the malformed template's syntax problem, at the string's own position.
+#[track_caller]
+fn assert_malformed_at(schema: &EffectiveSchema, action: &str, path: &str) {
+    assert_malformed_under(schema, "actions", action, path);
+}
+
+/// [`assert_malformed_at`] for an action listed under `key`.
+#[track_caller]
+fn assert_malformed_under(schema: &EffectiveSchema, key: &str, action: &str, path: &str) {
+    let yaml = format!("{key}:\n  - {action}\n");
+    let report = validate(schema, &yaml);
+    let full = format!("/{key}/0{path}");
+    assert!(!report.valid, "`{action}` passed");
+    let within: Vec<_> = report
+        .problems
+        .iter()
+        .filter(|problem| problem.path == full || problem.path.starts_with(&format!("{full}/")))
+        .collect();
+    assert_eq!(within.len(), 1, "`{action}`: {:#?}", report.problems);
+    let problem = within[0];
+    assert_eq!(problem.path, full, "`{action}`");
+    assert!(
+        problem.message.starts_with("malformed template `") && problem.message.contains("1 +"),
+        "`{action}`: {}",
+        problem.message
+    );
+    let column = yaml.lines().nth(1).and_then(|line| {
+        let quoted = line.find('"').or_else(|| line.find('\''))?;
+        u32::try_from(quoted + 1).ok()
+    });
+    assert_eq!((problem.line, problem.column), (Some(2), column), "`{action}`: {problem:#?}");
+}
+
+#[test]
+fn a_malformed_template_in_a_string_operand_is_a_syntax_problem() {
+    let schema = host_schema();
+
+    assert_malformed_at(&schema, "{ trim: \"{{ 1 + }}\" }", "/trim");
+    assert_malformed_at(&schema, "{ trim: [\"{{ 1 + }}\"] }", "/trim/0");
+    assert_malformed_at(&schema, "{ trim: { text: \"{{ 1 + }}\" } }", "/trim/text");
+    assert_malformed_at(&schema, "{ ensure_file: \"{{ 1 + }}\" }", "/ensure_file");
+    assert_malformed_at(&schema, "{ ensure_file: [\"{{ 1 + }}\"] }", "/ensure_file/0");
+    assert_malformed_at(&schema, "{ ensure_file: { file: \"{{ 1 + }}\" } }", "/ensure_file/file");
+    assert_malformed_at(&schema, "{ ensure_file: [notes.txt, \"{{ 1 + }}\"] }", "/ensure_file/1");
+}
+
+#[test]
+fn a_malformed_span_in_mixed_text_is_a_syntax_problem() {
+    let schema = host_schema();
+
+    assert_malformed_at(&schema, "{ trim: 'hello {{ 1 + }}' }", "/trim");
+    assert_malformed_at(&schema, "{ ensure_file: 'out/{{ 1 + }}.md' }", "/ensure_file");
+    assert_malformed_at(&schema, "{ trim: '{{ fm.name }} and {{ 1 + }}' }", "/trim");
+}
+
+#[test]
+fn a_malformed_template_in_a_number_or_mapping_operand_reports_its_syntax() {
+    let schema = host_schema();
+
+    assert_malformed_at(&schema, "{ min: [\"{{ 1 + }}\", 3] }", "/min/0");
+    assert_malformed_at(&schema, "{ min: { a: 1, b: \"{{ 1 + }}\" } }", "/min/b");
+    assert_malformed_at(&schema, "{ merge_frontmatter: [d.md, '{{ 1 + }}'] }", "/merge_frontmatter/1");
+}
+
+#[test]
+fn a_malformed_template_leaves_its_literal_siblings_judged() {
+    let schema = host_schema();
+
+    let report = validate(&schema, "actions:\n  - { min: [\"{{ 1 + }}\", three] }\n");
+    let paths: Vec<&str> = report.problems.iter().map(|problem| problem.path.as_str()).collect();
+    assert!(paths.contains(&"/actions/0/min/0"), "{:#?}", report.problems);
+    assert!(paths.contains(&"/actions/0/min/1"), "{:#?}", report.problems);
+}
+
+#[test]
+fn deferred_templates_text_and_unclosed_braces_stay_valid_string_operands() {
+    let schema = host_schema();
+
+    for action in [
+        "{ trim: \"{{ fm.name }}\" }",
+        "{ trim: 'hello {{ fm.name }}' }",
+        "{ trim: hello }",
+        "{ trim: \"{{ unclosed\" }",
+        "{ ensure_file: \"{{ fm.name }}\" }",
+        "{ ensure_file: 'out/{{ fm.name }}.md' }",
+        "{ ensure_file: { file: \"{{ unclosed\" } }",
+        "{ min: [\"{{ fm.a }}\", 3] }",
+    ] {
+        assert_action_passes(&schema, action);
+    }
+}
+
+#[test]
+fn a_literal_token_holding_malformed_template_text_is_data() {
+    let schema = host_schema();
+    let token = darkmatter::markdown::literal_token::encode("{{ 1 + }}");
+    let yaml = format!("actions:\n  - {{ trim: \"{token}\" }}\n");
+    let value: Value = serde_yaml_ng::from_str(&yaml).expect("fixture YAML parses");
+    let options = darkmatter::markdown::schemas::ValidationOptions::default();
+
+    let report = schema.validate_with_options(&value, &build_position_map(&yaml), &options);
+
+    assert!(report.valid, "{:#?}", report.problems);
+}
+
+// ── Stored literal tokens are data ──────────────────────────────────────────
+
+/// `actions: [<action>]` with `TOKEN` replaced by the stored literal token of
+/// `text`, judged by the public options API, which decodes the token.
+fn validate_stored_action(schema: &EffectiveSchema, action: &str, text: &str) -> ValidationReport {
+    let token = darkmatter::markdown::literal_token::encode(text);
+    let yaml = format!("actions:\n  - {}\n", action.replace("TOKEN", &format!("\"{token}\"")));
+    let value: Value = serde_yaml_ng::from_str(&yaml).expect("fixture YAML parses");
+    let options = darkmatter::markdown::schemas::ValidationOptions::default();
+    schema.validate_with_options(&value, &build_position_map(&yaml), &options)
+}
+
+/// The report rejects with a positioned problem at `path` (below
+/// `/actions/0`) or below it, and defers nothing.
+#[track_caller]
+fn assert_stored_rejected_at(report: &ValidationReport, path: &str) {
+    let full = format!("/actions/0{path}");
+    let problem = report
+        .problems
+        .iter()
+        .find(|problem| problem.path == full || problem.path.starts_with(&format!("{full}/")))
+        .unwrap_or_else(|| panic!("no problem at {full}: {:#?}", report.problems));
+    assert!(!report.valid);
+    assert!(problem.line == Some(2) && problem.column.is_some(), "unpositioned: {problem:#?}");
+    assert!(report.deferred.is_empty(), "stored data was deferred: {:?}", report.deferred);
+}
+
+#[test]
+fn a_literal_token_holding_template_text_is_bound_as_that_text() {
+    let schema = host_schema();
+
+    let scalar = validate_stored_action(&schema, "{ abs: TOKEN }", "{{ fm.count }}");
+    assert_stored_rejected_at(&scalar, "/abs");
+    let positional = validate_stored_action(&schema, "{ min: [TOKEN, 1] }", "{{ fm.count }}");
+    assert_stored_rejected_at(&positional, "/min/0");
+    let named = validate_stored_action(&schema, "{ min: { a: TOKEN, b: 1 } }", "{{ fm.count }}");
+    assert_stored_rejected_at(&named, "/min/a");
+    let structured = validate_stored_action(&schema, "{ merge_frontmatter: [doc.md, TOKEN] }", "{{ fm.count }}");
+    assert_stored_rejected_at(&structured, "/merge_frontmatter/1");
+}
+
+#[test]
+fn a_literal_token_keeps_the_conversion_and_template_controls() {
+    let schema = host_schema();
+
+    let text = validate_stored_action(&schema, "{ trim: TOKEN }", "{{ fm.count }}");
+    assert!(text.valid && text.deferred.is_empty(), "{text:#?}");
+    let word = validate_stored_action(&schema, "{ abs: TOKEN }", "three");
+    assert_stored_rejected_at(&word, "/abs");
+    let numeral = validate_stored_action(&schema, "{ abs: TOKEN }", "3");
+    assert!(numeral.valid, "{:#?}", numeral.problems);
+
+    let yaml = "actions:\n  - { abs: \"{{ fm.count }}\" }\n";
+    let value: Value = serde_yaml_ng::from_str(yaml).expect("fixture YAML parses");
+    let options = darkmatter::markdown::schemas::ValidationOptions::default();
+    let authored = schema.validate_with_options(&value, &build_position_map(yaml), &options);
+    assert!(authored.valid, "{:#?}", authored.problems);
+    assert_eq!(authored.deferred, ["/actions/0/abs"]);
+}
+
+#[test]
+fn the_phase_apis_keep_a_stored_token_apart_from_an_authored_template() {
+    use darkmatter::markdown::schemas::{PositionMap, SchemaPhase};
+
+    let schema = host_schema();
+    let token = darkmatter::markdown::literal_token::encode("{{ fm.count }}");
+    let stored = json!({ "actions": [{ "abs": token }] });
+    let authored = json!({ "actions": [{ "abs": "{{ fm.count }}" }] });
+
+    assert!(!schema.validate_raw(&stored).valid, "raw validation judges the token as written");
+    for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+        let encoded = schema.validate_for_phase(&stored, phase).expect("projects");
+        assert!(!encoded.valid, "{phase:?}: the encoded token is not a template");
+        let decoded = schema.validate_for_phase(&authored, phase).expect("projects");
+        assert!(decoded.valid, "{phase:?}: an authored template is deferred: {:#?}", decoded.problems);
+
+        let report = schema.validate_stored(&stored, &PositionMap::new(), Some(phase)).expect("projects");
+        assert!(!report.valid && report.deferred.is_empty(), "{phase:?}: {report:#?}");
+        let report = schema.validate_stored(&authored, &PositionMap::new(), Some(phase)).expect("projects");
+        assert!(report.valid, "{phase:?}: {:#?}", report.problems);
+        assert_eq!(report.deferred, ["/actions/0/abs"], "{phase:?}");
+    }
+    let unphased = schema.validate_stored(&stored, &PositionMap::new(), None).expect("never fails unphased");
+    assert!(!unphased.valid);
 }
 
 #[test]
@@ -246,10 +442,167 @@ fn bundles_take_short_forms_only() {
     assert!(!bundle("{ ensure_file: [a, b, c] }").valid);
 }
 
+// ── Registration rules ──────────────────────────────────────────────────────
+
+/// `number` and `round` recover a subject that does not convert through
+/// their fallback, so the call binds although the projected subject type
+/// rejects the text; the long form selects the same overload.
+#[test]
+fn a_numeric_recovery_fallback_binds_a_subject_the_types_reject() {
+    let schema = host_schema();
+
+    for verb in ["number", "round"] {
+        assert_action_passes(&schema, &format!("{{ {verb}: [pear, 7] }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: [pear, 2.7] }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: [[1, 2], 7] }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: [null, \"7\"] }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: {{ x: pear, fallback: 7 }} }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: {{ x: pear, fallback: 2.7, no_error: true }} }}"));
+        assert_action_passes(&schema, &format!("{{ {verb}: [\"{{{{ fm.x }}}}\", 7] }}"));
+        // Without a usable fallback the subject must convert, as at runtime.
+        assert_action_fails_at(&schema, &format!("{{ {verb}: pear }}"), &format!("/{verb}"));
+        assert_action_fails_at(&schema, &format!("{{ {verb}: [pear] }}"), &format!("/{verb}"));
+        assert_action_fails_at(&schema, &format!("{{ {verb}: [pear, null] }}"), &format!("/{verb}"));
+        assert_action_fails_at(&schema, &format!("{{ {verb}: [pear, plum] }}"), &format!("/{verb}"));
+        assert_action_fails_at(&schema, &format!("{{ {verb}: {{ x: pear }} }}"), &format!("/{verb}"));
+    }
+}
+
+/// `length` refuses a boolean before any conversion, in every spelling,
+/// although its projected `string` operand converts one.
+#[test]
+fn a_source_exclusion_rejects_a_value_the_types_accept() {
+    let schema = host_schema();
+
+    assert_action_fails_at(&schema, "{ length: true }", "/length");
+    assert_action_fails_at(&schema, "{ length: [true] }", "/length/0");
+    assert_action_fails_at(&schema, "{ length: { val: false } }", "/length/val");
+    let report = validate(&schema, "actions:\n  - { length: [true] }\n");
+    let problem = report.problems.iter().find(|problem| problem.path == "/actions/0/length/0").expect("a problem");
+    assert!(problem.message.contains("does not accept a boolean"), "{problem:#?}");
+    assert_eq!(problem.line, Some(2));
+    assert!(problem.column.is_some_and(|column| column > 14), "{problem:#?}");
+}
+
+#[test]
+fn ordinary_calls_of_the_registered_verbs_still_pass() {
+    let schema = host_schema();
+
+    for action in [
+        "{ number: [3, 7] }",
+        "{ number: \"3\" }",
+        "{ number: { x: 3 } }",
+        "{ round: [3.7] }",
+        "{ round: 3.7 }",
+        "{ length: [hi] }",
+        "{ length: hi }",
+        "{ length: { val: hi } }",
+        "{ length: [\"{{ fm.v }}\"] }",
+    ] {
+        assert_action_passes(&schema, action);
+    }
+}
+
+/// A deferred or settled operand never hides a mistake beside it: an
+/// extra operand, an unknown or missing name, or a bad `no_error`.
+#[test]
+fn a_bound_call_keeps_the_checks_beside_its_operands() {
+    let schema = host_schema();
+
+    assert_action_fails_at(&schema, "{ number: [pear, 7, 8] }", "/number");
+    assert_action_fails_at(&schema, "{ number: { x: pear, fallback: 7, bogus: 1 } }", "/number");
+    assert_action_fails_at(&schema, "{ number: { fallback: 7 } }", "/number");
+    assert_action_fails_at(&schema, "{ number: { x: pear, fallback: 7, no_error: [1] } }", "/number");
+    assert_action_fails_at(&schema, "{ length: [\"{{ fm.v }}\", true] }", "/length");
+    assert_action_fails_at(&schema, "{ number: { x: \"{{ fm.x }}\", fallback: 7, bogus: 1 } }", "/number");
+}
+
+#[test]
+fn bundles_bind_their_short_forms_and_still_refuse_long_forms() {
+    let schema = host_schema();
+    let bundle = |yaml: &str| validate(&schema, &format!("bundles:\n  - {yaml}\n"));
+
+    assert!(bundle("{ number: [pear, 7], info: hi }").valid);
+    assert!(bundle("{ round: [pear, 2.7], when: \"{{ true }}\" }").valid);
+    let report = bundle("{ length: [true], info: hi }");
+    assert!(report.problems.iter().any(|problem| problem.path == "/bundles/0/length/0"), "{:#?}", report.problems);
+    assert!(!bundle("{ number: { x: pear, fallback: 7 }, info: hi }").valid);
+}
+
+/// The review's operand matrix: with a valid fallback, `number` and `round`
+/// bind every subject shape, and `length` refuses only a boolean; the schema
+/// now reaches the binder's verdict on each, in every spelling.
+#[test]
+fn the_registered_verbs_reach_the_binders_verdict() {
+    let projection = LifecycleSchemaProjection::shipped().expect("the shipped catalogs project");
+    let subjects = [
+        json!(null),
+        json!(true),
+        json!(3),
+        json!("3"),
+        json!("pear"),
+        json!(""),
+        json!([]),
+        json!([1, "a"]),
+        json!([1, 2]),
+        json!({}),
+        json!({ "a": 1 }),
+        json!("{{ fm.x }}"),
+    ];
+    let mut disagreements = Vec::new();
+    for (name, fallbacks) in [("number", vec![json!(7), json!(null), json!("x")]), ("round", vec![json!(2.7)])] {
+        let mut calls: Vec<Vec<Value>> = vec![vec![]];
+        for subject in &subjects {
+            calls.push(vec![subject.clone()]);
+            for fallback in &fallbacks {
+                calls.push(vec![subject.clone(), fallback.clone()]);
+            }
+        }
+        let verb = projection.verb(name).expect("generated");
+        disagreements.extend(bound_parity(verb, &projection.helper_types, &calls));
+    }
+    let mut calls: Vec<Vec<Value>> = subjects.iter().map(|subject| vec![subject.clone()]).collect();
+    calls.push(vec![]);
+    calls.push(vec![json!("a"), json!("b")]);
+    let verb = projection.verb("length").expect("generated");
+    disagreements.extend(bound_parity(verb, &projection.helper_types, &calls));
+    assert!(disagreements.is_empty(), "binder and schema disagree:\n{}", disagreements.join("\n"));
+}
+
+/// The shipped short form's verdict on every spelling of each call, against
+/// the binder's.
+fn bound_parity(verb: &ProjectedVerb, helpers: &[(String, PropertyDef)], calls: &[Vec<Value>]) -> Vec<String> {
+    let file = ArmFile::new(verb, helpers);
+    let schema = file.schema(Some(verb.name.as_str()));
+    let registration = shipped_registration(&verb.name);
+    let mut disagreements = Vec::new();
+    for args in calls {
+        let accepted = !matches!(validate_operands(registration, args), OperandVerdict::Rejected(_));
+        for encoded in encodings(args) {
+            let verdict = schema_verdict(&schema, file.overloads, true, &encoded);
+            if verdict.shipped != Some(accepted) {
+                disagreements.push(format!("{}({encoded}): binder accepts: {accepted}", verb.name));
+            }
+        }
+    }
+    disagreements
+}
+
 // ── Binder parity ───────────────────────────────────────────────────────────
 
+/// `atom` without its `operands(...)` marker: the projected structure alone,
+/// which the schema judges without binding through a registration.
+fn structural(atom: &PropertyAtom) -> PropertyAtom {
+    let mut atom = atom.clone();
+    atom.constraints.retain(|constraint| !matches!(constraint, Constraint::Operands(_)));
+    atom.array_constraints.retain(|constraint| !matches!(constraint, Constraint::Operands(_)));
+    atom
+}
+
 /// A temporary schema file holding the projection's helper types, `short`
-/// (the verb's short form) and `arm-<i>` (overload `i`'s short-form arms).
+/// (the verb's short form, structure only), `bound` (the short form as
+/// generated, bound through its registration), and `arm-<i>` (overload
+/// `i`'s short-form arms, structure only).
 struct ArmFile {
     dir: tempfile::TempDir,
     overloads: usize,
@@ -277,9 +630,12 @@ impl ArmFile {
         for (name, def) in helpers {
             types.insert(name.clone().into(), serialize_property_def(def).into());
         }
-        types.insert("short".into(), arms_yaml(&verb.short));
+        let structure: Vec<PropertyAtom> = verb.short.iter().map(structural).collect();
+        types.insert("short".into(), arms_yaml(&structure));
+        types.insert("bound".into(), arms_yaml(&verb.short));
         for overload in &verb.overloads {
-            types.insert(format!("arm-{}", overload.index).into(), arms_yaml(&overload.short_arms()));
+            let arms: Vec<PropertyAtom> = overload.short_arms().iter().map(structural).collect();
+            types.insert(format!("arm-{}", overload.index).into(), arms_yaml(&arms));
         }
         let mut document = Mapping::new();
         document.insert("kind".into(), "schema".into());
@@ -456,9 +812,11 @@ fn function_type(text: &str) -> FunctionType {
 /// No shipped overload set has two same-arity overloads that both convert
 /// one value, so the case the two selection rules decide differently comes
 /// from a fixture: `pick(x: number) | pick(x: boolean)` with `"1"`, which
-/// each overload accepts only after conversion.
+/// each overload accepts only after conversion. The projected union alone
+/// accepts it through either arm; the generated type, bound through the
+/// registration a call dispatches to, rejects it as the binder does.
 #[test]
-fn two_overloads_that_both_convert_are_ambiguous_to_the_binder_but_accepted_by_the_schema() {
+fn two_overloads_that_both_convert_are_ambiguous_to_the_binder_and_the_bound_schema() {
     let overloads = [
         function_type("function(parameters(x: number); returns(boolean))"),
         function_type("function(parameters(x: boolean); returns(boolean))"),
@@ -481,8 +839,180 @@ fn two_overloads_that_both_convert_are_ambiguous_to_the_binder_but_accepted_by_t
         assert!(verdict.short, "the union accepts {encoded} through either arm");
         assert_eq!(verdict.overloads, BTreeSet::from([0, 1]), "{encoded}");
     }
+    bound_pick_follows_the_binder(&file, registration.clone());
 
     // Exact values bind and agree.
     let disagreements = parity(&verb, &[], &registration, false, &[vec![json!(2)], vec![json!(true)], vec![json!("x")]]);
     assert!(disagreements.is_empty(), "{disagreements:#?}");
+}
+
+/// The generated `pick` type, bound through `pick`'s registration (a test
+/// function, which dispatch, and so validation, consults first), reaches the
+/// binder's verdict: `"1"` is ambiguous, exact values bind.
+#[cfg(feature = "effects-instrumentation")]
+fn bound_pick_follows_the_binder(file: &ArmFile, registration: FunctionRegistration) {
+    use darkmatter::markdown::compose::expression::function_test_hooks;
+
+    let _pick = function_test_hooks::register(registration, std::sync::Arc::new(|_| Ok(json!(true))));
+    let schema = effective(file.dir.path(), &[("bound", "{ v: bound(required)@./arms.yaml }".to_string())]);
+    for encoded in encodings(&[json!("1")]) {
+        let yaml = serde_yaml_ng::to_string(&json!({ "bound": { "v": encoded } })).expect("serializes");
+        let report = validate(&schema, &yaml);
+        let problem = report
+            .problems
+            .iter()
+            .find(|problem| problem.path.starts_with("/bound/v"))
+            .unwrap_or_else(|| panic!("{encoded} is accepted: {:#?}", report.problems));
+        assert!(problem.message.contains("ambiguous call"), "{problem:#?}");
+        assert!(problem.line.is_some(), "{problem:#?}");
+    }
+    for encoded in [json!(2), json!(true), json!([2]), json!([true])] {
+        let yaml = serde_yaml_ng::to_string(&json!({ "bound": { "v": encoded } })).expect("serializes");
+        let report = validate(&schema, &yaml);
+        assert!(report.valid, "{encoded}: {:#?}", report.problems);
+    }
+}
+
+/// Without the instrumentation feature no test function can be registered,
+/// so no registration exists for `pick` and the bound type keeps the
+/// projected union's verdict; the bound half runs under `just test`.
+#[cfg(not(feature = "effects-instrumentation"))]
+fn bound_pick_follows_the_binder(_: &ArmFile, _: FunctionRegistration) {}
+
+// ── Hand-written verbs: malformed templates ─────────────────────────────────
+
+/// A list of each hand-written category and of `bundle`s, as a host's event
+/// stack references them.
+fn hand_written_schema() -> EffectiveSchema {
+    effective(
+        &std::env::current_dir().expect("process directory"),
+        &[
+            ("communicate", "communicate[]@darkmatter:lifecycle".to_string()),
+            ("flow", "flow[]@darkmatter:lifecycle".to_string()),
+            ("shell", "shell[]@darkmatter:lifecycle".to_string()),
+            ("expression", "expression[]@darkmatter:lifecycle".to_string()),
+            ("bundles", "bundle[]@darkmatter:lifecycle".to_string()),
+        ],
+    )
+}
+
+/// The category list `action`'s verb belongs under in [`hand_written_schema`].
+fn category_of(action: &str) -> &'static str {
+    let value: Value = serde_yaml_ng::from_str(action).expect("the action parses as YAML");
+    let verb = value
+        .as_object()
+        .and_then(|map| map.keys().find(|key| key.as_str() != "when" && key.as_str() != "no_error"))
+        .expect("one verb")
+        .clone();
+    match verb.as_str() {
+        "shell" => "shell",
+        "set" => "expression",
+        "error" | "proxy" | "retry" | "resume" | "defer" | "break" | "prep" | "stop" | "skip" => "flow",
+        _ => "communicate",
+    }
+}
+
+/// Whether the lifecycle parser accepts `action` as the one action of md's
+/// `composed` stack.
+fn parser_accepts(action: &str) -> bool {
+    use darkmatter::lifecycle::registry::EventRegistry;
+    use darkmatter::lifecycle::{LifecycleParseOptions, UnknownVerbPolicy, parse_lifecycle_config_with};
+
+    let value: Value = serde_yaml_ng::from_str(action).expect("the action parses as YAML");
+    let registry = EventRegistry::md();
+    let options = LifecycleParseOptions {
+        is_known_effect: &|_| true,
+        authored: None,
+        unknown_verbs: UnknownVerbPolicy::Reject,
+        registry: &registry,
+    };
+    parse_lifecycle_config_with(&json!({ "composed": [value] }), Path::new("doc.md"), &options).is_ok()
+}
+
+/// Every string the lifecycle parser reads as a template in a hand-written
+/// verb's value (communication text, directive strings, `shell`, `set`
+/// values, and a `with:` overlay) reports a malformed span where the parser
+/// rejects it, at the string's own path and position.
+#[test]
+fn a_malformed_template_in_a_hand_written_verb_is_a_syntax_problem() {
+    let schema = hand_written_schema();
+
+    for (action, path) in [
+        ("{ say: \"{{ 1 + }}\" }", "/say"),
+        ("{ say: { text: 'hello {{ 1 + }}' } }", "/say/text"),
+        ("{ info: \"{{ 1 + }}\" }", "/info"),
+        ("{ effect: \"{{ 1 + }}\" }", "/effect"),
+        ("{ error: \"{{ 1 + }}\" }", "/error"),
+        ("{ error: { reason: \"{{ 1 + }}\" } }", "/error/reason"),
+        ("{ proxy: \"{{ 1 + }}\" }", "/proxy"),
+        ("{ proxy: { target: \"{{ 1 + }}\" } }", "/proxy/target"),
+        ("{ proxy: { with: { round: \"{{ 1 + }}\" }, target: next.md } }", "/proxy/with/round"),
+        ("{ proxy: { with: { list: [\"{{ 1 + }}\"] }, target: next.md } }", "/proxy/with/list/0"),
+        ("{ retry: \"{{ 1 + }}\" }", "/retry"),
+        ("{ retry: { with: { round: \"{{ 1 + }}\" } } }", "/retry/with/round"),
+        ("{ resume: \"{{ 1 + }}\" }", "/resume"),
+        ("{ resume: { message: \"{{ 1 + }}\" } }", "/resume/message"),
+        ("{ defer: { delay: \"{{ 1 + }}\" } }", "/defer/delay"),
+        ("{ break: \"{{ 1 + }}\" }", "/break"),
+        ("{ prep: { target: \"{{ 1 + }}\" } }", "/prep/target"),
+        ("{ prep: { with: { round: \"{{ 1 + }}\" }, target: setup.md } }", "/prep/with/round"),
+        ("{ shell: \"echo {{ 1 + }}\" }", "/shell"),
+        ("{ shell: { command: \"echo {{ 1 + }}\" } }", "/shell/command"),
+        ("{ set: { round: \"{{ 1 + }}\" } }", "/set/round"),
+        ("{ set: { nested: { deep: \"{{ 1 + }}\" } } }", "/set/nested/deep"),
+    ] {
+        assert!(!parser_accepts(action), "the parser accepts `{action}`");
+        assert_malformed_under(&schema, category_of(action), action, path);
+    }
+}
+
+#[test]
+fn a_malformed_template_in_a_bundle_verb_is_a_syntax_problem() {
+    let schema = hand_written_schema();
+
+    let yaml = "bundles:\n  - { info: \"{{ 1 + }}\", stop: null }\n";
+    let report = validate(&schema, yaml);
+
+    let problems: Vec<_> = report.problems.iter().map(|problem| (problem.path.as_str(), problem.line, problem.column)).collect();
+    assert_eq!(problems, [("/bundles/0/info", Some(2), Some(13))], "{:#?}", report.problems);
+    assert!(report.problems[0].message.starts_with("malformed template `"), "{:#?}", report.problems);
+}
+
+/// Valid templates, plain text, an unclosed `{{`, a `set` value the parser
+/// reads as a shell command, and a `when` condition stay as they were.
+#[test]
+fn hand_written_verbs_keep_valid_templates_text_and_shell_values() {
+    let schema = hand_written_schema();
+
+    for action in [
+        "{ say: \"{{ fm.name }}\" }",
+        "{ say: { text: 'hello {{ fm.name }}' } }",
+        "{ info: plain text }",
+        "{ info: \"{{ unclosed\" }",
+        "{ error: done }",
+        "{ proxy: { target: next.md, with: { round: \"{{ fm.round + 1 }}\", note: \"{{ unclosed\" } } }",
+        "{ shell: \"echo {{ fm.name }}\" }",
+        "{ set: { round: \"{{ fm.round + 1 }}\", text: plain } }",
+        "{ set: { listing: \"$(echo {{ 1 + }})\" } }",
+        "{ when: \"fm.ready\", info: ready }",
+        "{ break: { reason: done, code: 3 } }",
+    ] {
+        assert!(parser_accepts(action), "the parser rejects `{action}`");
+        let key = category_of(action);
+        let report = validate(&schema, &format!("{key}:\n  - {action}\n"));
+        assert!(report.valid, "rejected `{action}`: {:#?}", report.problems);
+    }
+}
+
+#[test]
+fn a_literal_token_in_a_hand_written_verb_is_data() {
+    let schema = hand_written_schema();
+    let token = darkmatter::markdown::literal_token::encode("{{ 1 + }}");
+    let yaml = format!("communicate:\n  - {{ say: \"{token}\" }}\nexpression:\n  - {{ set: {{ v: \"{token}\" }} }}\n");
+    let value: Value = serde_yaml_ng::from_str(&yaml).expect("fixture YAML parses");
+    let options = darkmatter::markdown::schemas::ValidationOptions::default();
+
+    let report = schema.validate_with_options(&value, &build_position_map(&yaml), &options);
+
+    assert!(report.valid, "{:#?}", report.problems);
 }

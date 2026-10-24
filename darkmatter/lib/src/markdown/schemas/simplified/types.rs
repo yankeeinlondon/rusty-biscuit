@@ -872,6 +872,14 @@ pub enum Constraint {
     /// [`Constraint::MaxItems`]; lowers to JSON Schema `maxProperties`.
     MaxKeys(usize),
 
+    /// `uncounted-keys(when, no_error)`: keys that `min-keys` and `max-keys`
+    /// do not count, so `{ a, b, when }` with `max-keys(1)` admits one key
+    /// besides `when`. Needs `min-keys` or `max-keys` on the same object and
+    /// names at most [`MAX_UNCOUNTED_KEYS`] keys. Lowers to one `if`/`then`
+    /// pair per combination of the named keys present, each bounding
+    /// `minProperties`/`maxProperties` by that many more.
+    UncountedKeys(Vec<String>),
+
     // ── documentation ──────────────────────────────────────────────────────
     /// One or more example artifact file references (`example(...)`, Feature
     /// A). Non-validating for the annotated property — each referenced file is
@@ -884,6 +892,18 @@ pub enum Constraint {
     /// lowers to the `x-darkmatter-category` annotation; a schema file that
     /// declares `categories:` rejects a name it does not list.
     Category(String),
+
+    // ── lifecycle ──────────────────────────────────────────────────────────
+    /// `operands(<verb>-short)` or `operands(<verb>-long)`: the value is the
+    /// short or long form of the Darkmatter lifecycle verb `<verb>`, so
+    /// schema validation binds its operands through that verb's runtime
+    /// registration and the binder's verdict replaces the type's own for
+    /// them. The lifecycle schema generator writes it on every generated verb
+    /// arm; a verb the parser owns itself (`say`, `proxy`, `set`, …) carries
+    /// it on its hand-written type, where it only checks the strings the
+    /// parser reads as templates. Lowers to the `x-darkmatter-operands`
+    /// annotation, which never fails a value by itself.
+    Operands(String),
 }
 
 impl Constraint {
@@ -915,10 +935,60 @@ impl Constraint {
             Constraint::MaxItems(_) => "max",
             Constraint::MinKeys(_) => "min-keys",
             Constraint::MaxKeys(_) => "max-keys",
+            Constraint::UncountedKeys(_) => "uncounted-keys",
             Constraint::Example(_) => "example",
             Constraint::Category(_) => "category",
+            Constraint::Operands(_) => "operands",
         }
     }
+}
+
+/// The most keys one [`Constraint::UncountedKeys`] may name: its lowering
+/// holds one condition per combination of them.
+pub const MAX_UNCOUNTED_KEYS: usize = 8;
+
+/// Checks the key list of a [`Constraint::UncountedKeys`]: one to
+/// [`MAX_UNCOUNTED_KEYS`] distinct, nonempty names. The error is the message
+/// both authoring surfaces report.
+pub(crate) fn check_uncounted_keys(keys: &[String]) -> Result<(), String> {
+    if keys.is_empty() {
+        return Err("`uncounted-keys` requires at least one key".to_string());
+    }
+    if keys.len() > MAX_UNCOUNTED_KEYS {
+        return Err(format!(
+            "`uncounted-keys` names at most {MAX_UNCOUNTED_KEYS} keys, got {}",
+            keys.len()
+        ));
+    }
+    if keys.iter().any(|key| key.is_empty()) {
+        return Err("`uncounted-keys` cannot name an empty key".to_string());
+    }
+    if let Some(repeated) = keys.iter().enumerate().find_map(|(index, key)| keys[..index].contains(key).then_some(key)) {
+        return Err(format!("`uncounted-keys` names `{repeated}` twice"));
+    }
+    Ok(())
+}
+
+/// Which spelling of a lifecycle verb an [`Constraint::Operands`] arm types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OperandForm {
+    /// `null`, a list of positional operands, or one scalar operand.
+    Short,
+    /// A mapping of named operands.
+    Long,
+}
+
+/// The verb and form an [`Constraint::Operands`] name (`number-short`)
+/// spells; `None` when it is not `<verb>-short` or `<verb>-long` with a
+/// nonempty verb made of letters, digits, and underscores.
+pub fn operands_verb(name: &str) -> Option<(&str, OperandForm)> {
+    let (verb, form) = if let Some(verb) = name.strip_suffix("-short") {
+        (verb, OperandForm::Short)
+    } else {
+        (name.strip_suffix("-long")?, OperandForm::Long)
+    };
+    let valid = !verb.is_empty() && verb.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+    valid.then_some((verb, form))
 }
 
 /// One interpreted argument from a `suggest(...)` constraint.

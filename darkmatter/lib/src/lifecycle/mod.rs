@@ -107,7 +107,11 @@ pub use envelope::{
     SourceExcerpt,
 };
 pub use error::LifecycleExprError;
-pub use operands::{OperandVerdict, validate_expression_function_operands, validate_operands, validate_operands_with};
+pub use operands::{
+    ActionCall, OperandLocation, OperandVerdict, TemplateOperand, action_call, operand_form, template_operands, validate_action_operands,
+    validate_action_operands_with,
+    validate_expression_function_operands, validate_operands, validate_operands_with,
+};
 pub use services::{LifecycleService, LifecycleServices, MissingServiceError};
 pub use parse::{
     LOOP_ITERATION_KEYS, LifecycleParseOptions, UnknownVerbPolicy, parse_lifecycle_config_with,

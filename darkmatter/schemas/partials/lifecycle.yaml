@@ -8,8 +8,16 @@
 #
 # Each verb has a short form (`<verb>-short`) and, except `set` and the
 # variadic verbs (`and`, `or`), a closed long form (`<verb>-long`). A category
-# type holds exactly one verb, whose value is its short or long form. A bundle
-# holds several verbs in short form only, plus `when` and `no_error`.
+# type is a single-action dictionary: exactly one verb, whose value is its
+# short or long form, plus `when` and `no_error`, which `uncounted-keys` leaves
+# out of the one-key count. A bundle holds several verbs in short form only,
+# plus `when` and `no_error`.
+#
+# Every verb type that can hold a string carries `operands(<verb>-short)` or
+# `operands(<verb>-long)` (one arm of a union is enough). Schema validation
+# then reads the value as the lifecycle parser does: a `{{ … }}` span that
+# does not parse is a positioned problem even where the type accepts text.
+# `stop` and `skip` hold no string and carry none.
 #
 # The side-effect and expression-function verbs are generated from
 # Darkmatter's typed catalogs (functions.yaml, mutations.yaml): their types
@@ -34,26 +42,26 @@ types:
     count:
         - "number(integer; min(0)) -> a count"
         - interpolation
-    say-short: "string -> speak the text aloud through text-to-speech"
-    say-long: "{ text: string(required), no_error: boolean }"
-    speak-short: "string -> alias of say"
-    speak-long: "{ text: string(required), no_error: boolean }"
-    effect-short: "string -> play the named sound effect from the effect catalog"
-    effect-long: "{ text: string(required), no_error: boolean }"
-    message-short: "string -> send the text to the configured messaging routes"
-    message-long: "{ text: string(required), no_error: boolean }"
-    notify-short: "string -> show the text as a desktop notification"
-    notify-long: "{ text: string(required), no_error: boolean }"
-    stderr-short: "string -> write the text to standard error"
-    stderr-long: "{ text: string(required), no_error: boolean }"
-    stdout-short: "string -> write the text to standard output"
-    stdout-long: "{ text: string(required), no_error: boolean }"
-    info-short: "string -> print the text as an informational status line"
-    info-long: "{ text: string(required), no_error: boolean }"
-    warn-short: "string -> print the text as a warning status line"
-    warn-long: "{ text: string(required), no_error: boolean }"
-    success-short: "string -> print the text as a success status line"
-    success-long: "{ text: string(required), no_error: boolean }"
+    say-short: "string(operands(say-short)) -> speak the text aloud through text-to-speech"
+    say-long: "{ text: string(required), no_error: boolean }(operands(say-long))"
+    speak-short: "string(operands(speak-short)) -> alias of say"
+    speak-long: "{ text: string(required), no_error: boolean }(operands(speak-long))"
+    effect-short: "string(operands(effect-short)) -> play the named sound effect from the effect catalog"
+    effect-long: "{ text: string(required), no_error: boolean }(operands(effect-long))"
+    message-short: "string(operands(message-short)) -> send the text to the configured messaging routes"
+    message-long: "{ text: string(required), no_error: boolean }(operands(message-long))"
+    notify-short: "string(operands(notify-short)) -> show the text as a desktop notification"
+    notify-long: "{ text: string(required), no_error: boolean }(operands(notify-long))"
+    stderr-short: "string(operands(stderr-short)) -> write the text to standard error"
+    stderr-long: "{ text: string(required), no_error: boolean }(operands(stderr-long))"
+    stdout-short: "string(operands(stdout-short)) -> write the text to standard output"
+    stdout-long: "{ text: string(required), no_error: boolean }(operands(stdout-long))"
+    info-short: "string(operands(info-short)) -> print the text as an informational status line"
+    info-long: "{ text: string(required), no_error: boolean }(operands(info-long))"
+    warn-short: "string(operands(warn-short)) -> print the text as a warning status line"
+    warn-long: "{ text: string(required), no_error: boolean }(operands(warn-long))"
+    success-short: "string(operands(success-short)) -> print the text as a success status line"
+    success-long: "{ text: string(required), no_error: boolean }(operands(success-long))"
     stop-short:
         - null
         - "unknown[](max(0)) -> stop the remaining actions of this stack"
@@ -65,792 +73,792 @@ types:
     error-short:
         - null
         - "unknown[](max(0))"
-        - "string -> fail the run with this reason"
-    error-long: "{ reason: string, no_error: boolean }"
-    proxy-short: "string -> hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
-    proxy-long: "{ target: string(required), with: object, no_error: boolean }"
+        - "string(operands(error-short)) -> fail the run with this reason"
+    error-long: "{ reason: string, no_error: boolean }(operands(error-long))"
+    proxy-short: "string(operands(proxy-short)) -> hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
+    proxy-long: "{ target: string(required), with: object, no_error: boolean }(operands(proxy-long))"
     retry-short:
         - null
-        - "unknown[](max(0))"
+        - "unknown[](max(0); operands(retry-short))"
         - "count -> re-read and re-run the document at most this many times"
-    retry-long: "{ max_attempts: count, delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }"
-    resume-short: "string -> send this follow-up message into the live session"
-    resume-long: "{ message: string(required), max_attempts: count, no_error: boolean }"
-    defer-short: "string -> planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
-    defer-long: "{ delay: string(required), reason: string, no_error: boolean }"
+    retry-long: "{ max_attempts: count, delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }(operands(retry-long))"
+    resume-short: "string(operands(resume-short)) -> send this follow-up message into the live session"
+    resume-long: "{ message: string(required), max_attempts: count, no_error: boolean }(operands(resume-long))"
+    defer-short: "string(operands(defer-short)) -> planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
+    defer-long: "{ delay: string(required), reason: string, no_error: boolean }(operands(defer-long))"
     break-short:
         - null
         - "unknown[](max(0))"
-        - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
-    break-long: "{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }"
-    prep-short: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
-    prep-long: "{ target: string(not-empty; required), with: object, no_error: boolean }"
-    shell-short: "shell -> run a shell command (never in initialize)"
-    shell-long: "{ command: shell(required), on_error: string, no_error: boolean }"
-    set-short: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
+        - "string(operands(break-short)) -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+    break-long: "{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }(operands(break-long))"
+    prep-short: "string(not-empty; operands(prep-short)) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
+    prep-long: "{ target: string(not-empty; required), with: object, no_error: boolean }(operands(prep-long))"
+    shell-short: "shell(operands(shell-short)) -> run a shell command (never in initialize)"
+    shell-long: "{ command: shell(required), on_error: string, no_error: boolean }(operands(shell-long))"
+    set-short: "object(operands(set-short)) -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
     side-effect-verb: "unknown -> Darkmatter side effect; the parser checks its arguments"
     expression-function-verb: "unknown -> Darkmatter expression function; the parser checks its arguments"
     # BEGIN GENERATED types
     template-operand: "string(pattern([^\\s\\S]);deferred) -> a whole-value {{ … }} template supplying a list or mapping; no literal matches"
     agentic-cli: "enum(claude,codex,gemini,goose,kimi,kimicode,kimi_code,kimi-code,opencode,open_code,open-code,qwen,qwencode,qwen_code,qwen-code,pi,kilo,antigravity) -> An agentic CLI name accepted by `has_agentic_cli`: a Claudine\nprovider roster slug or one of its aliases."
     ip-address: "string(pattern('^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(:[0-9a-fA-F]{1,4}){1,6}|:((:[0-9a-fA-F]{1,4}){1,7}|:)|([0-9a-fA-F]{1,4}:){6}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|::([0-9a-fA-F]{1,4}:){0,5}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|([0-9a-fA-F]{1,4}:){1,5}:([0-9a-fA-F]{1,4}:){0,4}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})(%[^%/\\\\s]+)?)$')) -> An IP address literal: IPv4 (`192.168.1.1`), IPv6 (`2001:db8::10`), or\nscoped IPv6 (`fe80::1%en0`). A host name is never an address; nothing\nresolves DNS."
-    append_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null])"
+    append_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null]; operands(append_frontmatter-short))"
     append_frontmatter-long:
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3))"
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4))"
-    append_jsonl-short: "tuple([string(deferred), unknown | null])"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3);operands(append_frontmatter-long))"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4);operands(append_frontmatter-long))"
+    append_jsonl-short: "tuple([string(deferred), unknown | null]; operands(append_jsonl-short))"
     append_jsonl-long:
-        - "{file: string(deferred;required),obj: unknown | null}(min-keys(2))"
-        - "{file: string(deferred;required),obj: unknown | null,no_error: boolean(required)}(min-keys(3))"
-    append_line-short: "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null])"
+        - "{file: string(deferred;required),obj: unknown | null}(min-keys(2);operands(append_jsonl-long))"
+        - "{file: string(deferred;required),obj: unknown | null,no_error: boolean(required)}(min-keys(3);operands(append_jsonl-long))"
+    append_line-short: "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null]; operands(append_line-short))"
     append_line-long:
-        - "{file: string(deferred;required),text: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2))"
-        - "{file: string(deferred;required),text: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    decrement_frontmatter-short: "tuple([string(deferred), string(deferred)])"
-    decrement_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}"
-    delete_frontmatter-short: "tuple([string(deferred), string(deferred)])"
-    delete_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}"
+        - "{file: string(deferred;required),text: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2);operands(append_line-long))"
+        - "{file: string(deferred;required),text: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3);operands(append_line-long))"
+    decrement_frontmatter-short: "tuple([string(deferred), string(deferred)]; operands(decrement_frontmatter-short))"
+    decrement_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}(operands(decrement_frontmatter-long))"
+    delete_frontmatter-short: "tuple([string(deferred), string(deferred)]; operands(delete_frontmatter-short))"
+    delete_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}(operands(delete_frontmatter-long))"
     ensure_dir-short:
-        - "string(deferred)"
-        - "tuple([string(deferred)])"
-    ensure_dir-long: "{dir: string(deferred;required),no_error: boolean}"
+        - "string(deferred;operands(ensure_dir-short))"
+        - "tuple([string(deferred)]; operands(ensure_dir-short))"
+    ensure_dir-long: "{dir: string(deferred;required),no_error: boolean}(operands(ensure_dir-long))"
     ensure_file-short:
-        - "string(deferred)"
-        - "tuple([string(deferred)])"
-        - "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null])"
+        - "string(deferred;operands(ensure_file-short))"
+        - "tuple([string(deferred)]; operands(ensure_file-short))"
+        - "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null]; operands(ensure_file-short))"
     ensure_file-long:
-        - "{file: string(deferred;required),no_error: boolean}"
-        - "{file: string(deferred;required),content: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2))"
-        - "{file: string(deferred;required),content: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    http_post-short: "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null])"
+        - "{file: string(deferred;required),no_error: boolean}(operands(ensure_file-long))"
+        - "{file: string(deferred;required),content: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2);operands(ensure_file-long))"
+        - "{file: string(deferred;required),content: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3);operands(ensure_file-long))"
+    http_post-short: "tuple([string(deferred), string(deferred) | object(deferred) | unknown[](deferred) | null]; operands(http_post-short))"
     http_post-long:
-        - "{url: string(deferred;required),body: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2))"
-        - "{url: string(deferred;required),body: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    increment_frontmatter-short: "tuple([string(deferred), string(deferred)])"
-    increment_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}"
-    merge_frontmatter-short: "tuple([string(deferred), object(deferred)])"
-    merge_frontmatter-long: "{file: string(deferred;required),obj: object(deferred;required),no_error: boolean}"
-    prepend_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null])"
+        - "{url: string(deferred;required),body: string(deferred) | object(deferred) | unknown[](deferred) | null}(min-keys(2);operands(http_post-long))"
+        - "{url: string(deferred;required),body: string(deferred) | object(deferred) | unknown[](deferred) | null,no_error: boolean(required)}(min-keys(3);operands(http_post-long))"
+    increment_frontmatter-short: "tuple([string(deferred), string(deferred)]; operands(increment_frontmatter-short))"
+    increment_frontmatter-long: "{file: string(deferred;required),prop: string(deferred;required),no_error: boolean}(operands(increment_frontmatter-long))"
+    merge_frontmatter-short: "tuple([string(deferred), object(deferred)]; operands(merge_frontmatter-short))"
+    merge_frontmatter-long: "{file: string(deferred;required),obj: object(deferred;required),no_error: boolean}(operands(merge_frontmatter-long))"
+    prepend_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null]; operands(prepend_frontmatter-short))"
     prepend_frontmatter-long:
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3))"
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4))"
-    set_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null])"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3);operands(prepend_frontmatter-long))"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4);operands(prepend_frontmatter-long))"
+    set_frontmatter-short: "tuple([string(deferred), string(deferred), unknown | null]; operands(set_frontmatter-short))"
     set_frontmatter-long:
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3))"
-        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4))"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null}(min-keys(3);operands(set_frontmatter-long))"
+        - "{file: string(deferred;required),prop: string(deferred;required),value: unknown | null,no_error: boolean(required)}(min-keys(4);operands(set_frontmatter-long))"
     abs-short:
-        - "number(deferred)"
-        - "tuple([number(deferred)])"
-    abs-long: "{x: number(deferred;required),no_error: boolean}"
+        - "number(deferred;operands(abs-short))"
+        - "tuple([number(deferred)]; operands(abs-short))"
+    abs-long: "{x: number(deferred;required),no_error: boolean}(operands(abs-long))"
     absolute-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(absolute-short))"
+        - "tuple([file(deferred) | null]; operands(absolute-short))"
     absolute-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(absolute-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(absolute-long))"
     and-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "(unknown | null)[]"
+        - "unknown[](max(0);operands(and-short))"
+        - "string(deferred;operands(and-short))"
+        - "number(deferred;operands(and-short))"
+        - "boolean(deferred;operands(and-short))"
+        - "(unknown | null)[](operands(and-short))"
     as_csv-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_csv-short))"
     as_csv-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_csv-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_csv-long))"
     as_json-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_json-short))"
     as_json-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_json-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_json-long))"
     as_json5-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_json5-short))"
     as_json5-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_json5-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_json5-long))"
     as_line_separated-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_line_separated-short))"
     as_line_separated-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_line_separated-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_line_separated-long))"
     as_markdown-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(as_markdown-short))"
+        - "tuple([string(deferred) | null]; operands(as_markdown-short))"
     as_markdown-long:
-        - "{content: string(deferred) | null}(min-keys(1))"
-        - "{content: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{content: string(deferred) | null}(min-keys(1);operands(as_markdown-long))"
+        - "{content: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_markdown-long))"
     as_ordered_list-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_ordered_list-short))"
     as_ordered_list-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_ordered_list-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_ordered_list-long))"
     as_space_separated-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_space_separated-short))"
     as_space_separated-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_space_separated-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_space_separated-long))"
     as_tsv-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_tsv-short))"
     as_tsv-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_tsv-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_tsv-long))"
     as_unordered_list-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(as_unordered_list-short))"
     as_unordered_list-long:
-        - "{list: unknown[](deferred) | null}(min-keys(1))"
-        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{list: unknown[](deferred) | null}(min-keys(1);operands(as_unordered_list-long))"
+        - "{list: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(as_unordered_list-long))"
     basename-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(basename-short))"
+        - "tuple([file(deferred) | null]; operands(basename-short))"
     basename-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(basename-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(basename-long))"
     basename_without_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(basename_without_index-short))"
+        - "tuple([file(deferred) | null]; operands(basename_without_index-short))"
     basename_without_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(basename_without_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(basename_without_index-long))"
     branch_exists_on_remote-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "tuple([string(deferred)])"
-        - "tuple([string(deferred), string(deferred)])"
+        - "unknown[](max(0);operands(branch_exists_on_remote-short))"
+        - "string(deferred;operands(branch_exists_on_remote-short))"
+        - "tuple([string(deferred)]; operands(branch_exists_on_remote-short))"
+        - "tuple([string(deferred), string(deferred)]; operands(branch_exists_on_remote-short))"
     branch_exists_on_remote-long:
-        - "{no_error: boolean}"
-        - "{branch: string(deferred;required),no_error: boolean}"
-        - "{branch: string(deferred;required),remote: string(deferred;required),no_error: boolean}"
+        - "{no_error: boolean}(operands(branch_exists_on_remote-long))"
+        - "{branch: string(deferred;required),no_error: boolean}(operands(branch_exists_on_remote-long))"
+        - "{branch: string(deferred;required),remote: string(deferred;required),no_error: boolean}(operands(branch_exists_on_remote-long))"
     camel_case-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(camel_case-short))"
+        - "tuple([string(deferred) | null]; operands(camel_case-short))"
     camel_case-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(camel_case-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(camel_case-long))"
     can_execute-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(can_execute-short))"
+        - "tuple([string(deferred) | null]; operands(can_execute-short))"
     can_execute-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(can_execute-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(can_execute-long))"
     capitalize-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(capitalize-short))"
+        - "tuple([string(deferred) | null]; operands(capitalize-short))"
     capitalize-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(capitalize-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(capitalize-long))"
     cicd-short:
-        - "number(integer;min(1);deferred)"
-        - "string(min(1);deferred)"
-        - "tuple([number(integer;min(1);deferred) | string(min(1);deferred)])"
-    cicd-long: "{id: number(integer;min(1);deferred;required) | string(min(1);deferred),no_error: boolean}"
+        - "number(integer;min(1);deferred;operands(cicd-short))"
+        - "string(min(1);deferred;operands(cicd-short))"
+        - "tuple([number(integer;min(1);deferred) | string(min(1);deferred)]; operands(cicd-short))"
+    cicd-long: "{id: number(integer;min(1);deferred;required) | string(min(1);deferred),no_error: boolean}(operands(cicd-long))"
     cicd_list-short:
         - "template-operand"
-        - "number(integer;min(1);max(100);deferred)"
-        - "tuple([object(deferred)])"
-        - "tuple([number(integer;min(1);max(100);deferred)])"
+        - "number(integer;min(1);max(100);deferred;operands(cicd_list-short))"
+        - "tuple([object(deferred)]; operands(cicd_list-short))"
+        - "tuple([number(integer;min(1);max(100);deferred)]; operands(cicd_list-short))"
     cicd_list-long:
-        - "{query: object(deferred;required),no_error: boolean}"
-        - "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}"
+        - "{query: object(deferred;required),no_error: boolean}(operands(cicd_list-long))"
+        - "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}(operands(cicd_list-long))"
     code_link-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
-        - "tuple([file(deferred) | null, string(deferred) | null])"
+        - "file(deferred;operands(code_link-short))"
+        - "tuple([file(deferred) | null]; operands(code_link-short))"
+        - "tuple([file(deferred) | null, string(deferred) | null]; operands(code_link-short))"
     code_link-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-        - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2))"
-        - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    contains-short: "tuple([string(deferred) | unknown[](deferred) | object(deferred) | null, unknown | null])"
+        - "{file: file(deferred) | null}(min-keys(1);operands(code_link-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(code_link-long))"
+        - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2);operands(code_link-long))"
+        - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(code_link-long))"
+    contains-short: "tuple([string(deferred) | unknown[](deferred) | object(deferred) | null, unknown | null]; operands(contains-short))"
     contains-long:
-        - "{haystack: string(deferred) | unknown[](deferred) | object(deferred) | null,needle: unknown | null}(min-keys(2))"
-        - "{haystack: string(deferred) | unknown[](deferred) | object(deferred) | null,needle: unknown | null,no_error: boolean(required)}(min-keys(3))"
-    date-short: "tuple([date(deferred) | datetime(deferred) | null, enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null])"
+        - "{haystack: string(deferred) | unknown[](deferred) | object(deferred) | null,needle: unknown | null}(min-keys(2);operands(contains-long))"
+        - "{haystack: string(deferred) | unknown[](deferred) | object(deferred) | null,needle: unknown | null,no_error: boolean(required)}(min-keys(3);operands(contains-long))"
+    date-short: "tuple([date(deferred) | datetime(deferred) | null, enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null]; operands(date-short))"
     date-long:
-        - "{iso: date(deferred) | datetime(deferred) | null,fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null}(min-keys(2))"
-        - "{iso: date(deferred) | datetime(deferred) | null,fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    date_delta-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)])"
-    date_delta-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}"
+        - "{iso: date(deferred) | datetime(deferred) | null,fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null}(min-keys(2);operands(date-long))"
+        - "{iso: date(deferred) | datetime(deferred) | null,fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long;deferred) | null,no_error: boolean(required)}(min-keys(3);operands(date-long))"
+    date_delta-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)]; operands(date_delta-short))"
+    date_delta-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}(operands(date_delta-long))"
     decrement_file_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(decrement_file_index-short))"
+        - "tuple([file(deferred) | null]; operands(decrement_file_index-short))"
     decrement_file_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(decrement_file_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(decrement_file_index-long))"
     dir_leading-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(dir_leading-short))"
+        - "tuple([file(deferred) | null]; operands(dir_leading-short))"
     dir_leading-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(dir_leading-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(dir_leading-long))"
     dirname-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(dirname-short))"
+        - "tuple([file(deferred) | null]; operands(dirname-short))"
     dirname-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-    ends_with-short: "tuple([string(deferred) | null, string(deferred) | null])"
+        - "{file: file(deferred) | null}(min-keys(1);operands(dirname-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(dirname-long))"
+    ends_with-short: "tuple([string(deferred) | null, string(deferred) | null]; operands(ends_with-short))"
     ends_with-long:
-        - "{x: string(deferred) | null,find: string(deferred) | null}(min-keys(2))"
-        - "{x: string(deferred) | null,find: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    ensure_leading-short: "tuple([string(deferred) | number(deferred) | null, string(deferred) | number(deferred) | null])"
+        - "{x: string(deferred) | null,find: string(deferred) | null}(min-keys(2);operands(ends_with-long))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(ends_with-long))"
+    ensure_leading-short: "tuple([string(deferred) | number(deferred) | null, string(deferred) | number(deferred) | null]; operands(ensure_leading-short))"
     ensure_leading-long:
-        - "{var: string(deferred) | number(deferred) | null,prefix: string(deferred) | number(deferred) | null}(min-keys(2))"
-        - "{var: string(deferred) | number(deferred) | null,prefix: string(deferred) | number(deferred) | null,no_error: boolean(required)}(min-keys(3))"
-    ensure_trailing-short: "tuple([string(deferred) | number(deferred) | null, string(deferred) | number(deferred) | null])"
+        - "{var: string(deferred) | number(deferred) | null,prefix: string(deferred) | number(deferred) | null}(min-keys(2);operands(ensure_leading-long))"
+        - "{var: string(deferred) | number(deferred) | null,prefix: string(deferred) | number(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(ensure_leading-long))"
+    ensure_trailing-short: "tuple([string(deferred) | number(deferred) | null, string(deferred) | number(deferred) | null]; operands(ensure_trailing-short))"
     ensure_trailing-long:
-        - "{var: string(deferred) | number(deferred) | null,postfix: string(deferred) | number(deferred) | null}(min-keys(2))"
-        - "{var: string(deferred) | number(deferred) | null,postfix: string(deferred) | number(deferred) | null,no_error: boolean(required)}(min-keys(3))"
+        - "{var: string(deferred) | number(deferred) | null,postfix: string(deferred) | number(deferred) | null}(min-keys(2);operands(ensure_trailing-long))"
+        - "{var: string(deferred) | number(deferred) | null,postfix: string(deferred) | number(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(ensure_trailing-long))"
     ext-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(ext-short))"
+        - "tuple([file(deferred) | null]; operands(ext-short))"
     ext-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(ext-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(ext-long))"
     file_exists-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(file_exists-short))"
+        - "number(deferred;operands(file_exists-short))"
+        - "boolean(deferred;operands(file_exists-short))"
+        - "tuple([unknown | null]; operands(file_exists-short))"
     file_exists-long:
-        - "{value: unknown | null}(min-keys(1))"
-        - "{value: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{value: unknown | null}(min-keys(1);operands(file_exists-long))"
+        - "{value: unknown | null,no_error: boolean(required)}(min-keys(2);operands(file_exists-long))"
     file_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(file_index-short))"
+        - "tuple([file(deferred) | null]; operands(file_index-short))"
     file_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(file_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(file_index-long))"
     file_trailing-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(file_trailing-short))"
+        - "tuple([file(deferred) | null]; operands(file_trailing-short))"
     file_trailing-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(file_trailing-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(file_trailing-long))"
     find_files-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(find_files-short))"
+        - "tuple([string(deferred) | null]; operands(find_files-short))"
     find_files-long:
-        - "{pattern: string(deferred) | null}(min-keys(1))"
-        - "{pattern: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{pattern: string(deferred) | null}(min-keys(1);operands(find_files-long))"
+        - "{pattern: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(find_files-long))"
     find_first_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(find_first_index-short))"
+        - "tuple([file(deferred) | null]; operands(find_first_index-short))"
     find_first_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(find_first_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(find_first_index-long))"
     find_last_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(find_last_index-short))"
+        - "tuple([file(deferred) | null]; operands(find_last_index-short))"
     find_last_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(find_last_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(find_last_index-long))"
     first-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(first-short))"
     first-long:
-        - "{x: unknown[](deferred) | null}(min-keys(1))"
-        - "{x: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown[](deferred) | null}(min-keys(1);operands(first-long))"
+        - "{x: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(first-long))"
     frontmatter-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
-        - "tuple([file(deferred) | null, string(deferred)])"
+        - "file(deferred;operands(frontmatter-short))"
+        - "tuple([file(deferred) | null]; operands(frontmatter-short))"
+        - "tuple([file(deferred) | null, string(deferred)]; operands(frontmatter-short))"
     frontmatter-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-        - "{file: file(deferred) | null,prop: string(deferred;required)}(min-keys(2))"
-        - "{file: file(deferred) | null,prop: string(deferred;required),no_error: boolean(required)}(min-keys(3))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(frontmatter-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(frontmatter-long))"
+        - "{file: file(deferred) | null,prop: string(deferred;required)}(min-keys(2);operands(frontmatter-long))"
+        - "{file: file(deferred) | null,prop: string(deferred;required),no_error: boolean(required)}(min-keys(3);operands(frontmatter-long))"
     has_agentic_cli-short:
         - "agentic-cli(deferred)"
-        - "tuple([agentic-cli(deferred) | null])"
+        - "tuple([agentic-cli(deferred) | null]; operands(has_agentic_cli-short))"
     has_agentic_cli-long:
-        - "{agent: agentic-cli(deferred) | null}(min-keys(1))"
-        - "{agent: agentic-cli(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{agent: agentic-cli(deferred) | null}(min-keys(1);operands(has_agentic_cli-long))"
+        - "{agent: agentic-cli(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_agentic_cli-long))"
     has_alias-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_alias-short))"
+        - "tuple([string(deferred) | null]; operands(has_alias-short))"
     has_alias-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(has_alias-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_alias-long))"
     has_binary-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_binary-short))"
+        - "tuple([string(deferred) | null]; operands(has_binary-short))"
     has_binary-long:
-        - "{name_or_path: string(deferred) | null}(min-keys(1))"
-        - "{name_or_path: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name_or_path: string(deferred) | null}(min-keys(1);operands(has_binary-long))"
+        - "{name_or_path: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_binary-long))"
     has_builtin_function-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_builtin_function-short))"
+        - "tuple([string(deferred) | null]; operands(has_builtin_function-short))"
     has_builtin_function-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(has_builtin_function-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_builtin_function-long))"
     has_command-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_command-short))"
+        - "tuple([string(deferred) | null]; operands(has_command-short))"
     has_command-long:
-        - "{cmd: string(deferred) | null}(min-keys(1))"
-        - "{cmd: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-    has_key-short: "tuple([object(deferred) | null, string(deferred) | null])"
+        - "{cmd: string(deferred) | null}(min-keys(1);operands(has_command-long))"
+        - "{cmd: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_command-long))"
+    has_key-short: "tuple([object(deferred) | null, string(deferred) | null]; operands(has_key-short))"
     has_key-long:
-        - "{obj: object(deferred) | null,key: string(deferred) | null}(min-keys(2))"
-        - "{obj: object(deferred) | null,key: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
+        - "{obj: object(deferred) | null,key: string(deferred) | null}(min-keys(2);operands(has_key-long))"
+        - "{obj: object(deferred) | null,key: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(has_key-long))"
     has_local_skill-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_local_skill-short))"
+        - "tuple([string(deferred) | null]; operands(has_local_skill-short))"
     has_local_skill-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(has_local_skill-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_local_skill-long))"
     has_skill-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_skill-short))"
+        - "tuple([string(deferred) | null]; operands(has_skill-short))"
     has_skill-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(has_skill-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_skill-long))"
     has_user_function-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(has_user_function-short))"
+        - "tuple([string(deferred) | null]; operands(has_user_function-short))"
     has_user_function-long:
-        - "{name: string(deferred) | null}(min-keys(1))"
-        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{name: string(deferred) | null}(min-keys(1);operands(has_user_function-long))"
+        - "{name: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(has_user_function-long))"
     increment_file_index-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(increment_file_index-short))"
+        - "tuple([file(deferred) | null]; operands(increment_file_index-short))"
     increment_file_index-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(increment_file_index-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(increment_file_index-long))"
     ipv4-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "tuple([string(deferred)?])"
+        - "unknown[](max(0);operands(ipv4-short))"
+        - "string(deferred;operands(ipv4-short))"
+        - "tuple([string(deferred)?]; operands(ipv4-short))"
     ipv4-long:
-        - "{no_error: boolean}"
-        - "{filter: string(deferred;required),no_error: boolean}"
+        - "{no_error: boolean}(operands(ipv4-long))"
+        - "{filter: string(deferred;required),no_error: boolean}(operands(ipv4-long))"
     ipv6-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "tuple([string(deferred)?])"
+        - "unknown[](max(0);operands(ipv6-short))"
+        - "string(deferred;operands(ipv6-short))"
+        - "tuple([string(deferred)?]; operands(ipv6-short))"
     ipv6-long:
-        - "{no_error: boolean}"
-        - "{filter: string(deferred;required),no_error: boolean}"
+        - "{no_error: boolean}(operands(ipv6-long))"
+        - "{filter: string(deferred;required),no_error: boolean}(operands(ipv6-long))"
     is_array-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_array-short))"
+        - "number(deferred;operands(is_array-short))"
+        - "boolean(deferred;operands(is_array-short))"
+        - "tuple([unknown | null]; operands(is_array-short))"
     is_array-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_array-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_array-long))"
     is_date-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_date-short))"
+        - "number(deferred;operands(is_date-short))"
+        - "boolean(deferred;operands(is_date-short))"
+        - "tuple([unknown | null]; operands(is_date-short))"
     is_date-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_date-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_date-long))"
     is_date_time-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_date_time-short))"
+        - "number(deferred;operands(is_date_time-short))"
+        - "boolean(deferred;operands(is_date_time-short))"
+        - "tuple([unknown | null]; operands(is_date_time-short))"
     is_date_time-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_date_time-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_date_time-long))"
     is_date_time_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_date_time_utc-short))"
+        - "number(deferred;operands(is_date_time_utc-short))"
+        - "boolean(deferred;operands(is_date_time_utc-short))"
+        - "tuple([unknown | null]; operands(is_date_time_utc-short))"
     is_date_time_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_date_time_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_date_time_utc-long))"
     is_date_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_date_utc-short))"
+        - "number(deferred;operands(is_date_utc-short))"
+        - "boolean(deferred;operands(is_date_utc-short))"
+        - "tuple([unknown | null]; operands(is_date_utc-short))"
     is_date_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_date_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_date_utc-long))"
     is_empty-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_empty-short))"
+        - "number(deferred;operands(is_empty-short))"
+        - "boolean(deferred;operands(is_empty-short))"
+        - "tuple([unknown | null]; operands(is_empty-short))"
     is_empty-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_empty-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_empty-long))"
     is_indexed_file-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(is_indexed_file-short))"
+        - "tuple([file(deferred) | null]; operands(is_indexed_file-short))"
     is_indexed_file-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(is_indexed_file-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(is_indexed_file-long))"
     is_integer-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_integer-short))"
+        - "number(deferred;operands(is_integer-short))"
+        - "boolean(deferred;operands(is_integer-short))"
+        - "tuple([unknown | null]; operands(is_integer-short))"
     is_integer-long:
-        - "{val: unknown | null}(min-keys(1))"
-        - "{val: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{val: unknown | null}(min-keys(1);operands(is_integer-long))"
+        - "{val: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_integer-long))"
     is_negative-short:
-        - "number(deferred)"
-        - "tuple([number(deferred) | null])"
+        - "number(deferred;operands(is_negative-short))"
+        - "tuple([number(deferred) | null]; operands(is_negative-short))"
     is_negative-long:
-        - "{val: number(deferred) | null}(min-keys(1))"
-        - "{val: number(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{val: number(deferred) | null}(min-keys(1);operands(is_negative-long))"
+        - "{val: number(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(is_negative-long))"
     is_null-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_null-short))"
+        - "number(deferred;operands(is_null-short))"
+        - "boolean(deferred;operands(is_null-short))"
+        - "tuple([unknown | null]; operands(is_null-short))"
     is_null-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_null-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_null-long))"
     is_number-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_number-short))"
+        - "number(deferred;operands(is_number-short))"
+        - "boolean(deferred;operands(is_number-short))"
+        - "tuple([unknown | null]; operands(is_number-short))"
     is_number-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_number-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_number-long))"
     is_object-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_object-short))"
+        - "number(deferred;operands(is_object-short))"
+        - "boolean(deferred;operands(is_object-short))"
+        - "tuple([unknown | null]; operands(is_object-short))"
     is_object-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_object-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_object-long))"
     is_positive-short:
-        - "number(deferred)"
-        - "tuple([number(deferred) | null])"
+        - "number(deferred;operands(is_positive-short))"
+        - "tuple([number(deferred) | null]; operands(is_positive-short))"
     is_positive-long:
-        - "{val: number(deferred) | null}(min-keys(1))"
-        - "{val: number(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{val: number(deferred) | null}(min-keys(1);operands(is_positive-long))"
+        - "{val: number(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(is_positive-long))"
     is_string-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_string-short))"
+        - "number(deferred;operands(is_string-short))"
+        - "boolean(deferred;operands(is_string-short))"
+        - "tuple([unknown | null]; operands(is_string-short))"
     is_string-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_string-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_string-long))"
     is_this_month-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_this_month-short))"
+        - "number(deferred;operands(is_this_month-short))"
+        - "boolean(deferred;operands(is_this_month-short))"
+        - "tuple([unknown | null]; operands(is_this_month-short))"
     is_this_month-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_this_month-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_this_month-long))"
     is_this_month_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_this_month_utc-short))"
+        - "number(deferred;operands(is_this_month_utc-short))"
+        - "boolean(deferred;operands(is_this_month_utc-short))"
+        - "tuple([unknown | null]; operands(is_this_month_utc-short))"
     is_this_month_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_this_month_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_this_month_utc-long))"
     is_this_year-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_this_year-short))"
+        - "number(deferred;operands(is_this_year-short))"
+        - "boolean(deferred;operands(is_this_year-short))"
+        - "tuple([unknown | null]; operands(is_this_year-short))"
     is_this_year-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_this_year-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_this_year-long))"
     is_this_year_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_this_year_utc-short))"
+        - "number(deferred;operands(is_this_year_utc-short))"
+        - "boolean(deferred;operands(is_this_year_utc-short))"
+        - "tuple([unknown | null]; operands(is_this_year_utc-short))"
     is_this_year_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_this_year_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_this_year_utc-long))"
     is_today-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_today-short))"
+        - "number(deferred;operands(is_today-short))"
+        - "boolean(deferred;operands(is_today-short))"
+        - "tuple([unknown | null]; operands(is_today-short))"
     is_today-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_today-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_today-long))"
     is_today_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_today_utc-short))"
+        - "number(deferred;operands(is_today_utc-short))"
+        - "boolean(deferred;operands(is_today_utc-short))"
+        - "tuple([unknown | null]; operands(is_today_utc-short))"
     is_today_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_today_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_today_utc-long))"
     is_tomorrow-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_tomorrow-short))"
+        - "number(deferred;operands(is_tomorrow-short))"
+        - "boolean(deferred;operands(is_tomorrow-short))"
+        - "tuple([unknown | null]; operands(is_tomorrow-short))"
     is_tomorrow-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_tomorrow-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_tomorrow-long))"
     is_tomorrow_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_tomorrow_utc-short))"
+        - "number(deferred;operands(is_tomorrow_utc-short))"
+        - "boolean(deferred;operands(is_tomorrow_utc-short))"
+        - "tuple([unknown | null]; operands(is_tomorrow_utc-short))"
     is_tomorrow_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_tomorrow_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_tomorrow_utc-long))"
     is_yesterday-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_yesterday-short))"
+        - "number(deferred;operands(is_yesterday-short))"
+        - "boolean(deferred;operands(is_yesterday-short))"
+        - "tuple([unknown | null]; operands(is_yesterday-short))"
     is_yesterday-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown | null}(min-keys(1);operands(is_yesterday-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_yesterday-long))"
     is_yesterday_utc-short:
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "tuple([unknown | null])"
+        - "string(deferred;operands(is_yesterday_utc-short))"
+        - "number(deferred;operands(is_yesterday_utc-short))"
+        - "boolean(deferred;operands(is_yesterday_utc-short))"
+        - "tuple([unknown | null]; operands(is_yesterday_utc-short))"
     is_yesterday_utc-long:
-        - "{x: unknown | null}(min-keys(1))"
-        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2))"
-    join-short: "tuple([string(deferred) | null, string(deferred) | null])"
+        - "{x: unknown | null}(min-keys(1);operands(is_yesterday_utc-long))"
+        - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_yesterday_utc-long))"
+    join-short: "tuple([string(deferred) | null, string(deferred) | null]; operands(join-short))"
     join-long:
-        - "{left: string(deferred) | null,right: string(deferred) | null}(min-keys(2))"
-        - "{left: string(deferred) | null,right: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
+        - "{left: string(deferred) | null,right: string(deferred) | null}(min-keys(2);operands(join-long))"
+        - "{left: string(deferred) | null,right: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(join-long))"
     kebab_case-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(kebab_case-short))"
+        - "tuple([string(deferred) | null]; operands(kebab_case-short))"
     kebab_case-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(kebab_case-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(kebab_case-long))"
     keys-short:
         - "template-operand"
-        - "tuple([object(deferred) | null])"
+        - "tuple([object(deferred) | null]; operands(keys-short))"
     keys-long:
-        - "{obj: object(deferred) | null}(min-keys(1))"
-        - "{obj: object(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{obj: object(deferred) | null}(min-keys(1);operands(keys-long))"
+        - "{obj: object(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(keys-long))"
     last-short:
         - "template-operand"
-        - "tuple([unknown[](deferred) | null])"
+        - "tuple([unknown[](deferred) | null]; operands(last-short))"
     last-long:
-        - "{x: unknown[](deferred) | null}(min-keys(1))"
-        - "{x: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: unknown[](deferred) | null}(min-keys(1);operands(last-long))"
+        - "{x: unknown[](deferred) | null,no_error: boolean(required)}(min-keys(2);operands(last-long))"
     length-short:
-        - "string(deferred)"
+        - "string(deferred;operands(length-short))"
         - "template-operand"
-        - "tuple([string(deferred) | unknown[](deferred) | object(deferred)])"
-    length-long: "{val: string(deferred;required) | unknown[](deferred) | object(deferred),no_error: boolean}"
+        - "tuple([string(deferred) | unknown[](deferred) | object(deferred)]; operands(length-short))"
+    length-long: "{val: string(deferred;required) | unknown[](deferred) | object(deferred),no_error: boolean}(operands(length-long))"
     link-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
-        - "tuple([file(deferred) | null, string(deferred) | null])"
+        - "file(deferred;operands(link-short))"
+        - "tuple([file(deferred) | null]; operands(link-short))"
+        - "tuple([file(deferred) | null, string(deferred) | null]; operands(link-short))"
     link-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-        - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2))"
-        - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(link-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(link-long))"
+        - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2);operands(link-long))"
+        - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(link-long))"
     lower-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(lower-short))"
+        - "tuple([string(deferred) | null]; operands(lower-short))"
     lower-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(lower-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(lower-long))"
     markdown_body_empty-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(markdown_body_empty-short))"
+        - "tuple([file(deferred) | null]; operands(markdown_body_empty-short))"
     markdown_body_empty-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(markdown_body_empty-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(markdown_body_empty-long))"
     markdown_title-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(markdown_title-short))"
+        - "tuple([file(deferred) | null]; operands(markdown_title-short))"
     markdown_title-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-    max-short: "tuple([number(deferred), number(deferred)])"
-    max-long: "{a: number(deferred;required),b: number(deferred;required),no_error: boolean}"
-    min-short: "tuple([number(deferred), number(deferred)])"
-    min-long: "{a: number(deferred;required),b: number(deferred;required),no_error: boolean}"
-    newer_than-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)])"
-    newer_than-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}"
+        - "{file: file(deferred) | null}(min-keys(1);operands(markdown_title-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(markdown_title-long))"
+    max-short: "tuple([number(deferred), number(deferred)]; operands(max-short))"
+    max-long: "{a: number(deferred;required),b: number(deferred;required),no_error: boolean}(operands(max-long))"
+    min-short: "tuple([number(deferred), number(deferred)]; operands(min-short))"
+    min-long: "{a: number(deferred;required),b: number(deferred;required),no_error: boolean}(operands(min-long))"
+    newer_than-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)]; operands(newer_than-short))"
+    newer_than-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}(operands(newer_than-long))"
     number-short:
-        - "numberlike(deferred)"
-        - "tuple([numberlike(deferred), number(deferred)?])"
+        - "numberlike(deferred;operands(number-short))"
+        - "tuple([numberlike(deferred), number(deferred)?]; operands(number-short))"
     number-long:
-        - "{x: numberlike(deferred;required),no_error: boolean}"
-        - "{x: numberlike(deferred;required),fallback: number(deferred;required),no_error: boolean}"
-    older_than-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)])"
-    older_than-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}"
+        - "{x: numberlike(deferred;required),no_error: boolean}(operands(number-long))"
+        - "{x: numberlike(deferred;required),fallback: number(deferred;required),no_error: boolean}(operands(number-long))"
+    older_than-short: "tuple([date(deferred) | datetime(deferred), date(deferred) | datetime(deferred), string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred)]; operands(older_than-short))"
+    older_than-long: "{date1: date(deferred;required) | datetime(deferred),date2: date(deferred;required) | datetime(deferred),diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$');deferred;required),no_error: boolean}(operands(older_than-long))"
     or-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "number(deferred)"
-        - "boolean(deferred)"
-        - "(unknown | null)[]"
+        - "unknown[](max(0);operands(or-short))"
+        - "string(deferred;operands(or-short))"
+        - "number(deferred;operands(or-short))"
+        - "boolean(deferred;operands(or-short))"
+        - "(unknown | null)[](operands(or-short))"
     package-short:
-        - "file(deferred)"
-        - "tuple([file(deferred)])"
-    package-long: "{where: file(deferred;required),no_error: boolean}"
+        - "file(deferred;operands(package-short))"
+        - "tuple([file(deferred)]; operands(package-short))"
+    package-long: "{where: file(deferred;required),no_error: boolean}(operands(package-long))"
     package_area-short:
-        - "file(deferred)"
-        - "tuple([file(deferred)])"
-    package_area-long: "{where: file(deferred;required),no_error: boolean}"
+        - "file(deferred;operands(package_area-short))"
+        - "tuple([file(deferred)]; operands(package_area-short))"
+    package_area-long: "{where: file(deferred;required),no_error: boolean}(operands(package_area-long))"
     parent_dir-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(parent_dir-short))"
+        - "tuple([file(deferred) | null]; operands(parent_dir-short))"
     parent_dir-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(parent_dir-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(parent_dir-long))"
     pascal_case-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(pascal_case-short))"
+        - "tuple([string(deferred) | null]; operands(pascal_case-short))"
     pascal_case-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(pascal_case-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(pascal_case-long))"
     ping-short:
         - "ip-address(deferred)"
-        - "tuple([ip-address(deferred), number(deferred)?])"
+        - "tuple([ip-address(deferred), number(deferred)?]; operands(ping-short))"
     ping-long:
-        - "{address: ip-address(deferred;required),no_error: boolean}"
-        - "{address: ip-address(deferred;required),timeout: number(deferred;required),no_error: boolean}"
-    ping_under-short: "tuple([ip-address(deferred), number(deferred), number(integer;min(1);max(100);deferred)?])"
+        - "{address: ip-address(deferred;required),no_error: boolean}(operands(ping-long))"
+        - "{address: ip-address(deferred;required),timeout: number(deferred;required),no_error: boolean}(operands(ping-long))"
+    ping_under-short: "tuple([ip-address(deferred), number(deferred), number(integer;min(1);max(100);deferred)?]; operands(ping_under-short))"
     ping_under-long:
-        - "{address: ip-address(deferred;required),timeout: number(deferred;required),no_error: boolean}"
-        - "{address: ip-address(deferred;required),timeout: number(deferred;required),attempts: number(integer;min(1);max(100);deferred;required),no_error: boolean}"
+        - "{address: ip-address(deferred;required),timeout: number(deferred;required),no_error: boolean}(operands(ping_under-long))"
+        - "{address: ip-address(deferred;required),timeout: number(deferred;required),attempts: number(integer;min(1);max(100);deferred;required),no_error: boolean}(operands(ping_under-long))"
     pr-short:
-        - "number(integer;min(1);deferred)"
-        - "string(min(1);deferred)"
-        - "tuple([number(integer;min(1);deferred) | string(min(1);deferred)])"
-    pr-long: "{id: number(integer;min(1);deferred;required) | string(min(1);deferred),no_error: boolean}"
+        - "number(integer;min(1);deferred;operands(pr-short))"
+        - "string(min(1);deferred;operands(pr-short))"
+        - "tuple([number(integer;min(1);deferred) | string(min(1);deferred)]; operands(pr-short))"
+    pr-long: "{id: number(integer;min(1);deferred;required) | string(min(1);deferred),no_error: boolean}(operands(pr-long))"
     pr_list-short:
         - "template-operand"
-        - "number(integer;min(1);max(100);deferred)"
-        - "tuple([object(deferred)])"
-        - "tuple([number(integer;min(1);max(100);deferred)])"
+        - "number(integer;min(1);max(100);deferred;operands(pr_list-short))"
+        - "tuple([object(deferred)]; operands(pr_list-short))"
+        - "tuple([number(integer;min(1);max(100);deferred)]; operands(pr_list-short))"
     pr_list-long:
-        - "{query: object(deferred;required),no_error: boolean}"
-        - "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}"
+        - "{query: object(deferred;required),no_error: boolean}(operands(pr_list-long))"
+        - "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}(operands(pr_list-long))"
     predict_conflicts-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(predict_conflicts-short))"
+        - "tuple([string(deferred) | null]; operands(predict_conflicts-short))"
     predict_conflicts-long:
-        - "{branch: string(deferred) | null}(min-keys(1))"
-        - "{branch: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{branch: string(deferred) | null}(min-keys(1);operands(predict_conflicts-long))"
+        - "{branch: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(predict_conflicts-long))"
     recent_commits-short:
-        - "number(integer;min(1);deferred)"
-        - "tuple([number(integer;min(1);deferred)])"
-    recent_commits-long: "{count: number(integer;min(1);deferred;required),no_error: boolean}"
+        - "number(integer;min(1);deferred;operands(recent_commits-short))"
+        - "tuple([number(integer;min(1);deferred)]; operands(recent_commits-short))"
+    recent_commits-long: "{count: number(integer;min(1);deferred;required),no_error: boolean}(operands(recent_commits-long))"
     relative-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(relative-short))"
+        - "tuple([file(deferred) | null]; operands(relative-short))"
     relative-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(relative-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(relative-long))"
     remote_vendor-short:
         - null
-        - "unknown[](max(0))"
-        - "string(deferred)"
-        - "tuple([string(deferred)?])"
+        - "unknown[](max(0);operands(remote_vendor-short))"
+        - "string(deferred;operands(remote_vendor-short))"
+        - "tuple([string(deferred)?]; operands(remote_vendor-short))"
     remote_vendor-long:
-        - "{no_error: boolean}"
-        - "{remote: string(deferred;required),no_error: boolean}"
-    replace-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null])"
+        - "{no_error: boolean}(operands(remote_vendor-long))"
+        - "{remote: string(deferred;required),no_error: boolean}(operands(remote_vendor-long))"
+    replace-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null]; operands(replace-short))"
     replace-long:
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3))"
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4))"
-    replace_first-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null])"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3);operands(replace-long))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4);operands(replace-long))"
+    replace_first-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null]; operands(replace_first-short))"
     replace_first-long:
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3))"
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4))"
-    replace_last-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null])"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3);operands(replace_first-long))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4);operands(replace_first-long))"
+    replace_last-short: "tuple([string(deferred) | null, string(deferred) | null, string(deferred) | null]; operands(replace_last-short))"
     replace_last-long:
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3))"
-        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null}(min-keys(3);operands(replace_last-long))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,replacement: string(deferred) | null,no_error: boolean(required)}(min-keys(4);operands(replace_last-long))"
     round-short:
-        - "numberlike(deferred)"
-        - "tuple([numberlike(deferred), number(deferred)?])"
+        - "numberlike(deferred;operands(round-short))"
+        - "tuple([numberlike(deferred), number(deferred)?]; operands(round-short))"
     round-long:
-        - "{x: numberlike(deferred;required),no_error: boolean}"
-        - "{x: numberlike(deferred;required),fallback: number(deferred;required),no_error: boolean}"
+        - "{x: numberlike(deferred;required),no_error: boolean}(operands(round-long))"
+        - "{x: numberlike(deferred;required),fallback: number(deferred;required),no_error: boolean}(operands(round-long))"
     snake_case-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(snake_case-short))"
+        - "tuple([string(deferred) | null]; operands(snake_case-short))"
     snake_case-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-    starts_with-short: "tuple([string(deferred) | null, string(deferred) | null])"
+        - "{x: string(deferred) | null}(min-keys(1);operands(snake_case-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(snake_case-long))"
+    starts_with-short: "tuple([string(deferred) | null, string(deferred) | null]; operands(starts_with-short))"
     starts_with-long:
-        - "{x: string(deferred) | null,find: string(deferred) | null}(min-keys(2))"
-        - "{x: string(deferred) | null,find: string(deferred) | null,no_error: boolean(required)}(min-keys(3))"
+        - "{x: string(deferred) | null,find: string(deferred) | null}(min-keys(2);operands(starts_with-long))"
+        - "{x: string(deferred) | null,find: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(starts_with-long))"
     terminal-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(terminal-short))"
+        - "tuple([string(deferred) | null]; operands(terminal-short))"
     terminal-long:
-        - "{content: string(deferred) | null}(min-keys(1))"
-        - "{content: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{content: string(deferred) | null}(min-keys(1);operands(terminal-long))"
+        - "{content: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(terminal-long))"
     title_case-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(title_case-short))"
+        - "tuple([string(deferred) | null]; operands(title_case-short))"
     title_case-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(title_case-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(title_case-long))"
     trim-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(trim-short))"
+        - "tuple([string(deferred) | null]; operands(trim-short))"
     trim-long:
-        - "{text: string(deferred) | null}(min-keys(1))"
-        - "{text: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{text: string(deferred) | null}(min-keys(1);operands(trim-long))"
+        - "{text: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(trim-long))"
     try_frontmatter-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
+        - "file(deferred;operands(try_frontmatter-short))"
+        - "tuple([file(deferred) | null]; operands(try_frontmatter-short))"
     try_frontmatter-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(try_frontmatter-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(try_frontmatter-long))"
     upper-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(upper-short))"
+        - "tuple([string(deferred) | null]; operands(upper-short))"
     upper-long:
-        - "{x: string(deferred) | null}(min-keys(1))"
-        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{x: string(deferred) | null}(min-keys(1);operands(upper-long))"
+        - "{x: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(upper-long))"
     validate_schema-short:
-        - "file(deferred)"
-        - "tuple([file(deferred) | null])"
-        - "tuple([file(deferred) | null, object(deferred)])"
+        - "file(deferred;operands(validate_schema-short))"
+        - "tuple([file(deferred) | null]; operands(validate_schema-short))"
+        - "tuple([file(deferred) | null, object(deferred)]; operands(validate_schema-short))"
     validate_schema-long:
-        - "{file: file(deferred) | null}(min-keys(1))"
-        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2))"
-        - "{file: file(deferred) | null,obj: object(deferred;required)}(min-keys(2))"
-        - "{file: file(deferred) | null,obj: object(deferred;required),no_error: boolean(required)}(min-keys(3))"
+        - "{file: file(deferred) | null}(min-keys(1);operands(validate_schema-long))"
+        - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(validate_schema-long))"
+        - "{file: file(deferred) | null,obj: object(deferred;required)}(min-keys(2);operands(validate_schema-long))"
+        - "{file: file(deferred) | null,obj: object(deferred;required),no_error: boolean(required)}(min-keys(3);operands(validate_schema-long))"
     values-short:
         - "template-operand"
-        - "tuple([object(deferred) | null])"
+        - "tuple([object(deferred) | null]; operands(values-short))"
     values-long:
-        - "{obj: object(deferred) | null}(min-keys(1))"
-        - "{obj: object(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{obj: object(deferred) | null}(min-keys(1);operands(values-long))"
+        - "{obj: object(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(values-long))"
     without_date-short:
-        - "string(deferred)"
-        - "tuple([string(deferred) | null])"
+        - "string(deferred;operands(without_date-short))"
+        - "tuple([string(deferred) | null]; operands(without_date-short))"
     without_date-long:
-        - "{string: string(deferred) | null}(min-keys(1))"
-        - "{string: string(deferred) | null,no_error: boolean(required)}(min-keys(2))"
+        - "{string: string(deferred) | null}(min-keys(1);operands(without_date-long))"
+        - "{string: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(without_date-long))"
     # END GENERATED types
     communicate:
         say:
@@ -883,9 +891,12 @@ types:
         success:
             - success-short
             - success-long
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     flow:
         stop:
             - stop-short
@@ -914,16 +925,22 @@ types:
         prep:
             - prep-short
             - prep-long
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     shell:
         shell:
             - shell-short
             - shell-long
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     expression:
         set: set-short
         # BEGIN GENERATED expression
@@ -1308,9 +1325,12 @@ types:
             - without_date-short
             - without_date-long
         # END GENERATED expression
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     bundle:
         say: say-short
         speak: speak-short

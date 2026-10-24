@@ -82,6 +82,8 @@ pub(crate) struct ConversionPlan {
     validator: OnceLock<Option<Arc<Validator>>>,
     /// Whether the schema marks any node `deferred`.
     deferral: OnceLock<bool>,
+    /// Whether the schema marks any node `x-darkmatter-operands`.
+    operands: OnceLock<bool>,
 }
 
 impl ConversionPlan {
@@ -102,6 +104,7 @@ impl ConversionPlan {
             relaxed: OnceLock::new(),
             validator: OnceLock::new(),
             deferral: OnceLock::new(),
+            operands: OnceLock::new(),
         });
         let mut cache = PLAN_CACHE.lock().expect("plan cache poisoned");
         if cache.len() >= PLAN_CACHE_CAPACITY {
@@ -119,6 +122,13 @@ impl ConversionPlan {
     /// templates to look for.
     fn marks_deferral(&self, schema: &Value) -> bool {
         *self.deferral.get_or_init(|| marks_deferral(schema))
+    }
+
+    /// Whether `schema` types any value as a generated lifecycle verb's
+    /// operands, so validation has calls to bind
+    /// ([`super::bound_operands`]).
+    pub(super) fn marks_operands(&self, schema: &Value) -> bool {
+        *self.operands.get_or_init(|| super::bound_operands::marks_operands(schema))
     }
 
     fn relaxed(&self, schema: &Value) -> &Shape {
@@ -270,10 +280,17 @@ fn is_pending(path: &[PathSegment], pending: &HashSet<String>) -> bool {
 /// template anywhere else is ordinary text and is judged as written. A
 /// top-level value is never listed here: a whole top-level template keeps its
 /// pending-key rule ([`super::EffectiveSchema::validate_with_options`]).
-#[derive(Debug, Default)]
+///
+/// [`Self::with_settled`] adds the operands a generated lifecycle verb's
+/// runtime registration accepted ([`super::bound_operands`]); they are set
+/// aside exactly as a template is, but are not templates and are never
+/// reported as [`Self::pointers`].
+#[derive(Debug, Default, Clone)]
 pub(crate) struct NestedTemplates {
-    /// Each template's path and its JSON Pointer.
+    /// Each template's path and its JSON Pointer, then each settled operand's.
     paths: Vec<(Vec<PathSegment>, String)>,
+    /// How many leading entries of `paths` are templates.
+    templates: usize,
 }
 
 impl NestedTemplates {
@@ -301,17 +318,33 @@ impl NestedTemplates {
         };
         // Only the paths matter; the verdict is the validator's.
         let _ = bind_with_marked(plan.shape(json_schema), instance, &BindOptions::default(), Some(&marked));
+        let paths: Vec<_> = found.into_inner().into_iter().map(|path| {
+            let pointer = pointer(&path);
+            (path, pointer)
+        }).collect();
         Self {
-            paths: found.into_inner().into_iter().map(|path| {
-                let pointer = pointer(&path);
-                (path, pointer)
-            }).collect(),
+            templates: paths.len(),
+            paths,
         }
+    }
+
+    /// These templates plus `settled`, the operands a lifecycle verb's
+    /// runtime registration accepted: a problem the schema reports on one of
+    /// them, or on a value holding it, is set aside unless the core still
+    /// fails there with them all taken as matching.
+    pub(crate) fn with_settled(&self, settled: &[Vec<PathSegment>]) -> Self {
+        let mut widened = self.clone();
+        for path in settled {
+            if !widened.paths.iter().any(|(known, _)| known == path) {
+                widened.paths.push((path.clone(), pointer(path)));
+            }
+        }
+        widened
     }
 
     /// The JSON Pointer of every listed template.
     pub(crate) fn pointers(&self) -> Vec<String> {
-        self.paths.iter().map(|(_, pointer)| pointer.clone()).collect()
+        self.paths[..self.templates].iter().map(|(_, pointer)| pointer.clone()).collect()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -688,6 +721,7 @@ fn relax(shape: &Shape, targets: &mut Vec<(ShapeRef, RefSlot)>) -> Shape {
             },
             min_properties: object.min_properties,
             max_properties: object.max_properties,
+            uncounted: object.uncounted.clone(),
         }),
         Shape::Union(options) => Shape::Union(options.iter().map(|option| relax(option, targets)).collect()),
         Shape::Assert(inner, assertion) => Shape::Assert(Box::new(relax(inner, targets)), assertion.clone()),

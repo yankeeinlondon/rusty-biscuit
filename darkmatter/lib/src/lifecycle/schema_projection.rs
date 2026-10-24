@@ -35,6 +35,14 @@
 //! its keys with `min-keys`. A tuple's optional position already rejects
 //! `null` unless its type admits it.
 //!
+//! The projected types alone cannot carry a runtime registration's own rules
+//! (`number`'s and `round`'s numeric recovery, `length`'s refusal of a
+//! boolean, the binder's overload preference). Every arm but a bare `null`
+//! or a named reference therefore carries `operands(<verb>-short)` or
+//! `operands(<verb>-long)`, and schema validation binds a value so typed
+//! through the verb's runtime registration: the binder's verdict, not the
+//! arms', decides its literal operands.
+//!
 //! The generator entry point is the `lifecycle_schema_generator` example
 //! (`just regen-lifecycle-schema`); builds embed the checked-in YAML.
 
@@ -194,8 +202,9 @@ pub struct ProjectedOverload {
     /// The overload's index among its function's overloads, in catalog
     /// order (the binder's overload index).
     pub index: usize,
-    /// Whether the overload takes a call with no arguments (`null`, `[]`).
-    pub zero_arguments: bool,
+    /// The arms of a call with no arguments (`null`, `[]`); empty when the
+    /// overload takes at least one argument.
+    pub zero_arguments: Vec<PropertyAtom>,
     /// The values a one-argument scalar call may hold.
     pub scalar: Vec<PropertyAtom>,
     /// The positional list (a tuple, or a list for a rest-only overload);
@@ -209,10 +218,7 @@ impl ProjectedOverload {
     /// The short-form arms this overload alone contributes, in the order the
     /// verb's short type lists them.
     pub fn short_arms(&self) -> Vec<PropertyAtom> {
-        let mut arms = Vec::new();
-        if self.zero_arguments {
-            arms.extend(zero_argument_arms());
-        }
+        let mut arms = self.zero_arguments.clone();
         arms.extend(self.scalar.iter().cloned());
         arms.extend(self.positional.iter().cloned());
         arms
@@ -255,24 +261,33 @@ impl ProjectedVerb {
             let takes = |count: usize| {
                 count >= required && (list.iter().any(|parameter| parameter.rest) || count <= list.len())
             };
+            let short_name = format!("{name}-short");
+            let short_arm = |atom: PropertyAtom| bind_operands(atom, &short_name);
             let scalar = match list.first() {
-                Some(first) if takes(1) => scalar_arms(name, first, helper)?,
+                Some(first) if takes(1) => scalar_arms(name, first, helper)?.into_iter().map(short_arm).collect(),
                 _ => Vec::new(),
             };
-            let long = if variadic { Vec::new() } else { long_arms(name, list)? };
+            let long_name = format!("{name}-long");
+            let long = if variadic {
+                Vec::new()
+            } else {
+                long_arms(name, list)?.into_iter().map(|atom| bind_operands(atom, &long_name)).collect()
+            };
             projected.push(ProjectedOverload {
                 index,
-                zero_arguments: takes(0),
+                zero_arguments: if takes(0) {
+                    zero_argument_arms().into_iter().map(short_arm).collect()
+                } else {
+                    Vec::new()
+                },
                 scalar,
-                positional: positional_arm(list),
+                positional: positional_arm(list).map(short_arm),
                 long,
             });
         }
         let mut short = Vec::new();
         for overload in &projected {
-            if overload.zero_arguments {
-                push_unique(&mut short, zero_argument_arms());
-            }
+            push_unique(&mut short, overload.zero_arguments.iter().cloned());
         }
         for overload in &projected {
             push_unique(&mut short, overload.scalar.iter().cloned());
@@ -715,6 +730,21 @@ fn defer_atom(atom: &PropertyAtom) -> PropertyAtom {
     atom
 }
 
+/// `atom` marked as an arm of the generated verb type `type_name`
+/// ([`Constraint::Operands`]), so schema validation binds a value it types
+/// through the verb's runtime registration. The bare `null` arm and a named
+/// reference carry no constraint of their own; the verb's other arms mark
+/// the value.
+fn bind_operands(mut atom: PropertyAtom, type_name: &str) -> PropertyAtom {
+    let marker = Constraint::Operands(type_name.to_string());
+    match &atom.ty {
+        TypeExpr::Primitive(SimplifiedType::Null) | TypeExpr::Imported { .. } if !atom.is_array => {}
+        _ if atom.is_array => atom.array_constraints.push(marker),
+        _ => atom.constraints.push(marker),
+    }
+    atom
+}
+
 /// `null` and `unknown[](max(0))`: a call with no arguments, spelled as the
 /// hand-written zero-argument verbs spell it.
 fn zero_argument_arms() -> [PropertyAtom; 2] {
@@ -1017,16 +1047,16 @@ mod tests {
             rendered(&verb.short),
             [
                 "template-operand",
-                "number(integer;min(1);max(100);deferred)",
-                "tuple([object(deferred)])",
-                "tuple([number(integer;min(1);max(100);deferred)])",
+                "number(integer;min(1);max(100);deferred;operands(pr_list-short))",
+                "tuple([object(deferred)]; operands(pr_list-short))",
+                "tuple([number(integer;min(1);max(100);deferred)]; operands(pr_list-short))",
             ]
         );
         assert_eq!(
             rendered(verb.long.as_ref().expect("long form")),
             [
-                "{query: object(deferred;required),no_error: boolean}",
-                "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}",
+                "{query: object(deferred;required),no_error: boolean}(operands(pr_list-long))",
+                "{count: number(integer;min(1);max(100);deferred;required),no_error: boolean}(operands(pr_list-long))",
             ]
         );
     }
@@ -1037,8 +1067,37 @@ mod tests {
         let verb = projection.verb("and").expect("and");
 
         assert!(verb.long.is_none());
-        assert_eq!(verb.short.last().map(serialize_property_atom).as_deref(), Some("(unknown | null)[]"));
+        assert_eq!(
+            verb.short.last().map(serialize_property_atom).as_deref(),
+            Some("(unknown | null)[](operands(and-short))")
+        );
         assert!(verb.short.contains(&PropertyAtom::bare(SimplifiedType::Null)));
+    }
+
+    /// Every arm a value can be told apart by carries its verb type's name,
+    /// so validation binds the value through the verb's registration; the
+    /// bare `null` arm and a named reference carry none.
+    #[test]
+    fn every_arm_but_null_and_a_reference_names_its_verb_type() {
+        let projection = shipped();
+        for (_, verb) in &projection.verbs {
+            let forms = [(verb.short_type_name(), &verb.short)]
+                .into_iter()
+                .chain(verb.long_type_name().zip(verb.long.as_ref()));
+            for (type_name, arms) in forms {
+                for atom in arms {
+                    let marked = atom
+                        .constraints
+                        .iter()
+                        .chain(&atom.array_constraints)
+                        .filter(|constraint| **constraint == Constraint::Operands(type_name.clone()))
+                        .count();
+                    let unmarked = *atom == PropertyAtom::bare(SimplifiedType::Null)
+                        || matches!(atom.ty, TypeExpr::Imported { .. });
+                    assert_eq!(marked, usize::from(!unmarked), "{type_name}: {}", serialize_property_atom(atom));
+                }
+            }
+        }
     }
 
     #[test]

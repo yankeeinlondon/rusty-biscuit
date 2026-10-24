@@ -13,6 +13,13 @@
 # would add about 125 properties to every typed level of every event of the
 # baseline every document is validated against.
 #
+# A stack root or `then`/`else` body is a list or a dictionary: a
+# single-action dictionary (a category, whose one verb takes its short or long
+# form, with `when` and `no_error` uncounted beside it) or a bundle of short
+# forms, as the lifecycle parser reads it. A side-effect or expression-function
+# verb's long form already passes there through the bundle's open key, so the
+# stacks list no `md-expression` arm.
+#
 # Stacks are typed three conditional levels deep (host profiles such as
 # Claudine's are recursive instead): a
 # `then`/`else` body inside a level-3 conditional is accepted loosely, and the
@@ -48,9 +55,12 @@ types:
         message:
             - message-short@./lifecycle.yaml
             - message-long@./lifecycle.yaml
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     md-flow:
         stop:
             - stop-short@./lifecycle.yaml
@@ -61,16 +71,22 @@ types:
         error:
             - error-short@./lifecycle.yaml
             - error-long@./lifecycle.yaml
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     md-expression:
         set: set-short@./lifecycle.yaml
         ? "<pattern::^(?:append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date)$>"
         : "unknown -> a Darkmatter side effect or expression function; the parser checks its arguments"
+        when: "expression -> run the action only when this condition holds; a list item only"
+        no_error: "boolean -> keep the stack running when this action fails"
         $constraints:
             min-keys: 1
             max-keys: 1
+            uncounted-keys: [when, no_error]
     md-bundle:
         stdout: stdout-short@./lifecycle.yaml
         stderr: stderr-short@./lifecycle.yaml
@@ -112,6 +128,9 @@ types:
         - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
     md-stack:
         - md-item-1[]
+        - md-communicate
+        - md-flow
+        - shell@./lifecycle.yaml
         - md-bundle
     md-item-1:
         - md-communicate
@@ -129,6 +148,9 @@ types:
             min-keys: 2
     md-stack-2:
         - md-item-2[]
+        - md-communicate
+        - md-flow
+        - shell@./lifecycle.yaml
         - md-bundle
     md-item-2:
         - md-communicate
@@ -146,6 +168,9 @@ types:
             min-keys: 2
     md-stack-3:
         - md-item-3[]
+        - md-communicate
+        - md-flow
+        - shell@./lifecycle.yaml
         - md-bundle
     md-item-3:
         - md-communicate
@@ -163,6 +188,8 @@ types:
             min-keys: 2
     md-initialize-stack:
         - md-initialize-item-1[]
+        - md-communicate
+        - md-flow
         - md-initialize-bundle
     md-initialize-item-1:
         - md-communicate
@@ -179,6 +206,8 @@ types:
             min-keys: 2
     md-initialize-stack-2:
         - md-initialize-item-2[]
+        - md-communicate
+        - md-flow
         - md-initialize-bundle
     md-initialize-item-2:
         - md-communicate
@@ -195,6 +224,8 @@ types:
             min-keys: 2
     md-initialize-stack-3:
         - md-initialize-item-3[]
+        - md-communicate
+        - md-flow
         - md-initialize-bundle
     md-initialize-item-3:
         - md-communicate

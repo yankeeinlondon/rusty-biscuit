@@ -9,7 +9,8 @@
 //! `md schema validate` and DMLS read too; every other cell is one edit to a
 //! control, judged through the same trigger discovery, effective schema, and
 //! validation they use. The task parser (`resolve_sequence_plan`) judges the
-//! conditional-depth cells: each container event starts its own count.
+//! conditional-depth cells: each container event starts its own count, and
+//! the single-action dictionary cells, which both it and the schema accept.
 
 use std::path::Path;
 
@@ -284,12 +285,65 @@ fn assert_event_profiles_and_depth_counts(path: ContainerPath) {
     assert!(format!("{error}").contains("conditionals nest at most 5 levels"), "{}: {error}", path.name);
 }
 
+/// Every container event accepts a single-action dictionary in long form at
+/// its root and in both branches, through the same families as the
+/// document's events, and so does a container loop's single loose verb; the
+/// task parser accepts them all. The families' restrictions hold there too.
+fn assert_single_action_dictionaries(path: ContainerPath) {
+    let judge = Judge::new();
+    let bodies = [
+        ("initialize", "{ info: { text: ready } }"),
+        ("start", "{ ensure_file: { file: notes.md } }"),
+        ("blocked", "{ warn: { text: blocked } }"),
+        ("success", "{ say: { text: done }, no_error: true }"),
+        ("failure", "{ shell: { command: \"git status\" } }"),
+        ("cancelled", "{ stop: { no_error: true } }"),
+        ("finalize", "{ ensure_dir: { dir: logs } }"),
+    ];
+    let mut roots = control_events();
+    let mut branches = control_events();
+    for (event, body) in bodies {
+        roots.insert(event.to_string(), yaml(body));
+        branches.insert(
+            event.to_string(),
+            yaml(&format!("[{{ when: \"ctx.a\", then: {body} }}, {{ when: \"ctx.b\", then: [{{ info: hi }}], else: {body} }}]")),
+        );
+    }
+    roots.insert("loop".to_string(), yaml("{ until: \"{{ true }}\", ensure_file: { file: review.txt } }"));
+    branches.insert(
+        "loop".to_string(),
+        yaml("{ until: \"{{ true }}\", gate: [{ when: \"ctx.a\", then: { warn: { text: cap } }, else: { ensure_file: { file: pass.txt } } }] }"),
+    );
+    for (label, events) in [("roots", roots), ("branches", branches)] {
+        let text = markdown(&document(path, &events).0);
+        judge.assert_valid(&format!("{} single-action {label}", path.name), &text);
+        if let Some(error) = judge.parser(label, &text) {
+            panic!("{}: the task parser accepts the single-action {label}: {error}", path.name);
+        }
+    }
+
+    for (event, body, needle) in [
+        ("initialize", "{ shell: { command: ls } }", "shell"),
+        ("cancelled", "{ retry: { max_attempts: 2 } }", "retry"),
+    ] {
+        let (text, holder) = with_event(path, event, yaml(body));
+        judge.assert_rejected_at(&format!("{} {event} single-action `{needle}`", path.name), &text, &format!("{holder}/{event}"));
+        let error = judge.parser(event, &text).unwrap_or_else(|| panic!("{}: the task parser refuses `{body}` in `{event}`", path.name));
+        assert!(format!("{error} {error:?}").contains(needle), "{}: {error}", path.name);
+    }
+}
+
 macro_rules! container_path_tests {
-    ($($path:ident: $events:ident, $cancelled:ident, $profiles:ident => $fixture:literal;)*) => {
+    ($($path:ident: $events:ident, $cancelled:ident, $profiles:ident, $single:ident => $fixture:literal;)*) => {
         $(
             #[test]
             fn $events() {
                 assert_every_event_is_typed($path, include_str!($fixture));
+            }
+
+            #[test]
+            fn $single() {
+                assert_single_action_dictionaries($path);
             }
 
             #[test]
@@ -309,13 +363,17 @@ macro_rules! container_path_tests {
 }
 
 container_path_tests! {
-    SEQ_SEQ: seq_seq_types_every_event, seq_seq_restricts_cancelled, seq_seq_event_profiles_and_depth_counts
+    SEQ_SEQ: seq_seq_types_every_event, seq_seq_restricts_cancelled, seq_seq_event_profiles_and_depth_counts,
+        seq_seq_takes_single_action_dictionaries
         => "../fixtures/sequence-schema/containers-depth4-seq-seq.md";
-    SEQ_GROUP: seq_group_types_every_event, seq_group_restricts_cancelled, seq_group_event_profiles_and_depth_counts
+    SEQ_GROUP: seq_group_types_every_event, seq_group_restricts_cancelled, seq_group_event_profiles_and_depth_counts,
+        seq_group_takes_single_action_dictionaries
         => "../fixtures/sequence-schema/containers-depth4-seq-group.md";
-    GROUP_SEQ: group_seq_types_every_event, group_seq_restricts_cancelled, group_seq_event_profiles_and_depth_counts
+    GROUP_SEQ: group_seq_types_every_event, group_seq_restricts_cancelled, group_seq_event_profiles_and_depth_counts,
+        group_seq_takes_single_action_dictionaries
         => "../fixtures/sequence-schema/containers-depth4-group-seq.md";
-    GROUP_GROUP: group_group_types_every_event, group_group_restricts_cancelled, group_group_event_profiles_and_depth_counts
+    GROUP_GROUP: group_group_types_every_event, group_group_restricts_cancelled, group_group_event_profiles_and_depth_counts,
+        group_group_takes_single_action_dictionaries
         => "../fixtures/sequence-schema/containers-depth4-group-group.md";
 }
 

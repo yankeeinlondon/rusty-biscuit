@@ -55,6 +55,7 @@
 pub mod about;
 pub mod catalog;
 mod advisory;
+mod bound_operands;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
@@ -1126,32 +1127,20 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        self.validate_converted(frontmatter, positions, None)
+        self.validate_converted(frontmatter, frontmatter, positions)
     }
 
-    /// [`Self::validate_with_positions`]; `templates`, when given, were
-    /// found in the authored form of `frontmatter` (before literal tokens
-    /// were decoded), so decoded literal text is never taken for a template.
-    fn validate_converted(
-        &self,
-        frontmatter: &Value,
-        positions: &PositionMap,
-        templates: Option<&coerce::NestedTemplates>,
-    ) -> ValidationReport {
+    /// [`Self::validate_with_positions`] of `frontmatter`, whose templates
+    /// are found in `stored`, its form before literal tokens were decoded,
+    /// so decoded literal text is never taken for a template.
+    fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &PositionMap) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
         if self.accepts_as_is(frontmatter) {
-            return self.validate_instance(frontmatter, positions, &coerce::NestedTemplates::default());
+            return self.validate_instance(frontmatter, frontmatter, stored, positions, &coerce::NestedTemplates::default());
         }
-        let found;
-        let templates = match templates {
-            Some(templates) => templates,
-            None => {
-                found = self.nested_templates(frontmatter);
-                &found
-            }
-        };
-        let working_copy = coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, templates);
-        self.validate_instance(&working_copy, positions, templates)
+        let templates = self.nested_templates(stored);
+        let working_copy = coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
+        self.validate_instance(&working_copy, frontmatter, stored, positions, &templates)
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.
@@ -1181,7 +1170,66 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        let resolve = timings::stage(ValidationStage::Resolve);
+        let projected = self.phase_projection(phase)?;
+        Ok(match phase {
+            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
+            // Raw, as `validate_raw` is, but nested templates at `deferred`
+            // places are deferred as in every phase.
+            SchemaPhase::Completion => {
+                let _validate = timings::stage(ValidationStage::Validate);
+                projected.validate_instance(frontmatter, frontmatter, frontmatter, positions, &projected.nested_templates(frontmatter))
+            }
+        })
+    }
+
+    /// Validates `stored`, a frontmatter value as loaded with its literal
+    /// tokens still encoded, unphased like [`Self::validate_with_positions`]
+    /// or at `phase` like [`Self::validate_for_phase_with_positions`].
+    ///
+    /// Each token is judged by the text it holds, and that text is data: it
+    /// is never deferred as a `{{ … }}` template, whether nested at a
+    /// `deferred` place or in a generated lifecycle verb's operand, so a
+    /// token holding `{{ fm.count }}` fails a number parameter as `three`
+    /// does. A malformed token leaves the value raw; composition reports it.
+    /// [`Self::validate_with_options`] judges its instance this way too.
+    ///
+    /// ## Errors
+    ///
+    /// See [`Self::validate_for_phase_with_positions`]; never fails without
+    /// a phase.
+    pub fn validate_stored(
+        &self,
+        stored: &Value,
+        positions: &PositionMap,
+        phase: Option<SchemaPhase>,
+    ) -> Result<ValidationReport, SchemaError> {
+        let projected;
+        let schema = match phase {
+            Some(phase) => {
+                projected = self.phase_projection(phase)?;
+                &projected
+            }
+            None => self,
+        };
+        Ok(schema.judge_stored(stored, positions, phase == Some(SchemaPhase::Completion)))
+    }
+
+    /// [`Self::validate_stored`] against this schema as it is: converted
+    /// first, or raw (`completion`) as the completion phase judges.
+    fn judge_stored(&self, stored: &Value, positions: &PositionMap, completion: bool) -> ValidationReport {
+        let decoded = crate::markdown::literal_token::decode_literal_tokens(stored).ok();
+        let decoded = decoded.as_ref().unwrap_or(stored);
+        if completion {
+            let _validate = timings::stage(ValidationStage::Validate);
+            self.validate_instance(decoded, decoded, stored, positions, &self.nested_templates(stored))
+        } else {
+            self.validate_converted(decoded, stored, positions)
+        }
+    }
+
+    /// This schema projected to `phase`'s presence rules.
+    fn phase_projection(&self, phase: SchemaPhase) -> Result<Self, SchemaError> {
+        let _resolve = timings::stage(ValidationStage::Resolve);
         let (projected, definitions, projected_document) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
@@ -1214,16 +1262,7 @@ impl EffectiveSchema {
             advisories: self.advisories.clone(),
             conversion: OnceLock::new(),
         };
-        drop(resolve);
-        Ok(match phase {
-            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
-            // Raw, as `validate_raw` is, but nested templates at `deferred`
-            // places are deferred as in every phase.
-            SchemaPhase::Completion => {
-                let _validate = timings::stage(ValidationStage::Validate);
-                projected.validate_instance(frontmatter, positions, &projected.nested_templates(frontmatter))
-            }
-        })
+        Ok(projected)
     }
 
     /// Validates a frontmatter JSON value against this schema **without any
@@ -1247,7 +1286,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        self.validate_instance(frontmatter, positions, &coerce::NestedTemplates::default())
+        self.validate_instance(frontmatter, frontmatter, frontmatter, positions, &coerce::NestedTemplates::default())
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
@@ -1261,12 +1300,38 @@ impl EffectiveSchema {
     /// coerced working copy, the `validate_raw` pair passes the instance as
     /// parsed. Problems owed to one of `templates` are left out as they are
     /// collected.
+    ///
+    /// Every value the schema types as a generated lifecycle verb's operands
+    /// is bound through that verb's runtime registration, whose verdict
+    /// decides its literal operands ([`bound_operands`]): the operands of an
+    /// accepted call are set aside like templates, and a rejected call is a
+    /// problem even where the types alone accept it. Calls are bound from
+    /// `authored`, the instance before conversion, since a registration
+    /// judges the value as written (`length` refuses `true`, which the
+    /// working copy holds as `"true"`). A malformed template in an operand
+    /// is a syntax problem whatever its type accepts; operands are scanned
+    /// for one in `stored`, `authored` as loaded with its literal tokens
+    /// still encoded.
     fn validate_instance(
         &self,
         instance: &Value,
+        authored: &Value,
+        stored: &Value,
         positions: &PositionMap,
         templates: &coerce::NestedTemplates,
     ) -> ValidationReport {
+        let bound = self
+            .conversion()
+            .marks_operands(&self.json_schema)
+            .then(|| bound_operands::BoundOperands::bind(&self.json_schema, authored, stored));
+        let widened;
+        let templates = match &bound {
+            Some(bound) if !bound.settled.is_empty() => {
+                widened = templates.with_settled(&bound.settled);
+                &widened
+            }
+            _ => templates,
+        };
         let failures = std::cell::OnceCell::new();
         let excused = |problem: &ValidationProblem| {
             templates.excuses_problem(problem, self.conversion(), &self.json_schema, instance, &failures)
@@ -1326,6 +1391,12 @@ impl EffectiveSchema {
                     .filter(|desc| !desc.trim().is_empty())
                     .filter(|desc| *desc != problem.message);
         }
+        // After the enrichment: a binder's problem names its call, and the
+        // description found at its place would be an arbitrary arm's.
+        if let Some(bound) = &bound {
+            bound.report_malformed(&mut problems, positions);
+            bound.report_rejections(&mut problems, positions);
+        }
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -1359,15 +1430,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
         options: &ValidationOptions,
     ) -> ValidationReport {
-        // Stored literal tokens are judged by the text they hold. A malformed
-        // one stays raw; composition reports it.
-        let decoded = crate::markdown::literal_token::decode_literal_tokens(frontmatter).ok();
-        let templates = self.nested_templates(frontmatter);
-        let mut report = self.validate_converted(
-            decoded.as_ref().unwrap_or(frontmatter),
-            positions,
-            Some(&templates),
-        );
+        let mut report = self.judge_stored(frontmatter, positions, false);
         let pending = scan_pending_values(frontmatter);
         let shell_pending_keys: HashSet<&str> = pending
             .iter()

@@ -28,7 +28,7 @@ pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
 pub use subtype::{
     is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
 };
-pub use convert::{DARKMATTER_DEFERRED_KEYWORD, DRAFT_2020_12, to_json_schema, to_json_schema_with_definitions};
+pub use convert::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_OPERANDS_KEYWORD, DARKMATTER_UNCOUNTED_KEYWORD, DRAFT_2020_12, to_json_schema, to_json_schema_with_definitions};
 pub use definitions::{
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,
 };
@@ -56,8 +56,8 @@ pub use standalone::{
 };
 pub use types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    LOCAL_REFERENCE, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
+    LOCAL_REFERENCE, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr, operands_verb,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;
@@ -261,6 +261,7 @@ fn parse_dollar_constraints(
         let constraint = match key {
             "min-keys" => Constraint::MinKeys(constraints_usize(context, key, v)?),
             "max-keys" => Constraint::MaxKeys(constraints_usize(context, key, v)?),
+            "uncounted-keys" => Constraint::UncountedKeys(constraints_keys(context, key, v)?),
             "min-items" => Constraint::MinItems(constraints_usize(context, key, v)?),
             "max-items" => Constraint::MaxItems(constraints_usize(context, key, v)?),
             "required" => {
@@ -305,6 +306,26 @@ fn constraints_usize(context: &str, key: &str, value: &YamlValue) -> Result<usiz
             message: format!("`$constraints.{key}` requires a non-negative integer"),
             span: 0..0,
         })
+}
+
+fn constraints_keys(context: &str, key: &str, value: &YamlValue) -> Result<Vec<String>, SchemaError> {
+    let grammar = |message: String| SchemaError::Grammar {
+        property: context.to_string(),
+        message,
+        span: 0..0,
+    };
+    let keys = value
+        .as_sequence()
+        .ok_or_else(|| grammar(format!("`$constraints.{key}` requires a list of key names")))?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| grammar(format!("`$constraints.{key}` lists key names, which are strings")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    types::check_uncounted_keys(&keys).map_err(grammar)?;
+    Ok(keys)
 }
 
 fn constraints_flag(context: &str, key: &str, value: &YamlValue) -> Result<(), SchemaError> {

@@ -87,48 +87,76 @@ fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::p
 // Data-file formats
 // ============================================================================
 
-/// The five supported data formats are one code path above the loader, so a
-/// format that parses must produce the same plan as any other. Asserting
-/// equality between them — rather than five independent expectations — is what
-/// makes a future format-specific divergence visible.
-#[test]
-fn yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "d.yaml", "wrap:\n  items:\n    - one\n    - two\n");
-    write(&workspace, "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#);
-    write(
-        &workspace,
-        "d.json5",
-        "{ wrap: { items: ['one', 'two'] } } // trailing comment\n",
-    );
-    write(
-        &workspace,
-        "d.jsonl",
-        "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
-    );
-    write(
-        &workspace,
-        "d.ndjson",
-        "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
-    );
+/// The plan every data-format row must produce.
+const SAME_PLAN: [&str; 2] = ["one", "two"];
 
-    let expected = vec!["one".to_string(), "two".to_string()];
-    for (name, source) in [
-        ("yaml.md", "\"d.yaml -> wrap.items\""),
-        ("json.md", "\"d.json -> wrap.items\""),
-        ("json5.md", "\"d.json5 -> wrap.items\""),
-        // JSONL/NDJSON are always a list at the root, so they take an operator
-        // but never an offset.
-        ("jsonl.md", "\"d.jsonl::name(label)\""),
-        ("ndjson.md", "\"d.ndjson::name(label)\""),
-    ] {
-        let doc = source_doc(&workspace, name, source);
-        assert_eq!(
-            composed_steps(&workspace, &doc, &[]),
-            expected,
-            "`{source}` should normalize to the same plan as every other format"
+/// The five supported data formats are one code path above the loader, so a
+/// format that parses must produce the same plan as any other. Each row is
+/// asserted against the one [`SAME_PLAN`] rather than an expectation of its
+/// own, which is what makes a future format-specific divergence visible.
+fn assert_source_produces_the_same_plan(doc: &str, data_file: &str, data: &str, source: &str) {
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
+    write(&workspace, data_file, data);
+    let doc = source_doc(&workspace, doc, source);
+    assert_eq!(
+        composed_steps(&workspace, &doc, &[]),
+        SAME_PLAN,
+        "`{source}` should normalize to the same plan as every other format"
+    );
+}
+
+/// One test per data format, so nextest runs the spawns in parallel.
+macro_rules! same_plan_tests {
+    ($($test:ident => ($doc:literal, $data_file:literal, $data:expr, $source:literal)),* $(,)?) => {
+        /// Each generated test's data file, in declaration order.
+        const SAME_PLAN_DATA_FILES: &[&str] = &[$($data_file),*];
+
+        $(#[test]
+        fn $test() {
+            assert_source_produces_the_same_plan($doc, $data_file, $data, $source);
+        })*
+    };
+}
+
+same_plan_tests! {
+    a_yaml_source_produces_the_same_plan =>
+        ("yaml.md", "d.yaml", "wrap:\n  items:\n    - one\n    - two\n", "\"d.yaml -> wrap.items\""),
+    a_json_source_produces_the_same_plan =>
+        ("json.md", "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#, "\"d.json -> wrap.items\""),
+    a_json5_source_produces_the_same_plan =>
+        ("json5.md", "d.json5", "{ wrap: { items: ['one', 'two'] } } // trailing comment\n", "\"d.json5 -> wrap.items\""),
+    // JSONL/NDJSON are always a list at the root, so they take an operator
+    // but never an offset.
+    a_jsonl_source_produces_the_same_plan =>
+        ("jsonl.md", "d.jsonl", "{\"label\": \"one\"}\n{\"label\": \"two\"}\n", "\"d.jsonl::name(label)\""),
+    an_ndjson_source_produces_the_same_plan =>
+        ("ndjson.md", "d.ndjson", "{\"label\": \"one\"}\n{\"label\": \"two\"}\n", "\"d.ndjson::name(label)\""),
+}
+
+/// Every source format the loader classifies has a same-plan row, and both
+/// line-delimited extensions keep theirs.
+#[test]
+fn every_source_format_has_a_same_plan_test() {
+    use claudine::composition::sequence::data::SourceFormat;
+
+    // Exhaustive on purpose: a new format fails to compile here until it has
+    // a row above.
+    let all = [
+        SourceFormat::Yaml,
+        SourceFormat::Json,
+        SourceFormat::Json5,
+        SourceFormat::LineDelimited,
+    ];
+    for format in all {
+        match format {
+            SourceFormat::Yaml | SourceFormat::Json | SourceFormat::Json5 | SourceFormat::LineDelimited => {}
+        }
+        assert!(
+            SAME_PLAN_DATA_FILES.iter().any(|file| SourceFormat::for_path(Path::new(file)) == format),
+            "{format:?} has no same-plan test"
         );
     }
+    assert_eq!(SAME_PLAN_DATA_FILES, ["d.yaml", "d.json", "d.json5", "d.jsonl", "d.ndjson"]);
 }
 
 #[test]
@@ -186,28 +214,84 @@ fn map_removes_the_source_key_while_name_retains_it() {
 /// Every classified string form reaches the sequence through the same
 /// `biscuit_file::ListFormat` classifier. Driving them through the CLI proves
 /// the wiring, not just the classifier's own unit tests.
-#[test]
-fn every_string_list_form_classifies_through_the_real_invocation_path() {
+fn assert_string_list_form_classifies(name: &str, raw: &str, expected: &[&str]) {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let cases: &[(&str, &str, &[&str])] = &[
-        ("csv", "\"alpha, beta, gamma\"", &["alpha", "beta", "gamma"]),
-        ("tsv", "\"alpha\tbeta\"", &["alpha", "beta"]),
-        ("lines", "\"alpha\nbeta\"", &["alpha", "beta"]),
-        ("spaces", "\"alpha beta gamma\"", &["alpha", "beta", "gamma"]),
-        ("scalar", "\"solo\"", &["solo"]),
-    ];
+    let doc = write(
+        &workspace,
+        &format!("{name}.md"),
+        &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ seq.name }}}}.\n"),
+    );
+    assert_eq!(
+        composed_steps(&workspace, &doc, &[]),
+        expected,
+        "`{name}` did not classify as expected"
+    );
+}
 
-    for (name, raw, expected) in cases {
-        let doc = write(
-            &workspace,
-            &format!("{name}.md"),
-            &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ seq.name }}}}.\n"),
-        );
-        assert_eq!(
-            composed_steps(&workspace, &doc, &[]),
-            *expected,
-            "`{name}` did not classify as expected"
-        );
+/// One test per string form, so nextest runs the spawns in parallel. `$raw`
+/// is the frontmatter scalar as authored; `$format` is what it must classify
+/// as once YAML has read it.
+macro_rules! string_list_form_tests {
+    ($($test:ident => ($name:literal, $raw:literal, $format:ident, [$($expected:literal),* $(,)?])),* $(,)?) => {
+        /// Each generated test's authored scalar and its intended format.
+        const STRING_LIST_FORMS: &[(&str, biscuit_file::ListFormat)] =
+            &[$(($raw, biscuit_file::ListFormat::$format)),*];
+
+        $(#[test]
+        fn $test() {
+            assert_string_list_form_classifies($name, $raw, &[$($expected),*]);
+        })*
+    };
+}
+
+string_list_form_tests! {
+    the_csv_string_form_classifies_through_the_real_invocation_path =>
+        ("csv", "\"alpha, beta, gamma\"", Csv, ["alpha", "beta", "gamma"]),
+    the_tsv_string_form_classifies_through_the_real_invocation_path =>
+        ("tsv", "\"alpha\tbeta\"", Tsv, ["alpha", "beta"]),
+    // YAML's `\n` escape: a raw newline inside a double-quoted scalar folds
+    // to a space, which would classify as space-separated instead.
+    the_lines_string_form_classifies_through_the_real_invocation_path =>
+        ("lines", "\"alpha\\nbeta\"", LineSeparated, ["alpha", "beta"]),
+    the_spaces_string_form_classifies_through_the_real_invocation_path =>
+        ("spaces", "\"alpha beta gamma\"", SpaceSeparated, ["alpha", "beta", "gamma"]),
+    the_scalar_string_form_classifies_through_the_real_invocation_path =>
+        ("scalar", "\"solo\"", Scalar, ["solo"]),
+}
+
+/// Each string-form row classifies as the format it names, and every
+/// `ListFormat` has a row here or in `markdown_list_markers_win_over_line_splitting`.
+#[test]
+fn every_list_format_has_a_string_form_test() {
+    use biscuit_file::{ListFormat, Yaml};
+
+    for (raw, format) in STRING_LIST_FORMS {
+        let yaml = Yaml::from_str(format!("raw: {raw}")).unwrap();
+        let value = yaml.value().get("raw").and_then(|v| v.as_str()).unwrap().to_string();
+        assert_eq!(ListFormat::classify(&value), *format, "row {raw:?} reads as {value:?}");
+    }
+
+    // Exhaustive on purpose: a new format fails to compile here until it has
+    // a test.
+    let all = [
+        ListFormat::MarkdownOrdered,
+        ListFormat::MarkdownUnordered,
+        ListFormat::LineSeparated,
+        ListFormat::Tsv,
+        ListFormat::Csv,
+        ListFormat::SpaceSeparated,
+        ListFormat::Scalar,
+    ];
+    for format in all {
+        let covered = match format {
+            ListFormat::MarkdownOrdered | ListFormat::MarkdownUnordered => true,
+            ListFormat::LineSeparated
+            | ListFormat::Tsv
+            | ListFormat::Csv
+            | ListFormat::SpaceSeparated
+            | ListFormat::Scalar => STRING_LIST_FORMS.iter().any(|(_, row)| *row == format),
+        };
+        assert!(covered, "{format:?} has no string-form test");
     }
 }
 

@@ -86,7 +86,11 @@ fn is_arm_property_marker(constraint: &Constraint) -> bool {
 fn is_count_bound(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::MinKeys(_) | Constraint::MaxKeys(_)
+        Constraint::MinItems(_)
+            | Constraint::MaxItems(_)
+            | Constraint::MinKeys(_)
+            | Constraint::MaxKeys(_)
+            | Constraint::UncountedKeys(_)
     )
 }
 

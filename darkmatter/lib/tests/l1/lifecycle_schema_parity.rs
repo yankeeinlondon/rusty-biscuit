@@ -226,6 +226,49 @@ fn a_root_dictionary_and_conditionals_keep_their_structure() {
     }
 }
 
+/// The md parser's verdict on `frontmatter`.
+fn md_parses(frontmatter: &str) -> Result<(), String> {
+    let value: serde_json::Value = serde_yaml_ng::from_str(frontmatter).expect("YAML frontmatter");
+    darkmatter::lifecycle::md_host::parse_lifecycle(&value, std::path::Path::new("doc.md"), None)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+/// A single-action dictionary takes its verb's long form at a stack root and
+/// in either branch, with `no_error` beside it there and `when` beside it in
+/// a list item, as md's parser reads it; several verbs beside a long form,
+/// and a shell in `initialize`, stay refused by both.
+#[test]
+fn single_action_dictionaries_take_long_forms_as_the_md_parser_does() {
+    let fixture = Fixture::new();
+    for body in ["{ info: { text: hi } }", "{ shell: { command: \"git status\" } }", "{ error: { reason: failed } }", "{ warn: { text: careful }, no_error: true }"] {
+        for frontmatter in [
+            format!("composed: {body}"),
+            format!("failed: [{{ when: 'true', then: {body} }}]"),
+            format!("finalize: [{{ when: 'true', then: [stop], else: {body} }}]"),
+        ] {
+            let report = fixture.validate(&frontmatter);
+            assert!(report.valid, "the baseline accepts `{frontmatter}`: {:?}", problems(&report));
+            assert_eq!(md_parses(&frontmatter), Ok(()), "md parses `{frontmatter}`");
+        }
+    }
+    for frontmatter in ["initialize: { info: { text: hi } }", "composed: [{ when: 'true', info: { text: hi } }]"] {
+        let report = fixture.validate(frontmatter);
+        assert!(report.valid, "the baseline accepts `{frontmatter}`: {:?}", problems(&report));
+        assert_eq!(md_parses(frontmatter), Ok(()), "md parses `{frontmatter}`");
+    }
+    for (frontmatter, needle) in [
+        ("composed: { info: { text: hi }, warn: careful }", "long form"),
+        ("composed: { info: { text: hi }, warn: { text: careful } }", "long form"),
+        ("initialize: { shell: { command: ls } }", "shell"),
+    ] {
+        let report = fixture.validate(frontmatter);
+        assert!(!report.valid, "the baseline rejects `{frontmatter}`");
+        let error = md_parses(frontmatter).expect_err(frontmatter);
+        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+    }
+}
+
 /// Every `x-darkmatter-suggest` list under `fragment`.
 fn suggestions(fragment: &serde_json::Value, found: &mut BTreeSet<Vec<String>>) {
     match fragment {

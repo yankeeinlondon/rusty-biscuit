@@ -132,8 +132,9 @@ fn the_shared_corpus_valid_depth_fixtures_raise_no_schema_diagnostic() {
 }
 
 /// The generated-verb fixtures `md schema validate` accepts (typed,
-/// convertible, and deferred operands, `ensure_file`'s overloads, and the
-/// variadic `and`/`or`) raise no schema diagnostic in DMLS.
+/// convertible, and deferred operands, `ensure_file`'s overloads, the
+/// variadic `and`/`or`, and the numeric-recovery fallbacks the runtime
+/// registration binds) raise no schema diagnostic in DMLS.
 #[test]
 fn the_shared_corpus_valid_generated_verb_fixtures_raise_no_schema_diagnostic() {
     assert_no_schema_diagnostic(&[
@@ -142,139 +143,280 @@ fn the_shared_corpus_valid_generated_verb_fixtures_raise_no_schema_diagnostic() 
         ("generated-verb-deferred", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md")),
         ("ensure-file-overloads", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md")),
         ("variadic-and-or", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md")),
+        ("generated-verb-numeric-recovery", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-numeric-recovery.md")),
     ]);
 }
 
-/// Each fixture `md schema validate` rejects is rejected by DMLS with the
-/// same set of instance paths, each starting at the node the CLI's
-/// line and column name (the CLI's 1-based position is this 0-based one plus
-/// one), with the offending text in the message where the verdict names one.
+/// A single-action dictionary in long form at a stack root, in either
+/// branch, and as a loop's one loose verb raises no schema diagnostic in
+/// DMLS, as `md schema validate` and the lifecycle parser accept it.
 #[test]
-fn the_shared_corpus_invalid_fixtures_are_rejected_where_the_cli_rejects_them() {
-    // (name, text, [(instance path, path to the node's first byte, message needle)])
-    type Expected<'a> = (&'a str, &'a str, Vec<(&'a str, Vec<&'a str>, &'a str)>);
-    let cases: Vec<Expected<'_>> = vec![
-        (
-            "depth6-wrong-verb",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md"),
-            vec![("/success/0/then/0/then/0/then/0/then/0/then/0/then/0", vec!["sya"], "sya")],
-        ),
-        (
-            "generated-verb-wrong-type",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md"),
-            vec![("/start/0/pr_list", vec!["three"], "three")],
-        ),
-        (
-            // A malformed template is judged as written, never deferred.
-            "generated-verb-malformed-template",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md"),
-            vec![("/start/0/pr_list", vec!["pr_list: ", "\""], "{{ 1 + }}")],
-        ),
-        (
-            "generated-verb-deferred-beside-unknown-parameter",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
-            vec![("/start/0/pr_list", vec!["pr_list: ", "{"], "limit")],
-        ),
-        (
-            "generated-verb-deferred-beside-extra-argument",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"),
-            vec![("/start/0/min/2", vec!["2, ", "3"], "3")],
-        ),
-        (
-            "generated-verb-deferred-beside-bad-sibling",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"),
-            vec![("/start/0/min/0", vec!["three"], "three")],
-        ),
-        (
-            "optional-nonnullable-null",
-            include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md"),
-            vec![
-                ("/start/0/ping/1", vec!["null"], "null"),
-                ("/start/1/ping/timeout", vec!["timeout: ", "null"], "null"),
-                ("/start/1/ping", vec!["ping: ", "ping: ", "{"], "timeout"),
-            ],
-        ),
-    ];
+fn the_shared_corpus_single_action_dictionaries_raise_no_schema_diagnostic() {
+    assert_no_schema_diagnostic(&[
+        ("single-action-root-dictionary", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-root-dictionary.md")),
+        ("single-action-branch-dictionaries", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-branch-dictionaries.md")),
+        ("single-action-loop-loose", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-loop-loose.md")),
+    ]);
+}
 
-    let documents: Vec<(&str, &str)> = cases.iter().map(|(name, text, _)| (*name, *text)).collect();
-    let found = published(&documents);
-    for ((name, text, expected), diagnostics) in cases.iter().zip(&found) {
-        let schema: Vec<&Value> = diagnostics.iter().filter(|diagnostic| is_schema(diagnostic)).collect();
-        let paths: BTreeSet<&str> = schema.iter().filter_map(|diagnostic| diagnostic["data"]["instance_path"].as_str()).collect();
-        let expected_paths: BTreeSet<&str> = expected.iter().map(|(pointer, _, _)| *pointer).collect();
-        assert_eq!(paths, expected_paths, "{name}: {schema:#?}");
-        for (pointer, node, needle) in expected {
-            let diagnostic = schema
-                .iter()
-                .find(|diagnostic| diagnostic["data"]["instance_path"] == json!(pointer))
-                .expect("present: the path sets match");
-            assert_eq!(diagnostic["range"]["start"], position(text, at(text, node)), "{name} {pointer}: {diagnostic:#?}");
-            assert!(diagnostic["message"].as_str().is_some_and(|message| message.contains(needle)), "{name} {pointer}: {diagnostic:#?}");
-        }
+/// Asserts DMLS rejects `text` with the set of instance paths in `expected`,
+/// each starting at the node its path of segments reaches (the CLI's 1-based
+/// line and column is this 0-based position plus one), with the needle in the
+/// message where the verdict names the offending text.
+fn assert_rejected_where_the_cli_rejects(name: &str, text: &str, expected: &[(&str, &[&str], &str)]) {
+    let found = published(&[(name, text)]);
+    let schema: Vec<&Value> = found[0].iter().filter(|diagnostic| is_schema(diagnostic)).collect();
+    let paths: BTreeSet<&str> = schema.iter().filter_map(|diagnostic| diagnostic["data"]["instance_path"].as_str()).collect();
+    let expected_paths: BTreeSet<&str> = expected.iter().map(|(pointer, _, _)| *pointer).collect();
+    assert_eq!(paths, expected_paths, "{name}: {schema:#?}");
+    for (pointer, node, needle) in expected {
+        let diagnostic = schema
+            .iter()
+            .find(|diagnostic| diagnostic["data"]["instance_path"] == json!(pointer))
+            .expect("present: the path sets match");
+        assert_eq!(diagnostic["range"]["start"], position(text, at(text, node)), "{name} {pointer}: {diagnostic:#?}");
+        assert!(diagnostic["message"].as_str().is_some_and(|message| message.contains(needle)), "{name} {pointer}: {diagnostic:#?}");
     }
 }
 
-/// In `start`, four conditionals deep, the innermost `then` and `else` each
-/// complete the generated canonical verbs and `shell`, and the long-form
-/// parameters of `ensure_file` (`then`) and `pr_list` (`else`); hover on
-/// each verb and on a parameter answers from the schema at that depth,
-/// including a parameter only a later overload declares (`content`, `count`).
+/// One test per fixture `md schema validate` rejects, each opening its one
+/// document in its own session, so the corpus's growth adds tests rather than
+/// time to one test. `INVALID_FIXTURES` is every generated test's fixture.
+macro_rules! invalid_fixture_tests {
+    ($($test:ident => ($name:literal, $text:expr, [$(($pointer:literal, [$($node:literal),+], $needle:literal)),+ $(,)?]);)*) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_rejected_where_the_cli_rejects($name, $text, &[$(($pointer, &[$($node),+], $needle)),+]);
+            }
+        )*
+
+        const INVALID_FIXTURES: &[&str] = &[$($name),*];
+    };
+}
+
+invalid_fixture_tests! {
+    the_cli_rejected_depth6_wrong_verb_is_rejected_at_the_verb => (
+        "depth6-wrong-verb",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md"),
+        [("/success/0/then/0/then/0/then/0/then/0/then/0/then/0", ["sya"], "sya")]
+    );
+    the_cli_rejected_generated_verb_wrong_type_is_rejected_at_the_operand => (
+        "generated-verb-wrong-type",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md"),
+        [("/start/0/pr_list", ["three"], "three")]
+    );
+    // A malformed template is never deferred: its syntax is the problem.
+    the_cli_rejected_generated_verb_malformed_template_is_rejected_at_the_template => (
+        "generated-verb-malformed-template",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md"),
+        [("/start/0/pr_list", ["pr_list: ", "\""], "malformed template `{{ 1 + }}`")]
+    );
+    // ... even where the operand's type accepts the text.
+    the_cli_rejected_generated_verb_malformed_string_template_is_rejected_at_each_template => (
+        "generated-verb-malformed-string-template",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-string-template.md"),
+        [
+            ("/start/0/ensure_file", ["ensure_file: ", "\""], "malformed template `{{ 1 + }}`"),
+            ("/start/1/trim/text", ["text: ", "'"], "malformed template `hello {{ 1 + }}`"),
+            ("/start/2/ensure_file/1", ["notes.txt, ", "'"], "malformed template `out/{{ 1 + }}.md`"),
+        ]
+    );
+    // ... and in a verb the parser owns itself, wherever it reads a template.
+    the_cli_rejected_handwritten_action_malformed_template_is_rejected_at_each_template => (
+        "handwritten-action-malformed-template",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/handwritten-action-malformed-template.md"),
+        [
+            ("/start/0/say", ["say: ", "\""], "malformed template `{{ 1 + }}`"),
+            ("/start/1/info/text", ["text: ", "'"], "malformed template `hello {{ 1 + }}`"),
+            ("/start/2/set/round", ["round: ", "'"], "malformed template `{{ fm.round + }}`"),
+            ("/start/3/shell", ["shell: ", "'"], "malformed template `echo {{ 2 * }}`"),
+            ("/start/4/then/0/error/reason", ["reason: ", "'"], "malformed template `failed {{ 3 - }}`"),
+            ("/start/4/else/0/proxy/with/note", ["note: ", "'"], "malformed template `next {{ 4 / }}`"),
+        ]
+    );
+    the_cli_rejected_deferred_beside_unknown_parameter_is_rejected_at_the_call => (
+        "generated-verb-deferred-beside-unknown-parameter",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
+        [("/start/0/pr_list", ["pr_list: ", "{"], "limit")]
+    );
+    the_cli_rejected_deferred_beside_extra_argument_is_rejected_at_the_argument => (
+        "generated-verb-deferred-beside-extra-argument",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"),
+        [("/start/0/min/2", ["2, ", "3"], "3")]
+    );
+    the_cli_rejected_deferred_beside_bad_sibling_is_rejected_at_the_sibling => (
+        "generated-verb-deferred-beside-bad-sibling",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"),
+        [("/start/0/min/0", ["three"], "three")]
+    );
+    the_cli_rejected_optional_nonnullable_null_is_rejected_at_each_null => (
+        "optional-nonnullable-null",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md"),
+        [
+            ("/start/0/ping/1", ["null"], "null"),
+            ("/start/1/ping/timeout", ["timeout: ", "null"], "null"),
+            ("/start/1/ping", ["ping: ", "ping: ", "{"], "timeout"),
+        ]
+    );
+    // The runtime registration refuses what the projected type converts.
+    the_cli_rejected_generated_verb_excluded_source_is_rejected_at_each_boolean => (
+        "generated-verb-excluded-source",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-excluded-source.md"),
+        [
+            ("/start/0/length/0", ["true"], "boolean"),
+            ("/start/1/then/0/length/val", ["val: ", "false"], "boolean"),
+        ]
+    );
+    // A loose long form beside another loose verb.
+    the_cli_rejected_long_forms_in_loop_bundle_is_rejected_at_the_long_form => (
+        "long-forms-in-loop-bundle",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/long-forms-in-loop-bundle.md"),
+        [("/loop/ensure_file", ["ensure_file: ", "{"], "file")]
+    );
+    // A conditional is a list item only, never a stack's dictionary.
+    the_cli_rejected_conditional_root_dictionary_is_rejected_at_the_stack => (
+        "conditional-root-dictionary",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/conditional-root-dictionary.md"),
+        [("/start", ["when"], "anyOf")]
+    );
+}
+
+/// Corpus fixtures this file judges in no test: the CLI and Claudine's own
+/// suites judge them, and their verdict is not part of the editor corpus.
+const OUTSIDE_EDITOR_PARITY: &[&str] = &[
+    "agent-empty-list", "bare-stop", "bundle-in-then", "controls-beside-ticket", "empty-frontmatter",
+    "linked-prompt", "long-form-in-bundle", "long-form-in-root-dictionary", "long-forms", "loop-gate",
+    "loop-number", "message-shell-bundle-with-when", "misspelled-parameter", "misspelled-verb-in-then",
+    "misspelled-verb", "null-identifiers", "prompt-with-malformed-sequence", "root-dictionary",
+    "shell-expansion-in-initialize-set", "shell-in-initialize-depth3-then", "shell-in-initialize-list",
+    "shell-in-initialize-root-dictionary", "shell-in-initialize-then", "shell-in-start", "start-number",
+    "unrelated-ticket", "when-with-then-and-sibling",
+];
+
+/// No corpus fixture escapes the editor parity unnoticed: each is named by a
+/// test in this file or listed in [`OUTSIDE_EDITOR_PARITY`], and each
+/// generated invalid-fixture test names a distinct corpus fixture.
 #[test]
-fn depth4_start_branches_complete_and_hover_generated_verbs_and_parameters() {
+fn every_corpus_fixture_is_judged_here_or_listed_outside_editor_parity() {
+    let corpus_dir = biscuit_test_harness::manifest_dir!().join("../../claudine/lib/tests/fixtures/claudine-schemas");
+    let corpus: BTreeSet<String> = std::fs::read_dir(&corpus_dir)
+        .unwrap_or_else(|error| panic!("{}: {error}", corpus_dir.display()))
+        .map(|entry| entry.expect("a directory entry").file_name().to_string_lossy().into_owned())
+        .filter_map(|file| file.strip_suffix(".md").map(str::to_owned))
+        .collect();
+    let invalid: BTreeSet<&str> = INVALID_FIXTURES.iter().copied().collect();
+    assert_eq!(invalid.len(), INVALID_FIXTURES.len(), "one test per invalid fixture: {INVALID_FIXTURES:?}");
+    for name in INVALID_FIXTURES.iter().chain(OUTSIDE_EDITOR_PARITY) {
+        assert!(corpus.contains(*name), "`{name}` is not a corpus fixture in {}", corpus_dir.display());
+    }
+    let source = include_str!("claudine_editor_parity.rs");
+    for name in &corpus {
+        let named = source.contains(&format!("claudine-schemas/{name}.md\")"));
+        let outside = OUTSIDE_EDITOR_PARITY.contains(&name.as_str());
+        assert!(
+            named != outside,
+            "`{name}.md`: add an editor-parity test for it (an `invalid_fixture_tests!` row if the CLI rejects it) or list it in OUTSIDE_EDITOR_PARITY, not both"
+        );
+    }
+}
+
+/// A stored literal token is data: DMLS types the text it holds as the
+/// generated verb's argument, at the operand, as `md schema validate` does,
+/// and never defers it as a template.
+#[test]
+fn a_stored_literal_token_argument_is_rejected_at_its_operand() {
+    // The token holds `{{ fm.count }}`, which no number converts from.
+    let text = "---\nstart:\n    - abs: \"{{!data:v1:e3sgZm0uY291bnQgfX0}}\"\n---\n# literal token\n";
+    let found = published(&[("literal-token", text)]);
+    let schema: Vec<&Value> = found[0].iter().filter(|diagnostic| is_schema(diagnostic)).collect();
+    let paths: BTreeSet<&str> = schema.iter().filter_map(|diagnostic| diagnostic["data"]["instance_path"].as_str()).collect();
+    assert_eq!(paths, BTreeSet::from(["/start/0/abs"]), "{schema:#?}");
+    assert_eq!(schema[0]["range"]["start"], position(text, at(text, &["abs: ", "\""])), "{schema:#?}");
+}
+
+/// Asserts the completion `labels` at `start`'s innermost `branch`, emptied
+/// to a bare item marker, offer the generated verbs, `shell`, and `when`.
+fn assert_depth4_start_branch_completes_generated_verbs(branch: &str, labels: &[String]) {
+    for verb in ["ensure_file", "pr_list", "set_frontmatter", "shell", "say", "when"] {
+        assert!(has(labels, verb), "start {branch}: `{verb}` in {labels:?}");
+    }
+}
+
+/// Each hover answers from the schema at depth four: bold `name`, naming its
+/// item path.
+fn assert_depth4_hovers(hovers: &[(&Vec<String>, &str)], item: &str) {
+    for (hover, name) in hovers {
+        let hover = &hover[0];
+        assert!(hover.contains(&format!("**`{name}`**")), "`{name}` hover: {hover:?}");
+        assert!(hover.contains(item), "`{name}` hover names its item {item}: {hover:?}");
+    }
+}
+
+/// In `start`, four conditionals deep, the innermost `then` completes the
+/// generated canonical verbs and `shell`, and the long-form parameters of
+/// `ensure_file`; hover on the verb and on a parameter answers from the schema
+/// at that depth, including a parameter only a later overload declares
+/// (`content`). The `else` branch is a separate test so neither opens all
+/// nine documents in one session.
+#[test]
+fn depth4_start_then_branch_completes_and_hovers_generated_verbs_and_parameters() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
     let (then_item, then_cursor) = emptied(depth4, "start", "then");
-    let (else_item, else_cursor) = emptied(depth4, "start", "else");
-    // A key-less block long form under each verb; flow-mapping keys
-    // (`{ fi }`) are not a completion position in DMLS at any depth.
+    // A key-less block long form under the verb; flow-mapping keys (`{ fi }`)
+    // are not a completion position in DMLS at any depth.
     let then_parameters = depth4.replacen(
         "- ensure_file: { file: notes.md, content: \"# Notes\" }",
         "- ensure_file:\n                                  file: notes.md\n                                  co: null",
         1,
     );
-    let else_parameters =
-        depth4.replacen("- pr_list: { count: 3 }", "- pr_list:\n                                  c: null", 1);
     let then_path = innermost("start", "then");
-    let else_path = innermost("start", "else");
 
     let found = editor_answers_at(&[
         ("then-item.md", &then_item, then_cursor, Ask::Complete),
-        ("else-item.md", &else_item, else_cursor, Ask::Complete),
         ("then-parameters.md", &then_parameters, after(&then_parameters, &[then_path.as_slice(), &["\n", "co"]].concat()), Ask::Complete),
-        ("else-parameters.md", &else_parameters, after(&else_parameters, &[else_path.as_slice(), &["\n", "c"]].concat()), Ask::Complete),
         ("then-verb.md", depth4, at(depth4, &[then_path.as_slice(), &["ensure_file"]].concat()), Ask::Hover),
         ("then-parameter.md", depth4, at(depth4, &[then_path.as_slice(), &["ensure_file", "file:"]].concat()), Ask::Hover),
         ("then-overload.md", depth4, at(depth4, &[then_path.as_slice(), &["content"]].concat()), Ask::Hover),
-        ("else-verb.md", depth4, at(depth4, &[else_path.as_slice(), &["pr_list"]].concat()), Ask::Hover),
-        ("else-parameter.md", depth4, at(depth4, &[else_path.as_slice(), &["count"]].concat()), Ask::Hover),
     ]);
-    let [then_labels, else_labels, then_keys, else_keys, then_verb, then_parameter, then_overload, else_verb, else_parameter] =
-        &found[..]
-    else {
+    let [then_labels, then_keys, then_verb, then_parameter, then_overload] = &found[..] else {
         panic!("{found:?}")
     };
 
-    for (branch, labels) in [("then", then_labels), ("else", else_labels)] {
-        for verb in ["ensure_file", "pr_list", "set_frontmatter", "shell", "say", "when"] {
-            assert!(has(labels, verb), "start {branch}: `{verb}` in {labels:?}");
-        }
-    }
+    assert_depth4_start_branch_completes_generated_verbs("then", then_labels);
     assert_eq!(then_keys, &["content"], "the `ensure_file` long-form parameter starting `co`");
-    assert_eq!(else_keys, &["count"], "the `pr_list` long-form parameter starting `c`");
-
-    let then_item_path = "`start[0].then[0].then[0].then[0].then[0]`";
-    let else_item_path = "`start[0].then[0].then[0].then[0].else[0]`";
-    for (hover, name, item) in [
-        (then_verb, "ensure_file", then_item_path),
-        (then_parameter, "file", then_item_path),
-        (then_overload, "content", then_item_path),
-        (else_verb, "pr_list", else_item_path),
-        (else_parameter, "count", else_item_path),
-    ] {
-        let hover = &hover[0];
-        assert!(hover.contains(&format!("**`{name}`**")), "`{name}` hover: {hover:?}");
-        assert!(hover.contains(item), "`{name}` hover names its item {item}: {hover:?}");
-    }
+    assert_depth4_hovers(
+        &[(then_verb, "ensure_file"), (then_parameter, "file"), (then_overload, "content")],
+        "`start[0].then[0].then[0].then[0].then[0]`",
+    );
     assert!(then_parameter[0].contains("Required"), "`file` is the required parameter: {then_parameter:?}");
+}
+
+/// In `start`, four conditionals deep, the innermost `else` completes the
+/// generated canonical verbs and `shell`, and the long-form parameters of
+/// `pr_list`; hover on the verb and on a parameter only a later overload
+/// declares (`count`) answers from the schema at that depth.
+#[test]
+fn depth4_start_else_branch_completes_and_hovers_generated_verbs_and_parameters() {
+    let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
+    let (else_item, else_cursor) = emptied(depth4, "start", "else");
+    let else_parameters =
+        depth4.replacen("- pr_list: { count: 3 }", "- pr_list:\n                                  c: null", 1);
+    let else_path = innermost("start", "else");
+
+    let found = editor_answers_at(&[
+        ("else-item.md", &else_item, else_cursor, Ask::Complete),
+        ("else-parameters.md", &else_parameters, after(&else_parameters, &[else_path.as_slice(), &["\n", "c"]].concat()), Ask::Complete),
+        ("else-verb.md", depth4, at(depth4, &[else_path.as_slice(), &["pr_list"]].concat()), Ask::Hover),
+        ("else-parameter.md", depth4, at(depth4, &[else_path.as_slice(), &["count"]].concat()), Ask::Hover),
+    ]);
+    let [else_labels, else_keys, else_verb, else_parameter] = &found[..] else {
+        panic!("{found:?}")
+    };
+
+    assert_depth4_start_branch_completes_generated_verbs("else", else_labels);
+    assert_eq!(else_keys, &["count"], "the `pr_list` long-form parameter starting `c`");
+    assert_depth4_hovers(&[(else_verb, "pr_list"), (else_parameter, "count")], "`start[0].then[0].then[0].then[0].else[0]`");
 }
 
 /// Four conditionals deep, each event keeps its own action profile in both

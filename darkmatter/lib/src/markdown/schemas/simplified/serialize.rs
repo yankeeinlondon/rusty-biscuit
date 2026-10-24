@@ -322,6 +322,16 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         Constraint::MaxKeys(n) => {
             let _ = write!(out, "max-keys({n})");
         }
+        Constraint::UncountedKeys(keys) => {
+            out.push_str("uncounted-keys(");
+            for (index, key) in keys.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_arg(out, key);
+            }
+            out.push(')');
+        }
 
         Constraint::Pattern(p) => {
             out.push_str("pattern(");
@@ -394,6 +404,9 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         }
         Constraint::Category(name) => {
             let _ = write!(out, "category({name})");
+        }
+        Constraint::Operands(name) => {
+            let _ = write!(out, "operands({name})");
         }
     }
 }
@@ -544,6 +557,14 @@ mod tests {
             array_constraints: vec![],
             description: None,
         });
+    }
+
+    #[test]
+    fn round_trip_object_with_uncounted_keys() {
+        let atom = parse_type_expr("test", "{ info: string, when: string }(max-keys(1); uncounted-keys(when))")
+            .expect("parses");
+        assert!(atom.constraints.contains(&Constraint::UncountedKeys(vec!["when".to_string()])));
+        round_trip(atom);
     }
 
     #[test]

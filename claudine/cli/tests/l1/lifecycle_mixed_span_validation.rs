@@ -71,12 +71,20 @@ fn conditional(indent: &str, branch: &str, text: &str) -> String {
     )
 }
 
+/// Either boundary may report the span first: the launch's passive schema
+/// verdict names the operand by JSON pointer (`/failure/0/else/0/info`), the
+/// lifecycle parser by its lifecycle path (`failure[0].else[0].info.text`).
 fn assert_rejected(run: &Run, path: &str) {
     assert_ne!(run.code, Some(0), "{}", run.output);
     assert_eq!(run.launches, 0, "the provider must not launch\n{}", run.output);
     let collapsed = run.collapsed();
-    assert!(collapsed.contains("invalid lifecycle action"), "{collapsed}");
-    assert!(collapsed.contains(&format!("`{path}`")), "path `{path}` not named: {collapsed}");
+    let pointer = format!(
+        "/{}",
+        path.trim_end_matches(".text").replace('[', ".").replace(']', "").replace('.', "/")
+    );
+    let by_parser = collapsed.contains("invalid lifecycle action") && collapsed.contains(&format!("`{path}`"));
+    let by_schema = collapsed.contains("malformed template") && collapsed.contains(&format!("`{pointer}`"));
+    assert!(by_parser || by_schema, "neither `{path}` nor `{pointer}` was rejected: {collapsed}");
 }
 
 fn event_document(event: &str, branch: &str) -> String {

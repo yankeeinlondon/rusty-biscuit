@@ -576,6 +576,7 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "example"
             | "min-keys"
             | "max-keys"
+            | "uncounted-keys"
             | "category"
     )
 }
@@ -1008,6 +1009,7 @@ impl<'a> Parser<'a> {
                         | Constraint::Deferred
                         | Constraint::Example(_)
                         | Constraint::Category(_)
+                        | Constraint::Operands(_)
                 )
             }) {
                 return self.err(
@@ -1273,6 +1275,26 @@ impl<'a> Parser<'a> {
         }
         if name.contains('(') {
             return self.err("a category name cannot contain `(`", open + 1..close);
+        }
+        self.lex.pos = close + 1;
+        Ok(name.to_string())
+    }
+
+    /// Reads `(<verb>-short)` or `(<verb>-long)` after `operands`.
+    fn read_operands_name(&mut self, keyword_span: Range<usize>) -> Result<String, SchemaError> {
+        let open = self.lex.pos;
+        let Some(close) = (open + 1..self.src.len()).find(|&index| self.lex.bytes[index] == b')') else {
+            return self.err(
+                "unterminated `operands(...)` (missing `)`)",
+                keyword_span.start..self.src.len(),
+            );
+        };
+        let name = self.src[open + 1..close].trim();
+        if super::types::operands_verb(name).is_none() {
+            return self.err(
+                "`operands` takes a generated verb type name, `<verb>-short` or `<verb>-long`",
+                keyword_span.start..close + 1,
+            );
         }
         self.lex.pos = close + 1;
         Ok(name.to_string())
@@ -1776,7 +1798,8 @@ impl<'a> Parser<'a> {
                 Constraint::Required
                 | Constraint::Generated
                 | Constraint::Deferred
-                | Constraint::Category(_) => {}
+                | Constraint::Category(_)
+                | Constraint::Operands(_) => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
                         return self.err(
@@ -2575,6 +2598,7 @@ impl<'a> Parser<'a> {
                 ExampleForm::Inline(_) => unreachable!("an inline example outside a signature is an error"),
             },
             ("category", true) => Constraint::Category(self.read_category_name(kw_span)?),
+            ("operands", true) => Constraint::Operands(self.read_operands_name(kw_span)?),
             ("min-keys", true) => {
                 self.lex.pos += 1;
                 let args = self.parse_arglist()?;
@@ -2601,7 +2625,17 @@ impl<'a> Parser<'a> {
                 let n = self.numeric_arg("max-keys", &args[0])?;
                 Constraint::MaxKeys(number_to_usize(n, "max-keys", &args[0], self.property)?)
             }
-            ("min-keys" | "max-keys" | "example" | "suggest" | "category", false) => {
+            ("uncounted-keys", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                let keys: Vec<String> = args.into_iter().map(|arg| arg.lex).collect();
+                if let Err(message) = super::types::check_uncounted_keys(&keys) {
+                    return self.err(message, kw_span);
+                }
+                Constraint::UncountedKeys(keys)
+            }
+            ("min-keys" | "max-keys" | "uncounted-keys" | "example" | "suggest" | "category" | "operands", false) => {
                 return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
@@ -3067,6 +3101,36 @@ mod tests {
 
     fn parse_err(input: &str) -> SchemaError {
         parse_type_expr("test", input).expect_err("expected parse error")
+    }
+
+    #[test]
+    fn operands_names_a_generated_verb_type_and_lowers_to_its_annotation() {
+        let atom = parse("tuple([number]; operands(number-short))");
+        assert_eq!(atom.constraints, [Constraint::Operands("number-short".to_string())]);
+        assert_eq!(
+            parse("unknown[](max(0); operands(stop_now-long))").array_constraints.last(),
+            Some(&Constraint::Operands("stop_now-long".to_string()))
+        );
+        let schema = to_json_schema_for_test("number(operands(number-short); required)");
+        assert_eq!(schema["x-darkmatter-operands"], "number-short");
+        // On the typed node, never on an optional property's `null` wrapper.
+        let optional = to_json_schema_for_test("tuple([number]; operands(number-short))");
+        assert!(optional.get("x-darkmatter-operands").is_none(), "{optional}");
+        let typed: Vec<&serde_json::Value> = optional["anyOf"].as_array().expect("a null wrapper").iter().collect();
+        assert_eq!(typed[1]["x-darkmatter-operands"], "number-short", "{optional}");
+
+        for bad in ["number(operands(number))", "number(operands(-short))", "number(operands(a b-long))", "number(operands)"] {
+            let error = parse_err(bad).to_string();
+            assert!(error.contains("operands"), "{bad}: {error}");
+        }
+    }
+
+    fn to_json_schema_for_test(ty: &str) -> serde_json::Value {
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&format!("root: \"{ty}\"\n")).expect("the fixture is YAML");
+        let schema = crate::markdown::schemas::simplified::parse_yaml_schema(&yaml).expect("the schema parses");
+        let json = crate::markdown::schemas::simplified::to_json_schema(&schema).expect("the schema lowers");
+        json["properties"]["root"].clone()
     }
 
     #[test]

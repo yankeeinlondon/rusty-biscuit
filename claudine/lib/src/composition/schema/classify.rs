@@ -588,14 +588,15 @@ pub fn build_schema_status_report_for_mode(
         }
     }
 
-    // Judged on the text composition reads; `fm_map` keeps stored tokens so
-    // the status below still sees them as data rather than pending.
-    let instance =
-        crate::composition::closure::stored_text(&serde_json::Value::Object(fm_map.clone()));
-    let mut report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase),
-        None => Ok(effective.validate(&instance)),
-    }
+    // Judged on the text composition reads, which Darkmatter decodes from
+    // the stored tokens and never defers as a template; `fm_map` keeps them
+    // so the status below still sees them as data rather than pending.
+    let mut report = effective
+        .validate_stored(
+            &serde_json::Value::Object(fm_map.clone()),
+            &darkmatter::markdown::schemas::PositionMap::new(),
+            phase,
+        )
     .map_err(|error| {
         schema_error_to_composition_error(
             &source.resolved_path,

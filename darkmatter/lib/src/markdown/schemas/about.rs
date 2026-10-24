@@ -413,6 +413,16 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         description: "Advisory completion candidates for DMLS. Non-validating: a document value is valid when it satisfies the underlying type and constraints, whether or not it appears in the list. At most one `suggest(...)` per complete property definition (including across property-union atoms). Array forms (`string[]`, `number[]`) describe individual elements, not whole arrays.",
         json_schema_effect: "emits `x-darkmatter-suggest: [interpreted values]` on the scalar or array `items` schema in declaration order; never lowered to `examples` or `x-darkmatter-example`",
     },
+    // ── lifecycle ──────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "operands",
+        keyword: "operands",
+        form: "operands(<verb>-<form>)",
+        target_types: "all types",
+        argument_arity: "1",
+        description: "Marks a value as the short or long form of a Darkmatter lifecycle verb (an expression function or side effect). Schema validation binds the value's operands through that verb's runtime registration, and the binder's verdict replaces the type's for them: numeric recovery, source exclusions, and overload selection decide. `{{ … }}` operands stay deferred, but a span that does not parse is a positioned problem. The lifecycle schema generator writes it on every generated verb arm; a verb the parser owns itself (`say`, `proxy`, `set`, …) carries it on its hand-written type, where it only checks the strings the parser reads as templates.",
+        json_schema_effect: "emits `x-darkmatter-operands: \"<verb>-short\"` (or `-long`) on the node the arm lowers to; never fails a value by itself",
+    },
     // ── array ──────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
         name: "unique",
@@ -910,11 +920,12 @@ mod tests {
             .collect();
         assert_eq!(
             accepted,
-            HashSet::from(["required", "default", "generated", "deferred", "eager", "min", "max", "unique"]),
+            HashSet::from(["required", "default", "generated", "deferred", "eager", "min", "max", "unique", "operands"]),
         );
         for keyword in accepted {
             let form = match keyword {
                 "default" => "default(1)".to_string(),
+                "operands" => "operands(and-short)".to_string(),
                 "min" | "max" => format!("{keyword}(1)"),
                 keyword => keyword.to_string(),
             };
@@ -1198,6 +1209,7 @@ mod tests {
             Constraint::Unique,
             Constraint::MinItems(0),
             Constraint::MaxItems(0),
+            Constraint::Operands(String::new()),
         ] {
             implemented.insert(c.keyword());
         }

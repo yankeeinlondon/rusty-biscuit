@@ -48,7 +48,7 @@ use super::format::{
     DARKMATTER_YAML_FORMAT,
 };
 use super::file_match::DARKMATTER_MATCH_KEYWORD;
-use super::simplified::{DARKMATTER_DEFERRED_KEYWORD, DRAFT_2020_12, SimplifiedType};
+use super::simplified::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_UNCOUNTED_KEYWORD, DRAFT_2020_12, SimplifiedType};
 use super::validate::build_structural_validator;
 use crate::markdown::coercion::{
     Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
@@ -365,7 +365,12 @@ impl<'s> Translator<'s> {
         if map.contains_key(DARKMATTER_TYPE_DEFINITION_KEYWORD) || map.contains_key(DARKMATTER_SCHEMA_KEYWORD) {
             return Shape::Any.assert(self.node_assertion(node));
         }
-        let mut exact = !map.keys().any(|keyword| UNMODELED_KEYWORDS.contains(&keyword.as_str()));
+        // The `allOf` conditions `uncounted-keys` lowers to are modeled by the
+        // object's count; any other `allOf` is an assertion.
+        let uncounted = uncounted_lowering(map).is_some();
+        let mut exact = !map
+            .keys()
+            .any(|keyword| UNMODELED_KEYWORDS.contains(&keyword.as_str()) && !(uncounted && keyword == "allOf"));
 
         let typed = map.contains_key("type");
         let base = self.base(map, references);
@@ -718,8 +723,12 @@ impl<'s> Translator<'s> {
                 count
             }
         };
-        let min_properties = count("minProperties");
-        let max_properties = count("maxProperties");
+        let mut min_properties = count("minProperties");
+        let mut max_properties = count("maxProperties");
+        let mut uncounted = Vec::new();
+        if let Some(lowering) = uncounted_lowering(map) {
+            (uncounted, min_properties, max_properties) = lowering;
+        }
         Part {
             shape: Shape::Object(ObjectShape {
                 properties,
@@ -728,6 +737,7 @@ impl<'s> Translator<'s> {
                 additional,
                 min_properties,
                 max_properties,
+                uncounted,
             }),
             exact,
         }
@@ -997,6 +1007,25 @@ fn is_annotation(keyword: &str) -> bool {
         )
 }
 
+/// The uncounted keys and key bounds of an object `uncounted-keys` lowered,
+/// read from its `x-darkmatter-uncounted-keys` annotation; `None` unless the
+/// annotation is well formed and the object's `allOf` holds exactly the one
+/// condition per combination of those keys that the lowering writes.
+fn uncounted_lowering(map: &Map<String, Value>) -> Option<(Vec<String>, Option<usize>, Option<usize>)> {
+    let annotation = map.get(DARKMATTER_UNCOUNTED_KEYWORD)?.as_object()?;
+    let keys: Vec<String> =
+        annotation.get("keys")?.as_array()?.iter().map(|key| key.as_str().map(str::to_string)).collect::<Option<_>>()?;
+    let conditions = map.get("allOf")?.as_array()?;
+    if keys.is_empty() || keys.len() >= 32 || conditions.len() != 1 << keys.len() {
+        return None;
+    }
+    let bound = |name: &str| match annotation.get(name) {
+        None => Some(None),
+        Some(value) => value.as_u64().and_then(|n| usize::try_from(n).ok()).map(Some),
+    };
+    Some((keys, bound("min")?, bound("max")?))
+}
+
 /// Whether a reference occurs anywhere in `node`'s subschemas.
 fn holds_reference(node: &Value) -> bool {
     match node {
@@ -1079,6 +1108,24 @@ mod tests {
     fn converts(schema: Value, value: Value) -> Result<Value, String> {
         let shape = shape_from_json_schema(&schema);
         bind(&shape, &value).map(|bound| bound.into_value()).map_err(|error| error.to_string())
+    }
+
+    /// The count `uncounted-keys` lowers to is the shape's own rule, not an
+    /// opaque assertion: the core binds a single action with its siblings
+    /// and refuses a second action, whatever the operands hold.
+    #[test]
+    fn uncounted_keys_lowering_is_a_modeled_count() {
+        let yaml = "action:\n  info: number\n  stop: number\n  when: string\n  $constraints:\n    max-keys: 1\n    uncounted-keys: [when]";
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml");
+        let simplified = crate::markdown::schemas::simplified::parse_yaml_schema(&value).expect("parses");
+        let schema = crate::markdown::schemas::simplified::to_json_schema(&simplified).expect("lowers");
+        let action = schema["properties"]["action"]["anyOf"][1].clone();
+        let shape = shape_from_json_schema(&action);
+        let shown = shape.to_string();
+        assert!(shown.contains("uncounted-keys(when)") && shown.contains("max-keys(1)"), "{shown}");
+        assert!(!matches!(shape, Shape::Assert(..)), "{shown}");
+        assert_eq!(converts(action.clone(), json!({ "info": "3", "when": "x" })), Ok(json!({ "info": 3, "when": "x" })));
+        assert!(converts(action, json!({ "info": 3, "stop": 4, "when": "x" })).is_err());
     }
 
     #[test]
