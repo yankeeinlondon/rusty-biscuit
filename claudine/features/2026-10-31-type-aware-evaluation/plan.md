@@ -7,10 +7,63 @@ yolo: "true"
 packages:
     - darkmatter
     - darkmatter-cli
-    - darkmatter-dmls
-    - biscuit-file
+    - dmls
     - claudine
-    - claudine-cli
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/raw.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/lifecycle/error.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/call-check.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Type-aware Evaluation, Narrowing, and Diagnostics Implementation Plan
@@ -184,7 +237,7 @@ parses.
 
 A spike runs once, before the work it informs.
 
-- [ ] **Spike S1 — biscuit-file structural-validation gap** (runs once; informs
+- [x] **Spike S1 — biscuit-file structural-validation gap** (runs once; informs
   Phase 4 only)
   - Classify each string in acceptance criterion 13 and 14's corpus
     (`./docs/spec.md`, `/tmp/spec.md`, `\Users\ken\data\foobar.json`,
@@ -201,7 +254,7 @@ A spike runs once, before the work it informs.
 
 ### Wave 1 — Inventory and Baselines
 
-- [ ] **Dependency audit**
+- [x] **Dependency audit**
   - Confirm, by reading code, that Phase B seams exist: catalog `returns`
     (`darkmatter/schemas/partials/functions.yaml`, loaded by
     `compose/expression/catalog/mod.rs`, `expression_function_catalog()`),
@@ -225,7 +278,7 @@ A spike runs once, before the work it informs.
     `is_subtype_with_definitions`, and `Shape::Ref` in the call check.
     Record file paths and signatures
     in `implementation-log.md`. Apply Rule 2 if any is missing.
-- [ ] **Surface inventory** — parallelizable with Dependency audit
+- [x] **Surface inventory** — parallelizable with Dependency audit
   - Map criteria 1–39 to existing tests and required additions
     (traceability table in `implementation-log.md`).
   - Inventory every consumer of expression analysis: Darkmatter
@@ -238,13 +291,13 @@ A spike runs once, before the work it informs.
   - Inventory every legacy flag spelling (`--allow-*`, `--no-baseline-schema`,
     `--no-schema-triggers`, `--strict-style`) across `darkmatter/cli/src/args`,
     `commands/`, completions, justfiles, scripts, examples, docs, tests.
-- [ ] **Performance baseline ("before")** — runs before any product edit
+- [x] **Performance baseline ("before")** — runs before any product edit
   - On the current host, pick one existing representative repository document
     and record composition time and DMLS analysis time, separating checking
     from unrelated I/O where practical (`md schema validate -vv` reports the
     schema-validation stages separately). Record host, input, observations in
     `implementation-log.md`.
-- [ ] **Run Spike S1** (see above).
+- [x] **Run Spike S1** (see above).
 
 **Checkpoint 1:** dependency audit passed (or work stopped and reported);
 traceability table, inventories, baseline, and S1 table exist in the log.
@@ -259,17 +312,17 @@ projection function, for every expression surface.
 One integration owner for the projection module and the shared type/union
 normalization; no competing edits.
 
-- [ ] **Union normalization and optionality**
+- [x] **Union normalization and optionality**
   - Implement the annex's union-normalization table (all rows) and `| null`
     optionality rules inside the existing type model; cycle-aware.
   - Tests: criterion 2 (every normalization row), order independence.
-- [ ] **Root-union projection**
+- [x] **Root-union projection**
   - Arms contribute projected types; an arm not declaring the property
     contributes `unknown`; fold with normalization. Result independent of arm
     and key order and validator error order.
   - Tests: criterion 1 (`spec`, `design`, `review` → `unknown`; `plan` →
     `file`; `area` → `string | null`).
-- [ ] **All effective-schema layers**
+- [x] **All effective-schema layers**
   - Project from the final `EffectiveSchema` after resolution and merging
     (imported named types, baseline, trigger, document), including layers
     `EffectiveSchema.simplified` does not represent. A recursive type from
@@ -278,7 +331,7 @@ normalization; no competing edits.
     (composition precheck, DMLS call check, `lifecycle_declared_types`).
   - Tests: criterion 3 (layered fixture), including pattern-only shapes
     declaring no literal name.
-- [ ] **Raw JSON Schema projection** — parallelizable with Root-union work
+- [x] **Raw JSON Schema projection** — parallelizable with Root-union work
   (disjoint module)
   - Annex's conservative projection: enumerable literal properties, `anyOf`,
     type arrays with `"null"`, `allOf`; anything indeterminate is `unknown`.
@@ -286,7 +339,7 @@ normalization; no competing edits.
 
 ### Wave 3 — Paths, reserved roots, calls, operators
 
-- [ ] **Nested paths**
+- [x] **Nested paths**
   - Constant members/indices yield declared member/item types with `| null`
     when absent-able (including unguaranteed array index); dynamic keys fall
     back to `unknown`. Follow recursive named types lazily along the requested
@@ -294,20 +347,20 @@ normalization; no competing edits.
     named (`TypeExpr::Ref`), never unfold it.
   - Tests: criteria 4, 32 (finite path through a recursive type terminates
     without expanding the schema).
-- [ ] **`fm` and precedence**
+- [x] **`fm` and precedence**
   - Type lookup follows value lookup: fixed namespaces, registered host
     globals, then document properties; `fm.x` equals unshadowed `x`; a global
     shadowing a property does not hide it through `fm`; an unavailable global
     keeps its binding diagnostic (even under `||`) and never falls back to a
     same-named property.
   - Tests: criterion 31.
-- [ ] **Reserved roots and host globals**
+- [x] **Reserved roots and host globals**
   - Types from `darkmatter/schemas/darkmatter.yaml` (`fm`, `ctx`, `env`,
     `err`, `timing`, `current`, `seq`, `loop`, `group`) and the host catalog
     file as registered by lifecycle ownership; unavailable global gets no
     type.
   - Tests: criterion 5 (`err`, `ctx`, `timing`, Claudine `seq.index`).
-- [ ] **Call and operator typing**
+- [x] **Call and operator typing**
   - Call-as-argument: callee `returns`; overloads union the `returns` of every
     overload the argument count can select (no type-directed overload
     selection). `x || y` = `x` minus `null` ∪ `y`. `c ? a : b` = union of
@@ -322,13 +375,13 @@ normalization; no competing edits.
 
 ### Wave 4 — Surfaces and passivity
 
-- [ ] **Every surface uses the projection**
+- [x] **Every surface uses the projection**
   - Body and frontmatter interpolation, conditional blocks, and lifecycle
     event action expressions (event globals typed per declaration). Remove any
     surface-local typing.
   - Tests: criterion 8 (`min(flag, 5)` in a lifecycle action rejected exactly
     like the body).
-- [ ] **Passivity and stability proofs**
+- [x] **Passivity and stability proofs**
   - Failing I/O stubs and instrumentation: no file/network/env access, no
     expression execution; authored frontmatter, effective frontmatter, and
     `EffectiveState::data()` unchanged; existing schema-stage `null`
