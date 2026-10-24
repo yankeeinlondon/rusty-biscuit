@@ -934,6 +934,21 @@ success:
 - An unknown parameter is an error (`LifecycleActionInvalidLongForm`), never
   silently dropped. Key/value parameter values follow the same literal-default
   rule as short-form values.
+- A side effect or expression function with several signatures is checked
+  against each signature on its own, never against a blend of them. A
+  short-form array must have a length one signature takes, and a long form
+  must name exactly the parameters of one signature, its required ones
+  included; that signature orders the arguments. `link` takes `(file)` or
+  `(target, desc)`:
+
+  ```yaml
+  success:
+    - link: { file: "notes.md" }                   # (file)
+    - link: { target: "notes.md", desc: "Notes" }  # (target, desc)
+    - link: { target: "notes.md" }                 # error: missing desc
+  ```
+
+  A function with a variable argument list (`and`, `or`) has no long form.
 
 | Verb | Short-form value | Long-form parameters |
 |------|------------------|----------------------|

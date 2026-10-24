@@ -328,49 +328,55 @@ start:
 
 ### How deep the schema checks
 
-The parser allows conditionals five levels deep; a sixth level is a parser
-error. How much of that the schema covers depends on the event:
+Every stack family is recursive: a conditional's `then` and `else` take the
+same stack type as the event that holds it, so the schema types every action
+at every depth, in both branches. Each event keeps its own restrictions all
+the way down:
 
-| Stack | Typed conditional levels | Below them |
+| Stack | Family | Restriction at every depth |
 |---|---|---|
-| `cancelled` | all five | a sixth-level `when` with `then` is a schema error |
-| `initialize`, `start`, `blocked`, `success`, `failure`, `finalize`, and the loop's `gate:` | three | a body inside a level-3 `when` is accepted as any list or mapping |
-
-So a directive that `cancelled` forbids is a schema error wherever the parser
-would accept its position:
+| `start`, `blocked`, `success`, `failure`, `finalize`, and the loop's `gate:` | `stack` | none beyond the action types |
+| `initialize` | `initialize-stack` | no `shell` |
+| `cancelled` | `cancelled-stack` | `stop` is the only flow directive |
 
 ```yaml
-cancelled:
+initialize:
     - when: "fm.a"                   # level 1
       then:
           - when: "fm.b"             # level 2
             then:
                 - when: "fm.c"       # level 3
                   then:
-                      - when: "fm.d" # level 4
-                        then:
-                            - retry: 2   # invalid: cancelled allows no retry
+                      - info: "ok"
+                  else:
+                      - shell: "git fetch"   # invalid: initialize allows no shell,
+                                             # even in an unselected branch
 ```
 
-In the other events, an action inside a level-3 `when` passes the schema, and
-the parser rejects it before anything runs:
+A conditional requires `when` and `then`, allows `else`, and takes no sibling
+verb or `no_error`, at any depth. An `else` without `then` is a schema error.
+
+The schema has **no depth limit**. The parser allows conditionals five levels
+deep and rejects a sixth, so a six-level stack of valid actions passes the
+schema and the editor but fails before anything runs. A misspelled verb is a
+schema error at any depth, including the sixth:
 
 ```yaml
-initialize:
-    - when: "fm.a"                   # level 1: typed
-      then:
-          - when: "fm.b"             # level 2: typed
+success:
+    - when: "fm.a"            # level 1 … level 6 below: schema valid,
+      then:                   # the parser rejects the sixth level
+          - when: "fm.b"
             then:
-                - when: "fm.c"       # level 3: typed
+                - when: "fm.c"
                   then:
-                      - shell: "git fetch"   # loose body: the schema accepts it,
-                                             # the parser rejects it
+                      - when: "fm.d"
+                        then:
+                            - when: "fm.e"
+                              then:
+                                  - when: "fm.f"
+                                    then:
+                                        - say: "leaf"    # `sya:` here is a schema error
 ```
-
-`cancelled` reaches every level by typing `then` and `else` as one pattern
-key, which keeps the compiled schema small. The editor therefore does not
-complete `then`/`else` inside a `cancelled` conditional, and an `else`
-without `then` there is left to the parser.
 
 ### Sequence containers
 
@@ -407,37 +413,40 @@ authored step data, never a schema error. A document-level `fail_fast` is
 removed and reported at `/fail_fast`; set `fail_fast` on a group object
 instead.
 
-SimplifiedSchema copies a named type into every place that uses it, so a type
-cannot contain itself. The container types are therefore unrolled into
-**three typed levels**, and the third level's lists are any list:
+The container types are recursive: a task's inline `sequence:` items and a
+group's `tasks:` legs are `task` again, so a container is typed the same way
+at every depth, and each container event takes the same family as the
+document event of that name:
 
 ```mermaid
 flowchart TD
-    D["document sequence:"] --> L1["level 1: task / group"]
-    L1 -->|"inline sequence:, group tasks:"| L2["level 2: task-2 / group-2"]
-    L2 -->|"inline sequence:, group tasks:"| L3["level 3: task-3 / group-3"]
-    L3 -->|"inline sequence:, group tasks:"| U["any list: the task parser checks it"]
+    D["document sequence:"] --> T["task"]
+    T -->|"inline sequence:"| T
+    T -->|"group:"| G["group"]
+    G -->|"tasks:"| T
+    T -->|"initialize"| I["initialize-stack"]
+    T -->|"start, blocked, success, failure, finalize"| S["stack"]
+    T -->|"cancelled"| C["cancelled-stack"]
+    T -->|"loop"| L["loop"]
+    G -->|"its seven events and loop"| E["the same families"]
 ```
 
-A document nested deeper than three container levels is still valid: the
-schema checks less there, and the task parser, which accepts unlimited
-nesting, checks the rest before anything runs.
+```yaml
+sequence:
+    - name: outer
+      sequence:
+          - group:
+                tasks:
+                    - name: inner
+                      sequence: [deploy]
+                      initialize: [{ shell: "ls" }]     # invalid: initialize allows no shell
+                      cancelled: [{ retry: 2 }]         # invalid: cancelled allows no retry
+                      start: [{ pr_list: three }]       # invalid: pr_list takes a count or a query
+```
 
-Each level inlines the next one twice (through a task's `sequence:` and its
-group's `tasks:`), so the size of a container field multiplies with every
-level. A typed container checks only what stays cheap:
-
-| Container field | Level 1 | Level 2 | Level 3 |
-|---|---|---|---|
-| `name`, `when`, `with`, `group`, `tasks`, `max_parallel`, `fail_fast`, … | typed | typed | typed |
-| `cancelled` | restricted stack | restricted stack | list or mapping |
-| `loop` (on a group, or beside an inline `sequence:`) | the `loop` type | object | object |
-| `initialize`, `start`, `blocked`, `success`, `failure`, `finalize` | list or mapping | list or mapping | list or mapping |
-
-Typing a container's events like a document's makes every Claudine launch
-about three seconds slower, because the compiled schema is built for every
-launch. The lifecycle and loop parsers check what the schema leaves loose.
-The document's own events and `loop` are typed fully by `claudine.yaml`.
+The schema adds no container-depth limit, and the task parser accepts
+unlimited nesting. Each container event starts its own conditional count, so
+a five-level stack is valid in every event of every container.
 
 A task's `when:` is typed by shape only: non-empty text.
 
@@ -455,17 +464,14 @@ before anything runs:
 - `skip` only in `initialize`
 - no `when` on a root dictionary or at the `loop:` root, and `gate:` never
   beside loose loop verbs
-- in every event except `cancelled`, anything inside a level-3 `when`, and
-  the five-level nesting limit
-- in `cancelled`, an `else` written without `then`, and a guarded bundle
-  (`when` beside verbs, such as `- { when: "fm.x", stop: null }`) placed
-  inside a fifth-level `when`, which the parser counts as a sixth level
-- a container's events other than `cancelled`, the `cancelled` of a
-  third-level container, the contents of a `loop` below the first container
-  level, and any container below the three typed container levels
+- the five-level conditional nesting limit, in every event, including a
+  guarded bundle (`when` beside verbs, such as `- { when: "fm.x", stop: null }`)
+  placed inside a fifth-level `when`, which the parser counts as a sixth level
 - a shell expansion hidden in a `set` value in `initialize`
   (`set: { sha: "$(git rev-parse HEAD)" }`)
-- the arguments of the generated verbs (below)
+- the literal operand rules of the generated verbs: a literal YAML `null`,
+  list, or mapping as one operand is rejected with a hint to write a
+  whole-value `{{ … }}` template (see below)
 
 Passing the schema, in the editor or at launch, is therefore not proof that a
 lifecycle stack can execute.
@@ -473,13 +479,24 @@ lifecycle stack can execute.
 ### Generated and planned verbs
 
 The Darkmatter side-effect verbs and expression functions are listed one key
-per name, so a misspelled name still fails. Their **values are untyped**: the
-parser judges the arguments.
+per name, and each value is typed from the verb's catalog signature: a
+positional list follows the parameters in order, a mapping is the long form
+named by the parameters, and a single value is the first argument. Each
+overload is a separate alternative.
 
 ```yaml
 start:
-    - set_frontmatter: [a, b, c]    # schema valid; the parser judges the arguments
+    - set_frontmatter: [notes.md, status, done]   # valid: (file, prop, value)
+    - pr_list: "3"                                 # valid: numeric text converts
+    - pr_list: three                               # invalid: a count or a query
+    - min: [1, "{{ fm.x }}"]                       # valid: the template is checked when the event runs
+    - min: [three, "{{ fm.x }}"]                   # invalid: the literal sibling is still checked
 ```
+
+A whole-value `{{ … }}` template is accepted wherever an argument is typed,
+and its evaluated value is bound to the signature when the event runs; a
+value of the wrong type fails the event then. A template that does not parse
+(`"{{ 1 + }}"`) is judged as written.
 
 `break` and `prep` are accepted by the schema and the parser alike
 (`break: "done"`, `break: { reason: done, code: 2 }`,

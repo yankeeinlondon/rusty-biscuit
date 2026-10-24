@@ -152,11 +152,14 @@ It uses Darkmatter's optional `effects-instrumentation` feature, which counts en
 1. Add an `EffectEngine` method in `verbs.rs`, honoring the applicable filesystem, network, and hash rules.
 2. Add an `EffectDescriptor` to `EFFECT_DESCRIPTORS`, including an example.
 3. Add an entry to the test-only `EFFECT_VERBS` table that calls the real method.
+4. Type the operation's parameters in `darkmatter/schemas/partials/mutations.yaml`, written in the expression-function catalog grammar (one `function(...)` per overload). These types are the operation's argument contract: a lifecycle action's arguments are bound to them when the event runs, before the engine is called, and the generated lifecycle schema projects them (`just -f darkmatter/justfile regen-lifecycle-schema`).
 
 Two tests in `effects/catalog.rs` check the result:
 
 - `verb_signature_set_equals_descriptor_signature_set` checks that the test table and descriptor catalog contain exactly the same signatures, and that every descriptor has an example.
 - `every_verb_maps_to_a_reachable_method` exercises each test-table entry in a sandbox. The HTTP entry checks the default host refusal without sending a request.
+
+A third test in `effects/types.rs`, `every_effect_descriptor_has_exactly_one_typed_overload`, fails when a descriptor signature has no typed entry in `mutations.yaml`, or a typed entry has no descriptor.
 
 These tests catch disagreement between the two tables, including missing entries for alternate signatures such as `ensure_file(file, content)`. They **cannot detect a new public method omitted from both tables**. Reviewing new methods for catalog coverage remains necessary.
 

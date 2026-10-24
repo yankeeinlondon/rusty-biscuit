@@ -392,25 +392,25 @@ The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`: `claudine.yaml` no longer declares it, and a sequence document's
 events and `loop` are typed by `claudine.yaml`, which they select. The
 container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
-SimplifiedSchema inlines named types (no recursion), so they are unrolled to
-three typed levels (`task`/`group`, `-2`, `-3`; below that any list). Each
-level inlines the next twice (task `sequence:` and group `tasks:`), so a
-container field costs 4x per level: `cancelled: cancelled-stack` on levels
-1–2 only, the shared `loop` type on level 1 only (object below), other events
-shape-only. Fully typed container events and loops measured +3 s per
-document (release `md`) and doubling `sequence` in both triggers +0.34 s per
-process (debug); every trigger payload is loaded whenever any trigger loads,
-so this cost hits every Claudine launch (see
+The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
+`cancelled-*`, literal `then`/`else` keys) and the containers (`task`
+reached from `sequence:` items and `group` `tasks:` legs) are recursive
+named types, which the resolver stores once in `$defs`: every container
+event is typed with its family (`initialize` shell-free, `cancelled` `stop`
+only) and `loop` with the shared `loop` type, at every depth. The resolver
+still inlines every non-recursive named type at each reference, so a new
+reference to `bundle`/`expression`/`loop` costs its full size; never unroll
+a family by hand again (the typed unroll measured 11 MB). The schema encodes
+no conditional-depth limit: depth 6 is schema-valid and parser-invalid.
+`claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_two_megabytes`
+pins the payload (about 0.66 MB `claudine.yaml`, 0.70 MB `sequence.yaml`)
+and asserts the families by `DefKey`, never by `$defs` key; criterion-10
+container cells are `lib/tests/l1/container_schema_recursion.rs` over the
+`tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
 [Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
 union with a file reference, so `execution`/`max_paralel` are reported at
 `/…/group` with the value in the message; a top-level `sequence: 42` is
-coerced to the string arm (schema valid; the parser rejects it). The
-`cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
-with no conditional at level 6; its conditionals use one
-`<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
-twice and grow the schema 2^n (measured 10x per validation at five levels).
-DMLS neither completes pattern keys nor resolves values below them, which is
-why `initialize-*` keeps literal keys and three typed levels.
+coerced to the string arm (schema valid; the parser rejects it).
 
 ## Per-task provider selection
 
@@ -507,6 +507,22 @@ evidence only: it never crosses an event, loop pass, retry, resume, or proxy
 handoff, and the live value is always checked again at the command. User docs:
 [Lifecycle → What a guard proves](topics/flow-control/lifecycle.md#what-a-guard-proves-to-the-actions-it-selects)
 and [Sequences → Task guards](topics/flow-control/sequences.md#task-guards-when).
+
+Launch pre-validation (`composition/schema/mod.rs::is_composition_independent`)
+sets a problem aside for composition only through Darkmatter's
+`schemas::awaits_rendering`: the value at the problem's own path holds a
+template the schema did not accept as `deferred` (`ValidationReport::deferred`),
+and the problem is not an unknown or missing key on a collection. A literal
+mistake beside a template therefore fails launch, and so does a malformed
+template (`expression::is_malformed_template`), which no rendering can
+settle. Claudine's `action.yaml` categories, bundles, and `loop` keys select
+Darkmatter's generated per-verb forms (`<verb>-short`/`-long@darkmatter:lifecycle`;
+bundles and loop keys short only); `claudine_schemas.rs::generated_verb_keys_equal_the_darkmatter_catalogs`
+pins each reference against `LifecycleSchemaProjection::shipped()`, and the
+parser itself does not type-check literal operands (a wrong-typed literal is
+S-reject, P-accept, R-reject). Side-effect operands are bound to their typed
+signatures at event time, before the effect engine runs; a binding failure
+is an evaluation failure that `no_error` does not suppress.
 
 Darkmatter's design-time call check rejects any composed prompt (compose,
 inline-compose, sequence task) whose authored call is proven wrong, before

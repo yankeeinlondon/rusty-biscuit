@@ -2,4 +2,4 @@
 start:
     - set_frontmatter: [a, b, c]
 ---
-# generated-verb-arbitrary-value
+# generated-verb-typed-value

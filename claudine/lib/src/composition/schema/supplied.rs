@@ -454,7 +454,7 @@ fn supplied_file_arms<'a>(
             .problems
             .iter()
             .all(|problem| {
-                !is_composition_independent(problem, &candidate, &std::collections::BTreeSet::new())
+                !is_composition_independent(problem, &candidate, &std::collections::BTreeSet::new(), &report.deferred)
             })
         {
             applicable.push(shape);

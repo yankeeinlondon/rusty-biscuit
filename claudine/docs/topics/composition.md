@@ -396,7 +396,10 @@ Steps:
    `compose`; an eager-only property remains optional, while a
    required-but-not-eager property may stay absent (the agent supplies it, the
    completion verdict enforces it) and renders as *deferred* in the launch
-   report. A present value is always type-checked. The intrinsic `prompt`
+   report. A present value is always type-checked; only the spot that still
+   holds `{{ … }}` or `$( … )` text waits for composition, so in
+   `counts: [three, "{{ fm.x }}"]` against `number[]` the launch fails at
+   `/counts/0` while the template's own element is judged once rendered. The intrinsic `prompt`
    verdict comes **after** this step, so a `--set`, positional `prompt=…`, or
    interactively collected eager `prompt` satisfies the gate and becomes the
    delivered prompt without being written to the file.

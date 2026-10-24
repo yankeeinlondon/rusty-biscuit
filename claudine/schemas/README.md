@@ -20,8 +20,8 @@ them.
 | File | Kind | Role |
 | --- | --- | --- |
 | `action.yaml` | library (`kind: schema`) | the four action types (`communicate`, `flow`, `shell`, `expression`), the two dictionary-bundle types (`bundle`, `initialize-bundle`), and the `cancelled` selections, each verb's shape referenced from Darkmatter |
-| `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types (`stack` and `initialize-stack`, typed three conditional levels deep; `cancelled-stack`, typed at all five levels the parser accepts) and the `loop:` block type |
-| `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`), unrolled to three typed container levels |
+| `lifecycle.yaml` | library (`kind: schema`) | the three recursive lifecycle stack families (`stack`, `initialize-stack`, `cancelled-stack`), typed at every conditional depth, and the `loop:` block type |
+| `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`); `task` and `group` recurse, so containers are typed at every depth |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
@@ -58,20 +58,18 @@ whose description names the Claudine event to write instead.
 
 The frontmatter catalog includes `cancelled` on documents and containers. Its
 stack accepts communication, expressions, shells, and `stop`, and rejects
-every other flow directive at every conditional depth the parser accepts. An
+every other flow directive at every conditional depth. An
 empty `cancelled: []` opts a primitive into cancellation.
 
 `sequence-types.yaml` exports `steps`, `step`, `task`, and `group` for
 editor completion and authored parameter schemas, for example
 `$schema: { nested: task@./sequence-types.yaml }`. A task can contain an
 inline `sequence:` list or a referenced sequence; a group owns `tasks:`,
-`variables:`, and `fail_fast:`. Named types are inlined, so the containers
-are unrolled to three typed levels (`task`/`group`, `task-2`/`group-2`,
-`task-3`/`group-3`); below the third level a nested list is any list, which
-the task parser checks. Each level inlines the next one twice, so a typed
-container checks only what stays cheap: `cancelled` on the first two levels,
-the shared `loop` type on the first level (an object below it), and its other
-events for shape only. A group object is closed, so a removed key such as
+`variables:`, and `fail_fast:`. A task's inline `sequence:` items and a
+group's `tasks:` legs reference `task` again, so every container, at every
+depth, has its events typed like a document's (`initialize` shell-free,
+`cancelled` restricted to `stop` among flow directives) and its `loop` typed
+by the shared `loop` type. A group object is closed, so a removed key such as
 `execution` is a schema error; a task object is open, so an undeclared key is
 step data. Executable exclusivity, unique leg names, container-event
 placement, and removed task keys remain parser-validated. The document

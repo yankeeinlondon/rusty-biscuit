@@ -1,6 +1,6 @@
 ---
-# Below the third container level a list is any list: the task parser, not
-# the schema, judges level 4 and deeper.
+# Containers recurse: a fourth-level task and a fifth-level group are typed
+# like the first.
 sequence:
     - name: l1
       sequence:

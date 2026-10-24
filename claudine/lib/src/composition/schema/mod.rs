@@ -864,8 +864,8 @@ fn pre_validate_verdict(
         );
 
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
-    // whose raw value contains template syntax, because Darkmatter may
-    // resolve them to valid values during composition. A caller-originated
+    // whose raw value at the problem's path contains template syntax, because
+    // Darkmatter may resolve them to valid values during composition. A caller-originated
     // eager file likewise keeps its launch-area provenance only in canonical
     // preparation, but only after the literal reference resolves there. An
     // unresolved partial must remain visible so the CLI can offer completion.
@@ -878,7 +878,7 @@ fn pre_validate_verdict(
             let caller_resolved = !matches!(p.kind, ValidationProblemKind::Missing)
                 && top_level_pointer_segment(&p.path)
                     .is_some_and(|name| caller_resolved_eager_files.contains(&name));
-            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys)
+            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys, &report.deferred)
         })
         .cloned()
         .collect();
@@ -1213,15 +1213,21 @@ fn file_override_resolves_from(
 /// Whether a validation problem stands regardless of composition.
 ///
 /// `Missing` always stands: no template can conjure a key absent from both raw
-/// frontmatter and overrides. `Type`/`Invalid` stand only when the problem's
-/// top-level property in `instance` holds no template or shell syntax, since
-/// composition may still turn such a value valid; a property named in
-/// `data_keys` is data and always stands. Shared by the pre-validator and
-/// root-union arm selection so both judge arms by the same rule.
+/// frontmatter and overrides. `Type`/`Invalid` stand unless Darkmatter's
+/// [`awaits_rendering`](darkmatter::markdown::schemas::awaits_rendering) says
+/// rendering could settle them: the value at the problem's own path (its
+/// nearest existing ancestor when absent) holds template or shell syntax the
+/// schema did not already accept as `deferred` (`deferred`, from the report)
+/// and no malformed template, and the problem is not an unknown or missing
+/// key on a collection. A
+/// literal sibling of a template always stands. A property named in `data_keys`
+/// is data and always stands. Shared by the pre-validator and root-union arm
+/// selection so both judge arms by the same rule.
 pub(super) fn is_composition_independent(
     problem: &ValidationProblem,
     instance: &serde_json::Value,
     data_keys: &std::collections::BTreeSet<String>,
+    deferred: &[String],
 ) -> bool {
     match problem.kind {
         ValidationProblemKind::Missing => true,
@@ -1229,8 +1235,17 @@ pub(super) fn is_composition_independent(
             let Some(name) = top_level_pointer_segment(&problem.path) else {
                 return true;
             };
+            // A malformed `{{ … }}` span can never render into a valid
+            // value, so its problem stands, as plain validation reports it.
+            let holds = |text: &str| {
+                darkmatter::markdown::literal_token::holds_pending_syntax(text)
+                    && !darkmatter::markdown::compose::expression::is_malformed_template(text)
+            };
             data_keys.contains(&name)
-                || !value_needs_composition(instance.as_object().and_then(|map| map.get(&name)))
+                || !darkmatter::markdown::schemas::authored_node_at(instance, &problem.path)
+                    .is_some_and(|(pointer, node)| {
+                        darkmatter::markdown::schemas::awaits_rendering(problem, node, &pointer, deferred, &holds)
+                    })
         }
     }
 }

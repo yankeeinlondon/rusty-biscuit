@@ -1040,7 +1040,7 @@ When a sequence step fails in non-fail-fast mode, the only information preserved
 
 ### 9. Deeper Schema Coverage for Claudine Controls
 
-Claudine's trigger schemas now type its frontmatter in the launch verdict, but event stacks other than `cancelled` only within three conditional levels (`cancelled` is typed at every depth the parser accepts), with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
+Claudine's trigger schemas type its frontmatter in the launch verdict at every conditional and container depth, including the generated verbs' arguments; the parser alone judges what the schema cannot express (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is still reported as an `anyOf` mismatch that echoes the value rather than naming the key; narrower union diagnostics would give better messages.
 
 ### 10. Unified Telemetry Span Across All Three Commands
 

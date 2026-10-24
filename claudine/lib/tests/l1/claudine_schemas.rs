@@ -21,10 +21,12 @@ use biscuit_file::FileResolutionContext;
 use claudine::composition::lifecycle::actions::all_lifecycle_verbs;
 use claudine::composition::parse_lifecycle_config;
 use darkmatter::effects::effect_descriptors;
+use darkmatter::lifecycle::schema_projection::LifecycleSchemaProjection;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::validate::build_position_map;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, ValidationReport};
 use serde_json::{Value, json};
 
@@ -212,6 +214,7 @@ impl Discovered {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                deferred: Vec::new(),
                 advisories: Vec::new(),
             },
         };
@@ -365,7 +368,7 @@ fn parser_hand_verbs() -> BTreeSet<String> {
 
 /// Darkmatter's side-effect and expression-function names, without `set`,
 /// which is typed once as the hand verb.
-fn generated_verbs() -> BTreeSet<String> {
+pub(crate) fn generated_verbs() -> BTreeSet<String> {
     let name_of = |signature: &str| signature.split('(').next().expect("a name").trim().to_string();
     effect_descriptors()
         .iter()
@@ -474,15 +477,39 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
             .collect();
         assert_eq!(&generated, expected_generated, "`{export}` lists every catalog verb once");
         for verb in &generated {
-            assert!(
-                types[export]["properties"][verb.as_str()]["description"].is_string(),
-                "`{export}.{verb}` is described"
-            );
-            let mut value = types[export]["properties"][verb.as_str()].clone();
-            if let Some(object) = value.as_object_mut() {
-                object.remove("description");
-            }
-            assert_eq!(value, json!({}), "`{export}.{verb}` is untyped");
+            let value = without_descriptions(&types[export]["properties"][verb.as_str()]);
+            assert_ne!(value, json!({}), "`{export}.{verb}` is typed");
+        }
+    }
+
+    // Each generated key names the projected per-verb types by reference: a
+    // category takes the short and (when the verb has one) the long form, a
+    // bundle and a loose loop key the short form only.
+    let projection = LifecycleSchemaProjection::shipped().expect("the shipped catalogs project");
+    let projected: BTreeSet<String> = projection.verbs.iter().map(|(_, verb)| verb.name.clone()).collect();
+    assert_eq!(projected, catalogs, "the projection covers the catalog verbs");
+    let authored = |file: &str| -> biscuit_file::serde_yaml_ng::Value {
+        let text = match file {
+            "action.yaml" => include_str!("../../../schemas/action.yaml"),
+            _ => include_str!("../../../schemas/lifecycle.yaml"),
+        };
+        biscuit_file::serde_yaml_ng::from_str(text).expect("the file parses")
+    };
+    let action = authored("action.yaml");
+    let lifecycle = authored("lifecycle.yaml");
+    let reference = |name: String| biscuit_file::serde_yaml_ng::Value::String(format!("{name}@darkmatter:lifecycle"));
+    for (_, verb) in &projection.verbs {
+        let short = reference(verb.short_type_name());
+        let category = match verb.long_type_name() {
+            Some(long) => biscuit_file::serde_yaml_ng::Value::Sequence(vec![short.clone(), reference(long)]),
+            None => short.clone(),
+        };
+        assert_eq!(action["types"]["expression"][verb.name.as_str()], category, "`expression.{}`", verb.name);
+        for bundle in ["bundle", "initialize-bundle", "cancelled-bundle"] {
+            assert_eq!(action["types"][bundle][verb.name.as_str()], short, "`{bundle}.{}`", verb.name);
+        }
+        if verb.name != "max" {
+            assert_eq!(lifecycle["types"]["loop"][verb.name.as_str()], short, "`loop.{}`", verb.name);
         }
     }
 
@@ -555,14 +582,25 @@ fn bundle_values_are_the_category_short_forms() {
     let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
+    let generated = generated_verbs();
     let mut long_forms = 0;
     for category in CATEGORIES {
         for verb in property_names(&types[*category]) {
             let declared = &types[*category]["properties"][verb.as_str()];
             let arms: Vec<Value> = arms_of(declared).iter().map(without_descriptions).collect();
-            // A long form is the one closed-object arm; `set` and the
-            // generated verbs have none.
+            // A long form is a closed-object arm. A hand verb has at most one
+            // and `set` none; a generated verb has one per overload and
+            // optional-parameter subset, whose shapes
+            // `generated_verb_keys_equal_the_darkmatter_catalogs` pins.
             let (long, short): (Vec<Value>, Vec<Value>) = arms.into_iter().partition(is_closed_object);
+            if generated.contains(&verb) {
+                for export in ["bundle", "initialize-bundle"] {
+                    let copied: Vec<Value> =
+                        arms_of(&types[export]["properties"][verb.as_str()]).iter().map(without_descriptions).collect();
+                    assert_eq!(copied, short, "`{export}.{verb}` is `{category}.{verb}`'s short form");
+                }
+                continue;
+            }
             assert!(long.len() <= 1, "`{verb}` has at most one long form: {declared}");
             if let Some(long) = long.first() {
                 long_forms += 1;
@@ -597,6 +635,9 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
     ];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
+    // A generated verb's object-typed parameter (`merge_frontmatter`'s `obj`,
+    // `append_line`'s structured `text`) is data, typed by its catalog.
+    let generated = generated_verbs();
     for export in ACTION_EXPORTS {
         let fragment = &types[*export];
         assert!(is_closed_object(fragment), "`{export}` is a closed object: {fragment}");
@@ -613,7 +654,7 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
                 assert!(is_closed_object(&arm), "`{export}.{verb}`'s long form is closed: {arm}");
                 for (parameter, value) in arm["properties"].as_object().expect("parameters") {
                     for parameter_arm in arms_of(value) {
-                        if parameter_arm["type"] == "object" {
+                        if parameter_arm["type"] == "object" && !generated.contains(verb) {
                             assert_eq!(parameter, "with", "`{export}.{verb}.{parameter}` is a scalar parameter");
                             assert!(parameter_arm.get("additionalProperties").is_none(), "`with` stays open");
                         }
@@ -665,11 +706,8 @@ fn every_file_loads_and_every_export_resolves() {
     let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
     assert_eq!(action.len(), 8);
     let lifecycle_exports = [
-        "bare-verb", "loose-body", "stack", "item-1", "conditional-1", "stack-2", "item-2", "conditional-2",
-        "stack-3", "item-3", "conditional-3", "initialize-stack", "initialize-item-1", "initialize-conditional-1",
-        "initialize-stack-2", "initialize-item-2", "initialize-conditional-2", "initialize-stack-3",
-        "initialize-item-3", "initialize-conditional-3", "cancelled-conditional-5", "cancelled-item-6",
-        "loop-action", "loop-action-entry", "loop",
+        "bare-verb", "stack", "item", "conditional", "initialize-stack", "initialize-item", "initialize-conditional",
+        "cancelled-stack", "cancelled-item", "cancelled-conditional", "loop-action", "loop-action-entry", "loop",
     ];
     let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
     assert_eq!(lifecycle.len(), lifecycle_exports.len());
@@ -678,10 +716,7 @@ fn every_file_loads_and_every_export_resolves() {
         "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
     ];
     assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
-    let sequence_exports = [
-        "steps", "step", "task", "group", "steps-2", "step-2", "task-2", "group-2", "steps-3", "step-3", "task-3",
-        "group-3",
-    ];
+    let sequence_exports = ["steps", "step", "task", "group"];
     assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
 
     // The three triggers load, and each payload resolves: a document
@@ -705,7 +740,7 @@ fn every_file_loads_and_every_export_resolves() {
 }
 
 /// A stack whose innermost conditional is `depth` levels deep and holds
-/// `leaf` as its only action.
+/// `leaf` as its only `then` action.
 fn nested(depth: usize, leaf: &str) -> String {
     let mut body = format!("[{leaf}]");
     for level in (1..=depth).rev() {
@@ -714,12 +749,28 @@ fn nested(depth: usize, leaf: &str) -> String {
     body
 }
 
+/// A stack whose innermost conditional is `depth` levels deep and holds
+/// `leaf` as its only `else` action: an unselected branch when the guards
+/// are false.
+fn nested_else(depth: usize, leaf: &str) -> String {
+    let mut body = format!("[{leaf}]");
+    for level in (1..=depth).rev() {
+        let (then, otherwise) = if level == depth {
+            ("[{ warn: \"no\" }]".to_string(), body)
+        } else {
+            (body, "[{ warn: \"no\" }]".to_string())
+        };
+        body = format!("[{{ when: \"ctx.level == {level}\", then: {then}, else: {otherwise} }}]");
+    }
+    body
+}
+
 /// Judges stacks placed by `holder` (an event, or the loop's gate) at depths
-/// 1, 2, 3, 5, and 6: a good leaf is valid at every depth, a bad leaf is
-/// rejected only within the three typed levels (a leaf inside a level-3
-/// conditional's body is not typed), and a level-3 conditional is itself
-/// typed.
-fn assert_typed_levels(bundle: &[BundleFile], claudine: &str, inline: &str, holder: &str, leaf_bad: &str) {
+/// 1, 3, 5, 6, and 8: the recursive family types every level, so a good leaf
+/// is valid and a bad leaf or a malformed long form is rejected at every
+/// depth, in `then` and in `else`. The schema encodes no depth limit, so depths past the parser's
+/// five levels are judged by type alone.
+fn assert_typed_at_every_depth(bundle: &[BundleFile], claudine: &str, inline: &str, holder: &str, leaf_bad: &str) {
     let repo = SchemaRepo::new(bundle);
     let discovered = repo.discover().expect("the shipped bundle loads");
     let close = if holder.starts_with("loop") { " }" } else { "" };
@@ -727,24 +778,33 @@ fn assert_typed_levels(bundle: &[BundleFile], claudine: &str, inline: &str, hold
         let path = repo.write_document(&format!("{name}.md"), &format!("---\n{holder}{stack}{close}\n---\n"));
         discovered.judge(&path, claudine, inline).expect("judged").report
     };
-    for depth in [1, 2, 3, 5, 6] {
-        let typed = depth < 3;
-        let valid = judge("ok", nested(depth, "{ info: hi }"));
-        assert!(valid.valid, "{holder}depth {depth}: {:?}", problems(&valid));
-        let invalid = judge("bad", nested(depth, leaf_bad));
-        assert_eq!(
-            invalid.valid, !typed,
-            "{holder}depth {depth}: a bad leaf is rejected only within the typed levels: {:?}",
-            problems(&invalid)
-        );
+    for depth in [1, 3, 5, 6, 8] {
+        for (branch, build) in [("then", nested as fn(usize, &str) -> String), ("else", nested_else)] {
+            let valid = judge("ok", build(depth, "{ info: hi }"));
+            assert!(valid.valid, "{holder}depth {depth} {branch}: {:?}", problems(&valid));
+            let invalid = judge("bad", build(depth, leaf_bad));
+            assert!(!invalid.valid, "{holder}depth {depth} {branch}: a bad leaf is rejected");
+            let long = judge("long", build(depth, "{ warn: { txet: careful } }"));
+            assert!(!long.valid, "{holder}depth {depth} {branch}: a malformed long form is rejected");
+        }
     }
-    let mixed = judge("mixed", nested(2, "{ when: \"ctx.x\", then: [stop], info: hi }"));
-    assert!(!mixed.valid, "{holder}a level-3 conditional is typed");
+    for depth in [1, 4] {
+        let mixed = judge("mixed", nested(depth, "{ when: \"ctx.x\", then: [stop], info: hi }"));
+        assert!(!mixed.valid, "{holder}a conditional beside a sibling verb is rejected below level {depth}");
+        let orphan = judge("orphan", nested(depth, "{ when: \"ctx.x\", else: [stop] }"));
+        assert!(!orphan.valid, "{holder}an `else` without `then` is rejected below level {depth}");
+        let sibling_no_error = judge("no-error", nested(depth, "{ when: \"ctx.x\", then: [stop], no_error: true }"));
+        assert!(!sibling_no_error.valid, "{holder}a conditional's sibling `no_error` is rejected below level {depth}");
+        let bundle = judge("bundle", nested(depth, "{ when: \"ctx.x\", info: hi, warn: careful }"));
+        assert!(bundle.valid, "{holder}a guarded bundle below level {depth}: {:?}", problems(&bundle));
+        let bare = judge("bare", nested(depth, "stop"));
+        assert!(bare.valid, "{holder}a bare verb below level {depth}: {:?}", problems(&bare));
+    }
 }
 
 #[test]
-fn event_stacks_are_typed_three_levels_deep_and_loose_below() {
-    assert_typed_levels(
+fn event_stacks_are_typed_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -754,8 +814,8 @@ fn event_stacks_are_typed_three_levels_deep_and_loose_below() {
 }
 
 #[test]
-fn initialize_stacks_are_typed_three_levels_deep_without_shell() {
-    assert_typed_levels(
+fn initialize_stacks_exclude_shell_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -765,8 +825,8 @@ fn initialize_stacks_are_typed_three_levels_deep_without_shell() {
 }
 
 #[test]
-fn loop_gate_is_typed_three_levels_deep_and_loose_below() {
-    assert_typed_levels(
+fn loop_gate_is_typed_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -809,12 +869,24 @@ type Case = (&'static str, &'static str, (bool, bool), Verdict, Parser);
 /// The AC5 rows, split by subject so each test stays small; together they
 /// name every file in `tests/fixtures/claudine-schemas/`.
 pub(crate) const AC5_GROUPS: &[&[&str]] = &[
-    &["depth1", "depth3", "depth5", "depth6", "root-dictionary", "bundle-in-then", "loop-gate", "long-forms", "bare-stop"],
+    &[
+        "depth1",
+        "depth3",
+        "depth5",
+        "depth6",
+        "depth6-wrong-verb",
+        "depth5-guarded-bundle",
+        "root-dictionary",
+        "bundle-in-then",
+        "loop-gate",
+        "long-forms",
+        "bare-stop",
+    ],
     &[
         "shell-in-initialize-list",
         "shell-in-initialize-then",
         "shell-in-initialize-root-dictionary",
-        "shell-in-initialize-below-typed-levels",
+        "shell-in-initialize-depth3-then",
         "shell-expansion-in-initialize-set",
         "shell-in-start",
         "message-shell-bundle-with-when",
@@ -826,7 +898,6 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "misspelled-verb-in-then",
         "long-form-in-bundle",
         "long-form-in-root-dictionary",
-        "generated-verb-arbitrary-value",
     ],
     &[
         "start-number",
@@ -838,6 +909,19 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "controls-beside-ticket",
         "prompt-with-malformed-sequence",
         "linked-prompt",
+    ],
+    &[
+        "generated-verb-typed-value",
+        "generated-verb-wrong-type",
+        "generated-verb-convertible-text",
+        "generated-verb-deferred",
+        "generated-verb-deferred-beside-unknown-parameter",
+        "generated-verb-deferred-beside-extra-argument",
+        "generated-verb-deferred-beside-bad-sibling",
+        "generated-verb-malformed-template",
+        "optional-nonnullable-null",
+        "ensure-file-overloads",
+        "variadic-and-or",
     ],
 ];
 
@@ -912,7 +996,8 @@ fn ac5_groups_name_every_fixture_once() {
     assert_eq!(named.into_iter().collect::<BTreeSet<_>>(), fixtures);
 }
 
-/// Depth 1, 3, and 5 are valid and depth 6 is the parser's to refuse; root
+/// Depth 1, 3, and 5 are valid and depth 6 is the parser's to refuse (the
+/// schema encodes no depth limit but types a misspelled verb at any depth); root
 /// dictionaries, bundles as bodies, the loop gate, long forms, and a bare
 /// `- stop` are valid.
 #[test]
@@ -933,6 +1018,24 @@ fn ac5_depths_and_stack_shapes() {
                 Valid,
                 Rejects("conditionals nest at most 5 levels"),
             ),
+            (
+                // The schema reports the misspelled verb; the parser reports
+                // the sixth level or the verb, whichever it meets first, and
+                // both lie on this path.
+                "depth6-wrong-verb",
+                include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md"),
+                CLAUDINE,
+                Invalid(&[("/success/0/then/0/then/0/then/0/then/0/then/0/then/0", "sya")]),
+                Rejects("success[0].then[0].then[0].then[0].then[0]"),
+            ),
+            (
+                // A guarded bundle inside a level-5 conditional is level 6.
+                "depth5-guarded-bundle",
+                include_str!("../fixtures/claudine-schemas/depth5-guarded-bundle.md"),
+                CLAUDINE,
+                Valid,
+                Rejects("conditionals nest at most 5 levels"),
+            ),
             ("root-dictionary", include_str!("../fixtures/claudine-schemas/root-dictionary.md"), CLAUDINE, Valid, Accepts),
             ("bundle-in-then", include_str!("../fixtures/claudine-schemas/bundle-in-then.md"), CLAUDINE, Valid, Accepts),
             ("loop-gate", include_str!("../fixtures/claudine-schemas/loop-gate.md"), CLAUDINE, Valid, Accepts),
@@ -942,8 +1045,31 @@ fn ac5_depths_and_stack_shapes() {
     );
 }
 
-/// `shell` in `initialize` is a schema error at every typed site, the
-/// parser's to refuse below them or inside `set`, and valid in `start`.
+/// `depth6-wrong-verb`'s problem carries the source position of the
+/// misspelled verb's item, which the CLI and DMLS report.
+#[test]
+fn depth6_wrong_verb_is_positioned_at_the_verb() {
+    let text = include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md");
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let path = repo.write_document("depth6-wrong-verb.md", text);
+    let markdown = Markdown::try_from(path.as_path()).expect("document loads").with_source(ComposeSource::File(path.clone()));
+    let effective = discovered.schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies");
+    let yaml = text.split("---\n").nth(1).expect("the frontmatter");
+    let report = effective.validate_with_positions(&frontmatter_json(&markdown), &build_position_map(yaml));
+    let line = u32::try_from(yaml.lines().position(|line| line.contains("sya:")).expect("the verb's line") + 1)
+        .expect("a small line");
+    let problem = report
+        .problems
+        .iter()
+        .find(|problem| problem.path == "/success/0/then/0/then/0/then/0/then/0/then/0/then/0")
+        .unwrap_or_else(|| panic!("a problem at the sixth-level item: {:?}", problems(&report)));
+    assert_eq!(problem.line, Some(line), "{problem:?}");
+    assert!(problem.column.is_some(), "{problem:?}");
+}
+
+/// `shell` in `initialize` is a schema error at every depth and the parser's
+/// alone to refuse inside `set`; it is valid in `start`.
 #[test]
 fn ac5_shell_placement() {
     assert_ac5(
@@ -974,10 +1100,10 @@ fn ac5_shell_placement() {
                 Rejects("shell"),
             ),
             (
-                "shell-in-initialize-below-typed-levels",
-                include_str!("../fixtures/claudine-schemas/shell-in-initialize-below-typed-levels.md"),
+                "shell-in-initialize-depth3-then",
+                include_str!("../fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"),
                 CLAUDINE,
-                Valid,
+                Invalid(&[("/initialize/0/then/0/then/0/then/0", "\"shell\"")]),
                 Rejects("initialize[0].then[0].then[0].then[0].shell"),
             ),
             (
@@ -1000,8 +1126,7 @@ fn ac5_shell_placement() {
 }
 
 /// Mixed conditionals, misspelled verbs and parameters, and long forms in
-/// bundles are schema errors naming the offending key; a generated verb's
-/// value is left to the parser.
+/// bundles are schema errors naming the offending key.
 #[test]
 fn ac5_malformed_actions() {
     assert_ac5(
@@ -1052,9 +1177,95 @@ fn ac5_malformed_actions() {
                 Invalid(&[("/success/say", "text")]),
                 Rejects("long form"),
             ),
+        ],
+    );
+}
+
+/// A generated verb's value is typed by its catalog signature: convertible
+/// text and deferred templates pass, and a deferred operand never hides a
+/// mistake beside it (an unknown parameter, an extra argument, an invalid
+/// literal sibling). The parser's own operand rules are judged separately.
+#[test]
+fn ac5_generated_operands() {
+    assert_ac5(
+        4,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
             (
-                "generated-verb-arbitrary-value",
-                include_str!("../fixtures/claudine-schemas/generated-verb-arbitrary-value.md"),
+                "generated-verb-typed-value",
+                include_str!("../fixtures/claudine-schemas/generated-verb-typed-value.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-wrong-type",
+                include_str!("../fixtures/claudine-schemas/generated-verb-wrong-type.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "three")]),
+                Accepts,
+            ),
+            (
+                "generated-verb-convertible-text",
+                include_str!("../fixtures/claudine-schemas/generated-verb-convertible-text.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-deferred",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-deferred-beside-unknown-parameter",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "limit")]),
+                Rejects("limit"),
+            ),
+            (
+                "generated-verb-deferred-beside-extra-argument",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/min/2", "does not allow 3")]),
+                Rejects("min"),
+            ),
+            (
+                "generated-verb-deferred-beside-bad-sibling",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/min/0", "three")]),
+                Accepts,
+            ),
+            (
+                "generated-verb-malformed-template",
+                include_str!("../fixtures/claudine-schemas/generated-verb-malformed-template.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "{{ 1 + }}")]),
+                Rejects("pr_list"),
+            ),
+            (
+                "optional-nonnullable-null",
+                include_str!("../fixtures/claudine-schemas/optional-nonnullable-null.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/ping/1", "null"), ("/start/1/ping/timeout", "null")]),
+                Rejects("{{ null }}"),
+            ),
+            (
+                "ensure-file-overloads",
+                include_str!("../fixtures/claudine-schemas/ensure-file-overloads.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "variadic-and-or",
+                include_str!("../fixtures/claudine-schemas/variadic-and-or.md"),
                 CLAUDINE,
                 Valid,
                 Accepts,
@@ -1241,10 +1452,9 @@ fn sequence_container_schema_contract() {
     }
 }
 
-/// A task guard is typed by shape only: non-empty text. A first-level
-/// container's loop (on a group object, or beside an inline nested
-/// sequence) uses the shared `loop` type; a deeper container's loop is an
-/// object. The task and loop parsers judge the rest.
+/// A task guard is typed by shape only: non-empty text. A container's loop
+/// (on a group object, or beside an inline nested sequence) uses the shared
+/// `loop` type at every depth. The task and loop parsers judge the rest.
 #[test]
 fn task_when_and_container_loop_schema_shapes() {
     let files = shipped_bundle!();
@@ -1264,9 +1474,8 @@ fn task_when_and_container_loop_schema_shapes() {
         ("nested-loop-list", "cancelled: []\nsequence: [{name: child, sequence: [], loop: [until]}]", false),
         ("group-loop-max-zero", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', max: 0}}}]", false),
         ("nested-loop-unknown-key", "cancelled: []\nsequence: [{name: child, sequence: [], loop: {until: 'true', maxx: 2}}]", false),
-        // Below the first container level the loop is an object; the loop
-        // parser rejects `max: 0` before anything runs.
-        ("deeper-loop-max-zero", "cancelled: []\nsequence: [{name: a, sequence: [{name: b, sequence: [], loop: {until: 'true', max: 0}}]}]", true),
+        ("deeper-loop-max-zero", "cancelled: []\nsequence: [{name: a, sequence: [{name: b, sequence: [], loop: {until: 'true', max: 0}}]}]", false),
+        ("deeper-group-loop-gate", "cancelled: []\nsequence: [{name: a, sequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', gate: [{inf0: hi}]}}}]}]", false),
         ("root-loop", "loop: {until: 'true'}\nsequence: [{name: a, shell: x, when: ready}]", true),
     ] {
         let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{yaml}\n---\n"));
@@ -1655,32 +1864,37 @@ cancelled_conditional_tests! {
         (GROUP_2_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
 }
 
-/// The cancellation stack ends where the parser does: a conditional one level
-/// deeper than it accepts is a schema error at that conditional, on a document
-/// and on a nested container, and the lifecycle parser refuses the document's
-/// stack.
+/// The schema encodes no conditional depth limit: a conditional one level
+/// deeper than the parser accepts is schema-valid on a document and on a
+/// nested container, while a forbidden action there is still a schema error,
+/// and the lifecycle parser alone refuses the sixth level.
 #[test]
-fn cancelled_rejects_a_conditional_deeper_than_the_parser_accepts() {
+fn cancelled_conditional_depth_is_the_parsers_alone_to_limit() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
     let level = PARSER_MAX_CONDITIONAL_DEPTH + 1;
-    for site in [DOCUMENT_CANCELLED, TASK_2_CANCELLED] {
-        let (items, _) = in_conditional(level, "then", "stop");
-        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", &items));
+    let judge = |site: &StackSite, items: &str| {
+        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", items));
         let path = repo.write_document("too-deep.md", &text);
-        let report = discovered
+        discovered
             .judge(
                 &path,
                 include_str!("../../../schemas/claudine.yaml"),
                 include_str!("../../../schemas/inline-compose.yaml"),
             )
             .expect("judged")
-            .report;
-        let pointer = format!("{}{}", site.stack, "/0/then".repeat(level - 1) + "/0");
-        let found = problems(&report);
+            .report
+    };
+    for site in [DOCUMENT_CANCELLED, TASK_2_CANCELLED] {
+        let (items, _) = in_conditional(level, "then", "stop");
+        let report = judge(&site, &items);
+        assert!(report.valid, "{}: a level-{level} conditional is schema-valid: {:?}", site.name, problems(&report));
+        let (items, below) = in_conditional(level, "else", "{ retry: 2 }");
+        let pointer = format!("{}{below}", site.stack);
+        let found = problems(&judge(&site, &items));
         assert!(
             found.iter().any(|(path, _)| *path == pointer),
-            "{}: a level-{level} conditional is rejected at `{pointer}`: {found:?}",
+            "{}: `retry` in a level-{level} `else` is rejected at `{pointer}`: {found:?}",
             site.name
         );
     }
@@ -1726,15 +1940,11 @@ fn cancelled_dictionaries_reject_forbidden_actions() {
     assert!(report.valid, "a dictionary of permitted verbs: {:?}", problems(&report));
 }
 
-/// Pins the documented `cancelled` bound: SimplifiedSchema inlines named
-/// types and cannot recurse, and each container level inlines the next one
-/// twice, so `cancelled` is typed on the first two container levels only (a
-/// task or group, and its direct children). A third-level container is typed,
-/// but its `cancelled` stack is checked by the task parser before anything
-/// runs, not by the schema. Deepening this bound is a deliberate change: each
-/// level multiplies the compiled schema of every Claudine launch.
+/// Containers recurse, so a third-level container's `cancelled` stack is
+/// typed like every other: a forbidden action there is a schema error at its
+/// path.
 #[test]
-fn grandchild_cancelled_is_left_to_the_task_parser() {
+fn grandchild_cancelled_is_typed() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
     let path = repo.write_document(
@@ -1749,5 +1959,9 @@ fn grandchild_cancelled_is_left_to_the_task_parser() {
         )
         .expect("judged")
         .report;
-    assert!(report.valid, "below the typed levels: {:?}", problems(&report));
+    let found = problems(&report);
+    assert!(
+        found.iter().any(|(path, _)| path == "/sequence/0/sequence/0/sequence/0/cancelled/0"),
+        "a grandchild's forbidden `cancelled` action is rejected at its path: {found:?}"
+    );
 }

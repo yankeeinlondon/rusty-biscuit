@@ -31,6 +31,7 @@ use claudine::composition::{
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
+use darkmatter::markdown::schemas::simplified::{DefKey, DefNamespace};
 use darkmatter::markdown::schemas::triggers::parse_trigger_envelope_from_str;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaOriginKind, SchemaRootKind, SchemaRoots,
@@ -195,39 +196,28 @@ const ACTION_PROBES: &[ExportProbe] = &[
 
 const LIFECYCLE_PROBES: &[ExportProbe] = &[
     ("bare-verb", "stop", "jump"),
-    ("loose-body", "[anything, 1]", "42"),
     ("stack", "[stop, { info: hi }]", "[{ inf0: hi }]"),
-    ("item-1", "stop", "{ inf0: hi }"),
-    ("conditional-1", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\" }"),
-    ("stack-2", "[{ info: hi }]", "[{ inf0: hi }]"),
-    ("item-2", "{ info: hi }", "{ inf0: hi }"),
-    ("conditional-2", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\" }"),
-    ("stack-3", "[{ info: hi }]", "[{ inf0: hi }]"),
-    ("item-3", "{ info: hi }", "{ inf0: hi }"),
-    ("conditional-3", "{ when: \"ctx.x\", then: [anything] }", "{ when: \"ctx.x\" }"),
+    ("item", "stop", "{ inf0: hi }"),
+    ("conditional", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\" }"),
     ("initialize-stack", "[{ info: hi }]", "[{ shell: ls }]"),
-    ("initialize-item-1", "{ info: hi }", "{ shell: ls }"),
-    ("initialize-conditional-1", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\" }"),
-    ("initialize-stack-2", "[stop]", "[{ shell: ls }]"),
-    ("initialize-item-2", "{ info: hi }", "{ shell: ls }"),
-    ("initialize-conditional-2", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\" }"),
-    ("initialize-stack-3", "[stop]", "[{ shell: ls }]"),
-    ("initialize-item-3", "{ info: hi }", "{ shell: ls }"),
-    ("initialize-conditional-3", "{ when: \"ctx.x\", then: [anything] }", "{ when: \"ctx.x\" }"),
+    ("initialize-item", "{ info: hi }", "{ shell: ls }"),
+    ("initialize-conditional", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\", then: [{ shell: ls }] }"),
     ("loop-action", "{ op: increment, prop: n }", "{ op: jump, prop: n }"),
     ("loop-action-entry", "increment(n)", "{ op: increment }"),
     ("loop", "{ while: \"ctx.x\", max: 3 }", "{ max: 0 }"),
+    ("cancelled-stack", "[stop, { info: hi }]", "[retry]"),
+    ("cancelled-item", "{ shell: ls }", "{ retry: 2 }"),
+    ("cancelled-conditional", "{ when: \"ctx.x\", then: [stop] }", "{ when: \"ctx.x\", else: [stop] }"),
 ];
 
-/// The first level and the untyped boundary; the levels between are judged
-/// through the disk bundle in `sequence_schema.rs`. Every probe inlines the
-/// container types, so a longer list makes this test slow.
+/// Every export of the recursive container family. Each container type is a
+/// definition referenced at every depth, so a nested probe costs no more to
+/// resolve than a flat one.
 const SEQUENCE_TYPES_PROBES: &[ExportProbe] = &[
     ("steps", "[a, { name: b, shell: x }]", "{ a: 1 }"),
+    ("step", "a", "[a]"),
     ("task", "{ name: a, prompt: a.md, with: { x: 1 }, topic: data }", "{ name: a, with: [1] }"),
     ("group", "{ tasks: [{ name: a, shell: x }], max_parallel: 2 }", "{ tasks: [{ name: a }], execution: parallel }"),
-    ("task-3", "{ name: c, sequence: [{ with: [1] }] }", "{ name: c, with: [1] }"),
-    ("group-3", "{ tasks: [{ anything: 1 }] }", "{ tasks: [] }"),
 ];
 
 /// Negative probes are lists or mappings where a scalar is declared, since
@@ -313,6 +303,92 @@ fn embedded_linking_exports_resolve_without_disk_schemas() {
 #[test]
 fn embedded_sequence_types_exports_resolve_without_disk_schemas() {
     assert_exports_resolve_embedded("sequence-types.yaml", SEQUENCE_TYPES_PROBES);
+}
+
+/// The resolved size limit for Claudine's embedded trigger payloads: the
+/// compact `serde_json` text of the resolved JSON Schema, `$defs` included,
+/// as `recursive_schema_frozen_fixture.rs` measures it in Darkmatter.
+const PAYLOAD_LIMIT_BYTES: usize = 2_000_000;
+
+/// The recursive event families, each stored once as a definition.
+const EVENT_FAMILIES: &[(&str, &str)] = &[
+    ("lifecycle.yaml", "stack"),
+    ("lifecycle.yaml", "item"),
+    ("lifecycle.yaml", "conditional"),
+    ("lifecycle.yaml", "initialize-stack"),
+    ("lifecycle.yaml", "initialize-item"),
+    ("lifecycle.yaml", "initialize-conditional"),
+    ("lifecycle.yaml", "cancelled-stack"),
+    ("lifecycle.yaml", "cancelled-item"),
+    ("lifecycle.yaml", "cancelled-conditional"),
+];
+
+/// The container families and every event family their events reach.
+const CONTAINER_FAMILIES: &[(&str, &str)] = &[
+    ("sequence-types.yaml", "steps"),
+    ("sequence-types.yaml", "step"),
+    ("sequence-types.yaml", "task"),
+    ("sequence-types.yaml", "group"),
+    ("lifecycle.yaml", "stack"),
+    ("lifecycle.yaml", "initialize-stack"),
+    ("lifecycle.yaml", "cancelled-stack"),
+];
+
+/// Names of the retired unrolled and loose types, by their authored file.
+const UNROLLED_TYPE_NAMES: &[(&str, &str)] = &[
+    ("lifecycle.yaml", "loose-body"),
+    ("lifecycle.yaml", "item-1"),
+    ("lifecycle.yaml", "stack-2"),
+    ("lifecycle.yaml", "conditional-3"),
+    ("lifecycle.yaml", "initialize-item-1"),
+    ("lifecycle.yaml", "initialize-stack-3"),
+    ("lifecycle.yaml", "cancelled-item-1"),
+    ("lifecycle.yaml", "cancelled-stack-6"),
+    ("sequence-types.yaml", "steps-2"),
+    ("sequence-types.yaml", "step-2"),
+    ("sequence-types.yaml", "task-2"),
+    ("sequence-types.yaml", "group-3"),
+];
+
+/// Whether `name`, declared by the bundle file `file`, is a definition of
+/// `effective`, looked up by its `DefKey` (never by a `$defs` key).
+fn embedded_definition(effective: &EffectiveSchema, file: &str, name: &str) -> bool {
+    let namespace = DefNamespace::Embedded(format!("{CLAUDINE_SCHEMA_BUNDLE_NAME}/{file}"));
+    effective.definition(&DefKey::new(namespace, name)).is_some()
+}
+
+/// The recursive families are stored once as definitions and the container
+/// types reach them at every depth, so each trigger's resolved schema stays
+/// under the limit. The measured schema is the effective one, which also
+/// holds the built-in baseline, so the payload alone is smaller still.
+#[test]
+fn embedded_trigger_payloads_resolve_within_two_megabytes() {
+    let bare = Bare::new();
+    let schemas = bare.schemas(claudine_schema_bundle());
+    let mut report = Vec::new();
+    for (label, frontmatter, families) in [
+        ("claudine.yaml", "start: []", EVENT_FAMILIES),
+        ("sequence.yaml", "sequence: []", CONTAINER_FAMILIES),
+        ("both", "start: []\nsequence: []", CONTAINER_FAMILIES),
+    ] {
+        let markdown = memory_document(frontmatter);
+        let effective = schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies");
+        let bytes = serde_json::to_string(&*effective.json_schema).expect("the schema serializes").len();
+        report.push(format!("{label}: {bytes} B"));
+        assert!(bytes <= PAYLOAD_LIMIT_BYTES, "{label} resolves to {bytes} bytes, over {PAYLOAD_LIMIT_BYTES}");
+        assert!(
+            effective.json_schema.get("$defs").and_then(|defs| defs.as_object()).is_some_and(|defs| !defs.is_empty()),
+            "{label}: the recursive families are local `$defs`"
+        );
+        for (file, name) in families {
+            assert!(embedded_definition(&effective, file, name), "{label}: `{name}@./{file}` is a definition");
+        }
+        for (file, name) in UNROLLED_TYPE_NAMES {
+            assert!(!embedded_definition(&effective, file, name), "{label}: `{name}@./{file}` must not remain");
+        }
+    }
+    eprintln!("{}", report.join("\n"));
+    bare.assert_untouched();
 }
 
 #[test]
@@ -789,6 +865,26 @@ fn disk_import_never_falls_back_to_an_embedded_file() {
     assert!(is_load_failure(&error), "{error:?}");
 }
 
+/// A disk `lifecycle.yaml` whose recursive family names a type it does not
+/// declare is a load failure: the embedded file of the same basename, which
+/// declares `item`, never supplies it.
+#[test]
+fn broken_disk_recursive_family_never_falls_back_to_an_embedded_file() {
+    let locations = Locations::new();
+    locations.write_schema(
+        Root::Tree,
+        "claudine.yaml",
+        "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
+    );
+    locations.write_schema(
+        Root::Tree,
+        "lifecycle.yaml",
+        "kind: schema\ntypes:\n    stack:\n        - item[]\n    conditional:\n        when: expression(required)\n        then: stack(required)\n",
+    );
+    let error = locations.verdict("broken", "start: [stop]").expect_err("the disk family is broken");
+    assert!(is_load_failure(&error), "{error:?}");
+}
+
 /// A disk `claudine.yaml` that matches nothing still shadows the embedded
 /// one, while the embedded inline-compose.yaml still applies.
 #[test]
@@ -957,6 +1053,10 @@ passive_parity_tests! {
     passive_parity_depth3 => ("depth3", include_str!("../fixtures/claudine-schemas/depth3.md"));
     passive_parity_depth5 => ("depth5", include_str!("../fixtures/claudine-schemas/depth5.md"));
     passive_parity_depth6 => ("depth6", include_str!("../fixtures/claudine-schemas/depth6.md"));
+    passive_parity_depth6_wrong_verb =>
+        ("depth6-wrong-verb", include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md"));
+    passive_parity_depth5_guarded_bundle =>
+        ("depth5-guarded-bundle", include_str!("../fixtures/claudine-schemas/depth5-guarded-bundle.md"));
     passive_parity_root_dictionary => ("root-dictionary", include_str!("../fixtures/claudine-schemas/root-dictionary.md"));
     passive_parity_bundle_in_then => ("bundle-in-then", include_str!("../fixtures/claudine-schemas/bundle-in-then.md"));
     passive_parity_loop_gate => ("loop-gate", include_str!("../fixtures/claudine-schemas/loop-gate.md"));
@@ -970,10 +1070,8 @@ passive_parity_tests! {
         "shell-in-initialize-root-dictionary",
         include_str!("../fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md")
     );
-    passive_parity_shell_in_initialize_below_typed_levels => (
-        "shell-in-initialize-below-typed-levels",
-        include_str!("../fixtures/claudine-schemas/shell-in-initialize-below-typed-levels.md")
-    );
+    passive_parity_shell_in_initialize_depth3_then =>
+        ("shell-in-initialize-depth3-then", include_str!("../fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"));
     passive_parity_shell_expansion_in_initialize_set => (
         "shell-expansion-in-initialize-set",
         include_str!("../fixtures/claudine-schemas/shell-expansion-in-initialize-set.md")
@@ -992,8 +1090,6 @@ passive_parity_tests! {
         ("long-form-in-bundle", include_str!("../fixtures/claudine-schemas/long-form-in-bundle.md"));
     passive_parity_long_form_in_root_dictionary =>
         ("long-form-in-root-dictionary", include_str!("../fixtures/claudine-schemas/long-form-in-root-dictionary.md"));
-    passive_parity_generated_verb_arbitrary_value =>
-        ("generated-verb-arbitrary-value", include_str!("../fixtures/claudine-schemas/generated-verb-arbitrary-value.md"));
     passive_parity_start_number => ("start-number", include_str!("../fixtures/claudine-schemas/start-number.md"));
     passive_parity_agent_empty_list => ("agent-empty-list", include_str!("../fixtures/claudine-schemas/agent-empty-list.md"));
     passive_parity_loop_number => ("loop-number", include_str!("../fixtures/claudine-schemas/loop-number.md"));
@@ -1006,6 +1102,28 @@ passive_parity_tests! {
     passive_parity_prompt_with_malformed_sequence =>
         ("prompt-with-malformed-sequence", include_str!("../fixtures/claudine-schemas/prompt-with-malformed-sequence.md"));
     passive_parity_linked_prompt => ("linked-prompt", include_str!("../fixtures/claudine-schemas/linked-prompt.md"));
+    passive_parity_generated_verb_typed_value =>
+        ("generated-verb-typed-value", include_str!("../fixtures/claudine-schemas/generated-verb-typed-value.md"));
+    passive_parity_generated_verb_wrong_type =>
+        ("generated-verb-wrong-type", include_str!("../fixtures/claudine-schemas/generated-verb-wrong-type.md"));
+    passive_parity_generated_verb_convertible_text =>
+        ("generated-verb-convertible-text", include_str!("../fixtures/claudine-schemas/generated-verb-convertible-text.md"));
+    passive_parity_generated_verb_deferred =>
+        ("generated-verb-deferred", include_str!("../fixtures/claudine-schemas/generated-verb-deferred.md"));
+    passive_parity_generated_verb_deferred_beside_unknown_parameter =>
+        ("generated-verb-deferred-beside-unknown-parameter", include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"));
+    passive_parity_generated_verb_deferred_beside_extra_argument =>
+        ("generated-verb-deferred-beside-extra-argument", include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"));
+    passive_parity_generated_verb_deferred_beside_bad_sibling =>
+        ("generated-verb-deferred-beside-bad-sibling", include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"));
+    passive_parity_generated_verb_malformed_template =>
+        ("generated-verb-malformed-template", include_str!("../fixtures/claudine-schemas/generated-verb-malformed-template.md"));
+    passive_parity_optional_nonnullable_null =>
+        ("optional-nonnullable-null", include_str!("../fixtures/claudine-schemas/optional-nonnullable-null.md"));
+    passive_parity_ensure_file_overloads =>
+        ("ensure-file-overloads", include_str!("../fixtures/claudine-schemas/ensure-file-overloads.md"));
+    passive_parity_variadic_and_or =>
+        ("variadic-and-or", include_str!("../fixtures/claudine-schemas/variadic-and-or.md"));
 }
 
 #[test]

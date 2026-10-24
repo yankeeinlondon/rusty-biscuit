@@ -11,9 +11,10 @@
 # A category type holds exactly one verb, whose value is its short form or its
 # closed long form. A bundle holds several verbs in short form only, plus
 # `when` and `no_error`. The Darkmatter side-effect and expression-function
-# verbs are listed one key per name with untyped values; Claudine's lifecycle
-# parser checks their arguments. Tests in claudine/lib/tests/l1 keep the
-# bundles, the generated keys, and the parser's verb inventory aligned.
+# verbs are listed one key per name and reference the per-verb types
+# Darkmatter generates from their typed catalog signatures. Tests in
+# claudine/lib/tests/l1 keep the bundles, the generated keys and their
+# references, and the parser's verb inventory aligned.
 kind: schema
 types:
     interpolation: interpolation@darkmatter:lifecycle
@@ -92,134 +93,386 @@ types:
             max-keys: 1
     expression:
         set: set-short@darkmatter:lifecycle
-        append_frontmatter: side-effect-verb@darkmatter:lifecycle
-        append_jsonl: side-effect-verb@darkmatter:lifecycle
-        append_line: side-effect-verb@darkmatter:lifecycle
-        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
-        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
-        ensure_dir: side-effect-verb@darkmatter:lifecycle
-        ensure_file: side-effect-verb@darkmatter:lifecycle
-        http_post: side-effect-verb@darkmatter:lifecycle
-        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
-        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
-        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
-        set_frontmatter: side-effect-verb@darkmatter:lifecycle
-        abs: expression-function-verb@darkmatter:lifecycle
-        absolute: expression-function-verb@darkmatter:lifecycle
-        and: expression-function-verb@darkmatter:lifecycle
-        as_csv: expression-function-verb@darkmatter:lifecycle
-        as_json: expression-function-verb@darkmatter:lifecycle
-        as_json5: expression-function-verb@darkmatter:lifecycle
-        as_line_separated: expression-function-verb@darkmatter:lifecycle
-        as_markdown: expression-function-verb@darkmatter:lifecycle
-        as_ordered_list: expression-function-verb@darkmatter:lifecycle
-        as_space_separated: expression-function-verb@darkmatter:lifecycle
-        as_tsv: expression-function-verb@darkmatter:lifecycle
-        as_unordered_list: expression-function-verb@darkmatter:lifecycle
-        basename: expression-function-verb@darkmatter:lifecycle
-        basename_without_index: expression-function-verb@darkmatter:lifecycle
-        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
-        camel_case: expression-function-verb@darkmatter:lifecycle
-        can_execute: expression-function-verb@darkmatter:lifecycle
-        capitalize: expression-function-verb@darkmatter:lifecycle
-        cicd: expression-function-verb@darkmatter:lifecycle
-        cicd_list: expression-function-verb@darkmatter:lifecycle
-        code_link: expression-function-verb@darkmatter:lifecycle
-        contains: expression-function-verb@darkmatter:lifecycle
-        date: expression-function-verb@darkmatter:lifecycle
-        date_delta: expression-function-verb@darkmatter:lifecycle
-        decrement_file_index: expression-function-verb@darkmatter:lifecycle
-        dir_leading: expression-function-verb@darkmatter:lifecycle
-        dirname: expression-function-verb@darkmatter:lifecycle
-        ends_with: expression-function-verb@darkmatter:lifecycle
-        ensure_leading: expression-function-verb@darkmatter:lifecycle
-        ensure_trailing: expression-function-verb@darkmatter:lifecycle
-        ext: expression-function-verb@darkmatter:lifecycle
-        file_exists: expression-function-verb@darkmatter:lifecycle
-        file_index: expression-function-verb@darkmatter:lifecycle
-        file_trailing: expression-function-verb@darkmatter:lifecycle
-        find_files: expression-function-verb@darkmatter:lifecycle
-        find_first_index: expression-function-verb@darkmatter:lifecycle
-        find_last_index: expression-function-verb@darkmatter:lifecycle
-        first: expression-function-verb@darkmatter:lifecycle
-        frontmatter: expression-function-verb@darkmatter:lifecycle
-        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
-        has_alias: expression-function-verb@darkmatter:lifecycle
-        has_binary: expression-function-verb@darkmatter:lifecycle
-        has_builtin_function: expression-function-verb@darkmatter:lifecycle
-        has_command: expression-function-verb@darkmatter:lifecycle
-        has_key: expression-function-verb@darkmatter:lifecycle
-        has_local_skill: expression-function-verb@darkmatter:lifecycle
-        has_skill: expression-function-verb@darkmatter:lifecycle
-        has_user_function: expression-function-verb@darkmatter:lifecycle
-        increment_file_index: expression-function-verb@darkmatter:lifecycle
-        ipv4: expression-function-verb@darkmatter:lifecycle
-        ipv6: expression-function-verb@darkmatter:lifecycle
-        is_array: expression-function-verb@darkmatter:lifecycle
-        is_date: expression-function-verb@darkmatter:lifecycle
-        is_date_time: expression-function-verb@darkmatter:lifecycle
-        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
-        is_date_utc: expression-function-verb@darkmatter:lifecycle
-        is_empty: expression-function-verb@darkmatter:lifecycle
-        is_indexed_file: expression-function-verb@darkmatter:lifecycle
-        is_integer: expression-function-verb@darkmatter:lifecycle
-        is_negative: expression-function-verb@darkmatter:lifecycle
-        is_null: expression-function-verb@darkmatter:lifecycle
-        is_number: expression-function-verb@darkmatter:lifecycle
-        is_object: expression-function-verb@darkmatter:lifecycle
-        is_positive: expression-function-verb@darkmatter:lifecycle
-        is_string: expression-function-verb@darkmatter:lifecycle
-        is_this_month: expression-function-verb@darkmatter:lifecycle
-        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
-        is_this_year: expression-function-verb@darkmatter:lifecycle
-        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
-        is_today: expression-function-verb@darkmatter:lifecycle
-        is_today_utc: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
-        is_yesterday: expression-function-verb@darkmatter:lifecycle
-        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
-        join: expression-function-verb@darkmatter:lifecycle
-        kebab_case: expression-function-verb@darkmatter:lifecycle
-        keys: expression-function-verb@darkmatter:lifecycle
-        last: expression-function-verb@darkmatter:lifecycle
-        length: expression-function-verb@darkmatter:lifecycle
-        link: expression-function-verb@darkmatter:lifecycle
-        lower: expression-function-verb@darkmatter:lifecycle
-        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
-        markdown_title: expression-function-verb@darkmatter:lifecycle
-        max: expression-function-verb@darkmatter:lifecycle
-        min: expression-function-verb@darkmatter:lifecycle
-        newer_than: expression-function-verb@darkmatter:lifecycle
-        number: expression-function-verb@darkmatter:lifecycle
-        older_than: expression-function-verb@darkmatter:lifecycle
-        or: expression-function-verb@darkmatter:lifecycle
-        package: expression-function-verb@darkmatter:lifecycle
-        package_area: expression-function-verb@darkmatter:lifecycle
-        parent_dir: expression-function-verb@darkmatter:lifecycle
-        pascal_case: expression-function-verb@darkmatter:lifecycle
-        ping: expression-function-verb@darkmatter:lifecycle
-        ping_under: expression-function-verb@darkmatter:lifecycle
-        pr: expression-function-verb@darkmatter:lifecycle
-        pr_list: expression-function-verb@darkmatter:lifecycle
-        predict_conflicts: expression-function-verb@darkmatter:lifecycle
-        recent_commits: expression-function-verb@darkmatter:lifecycle
-        relative: expression-function-verb@darkmatter:lifecycle
-        remote_vendor: expression-function-verb@darkmatter:lifecycle
-        replace: expression-function-verb@darkmatter:lifecycle
-        replace_first: expression-function-verb@darkmatter:lifecycle
-        replace_last: expression-function-verb@darkmatter:lifecycle
-        round: expression-function-verb@darkmatter:lifecycle
-        snake_case: expression-function-verb@darkmatter:lifecycle
-        starts_with: expression-function-verb@darkmatter:lifecycle
-        terminal: expression-function-verb@darkmatter:lifecycle
-        title_case: expression-function-verb@darkmatter:lifecycle
-        trim: expression-function-verb@darkmatter:lifecycle
-        try_frontmatter: expression-function-verb@darkmatter:lifecycle
-        upper: expression-function-verb@darkmatter:lifecycle
-        validate_schema: expression-function-verb@darkmatter:lifecycle
-        values: expression-function-verb@darkmatter:lifecycle
-        without_date: expression-function-verb@darkmatter:lifecycle
+        append_frontmatter:
+            - append_frontmatter-short@darkmatter:lifecycle
+            - append_frontmatter-long@darkmatter:lifecycle
+        append_jsonl:
+            - append_jsonl-short@darkmatter:lifecycle
+            - append_jsonl-long@darkmatter:lifecycle
+        append_line:
+            - append_line-short@darkmatter:lifecycle
+            - append_line-long@darkmatter:lifecycle
+        decrement_frontmatter:
+            - decrement_frontmatter-short@darkmatter:lifecycle
+            - decrement_frontmatter-long@darkmatter:lifecycle
+        delete_frontmatter:
+            - delete_frontmatter-short@darkmatter:lifecycle
+            - delete_frontmatter-long@darkmatter:lifecycle
+        ensure_dir:
+            - ensure_dir-short@darkmatter:lifecycle
+            - ensure_dir-long@darkmatter:lifecycle
+        ensure_file:
+            - ensure_file-short@darkmatter:lifecycle
+            - ensure_file-long@darkmatter:lifecycle
+        http_post:
+            - http_post-short@darkmatter:lifecycle
+            - http_post-long@darkmatter:lifecycle
+        increment_frontmatter:
+            - increment_frontmatter-short@darkmatter:lifecycle
+            - increment_frontmatter-long@darkmatter:lifecycle
+        merge_frontmatter:
+            - merge_frontmatter-short@darkmatter:lifecycle
+            - merge_frontmatter-long@darkmatter:lifecycle
+        prepend_frontmatter:
+            - prepend_frontmatter-short@darkmatter:lifecycle
+            - prepend_frontmatter-long@darkmatter:lifecycle
+        set_frontmatter:
+            - set_frontmatter-short@darkmatter:lifecycle
+            - set_frontmatter-long@darkmatter:lifecycle
+        abs:
+            - abs-short@darkmatter:lifecycle
+            - abs-long@darkmatter:lifecycle
+        absolute:
+            - absolute-short@darkmatter:lifecycle
+            - absolute-long@darkmatter:lifecycle
+        and: and-short@darkmatter:lifecycle
+        as_csv:
+            - as_csv-short@darkmatter:lifecycle
+            - as_csv-long@darkmatter:lifecycle
+        as_json:
+            - as_json-short@darkmatter:lifecycle
+            - as_json-long@darkmatter:lifecycle
+        as_json5:
+            - as_json5-short@darkmatter:lifecycle
+            - as_json5-long@darkmatter:lifecycle
+        as_line_separated:
+            - as_line_separated-short@darkmatter:lifecycle
+            - as_line_separated-long@darkmatter:lifecycle
+        as_markdown:
+            - as_markdown-short@darkmatter:lifecycle
+            - as_markdown-long@darkmatter:lifecycle
+        as_ordered_list:
+            - as_ordered_list-short@darkmatter:lifecycle
+            - as_ordered_list-long@darkmatter:lifecycle
+        as_space_separated:
+            - as_space_separated-short@darkmatter:lifecycle
+            - as_space_separated-long@darkmatter:lifecycle
+        as_tsv:
+            - as_tsv-short@darkmatter:lifecycle
+            - as_tsv-long@darkmatter:lifecycle
+        as_unordered_list:
+            - as_unordered_list-short@darkmatter:lifecycle
+            - as_unordered_list-long@darkmatter:lifecycle
+        basename:
+            - basename-short@darkmatter:lifecycle
+            - basename-long@darkmatter:lifecycle
+        basename_without_index:
+            - basename_without_index-short@darkmatter:lifecycle
+            - basename_without_index-long@darkmatter:lifecycle
+        branch_exists_on_remote:
+            - branch_exists_on_remote-short@darkmatter:lifecycle
+            - branch_exists_on_remote-long@darkmatter:lifecycle
+        camel_case:
+            - camel_case-short@darkmatter:lifecycle
+            - camel_case-long@darkmatter:lifecycle
+        can_execute:
+            - can_execute-short@darkmatter:lifecycle
+            - can_execute-long@darkmatter:lifecycle
+        capitalize:
+            - capitalize-short@darkmatter:lifecycle
+            - capitalize-long@darkmatter:lifecycle
+        cicd:
+            - cicd-short@darkmatter:lifecycle
+            - cicd-long@darkmatter:lifecycle
+        cicd_list:
+            - cicd_list-short@darkmatter:lifecycle
+            - cicd_list-long@darkmatter:lifecycle
+        code_link:
+            - code_link-short@darkmatter:lifecycle
+            - code_link-long@darkmatter:lifecycle
+        contains:
+            - contains-short@darkmatter:lifecycle
+            - contains-long@darkmatter:lifecycle
+        date:
+            - date-short@darkmatter:lifecycle
+            - date-long@darkmatter:lifecycle
+        date_delta:
+            - date_delta-short@darkmatter:lifecycle
+            - date_delta-long@darkmatter:lifecycle
+        decrement_file_index:
+            - decrement_file_index-short@darkmatter:lifecycle
+            - decrement_file_index-long@darkmatter:lifecycle
+        dir_leading:
+            - dir_leading-short@darkmatter:lifecycle
+            - dir_leading-long@darkmatter:lifecycle
+        dirname:
+            - dirname-short@darkmatter:lifecycle
+            - dirname-long@darkmatter:lifecycle
+        ends_with:
+            - ends_with-short@darkmatter:lifecycle
+            - ends_with-long@darkmatter:lifecycle
+        ensure_leading:
+            - ensure_leading-short@darkmatter:lifecycle
+            - ensure_leading-long@darkmatter:lifecycle
+        ensure_trailing:
+            - ensure_trailing-short@darkmatter:lifecycle
+            - ensure_trailing-long@darkmatter:lifecycle
+        ext:
+            - ext-short@darkmatter:lifecycle
+            - ext-long@darkmatter:lifecycle
+        file_exists:
+            - file_exists-short@darkmatter:lifecycle
+            - file_exists-long@darkmatter:lifecycle
+        file_index:
+            - file_index-short@darkmatter:lifecycle
+            - file_index-long@darkmatter:lifecycle
+        file_trailing:
+            - file_trailing-short@darkmatter:lifecycle
+            - file_trailing-long@darkmatter:lifecycle
+        find_files:
+            - find_files-short@darkmatter:lifecycle
+            - find_files-long@darkmatter:lifecycle
+        find_first_index:
+            - find_first_index-short@darkmatter:lifecycle
+            - find_first_index-long@darkmatter:lifecycle
+        find_last_index:
+            - find_last_index-short@darkmatter:lifecycle
+            - find_last_index-long@darkmatter:lifecycle
+        first:
+            - first-short@darkmatter:lifecycle
+            - first-long@darkmatter:lifecycle
+        frontmatter:
+            - frontmatter-short@darkmatter:lifecycle
+            - frontmatter-long@darkmatter:lifecycle
+        has_agentic_cli:
+            - has_agentic_cli-short@darkmatter:lifecycle
+            - has_agentic_cli-long@darkmatter:lifecycle
+        has_alias:
+            - has_alias-short@darkmatter:lifecycle
+            - has_alias-long@darkmatter:lifecycle
+        has_binary:
+            - has_binary-short@darkmatter:lifecycle
+            - has_binary-long@darkmatter:lifecycle
+        has_builtin_function:
+            - has_builtin_function-short@darkmatter:lifecycle
+            - has_builtin_function-long@darkmatter:lifecycle
+        has_command:
+            - has_command-short@darkmatter:lifecycle
+            - has_command-long@darkmatter:lifecycle
+        has_key:
+            - has_key-short@darkmatter:lifecycle
+            - has_key-long@darkmatter:lifecycle
+        has_local_skill:
+            - has_local_skill-short@darkmatter:lifecycle
+            - has_local_skill-long@darkmatter:lifecycle
+        has_skill:
+            - has_skill-short@darkmatter:lifecycle
+            - has_skill-long@darkmatter:lifecycle
+        has_user_function:
+            - has_user_function-short@darkmatter:lifecycle
+            - has_user_function-long@darkmatter:lifecycle
+        increment_file_index:
+            - increment_file_index-short@darkmatter:lifecycle
+            - increment_file_index-long@darkmatter:lifecycle
+        ipv4:
+            - ipv4-short@darkmatter:lifecycle
+            - ipv4-long@darkmatter:lifecycle
+        ipv6:
+            - ipv6-short@darkmatter:lifecycle
+            - ipv6-long@darkmatter:lifecycle
+        is_array:
+            - is_array-short@darkmatter:lifecycle
+            - is_array-long@darkmatter:lifecycle
+        is_date:
+            - is_date-short@darkmatter:lifecycle
+            - is_date-long@darkmatter:lifecycle
+        is_date_time:
+            - is_date_time-short@darkmatter:lifecycle
+            - is_date_time-long@darkmatter:lifecycle
+        is_date_time_utc:
+            - is_date_time_utc-short@darkmatter:lifecycle
+            - is_date_time_utc-long@darkmatter:lifecycle
+        is_date_utc:
+            - is_date_utc-short@darkmatter:lifecycle
+            - is_date_utc-long@darkmatter:lifecycle
+        is_empty:
+            - is_empty-short@darkmatter:lifecycle
+            - is_empty-long@darkmatter:lifecycle
+        is_indexed_file:
+            - is_indexed_file-short@darkmatter:lifecycle
+            - is_indexed_file-long@darkmatter:lifecycle
+        is_integer:
+            - is_integer-short@darkmatter:lifecycle
+            - is_integer-long@darkmatter:lifecycle
+        is_negative:
+            - is_negative-short@darkmatter:lifecycle
+            - is_negative-long@darkmatter:lifecycle
+        is_null:
+            - is_null-short@darkmatter:lifecycle
+            - is_null-long@darkmatter:lifecycle
+        is_number:
+            - is_number-short@darkmatter:lifecycle
+            - is_number-long@darkmatter:lifecycle
+        is_object:
+            - is_object-short@darkmatter:lifecycle
+            - is_object-long@darkmatter:lifecycle
+        is_positive:
+            - is_positive-short@darkmatter:lifecycle
+            - is_positive-long@darkmatter:lifecycle
+        is_string:
+            - is_string-short@darkmatter:lifecycle
+            - is_string-long@darkmatter:lifecycle
+        is_this_month:
+            - is_this_month-short@darkmatter:lifecycle
+            - is_this_month-long@darkmatter:lifecycle
+        is_this_month_utc:
+            - is_this_month_utc-short@darkmatter:lifecycle
+            - is_this_month_utc-long@darkmatter:lifecycle
+        is_this_year:
+            - is_this_year-short@darkmatter:lifecycle
+            - is_this_year-long@darkmatter:lifecycle
+        is_this_year_utc:
+            - is_this_year_utc-short@darkmatter:lifecycle
+            - is_this_year_utc-long@darkmatter:lifecycle
+        is_today:
+            - is_today-short@darkmatter:lifecycle
+            - is_today-long@darkmatter:lifecycle
+        is_today_utc:
+            - is_today_utc-short@darkmatter:lifecycle
+            - is_today_utc-long@darkmatter:lifecycle
+        is_tomorrow:
+            - is_tomorrow-short@darkmatter:lifecycle
+            - is_tomorrow-long@darkmatter:lifecycle
+        is_tomorrow_utc:
+            - is_tomorrow_utc-short@darkmatter:lifecycle
+            - is_tomorrow_utc-long@darkmatter:lifecycle
+        is_yesterday:
+            - is_yesterday-short@darkmatter:lifecycle
+            - is_yesterday-long@darkmatter:lifecycle
+        is_yesterday_utc:
+            - is_yesterday_utc-short@darkmatter:lifecycle
+            - is_yesterday_utc-long@darkmatter:lifecycle
+        join:
+            - join-short@darkmatter:lifecycle
+            - join-long@darkmatter:lifecycle
+        kebab_case:
+            - kebab_case-short@darkmatter:lifecycle
+            - kebab_case-long@darkmatter:lifecycle
+        keys:
+            - keys-short@darkmatter:lifecycle
+            - keys-long@darkmatter:lifecycle
+        last:
+            - last-short@darkmatter:lifecycle
+            - last-long@darkmatter:lifecycle
+        length:
+            - length-short@darkmatter:lifecycle
+            - length-long@darkmatter:lifecycle
+        link:
+            - link-short@darkmatter:lifecycle
+            - link-long@darkmatter:lifecycle
+        lower:
+            - lower-short@darkmatter:lifecycle
+            - lower-long@darkmatter:lifecycle
+        markdown_body_empty:
+            - markdown_body_empty-short@darkmatter:lifecycle
+            - markdown_body_empty-long@darkmatter:lifecycle
+        markdown_title:
+            - markdown_title-short@darkmatter:lifecycle
+            - markdown_title-long@darkmatter:lifecycle
+        max:
+            - max-short@darkmatter:lifecycle
+            - max-long@darkmatter:lifecycle
+        min:
+            - min-short@darkmatter:lifecycle
+            - min-long@darkmatter:lifecycle
+        newer_than:
+            - newer_than-short@darkmatter:lifecycle
+            - newer_than-long@darkmatter:lifecycle
+        number:
+            - number-short@darkmatter:lifecycle
+            - number-long@darkmatter:lifecycle
+        older_than:
+            - older_than-short@darkmatter:lifecycle
+            - older_than-long@darkmatter:lifecycle
+        or: or-short@darkmatter:lifecycle
+        package:
+            - package-short@darkmatter:lifecycle
+            - package-long@darkmatter:lifecycle
+        package_area:
+            - package_area-short@darkmatter:lifecycle
+            - package_area-long@darkmatter:lifecycle
+        parent_dir:
+            - parent_dir-short@darkmatter:lifecycle
+            - parent_dir-long@darkmatter:lifecycle
+        pascal_case:
+            - pascal_case-short@darkmatter:lifecycle
+            - pascal_case-long@darkmatter:lifecycle
+        ping:
+            - ping-short@darkmatter:lifecycle
+            - ping-long@darkmatter:lifecycle
+        ping_under:
+            - ping_under-short@darkmatter:lifecycle
+            - ping_under-long@darkmatter:lifecycle
+        pr:
+            - pr-short@darkmatter:lifecycle
+            - pr-long@darkmatter:lifecycle
+        pr_list:
+            - pr_list-short@darkmatter:lifecycle
+            - pr_list-long@darkmatter:lifecycle
+        predict_conflicts:
+            - predict_conflicts-short@darkmatter:lifecycle
+            - predict_conflicts-long@darkmatter:lifecycle
+        recent_commits:
+            - recent_commits-short@darkmatter:lifecycle
+            - recent_commits-long@darkmatter:lifecycle
+        relative:
+            - relative-short@darkmatter:lifecycle
+            - relative-long@darkmatter:lifecycle
+        remote_vendor:
+            - remote_vendor-short@darkmatter:lifecycle
+            - remote_vendor-long@darkmatter:lifecycle
+        replace:
+            - replace-short@darkmatter:lifecycle
+            - replace-long@darkmatter:lifecycle
+        replace_first:
+            - replace_first-short@darkmatter:lifecycle
+            - replace_first-long@darkmatter:lifecycle
+        replace_last:
+            - replace_last-short@darkmatter:lifecycle
+            - replace_last-long@darkmatter:lifecycle
+        round:
+            - round-short@darkmatter:lifecycle
+            - round-long@darkmatter:lifecycle
+        snake_case:
+            - snake_case-short@darkmatter:lifecycle
+            - snake_case-long@darkmatter:lifecycle
+        starts_with:
+            - starts_with-short@darkmatter:lifecycle
+            - starts_with-long@darkmatter:lifecycle
+        terminal:
+            - terminal-short@darkmatter:lifecycle
+            - terminal-long@darkmatter:lifecycle
+        title_case:
+            - title_case-short@darkmatter:lifecycle
+            - title_case-long@darkmatter:lifecycle
+        trim:
+            - trim-short@darkmatter:lifecycle
+            - trim-long@darkmatter:lifecycle
+        try_frontmatter:
+            - try_frontmatter-short@darkmatter:lifecycle
+            - try_frontmatter-long@darkmatter:lifecycle
+        upper:
+            - upper-short@darkmatter:lifecycle
+            - upper-long@darkmatter:lifecycle
+        validate_schema:
+            - validate_schema-short@darkmatter:lifecycle
+            - validate_schema-long@darkmatter:lifecycle
+        values:
+            - values-short@darkmatter:lifecycle
+            - values-long@darkmatter:lifecycle
+        without_date:
+            - without_date-short@darkmatter:lifecycle
+            - without_date-long@darkmatter:lifecycle
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -245,134 +498,134 @@ types:
         prep: prep-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
-        append_frontmatter: side-effect-verb@darkmatter:lifecycle
-        append_jsonl: side-effect-verb@darkmatter:lifecycle
-        append_line: side-effect-verb@darkmatter:lifecycle
-        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
-        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
-        ensure_dir: side-effect-verb@darkmatter:lifecycle
-        ensure_file: side-effect-verb@darkmatter:lifecycle
-        http_post: side-effect-verb@darkmatter:lifecycle
-        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
-        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
-        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
-        set_frontmatter: side-effect-verb@darkmatter:lifecycle
-        abs: expression-function-verb@darkmatter:lifecycle
-        absolute: expression-function-verb@darkmatter:lifecycle
-        and: expression-function-verb@darkmatter:lifecycle
-        as_csv: expression-function-verb@darkmatter:lifecycle
-        as_json: expression-function-verb@darkmatter:lifecycle
-        as_json5: expression-function-verb@darkmatter:lifecycle
-        as_line_separated: expression-function-verb@darkmatter:lifecycle
-        as_markdown: expression-function-verb@darkmatter:lifecycle
-        as_ordered_list: expression-function-verb@darkmatter:lifecycle
-        as_space_separated: expression-function-verb@darkmatter:lifecycle
-        as_tsv: expression-function-verb@darkmatter:lifecycle
-        as_unordered_list: expression-function-verb@darkmatter:lifecycle
-        basename: expression-function-verb@darkmatter:lifecycle
-        basename_without_index: expression-function-verb@darkmatter:lifecycle
-        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
-        camel_case: expression-function-verb@darkmatter:lifecycle
-        can_execute: expression-function-verb@darkmatter:lifecycle
-        capitalize: expression-function-verb@darkmatter:lifecycle
-        cicd: expression-function-verb@darkmatter:lifecycle
-        cicd_list: expression-function-verb@darkmatter:lifecycle
-        code_link: expression-function-verb@darkmatter:lifecycle
-        contains: expression-function-verb@darkmatter:lifecycle
-        date: expression-function-verb@darkmatter:lifecycle
-        date_delta: expression-function-verb@darkmatter:lifecycle
-        decrement_file_index: expression-function-verb@darkmatter:lifecycle
-        dir_leading: expression-function-verb@darkmatter:lifecycle
-        dirname: expression-function-verb@darkmatter:lifecycle
-        ends_with: expression-function-verb@darkmatter:lifecycle
-        ensure_leading: expression-function-verb@darkmatter:lifecycle
-        ensure_trailing: expression-function-verb@darkmatter:lifecycle
-        ext: expression-function-verb@darkmatter:lifecycle
-        file_exists: expression-function-verb@darkmatter:lifecycle
-        file_index: expression-function-verb@darkmatter:lifecycle
-        file_trailing: expression-function-verb@darkmatter:lifecycle
-        find_files: expression-function-verb@darkmatter:lifecycle
-        find_first_index: expression-function-verb@darkmatter:lifecycle
-        find_last_index: expression-function-verb@darkmatter:lifecycle
-        first: expression-function-verb@darkmatter:lifecycle
-        frontmatter: expression-function-verb@darkmatter:lifecycle
-        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
-        has_alias: expression-function-verb@darkmatter:lifecycle
-        has_binary: expression-function-verb@darkmatter:lifecycle
-        has_builtin_function: expression-function-verb@darkmatter:lifecycle
-        has_command: expression-function-verb@darkmatter:lifecycle
-        has_key: expression-function-verb@darkmatter:lifecycle
-        has_local_skill: expression-function-verb@darkmatter:lifecycle
-        has_skill: expression-function-verb@darkmatter:lifecycle
-        has_user_function: expression-function-verb@darkmatter:lifecycle
-        increment_file_index: expression-function-verb@darkmatter:lifecycle
-        ipv4: expression-function-verb@darkmatter:lifecycle
-        ipv6: expression-function-verb@darkmatter:lifecycle
-        is_array: expression-function-verb@darkmatter:lifecycle
-        is_date: expression-function-verb@darkmatter:lifecycle
-        is_date_time: expression-function-verb@darkmatter:lifecycle
-        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
-        is_date_utc: expression-function-verb@darkmatter:lifecycle
-        is_empty: expression-function-verb@darkmatter:lifecycle
-        is_indexed_file: expression-function-verb@darkmatter:lifecycle
-        is_integer: expression-function-verb@darkmatter:lifecycle
-        is_negative: expression-function-verb@darkmatter:lifecycle
-        is_null: expression-function-verb@darkmatter:lifecycle
-        is_number: expression-function-verb@darkmatter:lifecycle
-        is_object: expression-function-verb@darkmatter:lifecycle
-        is_positive: expression-function-verb@darkmatter:lifecycle
-        is_string: expression-function-verb@darkmatter:lifecycle
-        is_this_month: expression-function-verb@darkmatter:lifecycle
-        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
-        is_this_year: expression-function-verb@darkmatter:lifecycle
-        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
-        is_today: expression-function-verb@darkmatter:lifecycle
-        is_today_utc: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
-        is_yesterday: expression-function-verb@darkmatter:lifecycle
-        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
-        join: expression-function-verb@darkmatter:lifecycle
-        kebab_case: expression-function-verb@darkmatter:lifecycle
-        keys: expression-function-verb@darkmatter:lifecycle
-        last: expression-function-verb@darkmatter:lifecycle
-        length: expression-function-verb@darkmatter:lifecycle
-        link: expression-function-verb@darkmatter:lifecycle
-        lower: expression-function-verb@darkmatter:lifecycle
-        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
-        markdown_title: expression-function-verb@darkmatter:lifecycle
-        max: expression-function-verb@darkmatter:lifecycle
-        min: expression-function-verb@darkmatter:lifecycle
-        newer_than: expression-function-verb@darkmatter:lifecycle
-        number: expression-function-verb@darkmatter:lifecycle
-        older_than: expression-function-verb@darkmatter:lifecycle
-        or: expression-function-verb@darkmatter:lifecycle
-        package: expression-function-verb@darkmatter:lifecycle
-        package_area: expression-function-verb@darkmatter:lifecycle
-        parent_dir: expression-function-verb@darkmatter:lifecycle
-        pascal_case: expression-function-verb@darkmatter:lifecycle
-        ping: expression-function-verb@darkmatter:lifecycle
-        ping_under: expression-function-verb@darkmatter:lifecycle
-        pr: expression-function-verb@darkmatter:lifecycle
-        pr_list: expression-function-verb@darkmatter:lifecycle
-        predict_conflicts: expression-function-verb@darkmatter:lifecycle
-        recent_commits: expression-function-verb@darkmatter:lifecycle
-        relative: expression-function-verb@darkmatter:lifecycle
-        remote_vendor: expression-function-verb@darkmatter:lifecycle
-        replace: expression-function-verb@darkmatter:lifecycle
-        replace_first: expression-function-verb@darkmatter:lifecycle
-        replace_last: expression-function-verb@darkmatter:lifecycle
-        round: expression-function-verb@darkmatter:lifecycle
-        snake_case: expression-function-verb@darkmatter:lifecycle
-        starts_with: expression-function-verb@darkmatter:lifecycle
-        terminal: expression-function-verb@darkmatter:lifecycle
-        title_case: expression-function-verb@darkmatter:lifecycle
-        trim: expression-function-verb@darkmatter:lifecycle
-        try_frontmatter: expression-function-verb@darkmatter:lifecycle
-        upper: expression-function-verb@darkmatter:lifecycle
-        validate_schema: expression-function-verb@darkmatter:lifecycle
-        values: expression-function-verb@darkmatter:lifecycle
-        without_date: expression-function-verb@darkmatter:lifecycle
+        append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
+        append_jsonl: append_jsonl-short@darkmatter:lifecycle
+        append_line: append_line-short@darkmatter:lifecycle
+        decrement_frontmatter: decrement_frontmatter-short@darkmatter:lifecycle
+        delete_frontmatter: delete_frontmatter-short@darkmatter:lifecycle
+        ensure_dir: ensure_dir-short@darkmatter:lifecycle
+        ensure_file: ensure_file-short@darkmatter:lifecycle
+        http_post: http_post-short@darkmatter:lifecycle
+        increment_frontmatter: increment_frontmatter-short@darkmatter:lifecycle
+        merge_frontmatter: merge_frontmatter-short@darkmatter:lifecycle
+        prepend_frontmatter: prepend_frontmatter-short@darkmatter:lifecycle
+        set_frontmatter: set_frontmatter-short@darkmatter:lifecycle
+        abs: abs-short@darkmatter:lifecycle
+        absolute: absolute-short@darkmatter:lifecycle
+        and: and-short@darkmatter:lifecycle
+        as_csv: as_csv-short@darkmatter:lifecycle
+        as_json: as_json-short@darkmatter:lifecycle
+        as_json5: as_json5-short@darkmatter:lifecycle
+        as_line_separated: as_line_separated-short@darkmatter:lifecycle
+        as_markdown: as_markdown-short@darkmatter:lifecycle
+        as_ordered_list: as_ordered_list-short@darkmatter:lifecycle
+        as_space_separated: as_space_separated-short@darkmatter:lifecycle
+        as_tsv: as_tsv-short@darkmatter:lifecycle
+        as_unordered_list: as_unordered_list-short@darkmatter:lifecycle
+        basename: basename-short@darkmatter:lifecycle
+        basename_without_index: basename_without_index-short@darkmatter:lifecycle
+        branch_exists_on_remote: branch_exists_on_remote-short@darkmatter:lifecycle
+        camel_case: camel_case-short@darkmatter:lifecycle
+        can_execute: can_execute-short@darkmatter:lifecycle
+        capitalize: capitalize-short@darkmatter:lifecycle
+        cicd: cicd-short@darkmatter:lifecycle
+        cicd_list: cicd_list-short@darkmatter:lifecycle
+        code_link: code_link-short@darkmatter:lifecycle
+        contains: contains-short@darkmatter:lifecycle
+        date: date-short@darkmatter:lifecycle
+        date_delta: date_delta-short@darkmatter:lifecycle
+        decrement_file_index: decrement_file_index-short@darkmatter:lifecycle
+        dir_leading: dir_leading-short@darkmatter:lifecycle
+        dirname: dirname-short@darkmatter:lifecycle
+        ends_with: ends_with-short@darkmatter:lifecycle
+        ensure_leading: ensure_leading-short@darkmatter:lifecycle
+        ensure_trailing: ensure_trailing-short@darkmatter:lifecycle
+        ext: ext-short@darkmatter:lifecycle
+        file_exists: file_exists-short@darkmatter:lifecycle
+        file_index: file_index-short@darkmatter:lifecycle
+        file_trailing: file_trailing-short@darkmatter:lifecycle
+        find_files: find_files-short@darkmatter:lifecycle
+        find_first_index: find_first_index-short@darkmatter:lifecycle
+        find_last_index: find_last_index-short@darkmatter:lifecycle
+        first: first-short@darkmatter:lifecycle
+        frontmatter: frontmatter-short@darkmatter:lifecycle
+        has_agentic_cli: has_agentic_cli-short@darkmatter:lifecycle
+        has_alias: has_alias-short@darkmatter:lifecycle
+        has_binary: has_binary-short@darkmatter:lifecycle
+        has_builtin_function: has_builtin_function-short@darkmatter:lifecycle
+        has_command: has_command-short@darkmatter:lifecycle
+        has_key: has_key-short@darkmatter:lifecycle
+        has_local_skill: has_local_skill-short@darkmatter:lifecycle
+        has_skill: has_skill-short@darkmatter:lifecycle
+        has_user_function: has_user_function-short@darkmatter:lifecycle
+        increment_file_index: increment_file_index-short@darkmatter:lifecycle
+        ipv4: ipv4-short@darkmatter:lifecycle
+        ipv6: ipv6-short@darkmatter:lifecycle
+        is_array: is_array-short@darkmatter:lifecycle
+        is_date: is_date-short@darkmatter:lifecycle
+        is_date_time: is_date_time-short@darkmatter:lifecycle
+        is_date_time_utc: is_date_time_utc-short@darkmatter:lifecycle
+        is_date_utc: is_date_utc-short@darkmatter:lifecycle
+        is_empty: is_empty-short@darkmatter:lifecycle
+        is_indexed_file: is_indexed_file-short@darkmatter:lifecycle
+        is_integer: is_integer-short@darkmatter:lifecycle
+        is_negative: is_negative-short@darkmatter:lifecycle
+        is_null: is_null-short@darkmatter:lifecycle
+        is_number: is_number-short@darkmatter:lifecycle
+        is_object: is_object-short@darkmatter:lifecycle
+        is_positive: is_positive-short@darkmatter:lifecycle
+        is_string: is_string-short@darkmatter:lifecycle
+        is_this_month: is_this_month-short@darkmatter:lifecycle
+        is_this_month_utc: is_this_month_utc-short@darkmatter:lifecycle
+        is_this_year: is_this_year-short@darkmatter:lifecycle
+        is_this_year_utc: is_this_year_utc-short@darkmatter:lifecycle
+        is_today: is_today-short@darkmatter:lifecycle
+        is_today_utc: is_today_utc-short@darkmatter:lifecycle
+        is_tomorrow: is_tomorrow-short@darkmatter:lifecycle
+        is_tomorrow_utc: is_tomorrow_utc-short@darkmatter:lifecycle
+        is_yesterday: is_yesterday-short@darkmatter:lifecycle
+        is_yesterday_utc: is_yesterday_utc-short@darkmatter:lifecycle
+        join: join-short@darkmatter:lifecycle
+        kebab_case: kebab_case-short@darkmatter:lifecycle
+        keys: keys-short@darkmatter:lifecycle
+        last: last-short@darkmatter:lifecycle
+        length: length-short@darkmatter:lifecycle
+        link: link-short@darkmatter:lifecycle
+        lower: lower-short@darkmatter:lifecycle
+        markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
+        markdown_title: markdown_title-short@darkmatter:lifecycle
+        max: max-short@darkmatter:lifecycle
+        min: min-short@darkmatter:lifecycle
+        newer_than: newer_than-short@darkmatter:lifecycle
+        number: number-short@darkmatter:lifecycle
+        older_than: older_than-short@darkmatter:lifecycle
+        or: or-short@darkmatter:lifecycle
+        package: package-short@darkmatter:lifecycle
+        package_area: package_area-short@darkmatter:lifecycle
+        parent_dir: parent_dir-short@darkmatter:lifecycle
+        pascal_case: pascal_case-short@darkmatter:lifecycle
+        ping: ping-short@darkmatter:lifecycle
+        ping_under: ping_under-short@darkmatter:lifecycle
+        pr: pr-short@darkmatter:lifecycle
+        pr_list: pr_list-short@darkmatter:lifecycle
+        predict_conflicts: predict_conflicts-short@darkmatter:lifecycle
+        recent_commits: recent_commits-short@darkmatter:lifecycle
+        relative: relative-short@darkmatter:lifecycle
+        remote_vendor: remote_vendor-short@darkmatter:lifecycle
+        replace: replace-short@darkmatter:lifecycle
+        replace_first: replace_first-short@darkmatter:lifecycle
+        replace_last: replace_last-short@darkmatter:lifecycle
+        round: round-short@darkmatter:lifecycle
+        snake_case: snake_case-short@darkmatter:lifecycle
+        starts_with: starts_with-short@darkmatter:lifecycle
+        terminal: terminal-short@darkmatter:lifecycle
+        title_case: title_case-short@darkmatter:lifecycle
+        trim: trim-short@darkmatter:lifecycle
+        try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
+        upper: upper-short@darkmatter:lifecycle
+        validate_schema: validate_schema-short@darkmatter:lifecycle
+        values: values-short@darkmatter:lifecycle
+        without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"
     initialize-bundle:
@@ -396,134 +649,134 @@ types:
         break: break-short@darkmatter:lifecycle
         prep: prep-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
-        append_frontmatter: side-effect-verb@darkmatter:lifecycle
-        append_jsonl: side-effect-verb@darkmatter:lifecycle
-        append_line: side-effect-verb@darkmatter:lifecycle
-        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
-        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
-        ensure_dir: side-effect-verb@darkmatter:lifecycle
-        ensure_file: side-effect-verb@darkmatter:lifecycle
-        http_post: side-effect-verb@darkmatter:lifecycle
-        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
-        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
-        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
-        set_frontmatter: side-effect-verb@darkmatter:lifecycle
-        abs: expression-function-verb@darkmatter:lifecycle
-        absolute: expression-function-verb@darkmatter:lifecycle
-        and: expression-function-verb@darkmatter:lifecycle
-        as_csv: expression-function-verb@darkmatter:lifecycle
-        as_json: expression-function-verb@darkmatter:lifecycle
-        as_json5: expression-function-verb@darkmatter:lifecycle
-        as_line_separated: expression-function-verb@darkmatter:lifecycle
-        as_markdown: expression-function-verb@darkmatter:lifecycle
-        as_ordered_list: expression-function-verb@darkmatter:lifecycle
-        as_space_separated: expression-function-verb@darkmatter:lifecycle
-        as_tsv: expression-function-verb@darkmatter:lifecycle
-        as_unordered_list: expression-function-verb@darkmatter:lifecycle
-        basename: expression-function-verb@darkmatter:lifecycle
-        basename_without_index: expression-function-verb@darkmatter:lifecycle
-        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
-        camel_case: expression-function-verb@darkmatter:lifecycle
-        can_execute: expression-function-verb@darkmatter:lifecycle
-        capitalize: expression-function-verb@darkmatter:lifecycle
-        cicd: expression-function-verb@darkmatter:lifecycle
-        cicd_list: expression-function-verb@darkmatter:lifecycle
-        code_link: expression-function-verb@darkmatter:lifecycle
-        contains: expression-function-verb@darkmatter:lifecycle
-        date: expression-function-verb@darkmatter:lifecycle
-        date_delta: expression-function-verb@darkmatter:lifecycle
-        decrement_file_index: expression-function-verb@darkmatter:lifecycle
-        dir_leading: expression-function-verb@darkmatter:lifecycle
-        dirname: expression-function-verb@darkmatter:lifecycle
-        ends_with: expression-function-verb@darkmatter:lifecycle
-        ensure_leading: expression-function-verb@darkmatter:lifecycle
-        ensure_trailing: expression-function-verb@darkmatter:lifecycle
-        ext: expression-function-verb@darkmatter:lifecycle
-        file_exists: expression-function-verb@darkmatter:lifecycle
-        file_index: expression-function-verb@darkmatter:lifecycle
-        file_trailing: expression-function-verb@darkmatter:lifecycle
-        find_files: expression-function-verb@darkmatter:lifecycle
-        find_first_index: expression-function-verb@darkmatter:lifecycle
-        find_last_index: expression-function-verb@darkmatter:lifecycle
-        first: expression-function-verb@darkmatter:lifecycle
-        frontmatter: expression-function-verb@darkmatter:lifecycle
-        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
-        has_alias: expression-function-verb@darkmatter:lifecycle
-        has_binary: expression-function-verb@darkmatter:lifecycle
-        has_builtin_function: expression-function-verb@darkmatter:lifecycle
-        has_command: expression-function-verb@darkmatter:lifecycle
-        has_key: expression-function-verb@darkmatter:lifecycle
-        has_local_skill: expression-function-verb@darkmatter:lifecycle
-        has_skill: expression-function-verb@darkmatter:lifecycle
-        has_user_function: expression-function-verb@darkmatter:lifecycle
-        increment_file_index: expression-function-verb@darkmatter:lifecycle
-        ipv4: expression-function-verb@darkmatter:lifecycle
-        ipv6: expression-function-verb@darkmatter:lifecycle
-        is_array: expression-function-verb@darkmatter:lifecycle
-        is_date: expression-function-verb@darkmatter:lifecycle
-        is_date_time: expression-function-verb@darkmatter:lifecycle
-        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
-        is_date_utc: expression-function-verb@darkmatter:lifecycle
-        is_empty: expression-function-verb@darkmatter:lifecycle
-        is_indexed_file: expression-function-verb@darkmatter:lifecycle
-        is_integer: expression-function-verb@darkmatter:lifecycle
-        is_negative: expression-function-verb@darkmatter:lifecycle
-        is_null: expression-function-verb@darkmatter:lifecycle
-        is_number: expression-function-verb@darkmatter:lifecycle
-        is_object: expression-function-verb@darkmatter:lifecycle
-        is_positive: expression-function-verb@darkmatter:lifecycle
-        is_string: expression-function-verb@darkmatter:lifecycle
-        is_this_month: expression-function-verb@darkmatter:lifecycle
-        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
-        is_this_year: expression-function-verb@darkmatter:lifecycle
-        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
-        is_today: expression-function-verb@darkmatter:lifecycle
-        is_today_utc: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
-        is_yesterday: expression-function-verb@darkmatter:lifecycle
-        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
-        join: expression-function-verb@darkmatter:lifecycle
-        kebab_case: expression-function-verb@darkmatter:lifecycle
-        keys: expression-function-verb@darkmatter:lifecycle
-        last: expression-function-verb@darkmatter:lifecycle
-        length: expression-function-verb@darkmatter:lifecycle
-        link: expression-function-verb@darkmatter:lifecycle
-        lower: expression-function-verb@darkmatter:lifecycle
-        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
-        markdown_title: expression-function-verb@darkmatter:lifecycle
-        max: expression-function-verb@darkmatter:lifecycle
-        min: expression-function-verb@darkmatter:lifecycle
-        newer_than: expression-function-verb@darkmatter:lifecycle
-        number: expression-function-verb@darkmatter:lifecycle
-        older_than: expression-function-verb@darkmatter:lifecycle
-        or: expression-function-verb@darkmatter:lifecycle
-        package: expression-function-verb@darkmatter:lifecycle
-        package_area: expression-function-verb@darkmatter:lifecycle
-        parent_dir: expression-function-verb@darkmatter:lifecycle
-        pascal_case: expression-function-verb@darkmatter:lifecycle
-        ping: expression-function-verb@darkmatter:lifecycle
-        ping_under: expression-function-verb@darkmatter:lifecycle
-        pr: expression-function-verb@darkmatter:lifecycle
-        pr_list: expression-function-verb@darkmatter:lifecycle
-        predict_conflicts: expression-function-verb@darkmatter:lifecycle
-        recent_commits: expression-function-verb@darkmatter:lifecycle
-        relative: expression-function-verb@darkmatter:lifecycle
-        remote_vendor: expression-function-verb@darkmatter:lifecycle
-        replace: expression-function-verb@darkmatter:lifecycle
-        replace_first: expression-function-verb@darkmatter:lifecycle
-        replace_last: expression-function-verb@darkmatter:lifecycle
-        round: expression-function-verb@darkmatter:lifecycle
-        snake_case: expression-function-verb@darkmatter:lifecycle
-        starts_with: expression-function-verb@darkmatter:lifecycle
-        terminal: expression-function-verb@darkmatter:lifecycle
-        title_case: expression-function-verb@darkmatter:lifecycle
-        trim: expression-function-verb@darkmatter:lifecycle
-        try_frontmatter: expression-function-verb@darkmatter:lifecycle
-        upper: expression-function-verb@darkmatter:lifecycle
-        validate_schema: expression-function-verb@darkmatter:lifecycle
-        values: expression-function-verb@darkmatter:lifecycle
-        without_date: expression-function-verb@darkmatter:lifecycle
+        append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
+        append_jsonl: append_jsonl-short@darkmatter:lifecycle
+        append_line: append_line-short@darkmatter:lifecycle
+        decrement_frontmatter: decrement_frontmatter-short@darkmatter:lifecycle
+        delete_frontmatter: delete_frontmatter-short@darkmatter:lifecycle
+        ensure_dir: ensure_dir-short@darkmatter:lifecycle
+        ensure_file: ensure_file-short@darkmatter:lifecycle
+        http_post: http_post-short@darkmatter:lifecycle
+        increment_frontmatter: increment_frontmatter-short@darkmatter:lifecycle
+        merge_frontmatter: merge_frontmatter-short@darkmatter:lifecycle
+        prepend_frontmatter: prepend_frontmatter-short@darkmatter:lifecycle
+        set_frontmatter: set_frontmatter-short@darkmatter:lifecycle
+        abs: abs-short@darkmatter:lifecycle
+        absolute: absolute-short@darkmatter:lifecycle
+        and: and-short@darkmatter:lifecycle
+        as_csv: as_csv-short@darkmatter:lifecycle
+        as_json: as_json-short@darkmatter:lifecycle
+        as_json5: as_json5-short@darkmatter:lifecycle
+        as_line_separated: as_line_separated-short@darkmatter:lifecycle
+        as_markdown: as_markdown-short@darkmatter:lifecycle
+        as_ordered_list: as_ordered_list-short@darkmatter:lifecycle
+        as_space_separated: as_space_separated-short@darkmatter:lifecycle
+        as_tsv: as_tsv-short@darkmatter:lifecycle
+        as_unordered_list: as_unordered_list-short@darkmatter:lifecycle
+        basename: basename-short@darkmatter:lifecycle
+        basename_without_index: basename_without_index-short@darkmatter:lifecycle
+        branch_exists_on_remote: branch_exists_on_remote-short@darkmatter:lifecycle
+        camel_case: camel_case-short@darkmatter:lifecycle
+        can_execute: can_execute-short@darkmatter:lifecycle
+        capitalize: capitalize-short@darkmatter:lifecycle
+        cicd: cicd-short@darkmatter:lifecycle
+        cicd_list: cicd_list-short@darkmatter:lifecycle
+        code_link: code_link-short@darkmatter:lifecycle
+        contains: contains-short@darkmatter:lifecycle
+        date: date-short@darkmatter:lifecycle
+        date_delta: date_delta-short@darkmatter:lifecycle
+        decrement_file_index: decrement_file_index-short@darkmatter:lifecycle
+        dir_leading: dir_leading-short@darkmatter:lifecycle
+        dirname: dirname-short@darkmatter:lifecycle
+        ends_with: ends_with-short@darkmatter:lifecycle
+        ensure_leading: ensure_leading-short@darkmatter:lifecycle
+        ensure_trailing: ensure_trailing-short@darkmatter:lifecycle
+        ext: ext-short@darkmatter:lifecycle
+        file_exists: file_exists-short@darkmatter:lifecycle
+        file_index: file_index-short@darkmatter:lifecycle
+        file_trailing: file_trailing-short@darkmatter:lifecycle
+        find_files: find_files-short@darkmatter:lifecycle
+        find_first_index: find_first_index-short@darkmatter:lifecycle
+        find_last_index: find_last_index-short@darkmatter:lifecycle
+        first: first-short@darkmatter:lifecycle
+        frontmatter: frontmatter-short@darkmatter:lifecycle
+        has_agentic_cli: has_agentic_cli-short@darkmatter:lifecycle
+        has_alias: has_alias-short@darkmatter:lifecycle
+        has_binary: has_binary-short@darkmatter:lifecycle
+        has_builtin_function: has_builtin_function-short@darkmatter:lifecycle
+        has_command: has_command-short@darkmatter:lifecycle
+        has_key: has_key-short@darkmatter:lifecycle
+        has_local_skill: has_local_skill-short@darkmatter:lifecycle
+        has_skill: has_skill-short@darkmatter:lifecycle
+        has_user_function: has_user_function-short@darkmatter:lifecycle
+        increment_file_index: increment_file_index-short@darkmatter:lifecycle
+        ipv4: ipv4-short@darkmatter:lifecycle
+        ipv6: ipv6-short@darkmatter:lifecycle
+        is_array: is_array-short@darkmatter:lifecycle
+        is_date: is_date-short@darkmatter:lifecycle
+        is_date_time: is_date_time-short@darkmatter:lifecycle
+        is_date_time_utc: is_date_time_utc-short@darkmatter:lifecycle
+        is_date_utc: is_date_utc-short@darkmatter:lifecycle
+        is_empty: is_empty-short@darkmatter:lifecycle
+        is_indexed_file: is_indexed_file-short@darkmatter:lifecycle
+        is_integer: is_integer-short@darkmatter:lifecycle
+        is_negative: is_negative-short@darkmatter:lifecycle
+        is_null: is_null-short@darkmatter:lifecycle
+        is_number: is_number-short@darkmatter:lifecycle
+        is_object: is_object-short@darkmatter:lifecycle
+        is_positive: is_positive-short@darkmatter:lifecycle
+        is_string: is_string-short@darkmatter:lifecycle
+        is_this_month: is_this_month-short@darkmatter:lifecycle
+        is_this_month_utc: is_this_month_utc-short@darkmatter:lifecycle
+        is_this_year: is_this_year-short@darkmatter:lifecycle
+        is_this_year_utc: is_this_year_utc-short@darkmatter:lifecycle
+        is_today: is_today-short@darkmatter:lifecycle
+        is_today_utc: is_today_utc-short@darkmatter:lifecycle
+        is_tomorrow: is_tomorrow-short@darkmatter:lifecycle
+        is_tomorrow_utc: is_tomorrow_utc-short@darkmatter:lifecycle
+        is_yesterday: is_yesterday-short@darkmatter:lifecycle
+        is_yesterday_utc: is_yesterday_utc-short@darkmatter:lifecycle
+        join: join-short@darkmatter:lifecycle
+        kebab_case: kebab_case-short@darkmatter:lifecycle
+        keys: keys-short@darkmatter:lifecycle
+        last: last-short@darkmatter:lifecycle
+        length: length-short@darkmatter:lifecycle
+        link: link-short@darkmatter:lifecycle
+        lower: lower-short@darkmatter:lifecycle
+        markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
+        markdown_title: markdown_title-short@darkmatter:lifecycle
+        max: max-short@darkmatter:lifecycle
+        min: min-short@darkmatter:lifecycle
+        newer_than: newer_than-short@darkmatter:lifecycle
+        number: number-short@darkmatter:lifecycle
+        older_than: older_than-short@darkmatter:lifecycle
+        or: or-short@darkmatter:lifecycle
+        package: package-short@darkmatter:lifecycle
+        package_area: package_area-short@darkmatter:lifecycle
+        parent_dir: parent_dir-short@darkmatter:lifecycle
+        pascal_case: pascal_case-short@darkmatter:lifecycle
+        ping: ping-short@darkmatter:lifecycle
+        ping_under: ping_under-short@darkmatter:lifecycle
+        pr: pr-short@darkmatter:lifecycle
+        pr_list: pr_list-short@darkmatter:lifecycle
+        predict_conflicts: predict_conflicts-short@darkmatter:lifecycle
+        recent_commits: recent_commits-short@darkmatter:lifecycle
+        relative: relative-short@darkmatter:lifecycle
+        remote_vendor: remote_vendor-short@darkmatter:lifecycle
+        replace: replace-short@darkmatter:lifecycle
+        replace_first: replace_first-short@darkmatter:lifecycle
+        replace_last: replace_last-short@darkmatter:lifecycle
+        round: round-short@darkmatter:lifecycle
+        snake_case: snake_case-short@darkmatter:lifecycle
+        starts_with: starts_with-short@darkmatter:lifecycle
+        terminal: terminal-short@darkmatter:lifecycle
+        title_case: title_case-short@darkmatter:lifecycle
+        trim: trim-short@darkmatter:lifecycle
+        try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
+        upper: upper-short@darkmatter:lifecycle
+        validate_schema: validate_schema-short@darkmatter:lifecycle
+        values: values-short@darkmatter:lifecycle
+        without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"
     cancelled-stop:
@@ -548,133 +801,133 @@ types:
         stop: stop-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
-        append_frontmatter: side-effect-verb@darkmatter:lifecycle
-        append_jsonl: side-effect-verb@darkmatter:lifecycle
-        append_line: side-effect-verb@darkmatter:lifecycle
-        decrement_frontmatter: side-effect-verb@darkmatter:lifecycle
-        delete_frontmatter: side-effect-verb@darkmatter:lifecycle
-        ensure_dir: side-effect-verb@darkmatter:lifecycle
-        ensure_file: side-effect-verb@darkmatter:lifecycle
-        http_post: side-effect-verb@darkmatter:lifecycle
-        increment_frontmatter: side-effect-verb@darkmatter:lifecycle
-        merge_frontmatter: side-effect-verb@darkmatter:lifecycle
-        prepend_frontmatter: side-effect-verb@darkmatter:lifecycle
-        set_frontmatter: side-effect-verb@darkmatter:lifecycle
-        abs: expression-function-verb@darkmatter:lifecycle
-        absolute: expression-function-verb@darkmatter:lifecycle
-        and: expression-function-verb@darkmatter:lifecycle
-        as_csv: expression-function-verb@darkmatter:lifecycle
-        as_json: expression-function-verb@darkmatter:lifecycle
-        as_json5: expression-function-verb@darkmatter:lifecycle
-        as_line_separated: expression-function-verb@darkmatter:lifecycle
-        as_markdown: expression-function-verb@darkmatter:lifecycle
-        as_ordered_list: expression-function-verb@darkmatter:lifecycle
-        as_space_separated: expression-function-verb@darkmatter:lifecycle
-        as_tsv: expression-function-verb@darkmatter:lifecycle
-        as_unordered_list: expression-function-verb@darkmatter:lifecycle
-        basename: expression-function-verb@darkmatter:lifecycle
-        basename_without_index: expression-function-verb@darkmatter:lifecycle
-        branch_exists_on_remote: expression-function-verb@darkmatter:lifecycle
-        camel_case: expression-function-verb@darkmatter:lifecycle
-        can_execute: expression-function-verb@darkmatter:lifecycle
-        capitalize: expression-function-verb@darkmatter:lifecycle
-        cicd: expression-function-verb@darkmatter:lifecycle
-        cicd_list: expression-function-verb@darkmatter:lifecycle
-        code_link: expression-function-verb@darkmatter:lifecycle
-        contains: expression-function-verb@darkmatter:lifecycle
-        date: expression-function-verb@darkmatter:lifecycle
-        date_delta: expression-function-verb@darkmatter:lifecycle
-        decrement_file_index: expression-function-verb@darkmatter:lifecycle
-        dir_leading: expression-function-verb@darkmatter:lifecycle
-        dirname: expression-function-verb@darkmatter:lifecycle
-        ends_with: expression-function-verb@darkmatter:lifecycle
-        ensure_leading: expression-function-verb@darkmatter:lifecycle
-        ensure_trailing: expression-function-verb@darkmatter:lifecycle
-        ext: expression-function-verb@darkmatter:lifecycle
-        file_exists: expression-function-verb@darkmatter:lifecycle
-        file_index: expression-function-verb@darkmatter:lifecycle
-        file_trailing: expression-function-verb@darkmatter:lifecycle
-        find_files: expression-function-verb@darkmatter:lifecycle
-        find_first_index: expression-function-verb@darkmatter:lifecycle
-        find_last_index: expression-function-verb@darkmatter:lifecycle
-        first: expression-function-verb@darkmatter:lifecycle
-        frontmatter: expression-function-verb@darkmatter:lifecycle
-        has_agentic_cli: expression-function-verb@darkmatter:lifecycle
-        has_alias: expression-function-verb@darkmatter:lifecycle
-        has_binary: expression-function-verb@darkmatter:lifecycle
-        has_builtin_function: expression-function-verb@darkmatter:lifecycle
-        has_command: expression-function-verb@darkmatter:lifecycle
-        has_key: expression-function-verb@darkmatter:lifecycle
-        has_local_skill: expression-function-verb@darkmatter:lifecycle
-        has_skill: expression-function-verb@darkmatter:lifecycle
-        has_user_function: expression-function-verb@darkmatter:lifecycle
-        increment_file_index: expression-function-verb@darkmatter:lifecycle
-        ipv4: expression-function-verb@darkmatter:lifecycle
-        ipv6: expression-function-verb@darkmatter:lifecycle
-        is_array: expression-function-verb@darkmatter:lifecycle
-        is_date: expression-function-verb@darkmatter:lifecycle
-        is_date_time: expression-function-verb@darkmatter:lifecycle
-        is_date_time_utc: expression-function-verb@darkmatter:lifecycle
-        is_date_utc: expression-function-verb@darkmatter:lifecycle
-        is_empty: expression-function-verb@darkmatter:lifecycle
-        is_indexed_file: expression-function-verb@darkmatter:lifecycle
-        is_integer: expression-function-verb@darkmatter:lifecycle
-        is_negative: expression-function-verb@darkmatter:lifecycle
-        is_null: expression-function-verb@darkmatter:lifecycle
-        is_number: expression-function-verb@darkmatter:lifecycle
-        is_object: expression-function-verb@darkmatter:lifecycle
-        is_positive: expression-function-verb@darkmatter:lifecycle
-        is_string: expression-function-verb@darkmatter:lifecycle
-        is_this_month: expression-function-verb@darkmatter:lifecycle
-        is_this_month_utc: expression-function-verb@darkmatter:lifecycle
-        is_this_year: expression-function-verb@darkmatter:lifecycle
-        is_this_year_utc: expression-function-verb@darkmatter:lifecycle
-        is_today: expression-function-verb@darkmatter:lifecycle
-        is_today_utc: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow: expression-function-verb@darkmatter:lifecycle
-        is_tomorrow_utc: expression-function-verb@darkmatter:lifecycle
-        is_yesterday: expression-function-verb@darkmatter:lifecycle
-        is_yesterday_utc: expression-function-verb@darkmatter:lifecycle
-        join: expression-function-verb@darkmatter:lifecycle
-        kebab_case: expression-function-verb@darkmatter:lifecycle
-        keys: expression-function-verb@darkmatter:lifecycle
-        last: expression-function-verb@darkmatter:lifecycle
-        length: expression-function-verb@darkmatter:lifecycle
-        link: expression-function-verb@darkmatter:lifecycle
-        lower: expression-function-verb@darkmatter:lifecycle
-        markdown_body_empty: expression-function-verb@darkmatter:lifecycle
-        markdown_title: expression-function-verb@darkmatter:lifecycle
-        max: expression-function-verb@darkmatter:lifecycle
-        min: expression-function-verb@darkmatter:lifecycle
-        newer_than: expression-function-verb@darkmatter:lifecycle
-        number: expression-function-verb@darkmatter:lifecycle
-        older_than: expression-function-verb@darkmatter:lifecycle
-        or: expression-function-verb@darkmatter:lifecycle
-        package: expression-function-verb@darkmatter:lifecycle
-        package_area: expression-function-verb@darkmatter:lifecycle
-        parent_dir: expression-function-verb@darkmatter:lifecycle
-        pascal_case: expression-function-verb@darkmatter:lifecycle
-        ping: expression-function-verb@darkmatter:lifecycle
-        ping_under: expression-function-verb@darkmatter:lifecycle
-        pr: expression-function-verb@darkmatter:lifecycle
-        pr_list: expression-function-verb@darkmatter:lifecycle
-        predict_conflicts: expression-function-verb@darkmatter:lifecycle
-        recent_commits: expression-function-verb@darkmatter:lifecycle
-        relative: expression-function-verb@darkmatter:lifecycle
-        remote_vendor: expression-function-verb@darkmatter:lifecycle
-        replace: expression-function-verb@darkmatter:lifecycle
-        replace_first: expression-function-verb@darkmatter:lifecycle
-        replace_last: expression-function-verb@darkmatter:lifecycle
-        round: expression-function-verb@darkmatter:lifecycle
-        snake_case: expression-function-verb@darkmatter:lifecycle
-        starts_with: expression-function-verb@darkmatter:lifecycle
-        terminal: expression-function-verb@darkmatter:lifecycle
-        title_case: expression-function-verb@darkmatter:lifecycle
-        trim: expression-function-verb@darkmatter:lifecycle
-        try_frontmatter: expression-function-verb@darkmatter:lifecycle
-        upper: expression-function-verb@darkmatter:lifecycle
-        validate_schema: expression-function-verb@darkmatter:lifecycle
-        values: expression-function-verb@darkmatter:lifecycle
-        without_date: expression-function-verb@darkmatter:lifecycle
+        append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
+        append_jsonl: append_jsonl-short@darkmatter:lifecycle
+        append_line: append_line-short@darkmatter:lifecycle
+        decrement_frontmatter: decrement_frontmatter-short@darkmatter:lifecycle
+        delete_frontmatter: delete_frontmatter-short@darkmatter:lifecycle
+        ensure_dir: ensure_dir-short@darkmatter:lifecycle
+        ensure_file: ensure_file-short@darkmatter:lifecycle
+        http_post: http_post-short@darkmatter:lifecycle
+        increment_frontmatter: increment_frontmatter-short@darkmatter:lifecycle
+        merge_frontmatter: merge_frontmatter-short@darkmatter:lifecycle
+        prepend_frontmatter: prepend_frontmatter-short@darkmatter:lifecycle
+        set_frontmatter: set_frontmatter-short@darkmatter:lifecycle
+        abs: abs-short@darkmatter:lifecycle
+        absolute: absolute-short@darkmatter:lifecycle
+        and: and-short@darkmatter:lifecycle
+        as_csv: as_csv-short@darkmatter:lifecycle
+        as_json: as_json-short@darkmatter:lifecycle
+        as_json5: as_json5-short@darkmatter:lifecycle
+        as_line_separated: as_line_separated-short@darkmatter:lifecycle
+        as_markdown: as_markdown-short@darkmatter:lifecycle
+        as_ordered_list: as_ordered_list-short@darkmatter:lifecycle
+        as_space_separated: as_space_separated-short@darkmatter:lifecycle
+        as_tsv: as_tsv-short@darkmatter:lifecycle
+        as_unordered_list: as_unordered_list-short@darkmatter:lifecycle
+        basename: basename-short@darkmatter:lifecycle
+        basename_without_index: basename_without_index-short@darkmatter:lifecycle
+        branch_exists_on_remote: branch_exists_on_remote-short@darkmatter:lifecycle
+        camel_case: camel_case-short@darkmatter:lifecycle
+        can_execute: can_execute-short@darkmatter:lifecycle
+        capitalize: capitalize-short@darkmatter:lifecycle
+        cicd: cicd-short@darkmatter:lifecycle
+        cicd_list: cicd_list-short@darkmatter:lifecycle
+        code_link: code_link-short@darkmatter:lifecycle
+        contains: contains-short@darkmatter:lifecycle
+        date: date-short@darkmatter:lifecycle
+        date_delta: date_delta-short@darkmatter:lifecycle
+        decrement_file_index: decrement_file_index-short@darkmatter:lifecycle
+        dir_leading: dir_leading-short@darkmatter:lifecycle
+        dirname: dirname-short@darkmatter:lifecycle
+        ends_with: ends_with-short@darkmatter:lifecycle
+        ensure_leading: ensure_leading-short@darkmatter:lifecycle
+        ensure_trailing: ensure_trailing-short@darkmatter:lifecycle
+        ext: ext-short@darkmatter:lifecycle
+        file_exists: file_exists-short@darkmatter:lifecycle
+        file_index: file_index-short@darkmatter:lifecycle
+        file_trailing: file_trailing-short@darkmatter:lifecycle
+        find_files: find_files-short@darkmatter:lifecycle
+        find_first_index: find_first_index-short@darkmatter:lifecycle
+        find_last_index: find_last_index-short@darkmatter:lifecycle
+        first: first-short@darkmatter:lifecycle
+        frontmatter: frontmatter-short@darkmatter:lifecycle
+        has_agentic_cli: has_agentic_cli-short@darkmatter:lifecycle
+        has_alias: has_alias-short@darkmatter:lifecycle
+        has_binary: has_binary-short@darkmatter:lifecycle
+        has_builtin_function: has_builtin_function-short@darkmatter:lifecycle
+        has_command: has_command-short@darkmatter:lifecycle
+        has_key: has_key-short@darkmatter:lifecycle
+        has_local_skill: has_local_skill-short@darkmatter:lifecycle
+        has_skill: has_skill-short@darkmatter:lifecycle
+        has_user_function: has_user_function-short@darkmatter:lifecycle
+        increment_file_index: increment_file_index-short@darkmatter:lifecycle
+        ipv4: ipv4-short@darkmatter:lifecycle
+        ipv6: ipv6-short@darkmatter:lifecycle
+        is_array: is_array-short@darkmatter:lifecycle
+        is_date: is_date-short@darkmatter:lifecycle
+        is_date_time: is_date_time-short@darkmatter:lifecycle
+        is_date_time_utc: is_date_time_utc-short@darkmatter:lifecycle
+        is_date_utc: is_date_utc-short@darkmatter:lifecycle
+        is_empty: is_empty-short@darkmatter:lifecycle
+        is_indexed_file: is_indexed_file-short@darkmatter:lifecycle
+        is_integer: is_integer-short@darkmatter:lifecycle
+        is_negative: is_negative-short@darkmatter:lifecycle
+        is_null: is_null-short@darkmatter:lifecycle
+        is_number: is_number-short@darkmatter:lifecycle
+        is_object: is_object-short@darkmatter:lifecycle
+        is_positive: is_positive-short@darkmatter:lifecycle
+        is_string: is_string-short@darkmatter:lifecycle
+        is_this_month: is_this_month-short@darkmatter:lifecycle
+        is_this_month_utc: is_this_month_utc-short@darkmatter:lifecycle
+        is_this_year: is_this_year-short@darkmatter:lifecycle
+        is_this_year_utc: is_this_year_utc-short@darkmatter:lifecycle
+        is_today: is_today-short@darkmatter:lifecycle
+        is_today_utc: is_today_utc-short@darkmatter:lifecycle
+        is_tomorrow: is_tomorrow-short@darkmatter:lifecycle
+        is_tomorrow_utc: is_tomorrow_utc-short@darkmatter:lifecycle
+        is_yesterday: is_yesterday-short@darkmatter:lifecycle
+        is_yesterday_utc: is_yesterday_utc-short@darkmatter:lifecycle
+        join: join-short@darkmatter:lifecycle
+        kebab_case: kebab_case-short@darkmatter:lifecycle
+        keys: keys-short@darkmatter:lifecycle
+        last: last-short@darkmatter:lifecycle
+        length: length-short@darkmatter:lifecycle
+        link: link-short@darkmatter:lifecycle
+        lower: lower-short@darkmatter:lifecycle
+        markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
+        markdown_title: markdown_title-short@darkmatter:lifecycle
+        max: max-short@darkmatter:lifecycle
+        min: min-short@darkmatter:lifecycle
+        newer_than: newer_than-short@darkmatter:lifecycle
+        number: number-short@darkmatter:lifecycle
+        older_than: older_than-short@darkmatter:lifecycle
+        or: or-short@darkmatter:lifecycle
+        package: package-short@darkmatter:lifecycle
+        package_area: package_area-short@darkmatter:lifecycle
+        parent_dir: parent_dir-short@darkmatter:lifecycle
+        pascal_case: pascal_case-short@darkmatter:lifecycle
+        ping: ping-short@darkmatter:lifecycle
+        ping_under: ping_under-short@darkmatter:lifecycle
+        pr: pr-short@darkmatter:lifecycle
+        pr_list: pr_list-short@darkmatter:lifecycle
+        predict_conflicts: predict_conflicts-short@darkmatter:lifecycle
+        recent_commits: recent_commits-short@darkmatter:lifecycle
+        relative: relative-short@darkmatter:lifecycle
+        remote_vendor: remote_vendor-short@darkmatter:lifecycle
+        replace: replace-short@darkmatter:lifecycle
+        replace_first: replace_first-short@darkmatter:lifecycle
+        replace_last: replace_last-short@darkmatter:lifecycle
+        round: round-short@darkmatter:lifecycle
+        snake_case: snake_case-short@darkmatter:lifecycle
+        starts_with: starts_with-short@darkmatter:lifecycle
+        terminal: terminal-short@darkmatter:lifecycle
+        title_case: title_case-short@darkmatter:lifecycle
+        trim: trim-short@darkmatter:lifecycle
+        try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
+        upper: upper-short@darkmatter:lifecycle
+        validate_schema: validate_schema-short@darkmatter:lifecycle
+        values: values-short@darkmatter:lifecycle
+        without_date: without_date-short@darkmatter:lifecycle
         when: "expression -> run the bundle only when this condition holds"
         no_error: "boolean -> keep the stack running when one of these actions fails"

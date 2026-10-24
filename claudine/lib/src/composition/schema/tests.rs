@@ -1401,6 +1401,84 @@ fn pre_validate_still_surfaces_literal_invalid_required() {
     );
 }
 
+/// The problem pointers pre-validation rejects `frontmatter` with, or `None`
+/// when it passes.
+fn pre_validation_problems(frontmatter: &str) -> Option<Vec<String>> {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &format!("---\n{frontmatter}---\nbody\n"));
+    match pre_validate_schema(&source, None, None, &crate::test_support::context()) {
+        Ok(_) => None,
+        Err(CompositionError::SchemaValidation { problems, .. }) => Some(problems),
+        Err(other) => panic!("expected SchemaValidation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pre_validate_surfaces_literal_sibling_of_nested_template() {
+    let problems = pre_validation_problems(
+        "$schema:\n  cfg: \"{ counts: number[] }\"\ncfg:\n  counts: [three, \"{{ fm.x }}\"]\n",
+    )
+    .expect("the literal element is judged");
+    assert_eq!(problems, vec!["/cfg/counts/0".to_string()]);
+}
+
+#[test]
+fn pre_validate_surfaces_literal_sibling_of_deferred_operand() {
+    let problems = pre_validation_problems(
+        "$schema:\n  ops: \"{ min: tuple([number(deferred), number(deferred)]) }\"\n\
+         ops:\n  min: [three, \"{{ fm.x }}\"]\n",
+    )
+    .expect("the literal operand is judged");
+    assert_eq!(problems, vec!["/ops/min/0".to_string()]);
+}
+
+#[test]
+fn pre_validate_surfaces_unknown_key_beside_a_template() {
+    // Rendering a value never removes a key, so the closed object's extra
+    // key stands even though its mapping holds a template.
+    let problems = pre_validation_problems(
+        "$schema:\n  ops: \"{ count: number(deferred) }\"\n\
+         ops:\n  count: \"{{ fm.count }}\"\n  bogus: 1\n",
+    )
+    .expect("the unknown key is judged");
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].starts_with("/ops"), "{problems:?}");
+}
+
+#[test]
+fn pre_validate_surfaces_a_union_failure_beside_an_accepted_template() {
+    // The schema already accepted the marked template, so a problem left on
+    // its mapping is the closed object's, not one rendering could settle.
+    let problems = pre_validation_problems(
+        "$schema:\n  ops: \"{ pick: number(deferred) | { state: string(deferred) } }\"\n\
+         ops:\n  pick:\n    state: \"{{ fm.state }}\"\n    bogus: 1\n",
+    )
+    .expect("the closed object is judged");
+    assert!(problems.iter().any(|path| path.starts_with("/ops/pick")), "{problems:?}");
+}
+
+#[test]
+fn pre_validate_accepts_a_marked_template_operand() {
+    assert_eq!(
+        pre_validation_problems(
+            "$schema:\n  ops: \"{ count: number(integer; min(1); deferred) }\"\n\
+             ops:\n  count: \"{{ fm.count }}\"\n"
+        ),
+        None
+    );
+}
+
+#[test]
+fn pre_validate_defers_only_the_nested_template_path() {
+    assert_eq!(
+        pre_validation_problems(
+            "$schema:\n  cfg: \"{ counts: number[] }\"\ncfg:\n  counts: [3, \"{{ fm.x }}\"]\n"
+        ),
+        None,
+        "the template's own problem waits for composition"
+    );
+}
+
 #[test]
 fn pre_validate_still_surfaces_genuinely_missing_required() {
     // Missing-required is composition-independent: no template can

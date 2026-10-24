@@ -1,0 +1,27 @@
+---
+success:
+    - when: "ctx.level == 5"
+      then:
+          - when: "ctx.level == 4"
+            then:
+                - when: "ctx.level == 3"
+                  then:
+                      - when: "ctx.level == 2"
+                        then:
+                            - when: "ctx.level == 1"
+                              then:
+                                  - when: "ctx.leaf"
+                                    say: "leaf"
+                                    warn: "guarded"
+                              else:
+                                  - warn: "level 1 false"
+                        else:
+                            - warn: "level 2 false"
+                  else:
+                      - warn: "level 3 false"
+            else:
+                - warn: "level 4 false"
+      else:
+          - warn: "level 5 false"
+---
+# depth5-guarded-bundle
