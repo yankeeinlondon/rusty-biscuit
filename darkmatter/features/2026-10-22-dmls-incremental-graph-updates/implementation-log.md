@@ -3,30 +3,6 @@ spec: "/Volumes/coding/wt/rusty-biscuit/feat-merman/darkmatter/features/2026-10-
 plan: "darkmatter/features/2026-10-22-dmls-incremental-graph-updates/plan.md"
 implemented_by: "claude/opus"
 started_phase: "1"
-message_to_agent: |-
-  Phase 2 is in place. `graph/arena.rs` now has a private `DocumentTable`
-  (path records, `by_path`, `slot_documents`, basename `KeyIndex`,
-  portability collisions, the universe `Arc`, and `Listing`) shared by
-  `Arc` between snapshots, plus a per-snapshot `Vec<DocumentState>`
-  (hash, parsed). `DocumentRecord<'a>` is a borrowed `Copy` view
-  (`path: &PathBuf`, `canonical: &Vec<String>`); `documents()` returns an
-  `ExactSizeIterator + DoubleEndedIterator`. Roots are allocated first, so
-  `DocumentId(d)`'s root is `NodeId(d)`. Only `WorkspaceIndex::rebuild`
-  calls `build_listed_reusing`; the public builders always build a fresh
-  table, so they are the uncached oracle for Phase 3. Reuse needs equal
-  sorted paths, equal dependency flags, equal `Listing`, and the *same*
-  universe `Arc` (`DocumentTable::matches`). For tests inside the crate,
-  `WorkspaceGraph::shares_document_table` (`#[cfg(test)]`) checks table
-  identity. Found while testing: opening a dependency's buffer with
-  byte-identical text returns `Unchanged` and does not rebuild, so the
-  snapshot keeps that document marked as a dependency until the next
-  rebuild. That behavior predates this change, and rule 12 says to keep
-  publication behavior, so it is unchanged and listed in
-  `decisions_for_review`. Phase 3's transition harness should change the
-  text when it opens a dependency, or assert that quirk explicitly. Other
-  sessions are still editing `darkmatter/lib`, `claudine`, and
-  `biscuit-hash` in this worktree; their uncommitted work causes the
-  non-`dmls` failures recorded under Phase 2 Gates.
 source_files_during_phase_1:
   - darkmatter/dmls/src/work_counters.rs
   - darkmatter/dmls/src/wiki/universe.rs
@@ -88,6 +64,35 @@ decisions_for_review:
     `open_buffer` when the path was a dependency before it was opened, even
     for unchanged text. That is a small, separate change to publication
     behavior, which a reviewer may want to schedule.
+  - |-
+    Phase 3 had not been implemented when this final phase started: the log
+    had no Phase 3 section, and both of its tasks (fresh-graph equivalence
+    tests and server-session tests) were unchecked, with no test file
+    present. The plan treats Phase 4 as the close of the whole plan, so this
+    run implemented Phase 3's two tasks first, then Phase 4's. Their files
+    are listed under the Phase 4 file lists, because no Phase 3 run produced
+    them. The alternative was to fail this phase and wait for a Phase 3
+    rerun; nothing in Phase 4 depends on how Phase 3 is attributed. If the
+    reviewer wants separate attribution, only the frontmatter lists move.
+  - |-
+    The server-session test for build output (an unreferenced creation
+    under `target/`) proves zero graph path work, zero parses and reads,
+    and unchanged diagnostics. It cannot prove "no new snapshot
+    publication", because a session cannot see the snapshot generation and
+    the router re-sends diagnostics after every watched change. The
+    in-crate unit test `test_only_an_awaited_unlisted_creation_rebuilds`
+    already proves the generation does not move. Proving it in a session
+    would need a production hook exposing the generation, which this
+    graph-only change does not add.
+  - |-
+    Measurement: comparing the cached wiki universe's inputs is now the
+    largest single rebuild stage (about 1 ms, roughly 36% of rebuild CPU in
+    the sample), because it clones and compares about 5,900 candidate paths
+    on every rebuild. The plan says a result over or under the bounds
+    authorizes no further optimization, and the sample met both bounds
+    (0.78% of one core; 2.6 ms median), so it was left alone. A cheaper
+    comparison (for example a generation number on the listing and open
+    set) would be a follow-up of its own.
 source_files_during_phase_2:
   - darkmatter/dmls/src/graph/arena.rs
   - darkmatter/dmls/src/graph/invalidate.rs
@@ -106,6 +111,46 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_4:
+  - darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/dmls/tests/l1/workspace_file_list.rs
+  - darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measure-live-rebuild.py
+docs_updated_during_phase_4:
+  - darkmatter/docs/lsp/architecture.md
+  - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4:
+  - darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measurement.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/dmls.md
+source_code:
+  - darkmatter/dmls/src/work_counters.rs
+  - darkmatter/dmls/src/wiki/universe.rs
+  - darkmatter/dmls/src/graph/arena.rs
+  - darkmatter/dmls/src/graph/invalidate.rs
+  - darkmatter/dmls/src/providers/completion.rs
+  - darkmatter/dmls/src/providers/definition.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/location.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/rename.rs
+  - darkmatter/dmls/src/providers/symbols.rs
+  - darkmatter/dmls/src/providers/wiki.rs
+  - darkmatter/dmls/tests/l1/entry_point_parity.rs
+  - darkmatter/dmls/tests/l1/index_store_keys.rs
+  - darkmatter/dmls/tests/l1/index_store_requests.rs
+  - darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/dmls/tests/l1/workspace_file_list.rs
+  - darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measure-live-rebuild.py
+documentation:
+  - darkmatter/docs/lsp/architecture.md
+  - darkmatter/docs/lsp/indexing.md
+  - darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measurement.md
+  - .claude/skills/darkmatter/dmls.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-22-dmls-incremental-graph-updates (4 phases)
@@ -365,3 +410,203 @@ Focused checkpoint runs:
 - Docs and skills: no `docs/` page or skill line describes record storage
   or node numbering (the skill's `DocumentRecord::parsed`/`dependency`
   references still hold). The topic docs are Phase 4's task.
+
+## Phase 4
+
+### Phase 3 work was missing, and is done here
+
+When this run started, Phase 3 had not been implemented. The log had no
+Phase 3 section, both Wave 4 tasks were unchecked, and
+`tests/l1/incremental_graph_equivalence.rs` did not exist. This was the final
+phase and has to mark the plan implemented, so this run did Phase 3's two
+tasks first. That choice is recorded in `decisions_for_review`. The files are
+listed under `source_files_during_phase_4`, because no Phase 3 run produced
+them.
+
+### Work done
+
+- **Compare fresh graphs** (`dmls/tests/l1/incremental_graph_equivalence.rs`,
+  new, declared in `tests/l1/main.rs`).
+  - A transition harness drives a live `WorkspaceIndex` and keeps a separate
+    model of its inputs: listed paths, parse products, open buffers, stale
+    and unlisted reads, dependencies, listing state, and roots.
+  - After every transition it compares the live snapshot with a fresh
+    `WorkspaceGraph::build_listed` over the model's inputs. The fresh
+    universe comes from `WikiUniverse::new` over the model's candidates,
+    never from the live snapshot.
+  - Nodes are identified by (path, per-document ordinal, kind, span), and
+    every `WikiResolution` variant is matched exhaustively. The comparison
+    covers node payloads, per-document node order, edges of every kind,
+    incoming and outgoing queries, document facts, basename buckets,
+    portability twins, transclusion facts, the universe, awaited paths, and
+    unresolved diagnoses.
+  - Twelve tests; the mapping is below. **No production defect was found:**
+    every live snapshot matched its fresh build.
+- **Exercise server updates** (`dmls/tests/l1/workspace_file_list.rs`). Three
+  new server-session tests, an edit to the module doc that mentions the
+  path-work counters, and small request helpers. No existing test changed.
+- **Measure release editing.**
+  - New driver: `measure-live-rebuild.py`.
+  - New record: [measurement.md](./measurement.md).
+  - A temporary seam (`#[track_caller]` cause attribution, thread CPU time
+    via a temporary direct `libc` dependency, four stage timers) was added,
+    built in release, used for one 100.0 s sample, and removed.
+  - After removal, `git diff HEAD -- darkmatter/dmls/src
+    darkmatter/dmls/Cargo.toml Cargo.lock` is empty. The lockfile's `libc`
+    line was restored from a pre-measurement copy; the lockfile had no other
+    changes.
+- **Document snapshot reuse.**
+  - `darkmatter/docs/lsp/architecture.md` has a new section, "Rebuilding the
+    live snapshot". It covers:
+    - what is path-derived and what comes from content;
+    - a Mermaid flow from input comparison to publication;
+    - the exact invalidation inputs, with an example table;
+    - cached basename keys versus rebuilt frontmatter keys;
+    - roots-first numbering and snapshot-local IDs;
+    - dependency slots;
+    - that the public builders always build fresh.
+  - `darkmatter/docs/lsp/indexing.md` has a paragraph that links to that
+    section.
+  - The DMLS skill now has a bullet on reuse, the four new counters, and
+    one fixed stale claim: the universe extension happens at table
+    construction, not in `assemble`.
+  - `dmls/README.md` needed no change; it says nothing about record storage
+    or numbering.
+  - The stale benchmark-stage claims in `graph/` were already gone after
+    Phase 1.
+
+### Measurement
+
+The full record is in [measurement.md](./measurement.md). The sample was
+100.0 s on an Apple M4 Max with macOS 27.2, revision `183a542da`, release
+build.
+
+| | Baseline | Step-1 prototype | This change |
+| --- | --- | --- | --- |
+| Rebuild CPU share of one core | 13.6% | 4.4% | **0.78%** |
+| Median rebuild CPU | 42 ms | 12.35 ms | **2.61 ms** |
+| Median rebuild wall time | 52 ms | 14.3 ms | **2.61 ms** |
+| Server CPU over the sample | 20.6 s | 12.6 s | **8.65 s** |
+
+- **Rebuilds:** 271 in total, 259 of them open-buffer edits. The universe
+  and table were each built only 3 times: the unlisted `AGENTS.md` opening,
+  the listed join, and the listed leave.
+- **Build output:** the 50 creations under `target/` caused no rebuild.
+- **Slowest rebuild:** 52.6 ms of wall time, a `relink` with under 5 ms of
+  CPU.
+- **Largest remaining stage:** comparing the cached universe's inputs,
+  1.0 ms median and about 36% of rebuild CPU. The plan does not authorize
+  more optimization, so it is recorded only.
+
+Limitations:
+
+- The original driver was not preserved. This driver is a reconstruction
+  from the spec's description, not a replay.
+- The seam did not print parsed or dependency counts.
+- This is one run on one host. Both bounds are aids, not gates.
+
+### Departures
+
+- **Lookup terminology (rule 6).** The spec calls the shared lookup a
+  "frontmatter-key" lookup. The shared table actually holds the wiki
+  **basename** `KeyIndex`. Frontmatter keys (`FrontmatterKey` nodes,
+  `key_by_name`, `UsesVariable` targets) are content and are rebuilt for
+  every snapshot. The spec text is left as written. The docs describe the
+  distinction.
+- **Measurement record placement.** The plan asks for the new figures in a
+  separate `measurement.md`, not in the spec's dated measurement section.
+  That was done, so the spec stays a snapshot.
+- **Phase 3 done in this run.** See above and `decisions_for_review`.
+
+### Requirement-to-test mapping
+
+All tests are L1 at fidelity F1 (in-process `dmls`) or F2 (an in-process
+LSP server session over channels, `workspace_file_list.rs`). No loader or
+format reader changed, so the Input Robustness Matrix does not apply
+(rule 14).
+
+| Requirement | Test |
+|---|---|
+| Content edits (heading, link target, frontmatter key) and listed buffer open/close match a fresh build; table and universe reused | `incremental_graph_equivalence::content_edits_and_listed_buffers_match_a_fresh_build` |
+| Unsaved buffers outside the list; listed join, leave, and relist | `…::unsaved_buffers_and_listed_membership_match_a_fresh_build` |
+| A dependency becomes open, returns to referenced-only, joins and leaves the list; the identical-text open quirk asserted directly | `…::dependencies_open_join_and_return_to_referenced_only_like_a_fresh_build` |
+| Stale reads: unchanged, changed, failed | `…::stale_unchanged_changed_and_failed_reads_match_a_fresh_build` |
+| `Pending` → `Ready{complete:false}` → `Ready{complete:true}` | `…::every_listing_state_matches_a_fresh_build` |
+| Roots reordered, narrowed, emptied | `…::reordered_and_narrowed_wiki_roots_match_a_fresh_build` |
+| Context relink with an injected failure and its recovery | `…::context_relink_matches_a_fresh_build` |
+| Awaited creation vs. unreferenced build output | `…::awaited_creation_matches_a_fresh_build` |
+| Missing candidate vs. probe error (symlink loop) | `…::missing_and_unprobeable_targets_match_a_fresh_build` |
+| Wiki match unique → ambiguous → unique; portability twins | `…::wiki_matches_turn_ambiguous_and_back_like_a_fresh_build` |
+| Batch of joins: one table, one universe | `…::a_batch_of_joins_matches_a_fresh_build` |
+| Request graphs: rival outside scope, unique target outside graph, collision pair half in graph; documents-only-universe negative control | `…::request_graphs_over_the_live_universe_match_a_fresh_universe` |
+| Provider answers over a reused live snapshot equal the oracle: references, rename, will-rename, wiki diagnostics, symbols, plus direct definition, hover, completion, and diagnostics with ranges | `…::corpus_provider_answers_over_a_reused_live_snapshot_equal_the_oracle` |
+| Editing a listed open target: zero path work; definition, hover, and anchor completion use the new headings; the transcluding source gets current versioned diagnostics | `workspace_file_list::a_listed_target_edit_reuses_path_work_and_refreshes_its_dependents` |
+| One watched batch of creations, then one of deletions: ambiguity appears and clears; definition follows; one universe and one table per batch | `workspace_file_list::one_watched_batch_of_creations_and_one_of_deletions_each_rebuild_once` |
+| An unlisted awaited creation resolves; build output costs zero path work, parses, and reads | `workspace_file_list::an_awaited_unlisted_creation_resolves_and_build_output_costs_nothing` |
+
+**Not covered in a session:** "no new publication" for build output. A
+server session cannot observe the snapshot generation, and the router
+re-sends diagnostics after every watched change. The in-crate unit test
+`test_only_an_awaited_unlisted_creation_rebuilds` covers it.
+
+### Focused runs
+
+- `cargo nextest run -p dmls --test l1 -E 'test(incremental_graph_equivalence) | test(test_layout) | test(wiki_universe_equivalence)'`:
+  20/20 passed. The slowest test took 0.15 s.
+- `cargo nextest run -p dmls --test l1 -E 'test(workspace_file_list) | test(referenced_targets)'`:
+  48/48 passed. The new tests passed three runs in a row, at 21–35 ms each.
+- `cargo clippy -p dmls --tests -- -D warnings`: clean.
+
+### Gates
+
+These ran after the timing seam was removed and no subagent was running.
+
+- **`just lint`** (darkmatter: lib, CLI, `dmls`, `zed-dmls`, wasm32 check):
+  passed, exit 0.
+- **`just check-tier-coverage darkmatter`:** 0 stranded tests.
+- **`just test`** (darkmatter) stopped at its first failure,
+  `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`. A single
+  rerun with `--no-fail-fast` (log `/tmp/dm-phase4-test-all.log`) gave
+  **10659 run, 10616 passed, 43 failed, 10 skipped**.
+  - **All 1,299 `dmls` tests passed:** Phase 2's 1,283 plus the 16 new ones.
+  - The 43 failures are the same set Phase 2 recorded: 40
+    `schemas_convert_snapshots::*`,
+    `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata`,
+    `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`, and
+    `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`.
+  - They belong to the concurrent frontmatter-key-order fix: its plan's open
+    Phase 5 "Review each candidate failure individually" task lists every
+    one of them.
+  - They are in `darkmatter` and `darkmatter-cli`, neither of which depends
+    on `dmls`. This change does not touch them, and I left that work alone.
+- **Dependents:** `cargo tree -i dmls --workspace` lists only `dmls`, so
+  there is nothing downstream to test.
+- **Affected scope** (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages` = darkmatter, dmls, test-toolkit, darkmatter-cli;
+  `change_class` = package. The gates were required, and they ran. The
+  list is wide because other sessions' uncommitted files share this
+  working tree.
+- **Final diff review.**
+  - `git diff HEAD -- darkmatter/dmls/src darkmatter/dmls/Cargo.toml
+    Cargo.lock` is empty, so no timing or cause logging, no `libc`
+    dependency, and no production change remains.
+  - The shared table holds no content data, and live rebuilds copy no
+    universe; Phase 2's unit tests and the new equivalence tests assert
+    both.
+  - Both new test modules are compiled by declared targets, and the tier
+    gate finds no stranded test.
+  - The persistent facts format is unchanged.
+- **Cross-OS.** No production code changed in this phase, and no
+  OS-specific API or dependency was added. The tests use temp dirs,
+  `canonicalize_simplified`, or logical `abs()` paths.
+  - The probe-error case creates a symlink loop through `symlink_file` on
+    Windows, the same as the existing in-crate test
+    `test_an_unprobeable_earlier_candidate_is_not_answered_by_a_later_buffer`.
+  - I did not run `just cross-check`. Evidence for Windows, Linux, and WSL2
+    comes from CI, and none is claimed here.
+
+### Ready for review
+
+Every plan task is checked. The feature stays active, nothing was
+committed, and `just complete` was not run.

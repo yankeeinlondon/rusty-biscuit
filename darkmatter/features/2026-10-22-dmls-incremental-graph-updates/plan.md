@@ -1,38 +1,77 @@
 ---
 total_phases: 4
 created: 2026-10-23
-phase: 1
+phase: 5
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
 source_files_during_phase_1:
-  - darkmatter/dmls/src/work_counters.rs
-  - darkmatter/dmls/src/wiki/universe.rs
-  - darkmatter/dmls/src/graph/arena.rs
-  - darkmatter/dmls/src/graph/invalidate.rs
+- darkmatter/dmls/src/work_counters.rs
+- darkmatter/dmls/src/wiki/universe.rs
+- darkmatter/dmls/src/graph/arena.rs
+- darkmatter/dmls/src/graph/invalidate.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
-  - dmls
-start_phase: 3
+- dmls
 source_files_during_phase_2:
-  - darkmatter/dmls/src/graph/arena.rs
-  - darkmatter/dmls/src/graph/invalidate.rs
-  - darkmatter/dmls/src/providers/completion.rs
-  - darkmatter/dmls/src/providers/definition.rs
-  - darkmatter/dmls/src/providers/dsl.rs
-  - darkmatter/dmls/src/providers/frontmatter.rs
-  - darkmatter/dmls/src/providers/location.rs
-  - darkmatter/dmls/src/providers/mod.rs
-  - darkmatter/dmls/src/providers/rename.rs
-  - darkmatter/dmls/src/providers/symbols.rs
-  - darkmatter/dmls/src/providers/wiki.rs
-  - darkmatter/dmls/tests/l1/entry_point_parity.rs
-  - darkmatter/dmls/tests/l1/index_store_keys.rs
-  - darkmatter/dmls/tests/l1/index_store_requests.rs
+- darkmatter/dmls/src/graph/arena.rs
+- darkmatter/dmls/src/graph/invalidate.rs
+- darkmatter/dmls/src/providers/completion.rs
+- darkmatter/dmls/src/providers/definition.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/location.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/rename.rs
+- darkmatter/dmls/src/providers/symbols.rs
+- darkmatter/dmls/src/providers/wiki.rs
+- darkmatter/dmls/tests/l1/entry_point_parity.rs
+- darkmatter/dmls/tests/l1/index_store_keys.rs
+- darkmatter/dmls/tests/l1/index_store_requests.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_4:
+- darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/workspace_file_list.rs
+- darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measure-live-rebuild.py
+docs_updated_during_phase_4:
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4:
+- darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measurement.md
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/dmls.md
+source_code:
+- darkmatter/dmls/src/work_counters.rs
+- darkmatter/dmls/src/wiki/universe.rs
+- darkmatter/dmls/src/graph/arena.rs
+- darkmatter/dmls/src/graph/invalidate.rs
+- darkmatter/dmls/src/providers/completion.rs
+- darkmatter/dmls/src/providers/definition.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/location.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/rename.rs
+- darkmatter/dmls/src/providers/symbols.rs
+- darkmatter/dmls/src/providers/wiki.rs
+- darkmatter/dmls/tests/l1/entry_point_parity.rs
+- darkmatter/dmls/tests/l1/index_store_keys.rs
+- darkmatter/dmls/tests/l1/index_store_requests.rs
+- darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/workspace_file_list.rs
+- darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measure-live-rebuild.py
+documentation:
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/indexing.md
+- darkmatter/features/2026-10-22-dmls-incremental-graph-updates/measurement.md
+- .claude/skills/darkmatter/dmls.md
+completed_phase: 4
+implemented: true
 ---
 
 # DMLS cheaper live graph rebuilds
@@ -125,7 +164,7 @@ Checkpoint: run focused nextest graph/provider tests, `level1_graph_index`, `ent
 
 ### Wave 4
 
-- [ ] **Compare fresh graphs**
+- [x] **Compare fresh graphs**
   - Own new `darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs` and its declaration in `tests/l1/main.rs`; use existing `common::oracle` normalization methods without changing that shared helper. Registering the module is mandatory because `autotests = false` and `test_layout` rejects orphan files.
   - Build a small transition harness holding explicit listed paths, parsed `DocumentIndex` products, dependency membership, listing state, roots, and contexts. Apply those same inputs to a `WorkspaceIndex` and a fresh `WorkspaceGraph::build_listed` after every transition. The fresh universe is reconstructed independently from candidate/dependency inputs, never copied from the cached snapshot. Do not parse every listed file to build this reference.
   - Normalize node identity as document path plus per-document node ordinal, kind, and span; normalize all payloads containing node IDs, including every `WikiResolution` variant, through that identity. Compare node payload facts, document canonical paths/workspace IDs/dependency/parsed/hash facts, edges of every kind, incoming/outgoing queries, basename buckets, portability twins, and known awaited candidate paths. Compare per-document sequence separately; ignore global node numbers and generations between independently built graphs.
@@ -133,7 +172,7 @@ Checkpoint: run focused nextest graph/provider tests, `level1_graph_index`, `ent
   - For request-graph controls retain a candidate rival outside the scoped documents, a unique target outside the graph, and a collision pair with only one member in the graph. Keep the complete wiki universe on both sides. Preserve existing negative controls in `wiki_universe_equivalence.rs`.
   - Use `Oracle::{references_over,rename_over,will_rename_files_over,wiki_diagnostics_over}` and `symbols::graph_symbol_documents` to compare provider answers for graphs built from matching parsed inputs. Add direct `ProviderRegistry` calls for navigation, hover, completion, and diagnostics, including source ranges, using the same text/source maps for cached and fresh snapshots. Reuse the existing corpus for provider checks; keep the live transition harness small and lazy.
 
-- [ ] **Exercise server updates**
+- [x] **Exercise server updates**
   - Own `darkmatter/dmls/tests/l1/workspace_file_list.rs`; extend its existing `open`, `change`, `save`, `watched_change`, `latest`, and `LspFixture` patterns. No real editor, terminal, or browser is needed.
   - Open a source with an anchor link and transclusion, prepare its targets, then edit a listed open target. Verify definition/hover/anchor completion use new heading spans and the transcluding source receives current dependent diagnostics. Assert the content edit's path-work counter deltas are zero after startup and target preparation settle.
   - Send one watched notification containing multiple listed creations, then one with their deletions. Verify wiki ambiguity appears and disappears, provider requests use the resulting graph, and universe/table counts each increase once per batch. Use request/diagnostic barriers rather than sleeps; `flush_server` builds the persistent store, so take graph-work deltas around the notification plus a non-index-building round trip and wait for expected versioned diagnostics.
@@ -145,7 +184,7 @@ Checkpoint: run the new equivalence module and affected session modules under ne
 
 ### Wave 5
 
-- [ ] **Measure release editing**
+- [x] **Measure release editing**
   - Own this feature directory's `measure-live-rebuild.py`, `measurement.md`, and measurement entries in `implementation-log.md`. Run one approximately 100-second scripted editing sample on the current Apple Silicon macOS host, using `cargo build --release -p dmls`. Do not repeat the old flood spike or rerun baseline/prototype sessions; their measurements are already recorded in the spec.
   - The original temporary Python driver is not present in this feature directory. Preserve a replacement driver here: framed stdio LSP, dynamic watched registration acknowledgments, startup completion before timing, three open repository documents (`AGENTS.md`, `darkmatter/README.md`, `darkmatter/docs/lsp/indexing.md`), about 250 single-character edits spread across them at six per second, pauses, hover, completion, two save/change notification pairs, one listed join/leave, 50 unlisted creations in one notification under `target/`, and one close. Apply edits to open buffers only; save notifications report the real unchanged disk files without overwriting them. Create only driver-owned uniquely named temporary files for join/leave and build-output events, and remove them on teardown. Record these reconstruction details as a comparability limitation rather than claiming byte-identical replay of the removed driver.
   - Give the driver a 180-second overall deadline, bounded request reads, shutdown/exit, and terminate/kill cleanup on failure. Log counts, versions, times, method names, and status only; no document contents or heading text. Keep performance sleeps confined to this scripted sample, never correctness tests.
@@ -154,14 +193,14 @@ Checkpoint: run the new equivalence module and affected session modules under ne
   - Compare with the recorded baseline and step-1 prototype, retaining the 1%/50-ms aids without timing assertions. Any result completes the planned measurement; exceeding a bound does not authorize additional optimization. Write the new record in `measurement.md` and reference it from the implementation log, preserving the spec as its dated snapshot rather than editing its historical record. Record this placement departure in the log.
   - Remove temporary timing/cause instrumentation and the temporary dependency before final validation. Keep the reusable driver and measurement record; do not alter `bench.rs` output or leave duration telemetry in production.
 
-- [ ] **Document snapshot reuse**
+- [x] **Document snapshot reuse**
   - Own `darkmatter/docs/lsp/{indexing,architecture}.md` and `.claude/skills/darkmatter/dmls.md`. Describe content-edit reuse, the exact invalidation inputs, roots-first numbering, snapshot-local identities, dependency slots, and continued full content/reference rebuilds. Add a compact example and a Mermaid flow from input comparison through table reuse/rebuild to complete snapshot publication.
   - Explain the distinction between cached basename keys and rebuilt frontmatter keys. Keep docs accessible to a developer new to the repository; docs never name or link to the feature directory. Update the existing DMLS README architecture overview only where its claims about record storage or numbering change; retain detailed rules in topic docs.
   - Update touched symbol comments alongside behavior. Remove stale benchmark-stage claims as specified in Phase 1; do not broaden into unrelated comment cleanup. No dependency reference update is needed after the temporary measurement dependency is removed.
 
 ### Wave 6
 
-- [ ] **Validate final tree**
+- [x] **Validate final tree**
   - Run `just test` and `just lint` from the absolute `darkmatter/` working directory after integration and removal of the timing seam. These are the final area-wide gates; earlier checkpoints use focused `cargo nextest run -p dmls` filters. Never run `cargo test`, workspace-wide gates, or `cargo fmt`. The lint recipe's checks remain authoritative; correct formatting manually.
   - Review the final diff for stale owned-record assumptions, content data retained in the shared table, dependency-induced universe copies, incomplete candidate universes, unregistered tests, accidental persistent-format changes, and leftover timing/cause logging. Check production compilation uses no new OS-specific dependency or API.
   - Preserve macOS/Linux/native-Windows/WSL2 behavior through the portable fixtures and existing CI coverage; this graph-only change does not add CI cells or require a multi-host performance campaign. Report local test evidence as local evidence, without claiming unexecuted environments passed.

@@ -34,6 +34,8 @@ related:
     - 2026-10-22-dmls-watched-file-flood
 human_review: true
 needs_rulings: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # DMLS: update the workspace graph incrementally
