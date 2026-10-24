@@ -135,7 +135,7 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `cache/file_cache.rs` | `FileCache`, `MERMAID_BACKEND` |
 | `raster/png.rs` | SVG-to-PNG rasterization via resvg |
 | `fonts/` | Font chain (`chain.rs`, cache identity), shaper (`shaper.rs`), Merman measurer (`measure.rs`); crate-private |
-| `mermaid/embed/` | Embedded-font opt-in pieces (crate-private, not yet on the render path): `fsType` classifier and per-family face choice, code-point/weight collector (`roxmltree` + `simplecss` cascade, as usvg), `allsorts` subsetter, `@font-face` builder and page comments |
+| `mermaid/embed/` | Embedded-font opt-in (`MermaidDiagram::with_embedded_font`, HTML static SVG only): `fsType` classifier and per-family face choice (`FaceChooser`, used by `LabelMeasurer::embedding`, which measures plain advances), code-point/weight collector (`roxmltree` + `simplecss` cascade, as usvg), `allsorts` subsetter, `@font-face` builder and page comments; public `DiagramFont` (from `render_with_font`, or the component's `with_embedded_font` + `render_to_svg_with_font`, which Darkmatter's page path uses), `page_font` → `PageFont` (`page.rs`). The cache keeps a `{key}.font.json` record beside the SVG, never the subset |
 
 ## Dependencies
 

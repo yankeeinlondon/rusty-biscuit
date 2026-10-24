@@ -67,7 +67,8 @@ impl FontEmbedding {
 /// The page cannot carry an embedded font; its diagrams are emitted without
 /// one.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum FontEmbeddingError {
+#[non_exhaustive]
+pub enum FontEmbeddingError {
     #[error("the font data of \"{family}\" weight {weight} could not be read")]
     FaceData { family: String, weight: u16 },
     #[error("\"{family}\" weight {weight} could not be subset: {source}")]

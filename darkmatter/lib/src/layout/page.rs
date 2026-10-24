@@ -126,6 +126,8 @@ pub struct DarkmatterPage {
     local_image_style: Option<crate::style::schema::CommonStyle>,
     /// How code-block theme variants are chosen relative to the page color mode.
     code_block_mode: CodeBlockMode,
+    /// See [`HtmlOptions::embed_mermaid_font`].
+    embed_mermaid_font: bool,
 }
 
 impl DarkmatterPage {
@@ -163,6 +165,7 @@ impl DarkmatterPage {
             local_hyperlink_style: None,
             local_image_style: None,
             code_block_mode: CodeBlockMode::default(),
+            embed_mermaid_font: false,
         }
     }
 
@@ -726,6 +729,15 @@ impl DarkmatterPage {
         self
     }
 
+    /// Embeds the font the static Mermaid diagrams were measured with in the
+    /// browser page; see [`HtmlOptions::embed_mermaid_font`]. Acts only with
+    /// [`MermaidMode::Image`].
+    #[must_use]
+    pub fn with_embed_mermaid_font(mut self, embed: bool) -> Self {
+        self.embed_mermaid_font = embed;
+        self
+    }
+
     /// Pass through to [`TerminalOptions::hyperlink_mode`].
     pub fn with_hyperlink_mode(mut self, mode: HyperlinkMode) -> Self {
         self.options.hyperlink_mode = mode;
@@ -1147,6 +1159,7 @@ impl DarkmatterPage {
             include_line_numbers: self.line_numbers,
             include_styles: true,
             mermaid_mode: self.options.mermaid_mode,
+            embed_mermaid_font: self.embed_mermaid_font,
             hr_css_variables: std::collections::HashMap::new(),
             hr_defaults: self.hr_defaults(),
             hyperlink_style: self.hyperlink_style.clone(),
@@ -1245,6 +1258,9 @@ impl DarkmatterPage {
             include_line_numbers: self.line_numbers,
             include_styles: false,
             mermaid_mode: self.options.mermaid_mode,
+            // MarkdownPlus keeps Mermaid as a code block; there is no static
+            // SVG to carry a font.
+            embed_mermaid_font: false,
             hr_css_variables: std::collections::HashMap::new(),
             hr_defaults: self.hr_defaults(),
             hyperlink_style: self.hyperlink_style.clone(),

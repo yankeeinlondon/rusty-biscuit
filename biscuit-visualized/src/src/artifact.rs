@@ -45,6 +45,7 @@ impl Background {
     }
 
     /// The stable name this background takes in artifact cache keys.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
     fn cache_name(&self) -> String {
         match self {
             Self::Theme => "theme".to_string(),
@@ -56,6 +57,7 @@ impl Background {
 
 /// How PNG artifacts are compressed; part of every PNG artifact's cache key,
 /// so changing it never serves bytes encoded the old way.
+#[cfg_attr(not(feature = "image"), allow(dead_code))]
 pub(crate) const PNG_ENCODING: &str = "png@0.18:deflate=level1,filter=up";
 
 /// Parameters for rendering a visualization.
@@ -120,7 +122,8 @@ impl RenderRequest {
 
     /// Everything in this request that changes an artifact's bytes, for the
     /// renderers' cache keys: geometry, padding, background, and the PNG
-    /// encoding.
+    /// encoding. Only the renderers, behind the `image` feature, read it.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
     pub(crate) fn cache_identity(&self) -> serde_json::Value {
         serde_json::json!({
             "scale": self.scale.max(1),

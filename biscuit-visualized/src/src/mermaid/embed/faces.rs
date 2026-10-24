@@ -1,6 +1,8 @@
 //! Which face the embedded-font opt-in measures with and embeds, per
 //! requested family.
 
+use std::sync::{Arc, Mutex};
+
 use resvg::usvg::fontdb::ID;
 
 use super::permission::{EmbedPermission, Permission, Refusal, classify};
@@ -52,6 +54,15 @@ pub(crate) struct FamilyChoice {
     pub(crate) reason: ChoiceReason,
 }
 
+impl FamilyChoice {
+    /// The face text of CSS weight `weight` is measured and drawn in: bold
+    /// from 600 up, as a browser matches a 600 request against the page's
+    /// 400 and 700 rules, and as the code-point collector splits weights.
+    pub(crate) fn face_for_weight(&self, weight: u16) -> ID {
+        if weight >= 600 { self.bold.id } else { self.regular.id }
+    }
+}
+
 /// The face choice for every requested family of one render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EmbeddedFaces {
@@ -74,6 +85,43 @@ pub(crate) fn choose_embedded_faces(requested: &[&str], chain: &FontChain) -> Em
         }
     }
     EmbeddedFaces { families }
+}
+
+/// The face choices of one opt-in render, made the first time the render asks
+/// for each requested family, before any of that family's labels is
+/// measured, and kept, so every label of the family gets the same faces.
+pub(crate) struct FaceChooser {
+    chain: Arc<FontChain>,
+    families: Mutex<Vec<FamilyChoice>>,
+}
+
+impl FaceChooser {
+    pub(crate) fn new(chain: &Arc<FontChain>) -> Self {
+        FaceChooser {
+            chain: Arc::clone(chain),
+            families: Mutex::default(),
+        }
+    }
+
+    /// The choice for the CSS `font-family` list `css`, made now if this is
+    /// the first time it is asked for.
+    pub(crate) fn choice(&self, css: &str) -> FamilyChoice {
+        let mut families = self.families.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(choice) = families.iter().find(|choice| choice.requested == css) {
+            return choice.clone();
+        }
+        let choice = choose_family(css, &self.chain);
+        families.push(choice.clone());
+        choice
+    }
+
+    /// Every choice made so far, in the order the families were first asked
+    /// for.
+    pub(crate) fn faces(&self) -> EmbeddedFaces {
+        EmbeddedFaces {
+            families: self.families.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
+        }
+    }
 }
 
 fn choose_family(css: &str, chain: &FontChain) -> FamilyChoice {

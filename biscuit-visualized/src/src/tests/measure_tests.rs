@@ -299,6 +299,7 @@ fn params_of(span: &usvg::TextSpan) -> ShapeParams {
         word_spacing: span.word_spacing(),
         small_caps: span.small_caps(),
         kerning: span.apply_kerning(),
+        layout_tables: true,
         variations: span
             .font()
             .variations()

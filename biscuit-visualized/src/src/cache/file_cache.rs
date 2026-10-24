@@ -163,10 +163,43 @@ impl FileCache {
         format: OutputFormat,
         data: &[u8],
     ) -> io::Result<PathBuf> {
+        self.store_file(kind, key, format, &format!("{}.{}", key, format.extension()), data)
+    }
+
+    /// The path of the file stored beside artifact `key` with `suffix`
+    /// (`{key}.{suffix}`, in the artifact's directory), which an artifact
+    /// keeps data about itself in.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
+    pub(crate) fn sidecar_path(&self, kind: VisualizationKind, key: &str, format: OutputFormat, suffix: &str) -> PathBuf {
+        self.cache_dir(kind, format).join(format!("{key}.{suffix}"))
+    }
+
+    /// Stores `data` at [`sidecar_path`](Self::sidecar_path), as
+    /// [`store`](Self::store) stores an artifact.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
+    pub(crate) fn store_sidecar(
+        &self,
+        kind: VisualizationKind,
+        key: &str,
+        format: OutputFormat,
+        suffix: &str,
+        data: &[u8],
+    ) -> io::Result<PathBuf> {
+        self.store_file(kind, key, format, &format!("{key}.{suffix}"), data)
+    }
+
+    fn store_file(
+        &self,
+        kind: VisualizationKind,
+        key: &str,
+        format: OutputFormat,
+        file_name: &str,
+        data: &[u8],
+    ) -> io::Result<PathBuf> {
         let cache_dir = self.cache_dir(kind, format);
         fs::create_dir_all(&cache_dir)?;
 
-        let path = cache_dir.join(format!("{}.{}", key, format.extension()));
+        let path = cache_dir.join(file_name);
         // Write beside the artifact and rename it into place, so a concurrent
         // render of the same key never reads a half-written file. Every writer
         // of a key writes the same bytes, so whichever rename wins is fine.

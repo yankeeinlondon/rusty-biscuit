@@ -55,6 +55,13 @@ platform = { host = "cfg(target_os = \"macos\")" }
 filter = 'package(biscuit-visualized) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
 setup = 'coretext-small-bundle'
 
+# Darkmatter's static-Mermaid page tests render over the host's fonts too
+# (about 3.5 s each without this).
+[[profile.default.scripts]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(darkmatter) & test(/^(mermaid_static_svg|mermaid_embedded_font)::/)'
+setup = 'coretext-small-bundle'
+
 [test-groups]
 # Claudine's L1 library tests repeatedly perform repository discovery, so CI
 # keeps their concurrency bounded on contended runners. Local runs use the

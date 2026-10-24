@@ -72,6 +72,7 @@ pub mod embedded;
 pub mod entrypoints;
 pub mod fold;
 pub mod inventory;
+pub(crate) mod mermaid_font;
 pub mod pipeline;
 pub mod source;
 #[cfg(test)]

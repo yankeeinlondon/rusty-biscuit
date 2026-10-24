@@ -38,7 +38,7 @@ use crate::artifact::{Background, OutputFormat, RenderRequest};
 use renderable::tree::{RenderNode, TreeRenderable};
 
 // Re-export types from biscuit-visualized
-pub use crate::mermaid::{MermaidConfig, MermaidTarget, MermaidTheme, Palette, QuadrantTheme, TerminalColors};
+pub use crate::mermaid::{DiagramFont, MermaidConfig, MermaidTarget, MermaidTheme, Palette, QuadrantTheme, TerminalColors};
 
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
@@ -298,6 +298,13 @@ impl MermaidRenderer {
         self
     }
 
+    /// Embeds the measured font face in an HTML static SVG; see
+    /// [`crate::mermaid::MermaidDiagram::with_embedded_font`].
+    pub fn with_embedded_font(mut self, embed: bool) -> Self {
+        self.diagram = self.diagram.with_embedded_font(embed);
+        self
+    }
+
     /// Returns the diagram instructions.
     pub fn instructions(&self) -> &str {
         self.diagram.instructions()
@@ -331,15 +338,23 @@ impl MermaidRenderer {
     ///
     /// Returns error if diagram rendering or file I/O fails.
     pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
+        Ok(self.render_to_svg_with_font()?.0)
+    }
+
+    /// [`render_to_svg`](Self::render_to_svg), also returning the diagram's
+    /// [`DiagramFont`] when the embedded-font opt-in applies; `None`
+    /// otherwise.
+    pub fn render_to_svg_with_font(&self) -> Result<(String, Option<DiagramFont>), MermaidRenderError> {
         let request = RenderRequest {
             format: OutputFormat::Svg,
             scale: self.scale,
             background: self.background,
             ..RenderRequest::default()
         };
-        let artifact = self.diagram.render(&request)?;
-        std::fs::read_to_string(&artifact.path)
-            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))
+        let (artifact, font) = self.diagram.render_with_font(&request)?;
+        let svg = std::fs::read_to_string(&artifact.path)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?;
+        Ok((svg, font))
     }
 
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
@@ -590,6 +605,16 @@ impl MermaidDiagram {
         self
     }
 
+    /// Measures labels in a face the page may embed, for a
+    /// [`MermaidTarget::HtmlStatic`] SVG; the page builds its `@font-face`
+    /// rules from every diagram's [`render_to_svg_with_font`](Self::render_to_svg_with_font)
+    /// with [`page_font`](crate::mermaid::page_font). See
+    /// [`crate::mermaid::MermaidDiagram::with_embedded_font`].
+    pub fn with_embedded_font(mut self, embed: bool) -> Self {
+        self.renderer = self.renderer.with_embedded_font(embed);
+        self
+    }
+
     /// Uses inverted colors (solid background with opposite theme).
     pub fn inverted(mut self, is_dark_mode: bool) -> Self {
         let theme = MermaidTheme::for_color_mode(is_dark_mode).inverse();
@@ -615,6 +640,17 @@ impl MermaidDiagram {
     /// Delegates to [`MermaidRenderer::render_to_svg`].
     pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
         self.renderer.render_to_svg()
+    }
+
+    /// Renders the diagram to an SVG string, with the [`DiagramFont`] its
+    /// page embeds when [`with_embedded_font`](Self::with_embedded_font)
+    /// applies (an HTML static target); `None` otherwise.
+    ///
+    /// ## Errors
+    ///
+    /// The errors of [`render_to_svg`](Self::render_to_svg).
+    pub fn render_to_svg_with_font(&self) -> Result<(String, Option<DiagramFont>), MermaidRenderError> {
+        self.renderer.render_to_svg_with_font()
     }
 
     /// Renders the diagram to a terminal-displayable string.
@@ -1075,6 +1111,27 @@ mod tests {
             *merman <= budget + BUDGET_MARGIN && *merman < full,
             "Merman ran {merman:?} on a {budget:?} budget; uncancelled {full:?}"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn the_component_returns_the_font_of_an_opt_in_html_static_svg() {
+        let _cache = isolated_cache_dir();
+        let source = "flowchart LR\n    A[Alpha] --> B[Beta]";
+        let plain = MermaidDiagram::new(source).with_target(MermaidTarget::HtmlStatic);
+        let opt_in = plain.clone().with_embedded_font(true);
+
+        let (svg, font) = opt_in.render_to_svg_with_font().expect("opt-in svg");
+        let font = font.expect("the opt-in applies to an HTML static SVG");
+        assert!(!font.families().is_empty());
+        assert!(svg.contains(font.families()[0]), "{svg}");
+        assert_eq!(opt_in.render_to_svg().expect("cached svg"), svg);
+        assert!(!crate::mermaid::page_font([&font]).expect("page font").is_empty());
+
+        // Without the opt-in, or without the HTML static target, no font.
+        assert!(plain.render_to_svg_with_font().expect("plain svg").1.is_none());
+        let raster_safe = MermaidDiagram::new(source).with_embedded_font(true);
+        assert!(raster_safe.render_to_svg_with_font().expect("raster-safe svg").1.is_none());
     }
 
     #[test]

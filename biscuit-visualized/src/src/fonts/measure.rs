@@ -14,6 +14,7 @@ use merman::svg::{DeterministicTextMeasurer, TextMeasurer, TextStyle};
 use resvg::usvg::fontdb::{ID, Style};
 
 use super::chain::FontChain;
+use crate::mermaid::embed::faces::{EmbeddedFaces, FaceChooser};
 use super::query::{FamilyName, FontQuery, parse_font_family_list};
 use super::shaper::{self, ShapeParams, Shaped};
 
@@ -26,12 +27,21 @@ type FaceKey = (Option<String>, Option<String>, Option<String>);
 /// because Merman's wrapping measures complete candidate strings, spaces
 /// included (collapsing them breaks lines later than Mermaid does).
 /// Resolved faces and shaped strings are cached for the measurer's lifetime.
+///
+/// A measurer made with [`embedding`](Self::embedding) measures for the
+/// embedded-font opt-in instead: each requested family in the face the opt-in
+/// embeds for it (chosen once per family by a [`FaceChooser`], over both
+/// weights), with plain glyph advances, because the embedded subset carries no
+/// OpenType layout tables. Nothing global changes: other renders over the
+/// same chain still measure as resolved.
 pub(crate) struct LabelMeasurer {
     chain: Arc<FontChain>,
     /// usvg's family for text that names none (`usvg::Options::font_family`).
     default_family: String,
     faces: Mutex<HashMap<FaceKey, Option<ID>>>,
     shaped: Mutex<HashMap<(String, FaceKey, u32), Arc<Shaped>>>,
+    /// Set for the embedded-font opt-in.
+    chooser: Option<FaceChooser>,
 }
 
 impl LabelMeasurer {
@@ -41,7 +51,23 @@ impl LabelMeasurer {
             default_family: crate::raster::usvg_options(chain).font_family,
             faces: Mutex::default(),
             shaped: Mutex::default(),
+            chooser: None,
         }
+    }
+
+    /// A measurer for the embedded-font opt-in over `chain` (see the type's
+    /// docs).
+    pub(crate) fn embedding(chain: &Arc<FontChain>) -> Self {
+        LabelMeasurer {
+            chooser: Some(FaceChooser::new(chain)),
+            ..LabelMeasurer::new(chain)
+        }
+    }
+
+    /// The faces chosen for every family this measurer was asked about;
+    /// `None` unless it measures for the embedded-font opt-in.
+    pub(crate) fn embedded_faces(&self) -> Option<EmbeddedFaces> {
+        self.chooser.as_ref().map(FaceChooser::faces)
     }
 
     /// A measurer for Merman's render API, over `chain`.
@@ -121,13 +147,12 @@ impl LabelMeasurer {
             return Arc::clone(hit);
         }
         let query = self.query(style);
+        let params = ShapeParams {
+            layout_tables: self.chooser.is_none(),
+            ..ShapeParams::for_query(&query, size)
+        };
         let shaped = Arc::new(self.face_for(&key.1, &query).map_or_else(Shaped::default, |face| {
-            shaper::shape(
-                &self.chain,
-                face,
-                text,
-                &ShapeParams::for_query(&query, size),
-            )
+            shaper::shape(&self.chain, face, text, &params)
         }));
         lock(&self.shaped).insert(key, Arc::clone(&shaped));
         shaped
@@ -142,6 +167,9 @@ impl LabelMeasurer {
             style.font_weight.clone(),
             style.font_style.clone(),
         );
+        if let Some(chooser) = &self.chooser {
+            return Some(chooser.choice(&self.requested_family(&key)).family);
+        }
         let face = self.face_for(&key, &self.query(style))?;
         self.chain
             .database()
@@ -153,9 +181,18 @@ impl LabelMeasurer {
     /// The face `query` (built from the style `key` names) resolves to,
     /// cached per key.
     fn face_for(&self, key: &FaceKey, query: &FontQuery) -> Option<ID> {
-        *lock(&self.faces)
-            .entry(key.clone())
-            .or_insert_with(|| self.chain.resolve(query))
+        *lock(&self.faces).entry(key.clone()).or_insert_with(|| match &self.chooser {
+            Some(chooser) => Some(chooser.choice(&self.requested_family(key)).face_for_weight(query.weight)),
+            None => self.chain.resolve(query),
+        })
+    }
+
+    /// The CSS `font-family` list the style `key` requests, as the opt-in's
+    /// choice is keyed: trimmed, without a trailing `;`, and usvg's default
+    /// family when empty.
+    fn requested_family(&self, key: &FaceKey) -> String {
+        let list = key.0.as_deref().unwrap_or_default().trim().trim_end_matches(';').trim();
+        if list.is_empty() { self.default_family.clone() } else { list.to_string() }
     }
 
     /// `text` shaped for `query` with explicit `params` (spacing, small caps,

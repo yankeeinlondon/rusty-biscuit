@@ -12,7 +12,8 @@ use allsorts::tag;
 
 /// Why a face could not be turned into an embeddable file.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum SubsetError {
+#[non_exhaustive]
+pub enum SubsetError {
     #[error("the face does not parse: {0}")]
     Parse(String),
     #[error("the face has no Unicode cmap: {0}")]

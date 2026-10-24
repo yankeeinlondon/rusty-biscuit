@@ -15,6 +15,8 @@ mod embed_embedding_tests;
 #[cfg(feature = "image")]
 mod embed_faces_tests;
 #[cfg(feature = "image")]
+mod embed_render_tests;
+#[cfg(feature = "image")]
 mod embed_glyphs_tests;
 #[cfg(feature = "image")]
 mod embed_permission_tests;

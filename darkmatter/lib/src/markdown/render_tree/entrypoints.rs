@@ -46,6 +46,7 @@ use renderable::tree::{
 use renderable::tree::{NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
+use super::mermaid_font::place_page_font;
 use super::pipeline::PipelineResult;
 use crate::markdown::Markdown;
 use crate::markdown::inline::HorizontalRuleAttrs;
@@ -202,8 +203,11 @@ pub(crate) fn render_tree_html_with_context(
     // consumes: a malformed code-block directive is a hard error, not a silent
     // degrade. Runs on the single fold — no second traversal of the source.
     validate_code_directives(&doc.root)?;
-    let browser_opts = browser_options_from_html_options(options);
-    let rendered = render_browser_document_html(&doc, &browser_opts)?;
+    let (browser_opts, code_renderer) = browser_options_from_html_options(options);
+    let mut rendered = render_browser_document_html(&doc, &browser_opts)?;
+    if let Some(font) = code_renderer.take_page_font() {
+        rendered.output = place_page_font(&rendered.output, &font);
+    }
     Ok(PipelineResult::new(
         rendered.output,
         fold_diagnostics,
@@ -286,7 +290,7 @@ pub(crate) fn render_tree_html_page_body(
     let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     validate_code_directives(&doc.root)?;
 
-    let mut browser_opts = browser_options_from_html_options(options);
+    let (mut browser_opts, code_renderer) = browser_options_from_html_options(options);
     // Darkmatter's full-page browser default is interactive Mermaid; explicit
     // Image / Text choices keep their static-SVG / code opt-in shapes.
     browser_opts.mermaid_mode = match options.mermaid_mode {
@@ -301,7 +305,11 @@ pub(crate) fn render_tree_html_page_body(
     // requests without resolving/injecting them into `<head>`.
     browser_opts.defer_feature_injection = true;
 
-    let rendered = render_browser_document_body(&doc, &browser_opts)?;
+    let mut rendered = render_browser_document_body(&doc, &browser_opts)?;
+    if let Some(font) = code_renderer.take_page_font() {
+        rendered.output.document = place_page_font(&rendered.output.document, &font);
+        rendered.output.body = place_page_font(&rendered.output.body, &font);
+    }
     Ok(PipelineResult::new(
         BrowserPageRender {
             document: rendered.output.document,
@@ -586,7 +594,10 @@ pub fn render_tree_markdown_dialect(
 /// client-side mermaid.js path ([`BrowserMermaidMode::Interactive`]) is an
 /// orthogonal, default-off browser opt-in and is not reachable from the legacy
 /// enum.
-fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions {
+///
+/// Also returns the installed code renderer, which collects the page's
+/// embedded Mermaid font ([`TerminalCodeRenderer::take_page_font`]).
+fn browser_options_from_html_options(opts: &HtmlOptions) -> (BrowserRenderOptions, Rc<TerminalCodeRenderer>) {
     use renderable::browser::PageOptions;
     use renderable::tree::BrowserMermaidMode;
 
@@ -604,8 +615,11 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         ..PageOptions::default()
     });
 
-    BrowserRenderOptions {
+    let code_renderer = Rc::new(TerminalCodeRenderer::new().with_html_options(opts.clone()));
+    let browser_opts = BrowserRenderOptions {
         strictness: RenderStrictness::Warn,
+        // The embedded-font placeholder relies on this: no author HTML reaches
+        // the page unescaped (see `mermaid_font::PAGE_FONT_PLACEHOLDER`).
         raw_html: RawHtmlPolicy::Escape,
         page,
         // Carry the caller's resolved `HtmlOptions` (code theme, page color
@@ -613,12 +627,11 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         // highlighted markup uses the same mode/theme policy as the page frame
         // and the `.code-block` stylesheet, rather than `HtmlOptions::default()`
         // (review-1 finding 2).
-        code_renderer: Some(Rc::new(
-            TerminalCodeRenderer::new().with_html_options(opts.clone()),
-        )),
+        code_renderer: Some(Rc::clone(&code_renderer) as Rc<dyn renderable::tree::CodeRenderer>),
         mermaid_mode,
         ..Default::default()
-    }
+    };
+    (browser_opts, code_renderer)
 }
 
 /// Builds the `.code-block` panel-background stylesheet for the browser path.
@@ -1410,7 +1423,7 @@ mod tests {
     /// even when the rendered-bytes tests above don't run.
     #[test]
     fn render_browser_options_mapping_defaults_raw_html_to_escape() {
-        let opts = browser_options_from_html_options(&HtmlOptions::default());
+        let opts = browser_options_from_html_options(&HtmlOptions::default()).0;
         assert_eq!(opts.raw_html, RawHtmlPolicy::Escape);
     }
 
@@ -1462,7 +1475,7 @@ mod tests {
             hr_css_variables: vars,
             ..HtmlOptions::default()
         };
-        let browser = browser_options_from_html_options(&opts);
+        let browser = browser_options_from_html_options(&opts).0;
         let page = browser
             .page
             .expect("a page must be built to carry the HR override");
@@ -1645,7 +1658,7 @@ mod tests {
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             ..Default::default()
         };
-        let browser_opts = browser_options_from_html_options(&opts);
+        let browser_opts = browser_options_from_html_options(&opts).0;
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Code);
     }
 
@@ -1661,7 +1674,7 @@ mod tests {
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
             ..Default::default()
         };
-        let browser_opts = browser_options_from_html_options(&opts);
+        let browser_opts = browser_options_from_html_options(&opts).0;
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
     }
 

@@ -24,12 +24,17 @@ pub(crate) struct ShapeParams {
     pub(crate) word_spacing: f32,
     pub(crate) small_caps: bool,
     pub(crate) kerning: bool,
+    /// Whether the face's OpenType layout tables (`GSUB`, `GPOS`, `GDEF`,
+    /// `kern`, and the AAT ones) take part. Off, each face is shaped as only
+    /// the tables an embedded subset keeps (see [`subset_tables`]): plain glyph
+    /// advances, which is what a browser draws from that subset.
+    pub(crate) layout_tables: bool,
     /// Font variations, before the automatic `opsz`.
     pub(crate) variations: Vec<rustybuzz::Variation>,
 }
 
 impl ShapeParams {
-    /// No spacing, kerning on, no small caps, and the variations usvg's
+    /// No spacing, kerning and layout tables on, no small caps, and the variations usvg's
     /// `convert_font` (`src/parser/text.rs`) derives from `query`'s weight,
     /// stretch, and style when no `font-variation-settings` is given.
     pub(crate) fn for_query(query: &FontQuery, size: f32) -> Self {
@@ -68,6 +73,7 @@ impl ShapeParams {
             word_spacing: 0.0,
             small_caps: false,
             kerning: true,
+            layout_tables: true,
             variations,
         }
     }
@@ -211,7 +217,11 @@ fn shape_with_face(
     params: &ShapeParams,
 ) -> Option<Vec<Glyph>> {
     db.with_face_data(id, |data, index| {
-        let mut face = rustybuzz::Face::from_slice(data, index)?;
+        let mut face = if params.layout_tables {
+            rustybuzz::Face::from_slice(data, index)?
+        } else {
+            rustybuzz::Face::from_face(subset_tables(data, index)?)
+        };
         let opsz = Tag::from_bytes(b"opsz");
         let mut variations = params.variations.clone();
         if !variations.iter().any(|v| v.tag == opsz)
@@ -278,6 +288,29 @@ fn shape_with_face(
         }
         Some(glyphs)
     })?
+}
+
+/// Face `index` of `data` as only the tables the embedded subset keeps
+/// (`allsorts`'s minimal profile plus the outlines): no `GSUB`, `GPOS`,
+/// `GDEF`, `kern`, AAT, or variation tables, so rustybuzz shapes it exactly
+/// as a browser's HarfBuzz shapes the subset.
+fn subset_tables(data: &[u8], index: u32) -> Option<ttf_parser::Face<'_>> {
+    let raw = ttf_parser::RawFace::parse(data, index).ok()?;
+    let table = |tag: &[u8; 4]| raw.table(Tag::from_bytes(tag));
+    ttf_parser::Face::from_raw_tables(ttf_parser::RawFaceTables {
+        head: table(b"head")?,
+        hhea: table(b"hhea")?,
+        maxp: table(b"maxp")?,
+        cmap: table(b"cmap"),
+        hmtx: table(b"hmtx"),
+        name: table(b"name"),
+        os2: table(b"OS/2"),
+        post: table(b"post"),
+        glyf: table(b"glyf"),
+        loca: table(b"loca"),
+        ..ttf_parser::RawFaceTables::default()
+    })
+    .ok()
 }
 
 struct Cluster {
