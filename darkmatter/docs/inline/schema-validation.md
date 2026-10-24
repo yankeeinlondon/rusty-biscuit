@@ -303,15 +303,31 @@ The stages never overlap; each one's time is work done in it and nowhere else:
 | State | Meaning |
 |-------|---------|
 | `hit` | Validators were looked up and every one was cached. |
-| `miss` | At least one validator was built during this validation. |
+| `miss` | At least one validator was built for this document. |
 | `not requested` | No validator was needed: the document has no schema at all, or validation stopped earlier. |
 
 When a document fails before validating, for example because its `$schema`
 does not resolve, the error is printed as usual and the breakdown that follows
 covers the work done before the failure. Documents that cannot be opened or
-parsed get no breakdown. With `key=value` assignments, `md` resolves the schema
-once before validating to coerce the assigned values, so the validation itself
-usually reports a `hit`.
+parsed get no breakdown.
+
+The breakdown covers all of the document's schema work, not just the final
+check. With `key=value` assignments, `md` first resolves the schema to coerce
+the assigned values, then resolves it again after assigning them, because an
+assignment can change which triggers match. Both resolutions are counted, so a
+validator first built while preparing the assignments is still a `miss`:
+
+```console
+$ md schema validate --no-baseline-schema review_counter=2 doc.md -vv
+- ✔ the document doc.md has a schema definition and is valid.
+Validation timings for doc.md
+matched triggers: none
+compile cache: miss
+...
+```
+
+If that first resolution fails, its error is printed as usual and the breakdown
+covers the work done up to it.
 
 ## CLI: `md schema detect`
 
@@ -346,7 +362,15 @@ This placement is deliberate:
   caller-owned values selected as eager or non-recursive lazy files from each
   property's captured origin. It does not bind, coerce, validate, or normalize
   document-authored values. This gives frontmatter expressions one stable
-  semantic value from their first lookup.
+  semantic value from their first lookup. Selection reads through named and
+  recursive types the way validation does, so with
+  `node: "file(eager) | { children: node[] }"`, both `spec: node` and
+  `spec: node[]` select a caller's `--set spec=spec.md` (or `["spec.md"]`) as
+  an eager file and materialize the launch directory's `spec.md`, exactly as
+  `spec: file(eager)` would. A value that more than one alternative accepts
+  (`file(eager) | string`) is not selected and stays raw, and only a string
+  or a list of strings is a caller file: an object value such as
+  `{ children: [spec.md] }` is kept as supplied.
 - Full validation runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
@@ -551,13 +575,44 @@ it raw too rather than re-anchor it as though the document had authored it.
 Each simplified arm's declared glob is compiled into that arm as
 `x-darkmatter-match`, and an existing file outside it rules the arm out. An
 arm with several `match(...)` groups, as when a reused named type adds its
-own, keeps every group, and a file must satisfy each one:
+own, keeps every group, and a file must satisfy each one. The glob is
+enforced on a property whose type is `file` or `file[]` (directly or through
+a named type that is just that file) and on every file inside a recursive
+named type the arm uses, at every depth of the value. Any other file in the
+arm (a union alternative such as `file(match(…)) | number`, a file in an
+inline object, a dictionary value, a tuple slot, a list of a union) only
+suggests, as it does in a single schema:
 
 | Value | Result |
 |---|---|
 | `spec=fixes/x/spec.md` | the `feature` arm is ruled out; the `fix` arm applies |
 | `spec=features/x/spec.md` | the `fix` arm is ruled out; the `feature` arm applies |
 | `kind=fix spec=features/x/spec.md` | invalid: `` `…/features/x/spec.md` is outside this schema arm's `match(**/fixes/**/spec.md)` `` |
+
+A recursive type is not changed for its other uses: the arm compiles its own
+copy of each definition that reaches a glob (`$defs` key
+`<name>@match:<property>`), and the shared definition keeps the
+suggestion-only body a single schema or a merged trigger payload uses. A
+glob reached through a definition makes the schema depend on where the
+document lives, so its validator is never shared between documents in
+different folders.
+
+```yaml
+$schema:
+  - node: "file(match('./notes/*.md')) | { children: node[] }"
+    spec: node(required)
+  - spec: number
+```
+
+| Document | `spec` | Result |
+|---|---|---|
+| `a/doc.md` | `./notes/x.md` (exists) | valid |
+| `b/doc.md` | `../a/notes/x.md` (the same file) | invalid: outside `b/notes` |
+| `b/doc.md` | `{ children: [../a/notes/x.md] }` | invalid: the nested file is judged too |
+
+With `spec: "file(match('./notes/*.md')) | number"` in place of `node`, the
+same `b/doc.md` with `spec: ../a/notes/x.md` is valid: that glob only
+suggests.
 
 The same judgment runs wherever an arm is chosen: caller-file projection,
 coercion, and the final verdict. When every arm fails, an arm ruled out by its

@@ -46,14 +46,27 @@ impl DefKey {
 
 /// A table of named types that `Name@…` references resolve in.
 ///
-/// Every root a resolution can start from has its own identity, so two roots
-/// that each declare `item` never share a definition.
+/// Every independently authored source of named types has its own identity:
+/// the document's inline `$schema` (and each of its root-union arms), each
+/// disk trigger's inline payload, each schema file (and each of its inline
+/// root-union arms), and each embedded or shipped document. An effective
+/// schema looks references up across the tables of several of these sources
+/// at once, so two sources that each declare `item` must never produce equal
+/// keys: a shared identity would return one source's body for the other's
+/// reference.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DefNamespace {
     /// The inline `$schema` mapping of the document being prepared.
     InlineRoot,
     /// Inline arm `index` of a document's root union.
     RootUnionArm(usize),
+    /// The inline `$schema` payload of a schema-trigger file, by the
+    /// canonical path of that trigger file.
+    TriggerPayload(PathBuf),
+    /// Inline arm `index` of a trigger payload's root union, by the canonical
+    /// path of the trigger file. Such a payload is rejected as not mergeable,
+    /// but its arms are resolved before that check runs.
+    TriggerPayloadUnionArm(PathBuf, usize),
     /// A schema file, by the canonical path the resolver loaded it from.
     File(PathBuf),
     /// Inline arm `index` of a schema file whose declaration is a root union.
@@ -69,7 +82,13 @@ impl DefNamespace {
     /// The public identity of the source this namespace was authored in.
     pub fn source_id(&self) -> SchemaSourceId {
         match self {
-            Self::InlineRoot | Self::RootUnionArm(_) => SchemaSourceId::InlineDocument,
+            // A trigger payload is resolved from its YAML value, like a
+            // document's inline `$schema`, so its origins carry the same
+            // source and no span.
+            Self::InlineRoot
+            | Self::RootUnionArm(_)
+            | Self::TriggerPayload(_)
+            | Self::TriggerPayloadUnionArm(..) => SchemaSourceId::InlineDocument,
             Self::File(path) | Self::FileRootUnionArm(path, _) => SchemaSourceId::File(path.clone()),
             Self::Embedded(path) | Self::Shipped(path) => SchemaSourceId::Embedded(path.clone()),
         }

@@ -178,6 +178,7 @@ mod schema_cache_validity;
 mod scope_site_conformance;
 mod semantic_results_never_persist;
 mod serialized_code_neighbors;
+mod recursive_schema_caller_files;
 mod recursive_schema_golden;
 mod recursive_schema_merge;
 mod recursive_schema_types;

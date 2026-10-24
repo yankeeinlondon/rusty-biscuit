@@ -204,8 +204,10 @@ enum Baseline {
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
 ///
-/// The timings cover trigger discovery and the final validation, and are
-/// `None` when the file failed before discovery.
+/// The timings accumulate every schema step of the request: trigger
+/// discovery, the pre-assignment resolution, the final validation, and the
+/// schema-presence lookup. They are `None` when the file failed before
+/// discovery.
 fn validate_one(
     api: &DarkmatterSchemas,
     opened: &OpenedArgument,
@@ -244,7 +246,11 @@ fn validate_one(
         // Build the pre-assignment effective schema solely to coerce assignment
         // RHS values to declared property types. Validation resolves again
         // below because assignments may change trigger activation.
-        let effective = match api.effective_for(&md) {
+        // Recorded: on a cold request this is where the validator is built,
+        // so leaving it out would report the later validation as a cache hit.
+        let (effective, preparation) = ValidationTimings::record(|| api.effective_for(&md));
+        timings.absorb(preparation);
+        let effective = match effective {
             Ok(effective) => effective,
             Err(err) => return (FileOutcome::SchemaError(Box::new(err)), Some(timings)),
         };
@@ -258,13 +264,12 @@ fn validate_one(
     let schema_label = schema_label_from(&md);
     // Resolve again after assignments: assignments may change which trigger
     // arms match, so the pre-assignment schema is only valid for coercion.
-    // Validation runs first so its timings, not this lookup, pay any compile
-    // miss; both resolve the same schema and fail with the same error.
-    let (validated, validation) = api.validate_timed(&md);
-    timings.absorb(validation);
-    let outcome = validated.and_then(|report| {
+    // The presence lookup re-resolves the schema validation just resolved, so
+    // it shares the validation's recording.
+    let (outcome, validation) = ValidationTimings::record(|| {
+        let report = api.validate(&md)?;
         let no_schema = api.effective_for(&md)?.is_none();
-        Ok(FileOutcome::Validated {
+        Ok::<_, SchemaError>(FileOutcome::Validated {
             report_valid: report.valid,
             problems: report.problems,
             advisories: report.advisories,
@@ -272,6 +277,7 @@ fn validate_one(
             no_schema,
         })
     });
+    timings.absorb(validation);
     (outcome.unwrap_or_else(|err| FileOutcome::SchemaError(Box::new(err))), Some(timings))
 }
 

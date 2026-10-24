@@ -2,10 +2,15 @@
 //! constraint on each declaring arm of a root union.
 //!
 //! On a single schema `match` only suggests files: completion and choosers
-//! walk it, and validation ignores it. In a root union, conversion emits each
-//! declared glob as [`DARKMATTER_MATCH_KEYWORD`] on its arm's file fragment.
-//! An existing file outside the glob then rules that arm out, in arm selection
-//! and in the final verdict alike.
+//! walk it, and validation ignores it. In a root union, conversion emits a
+//! declared glob as [`DARKMATTER_MATCH_KEYWORD`] in two places: on an arm
+//! property that is directly a `file` (or `file[]`), and on every file inside
+//! the arm's own copy of a recursive definition the arm references, at any
+//! depth. An existing file outside the glob then rules that arm out, in arm
+//! selection and in the final verdict alike. Any other file in an arm (a
+//! property-union alternative, a nested inline object, a dictionary value, a
+//! tuple slot, a list of a union) only suggests, exactly as it did before
+//! recursive types existed.
 //!
 //! A value is judged only when it names an existing file. A missing file is
 //! the existence check's verdict (`file(eager)`), or a lazy output that does
@@ -47,10 +52,16 @@ use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::{Map, Value};
 
 use super::format::resolve_file_reference_in_context;
-use super::simplified::{Constraint, PropertyDef, SchemaArm, SimplifiedType, TypeExpr};
+use super::simplified::{Constraint, DefKey, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SimplifiedType, TypeExpr};
 
 /// Keyword carrying the globs a root-union arm enforces on a file value.
 pub const DARKMATTER_MATCH_KEYWORD: &str = "x-darkmatter-match";
+
+/// Sibling of [`DARKMATTER_MATCH_KEYWORD`] in an arm's enforcing copy of a
+/// recursive definition: the top-level property whose value the copy
+/// types, or `null` below a pattern key. A copy sits under `$defs`, so its
+/// location cannot name the property a caller may have supplied.
+pub const DARKMATTER_MATCH_PROPERTY_KEYWORD: &str = "x-darkmatter-match-property";
 
 /// The patterns of one `file(match(...))` constraint, as a [`GlobReference`]
 /// with the file-name view.
@@ -196,15 +207,204 @@ pub(crate) fn definition_error(patterns: &[String]) -> Option<(Option<usize>, Gl
     FileMatchGlobs::new(patterns).err().map(|error| (None, error))
 }
 
-/// Every `match` group a simplified root-union arm enforces on top-level
-/// `property`, in authored order. A single schema does not use this
-/// arm-level constraint.
+/// The `match` groups a simplified root-union arm enforces on a string
+/// value of its top-level `property`, one entry per file alternative the
+/// value could be judged by; each entry holds that alternative's non-empty
+/// groups in authored order.
+///
+/// The value satisfies the arm's file rule when **some** alternative admits
+/// it, and an alternative admits it when **every** one of its groups does:
+/// the arm's validator lowers alternatives to `anyOf` and an alternative's
+/// groups to one keyword. The same holds for each string item of an array
+/// property, whose items are read the same way.
+///
+/// The alternatives are [`file_alternatives`]'s, through `definitions` (the
+/// table the arm was resolved against), so this agrees with the arm's
+/// lowering: a property that is directly a `file` is judged, and so is every
+/// file reached through a recursive reference; a file alternative written in
+/// the arm itself (`file(match(...)) | number`) only suggests.
+///
+/// `None` when the property is absent, reaches no `match`, or offers some
+/// alternative that may accept the string without an enforced glob (`file`
+/// without `match`, a suggestion-only file alternative, `string`, `unknown`,
+/// or any other string-accepting type, or an unresolved import): then no
+/// glob can rule the arm out. A single schema does not use this arm-level
+/// constraint.
 #[must_use]
-pub fn root_union_match_groups<'a>(arm: &'a SchemaArm, property: &str) -> Option<Vec<&'a [String]>> {
+pub fn root_union_match_groups<'a>(
+    arm: &'a SchemaArm,
+    property: &str,
+    definitions: &'a DefinitionTable,
+) -> Option<Vec<Vec<&'a [String]>>> {
     let SchemaArm::Inline(shape) = arm else {
         return None;
     };
-    shape.properties.get(property).and_then(file_match_groups)
+    let alternatives = file_alternatives(shape.properties.get(property)?, definitions)?;
+    let groups: Vec<_> = alternatives.iter().map(FileAlternative::match_groups).collect();
+    (!groups.is_empty() && groups.iter().all(|groups| !groups.is_empty())).then_some(groups)
+}
+
+/// A `file` alternative that a property's string value, or each string item
+/// of its list value, is judged by.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FileAlternative<'a> {
+    /// The `file` atom; its constraints carry the alternative's timing and
+    /// `match` groups.
+    pub atom: &'a PropertyAtom,
+    /// Whether the property's value is a list of such files: the atom is a
+    /// list, or it is reached below a list (`node[]`).
+    pub is_array: bool,
+}
+
+impl<'a> FileAlternative<'a> {
+    /// The alternative's non-empty `match` groups, in authored order.
+    #[must_use]
+    pub fn match_groups(&self) -> Vec<&'a [String]> {
+        self.atom
+            .constraints
+            .iter()
+            .filter_map(|constraint| match constraint {
+                Constraint::Match(patterns) if !patterns.is_empty() => Some(patterns.as_slice()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether the alternative is marked `eager`, on its items or on the list
+    /// it is written as (`file(eager)[]`, `file[](eager)`).
+    #[must_use]
+    pub fn is_eager(&self) -> bool {
+        self.atom
+            .constraints
+            .iter()
+            .chain(&self.atom.array_constraints)
+            .any(|constraint| matches!(constraint, Constraint::Eager))
+    }
+}
+
+/// The `file` alternatives a string value of the property `definition`, or
+/// each string item of a list value, is judged by, in authored order.
+///
+/// Two kinds of property are read, and they are the two a root-union arm
+/// enforces `match(...)` on:
+///
+/// - a property that is directly a `file` (or `file[]`): that one atom;
+/// - a property whose alternatives reach [`TypeExpr::Ref`] uses of recursive
+///   definitions, through property-level unions and union-typed atoms:
+///   inside a definition the walk follows what a validator follows (unions
+///   and further references through `definitions`, the table `definition`
+///   was resolved against), each definition entered once per list depth, so
+///   recursion terminates.
+///
+/// Alternatives that never hold a string or a string item (`number`,
+/// `boolean`, `null`, `object`, inline objects, tuples, functions, and a list
+/// nested in a list) are skipped, so the result may be empty.
+///
+/// `None` when some alternative may accept a string other than as a file
+/// (`string`, `unknown`, or any other string-accepting type, or an unresolved
+/// import or reference), or when the property itself offers a `file`
+/// alternative beside others (`file | number`, an acyclic name bound to such
+/// a union, `(file | number)[]`). Those acyclic shapes were never read as a
+/// file before recursive types existed, and their `match(...)` only
+/// suggests, so they keep that behavior.
+#[must_use]
+pub fn file_alternatives<'a>(
+    definition: &'a PropertyDef,
+    definitions: &'a DefinitionTable,
+) -> Option<Vec<FileAlternative<'a>>> {
+    if let PropertyDef::Single(atom) = definition
+        && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+    {
+        return Some(vec![FileAlternative { atom, is_array: atom.is_array }]);
+    }
+    let mut alternatives = Vec::new();
+    let mut entered = std::collections::HashSet::new();
+    collect_reference_alternatives(alternatives_of(definition), false, definitions, &mut entered, &mut alternatives)?;
+    Some(alternatives)
+}
+
+/// [`collect_file_alternatives`] for the alternatives written on the property
+/// itself: only a reference is entered, and a `file` here is a
+/// suggestion-only alternative, so the property is not read as a file.
+fn collect_reference_alternatives<'a>(
+    atoms: &'a [PropertyAtom],
+    in_array: bool,
+    definitions: &'a DefinitionTable,
+    entered: &mut std::collections::HashSet<(&'a DefKey, bool)>,
+    alternatives: &mut Vec<FileAlternative<'a>>,
+) -> Option<()> {
+    for atom in atoms {
+        if in_array && atom.is_array {
+            continue;
+        }
+        let is_array = in_array || atom.is_array;
+        match &atom.ty {
+            TypeExpr::Ref(_) => collect_file_alternatives(
+                std::slice::from_ref(atom),
+                in_array,
+                definitions,
+                entered,
+                alternatives,
+            )?,
+            TypeExpr::Union(arms) => {
+                collect_reference_alternatives(arms, is_array, definitions, entered, alternatives)?;
+            }
+            TypeExpr::Primitive(
+                SimplifiedType::Number | SimplifiedType::Boolean | SimplifiedType::Null | SimplifiedType::Object,
+            )
+            | TypeExpr::InlineObject(_)
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_) => {}
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => return None,
+        }
+    }
+    Some(())
+}
+
+/// The atoms a definition offers as alternatives.
+fn alternatives_of(definition: &PropertyDef) -> &[PropertyAtom] {
+    match definition {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms,
+    }
+}
+
+/// Adds the file alternatives among `atoms`, reached below a list when
+/// `in_array`, to `alternatives`; `None` when some alternative may accept a
+/// string other than as a file.
+fn collect_file_alternatives<'a>(
+    atoms: &'a [PropertyAtom],
+    in_array: bool,
+    definitions: &'a DefinitionTable,
+    entered: &mut std::collections::HashSet<(&'a DefKey, bool)>,
+    alternatives: &mut Vec<FileAlternative<'a>>,
+) -> Option<()> {
+    for atom in atoms {
+        if in_array && atom.is_array {
+            continue;
+        }
+        let is_array = in_array || atom.is_array;
+        match &atom.ty {
+            TypeExpr::Primitive(SimplifiedType::File) => alternatives.push(FileAlternative { atom, is_array }),
+            TypeExpr::Ref(key) => {
+                // A definition entered once at this depth has given all its
+                // alternatives, and a cycle ends here.
+                if entered.insert((key, is_array)) {
+                    let body = &definitions.get(key)?.body;
+                    collect_file_alternatives(alternatives_of(body), is_array, definitions, entered, alternatives)?;
+                }
+            }
+            TypeExpr::Union(arms) => collect_file_alternatives(arms, is_array, definitions, entered, alternatives)?,
+            TypeExpr::Primitive(
+                SimplifiedType::Number | SimplifiedType::Boolean | SimplifiedType::Null | SimplifiedType::Object,
+            )
+            | TypeExpr::InlineObject(_)
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_) => {}
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => return None,
+        }
+    }
+    Some(())
 }
 
 /// Every non-empty `match` group of a `file` property, in authored order;
@@ -287,15 +487,19 @@ pub(crate) fn match_keyword_factory(
 + Send
 + Sync
 + 'static {
-    move |_parent, schema, location| {
+    move |parent, schema, location| {
         let groups = decode_match_groups(schema)?;
+        let property = match parent.get(DARKMATTER_MATCH_PROPERTY_KEYWORD) {
+            Some(named) => named.as_str().map(str::to_string),
+            None => top_level_property(&location),
+        };
         let globs = FileMatchGroups::new(&groups).map_err(|error| {
             ValidationError::schema(format!("{DARKMATTER_MATCH_KEYWORD} holds an invalid glob: {error}"))
         })?;
         Ok(Box::new(MatchKeyword {
             globs,
             groups,
-            judged_in: JudgedIn::for_keyword(&file_values, &location),
+            judged_in: JudgedIn::for_keyword(&file_values, property.as_deref()),
         }))
     }
 }
@@ -354,12 +558,13 @@ enum JudgedIn {
 impl JudgedIn {
     /// A caller-supplied property is judged in the context it was authored
     /// in; its value is already projected from there.
-    fn for_keyword(file_values: &super::validate::FileValues, location: &Location) -> Self {
+    /// `property` is the top-level property the keyword judges, if any.
+    fn for_keyword(file_values: &super::validate::FileValues, property: Option<&str>) -> Self {
         match file_values {
             super::validate::FileValues::Syntax => Self::Syntax,
             super::validate::FileValues::Resolved { base_dir, fallback, context, callers } => {
-                let origin = top_level_property(location)
-                    .map_or(super::validate::ValueOrigin::Document, |property| callers.origin_of(&property));
+                let origin =
+                    property.map_or(super::validate::ValueOrigin::Document, |property| callers.origin_of(property));
                 match origin {
                     super::validate::ValueOrigin::Caller(origin) => Self::Resolved {
                         base_dir: None,
@@ -378,8 +583,9 @@ impl JudgedIn {
 }
 
 /// The top-level property a keyword's schema location belongs to: the
-/// segment after the location's first `properties`. `match` is emitted only
-/// on top-level root-union properties (see [`root_union_match_groups`]).
+/// segment after the location's first `properties`. Inside a root-union arm
+/// that is the arm's property; an enforcing copy under `$defs` names its
+/// property with [`DARKMATTER_MATCH_PROPERTY_KEYWORD`] instead.
 fn top_level_property(location: &Location) -> Option<String> {
     let pointer = location.as_str();
     let mut segments = pointer.split('/').skip(1);
@@ -460,18 +666,22 @@ mod tests {
             "- {kind: 'literal(feature)', spec: 'file(eager;match(**/features/**/spec.md))', plan: 'file(match(**/*plan*.md))', solo: 'file(match(*.md))'}\n\
              - {kind: 'literal(fix)', spec: 'file(eager;match(**/fixes/**/spec.md))', plan: 'file(match(**/*plan*.md))'}\n",
         );
+        let none = DefinitionTable::default();
         assert_eq!(
-            root_union_match_groups(&arms[0], "spec"),
-            Some(vec![&["**/features/**/spec.md".to_string()][..]])
+            root_union_match_groups(&arms[0], "spec", &none),
+            Some(vec![vec![&["**/features/**/spec.md".to_string()][..]]])
         );
         assert_eq!(
-            root_union_match_groups(&arms[1], "spec"),
-            Some(vec![&["**/fixes/**/spec.md".to_string()][..]])
+            root_union_match_groups(&arms[1], "spec", &none),
+            Some(vec![vec![&["**/fixes/**/spec.md".to_string()][..]]])
         );
-        assert_eq!(root_union_match_groups(&arms[0], "plan"), Some(vec![&["**/*plan*.md".to_string()][..]]));
-        assert_eq!(root_union_match_groups(&arms[0], "solo"), Some(vec![&["*.md".to_string()][..]]));
-        assert_eq!(root_union_match_groups(&arms[1], "solo"), None);
-        assert_eq!(root_union_match_groups(&arms[0], "kind"), None);
+        assert_eq!(
+            root_union_match_groups(&arms[0], "plan", &none),
+            Some(vec![vec![&["**/*plan*.md".to_string()][..]]])
+        );
+        assert_eq!(root_union_match_groups(&arms[0], "solo", &none), Some(vec![vec![&["*.md".to_string()][..]]]));
+        assert_eq!(root_union_match_groups(&arms[1], "solo", &none), None);
+        assert_eq!(root_union_match_groups(&arms[0], "kind", &none), None);
     }
 
     #[test]
@@ -509,8 +719,9 @@ mod tests {
             "- {spec: 'file(match(**/fixes/**/spec.md))'}\n\
              - {spec: 'string'}\n",
         );
-        assert!(root_union_match_groups(&arms[0], "spec").is_some());
-        assert_eq!(root_union_match_groups(&arms[1], "spec"), None);
+        let none = DefinitionTable::default();
+        assert!(root_union_match_groups(&arms[0], "spec", &none).is_some());
+        assert_eq!(root_union_match_groups(&arms[1], "spec", &none), None);
     }
 
     #[test]
@@ -727,8 +938,86 @@ mod tests {
         atom.constraints.push(Constraint::Match(strings(&["guide*", "!guide-old*"])));
         atom.constraints.push(Constraint::Match(Vec::new()));
         let arm = SchemaArm::Inline(shape);
-        let groups = root_union_match_groups(&arm, "spec").unwrap();
-        assert_eq!(groups, [&strings(&["*.md"])[..], &strings(&["guide*", "!guide-old*"])[..]]);
+        let none = DefinitionTable::default();
+        let alternatives = root_union_match_groups(&arm, "spec", &none).unwrap();
+        assert_eq!(alternatives, [vec![&strings(&["*.md"])[..], &strings(&["guide*", "!guide-old*"])[..]]]);
+    }
+
+    /// The first arm of `$schema` resolved in a temporary folder, with the
+    /// definition table its references name.
+    fn resolved_first_arm(yaml: &str) -> (SchemaArm, std::sync::Arc<DefinitionTable>) {
+        let dir = tempfile::tempdir().unwrap();
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let resolved = crate::markdown::schemas::resolve::resolve_yaml_schema(
+            &value,
+            dir.path(),
+            &FileResolutionContext::new(dir.path()),
+        )
+        .unwrap();
+        let Some(crate::markdown::schemas::SimplifiedSchema::Union(mut arms)) = resolved.simplified else {
+            panic!("expected a root union");
+        };
+        (arms.remove(0), resolved.definitions)
+    }
+
+    #[test]
+    fn root_union_match_groups_follow_a_recursive_reference() {
+        let (arm, definitions) = resolved_first_arm(
+            "- node: \"file(match('./notes/*.md')) | { children: node[] }\"\n  spec: node(required)\n\
+             - spec: number\n",
+        );
+        assert!(!definitions.is_empty(), "node recurses, so it stays a reference");
+        assert_eq!(root_union_match_groups(&arm, "spec", &definitions), Some(vec![vec![&strings(&["./notes/*.md"])[..]]]));
+        assert_eq!(
+            root_union_match_groups(&arm, "spec", &DefinitionTable::default()),
+            None,
+            "a reference the table does not hold offers no glob"
+        );
+    }
+
+    /// A file alternative written in the arm itself only suggests, as before
+    /// recursive types existed, so it never rules the arm out; a reference
+    /// beside a non-string alternative is still judged through its copy.
+    #[test]
+    fn root_union_match_groups_leave_a_file_alternative_of_a_property_union_unjudged() {
+        for suggestion_only in [
+            "file(match('./notes/*.md')) | number",
+            "file(match('./notes/*.md')) | file(match('./guides/*.md'))",
+            "file(match('./notes/*.md')) | string",
+            "file(match('./notes/*.md')) | file",
+            "(file(match('./notes/*.md')) | number)[]",
+        ] {
+            let (arm, definitions) = resolved_first_arm(&format!("- spec: \"{suggestion_only}\"\n- spec: number\n"));
+            assert_eq!(root_union_match_groups(&arm, "spec", &definitions), None, "`{suggestion_only}`");
+        }
+        let (arm, definitions) = resolved_first_arm(
+            "- choice: \"file(match('./notes/*.md')) | number\"\n  spec: choice\n- spec: number\n",
+        );
+        assert_eq!(root_union_match_groups(&arm, "spec", &definitions), None, "an acyclic name bound to the union");
+
+        let node = "- node: \"file(match('./notes/*.md')) | { children: node[] }\"\n";
+        let (arm, definitions) = resolved_first_arm(&format!("{node}  spec: node | number\n- spec: number\n"));
+        assert_eq!(root_union_match_groups(&arm, "spec", &definitions), Some(vec![vec![&strings(&["./notes/*.md"])[..]]]));
+        let (arm, definitions) =
+            resolved_first_arm(&format!("{node}  spec: \"node | file(match('./guides/*.md'))\"\n- spec: number\n"));
+        assert_eq!(
+            root_union_match_groups(&arm, "spec", &definitions),
+            None,
+            "the arm's own file alternative accepts a string with no enforced glob"
+        );
+    }
+
+    #[test]
+    fn root_union_match_groups_read_an_acyclic_named_file_type() {
+        let (arm, definitions) =
+            resolved_first_arm("- note: \"file(match('./notes/*.md'))\"\n  spec: note(required)\n- spec: number\n");
+        assert_eq!(root_union_match_groups(&arm, "spec", &definitions), Some(vec![vec![&strings(&["./notes/*.md"])[..]]]));
+    }
+
+    #[test]
+    fn root_union_match_groups_read_a_direct_file_property() {
+        let (arm, definitions) = resolved_first_arm("- spec: \"file(match('./notes/*.md'))\"\n- spec: number\n");
+        assert_eq!(root_union_match_groups(&arm, "spec", &definitions), Some(vec![vec![&strings(&["./notes/*.md"])[..]]]));
     }
 
     fn keyword_schema(keyword: Value) -> Value {

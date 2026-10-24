@@ -177,7 +177,11 @@ runs in `with_trigger_discovery`, outside `validate`: wrap it in
 work (a registry freshness check) with `ValidationStage::time`. Recordings
 nest (the innermost wins) and never carry values or schema bodies. A new
 validator build path must go through `build_validator_with` or open
-`timings::compiling()` itself. `md schema validate -vv` renders it.
+`timings::compiling()` itself. `md schema validate -vv` renders it; a
+host's request is every schema call it makes for the document, so record each
+one (`validate.rs::validate_one` records discovery, the pre-assignment
+`effective_for`, and validation plus its presence lookup) or the first build
+lands outside the report and a cold request reads as a `hit`.
 
 ## Runtime baseline
 
@@ -294,7 +298,11 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `function(...)` signature), and rejects every cycle left after dropping
   descending edges as `NonDescendingCycle { cycles }` (each `CycleReference`
   carries a span for a file source). Members of a cyclic group are
-  `DefKey { namespace: DefNamespace, name }`; every use becomes
+  `DefKey { namespace: DefNamespace, name }` (every independently
+  authored source has its own namespace: the document's inline `$schema`
+  is `InlineRoot`, a disk trigger's inline payload is
+  `TriggerPayload(trigger path)` via `resolve::InlineOwner`, because
+  `EffectiveSchema::definition` searches several tables by key); every use becomes
   `TypeExpr::Ref(DefKey)` carrying the use site's markers (the definition's
   `required`/`generated`/`eager`/`default`/`suggest`/`example`/`category` and
   description merged with the postfix), and the presence-free body goes into
@@ -311,6 +319,25 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
   definition vs use site, errors, reach) is the one description; other pages
   link there.
+- **Root-union `match()` through references** (`simplified/convert.rs`).
+  A root-union arm enforces `match` in exactly two places, and an acyclic
+  schema lowers byte-identically to its pre-recursion output (spec
+  requirement): (1) a property that is directly `file`/`file[]`
+  (`attach_direct_file_match`, via `file_match_groups`); (2) inside an arm
+  copy of a match-reaching recursive definition. Lowering carries
+  `Lowering { defs, matching }`; in `Matching::Enforce` every `TypeExpr::Ref`
+  anywhere in the arm points at the arm copy `<key>@match:<property>`
+  (`MatchCopies`), never the shared body, and `file_fragment` emits
+  `x-darkmatter-match` only while lowering a copy (`in_copy`). Any other
+  arm-level file (union alternative, acyclic name bound to a union, inline
+  object, dictionary value, tuple slot, list of a union) stays
+  suggestion-only. The four `resolve.rs` arm sites call
+  `attach_root_union_match(arm, shape, defs, root_defs)` (direct attach, then
+  graft the ref redirects and join the copies); `union_to_root_schema` lowers
+  in that mode and attaches the direct keyword. A copy names its property in
+  `x-darkmatter-match-property` because its `$defs` location cannot (the
+  keyword factory reads it for the caller origin). Compatibility tests:
+  `schema_cache_validity::acyclic_match_*` (six shapes, five routes, phases).
 - **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
   schema's root. A sub-schema compiled alone (a root-union arm, a
   discriminated arm, a property union arm, an example target) goes through
@@ -352,8 +379,27 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   group of a property and accepts a path only when each group does (positives
   and `!` exclusions stay inside their own group; groups are never flattened).
   `PreparedFileMatch` walks the first group's `roots()` and keeps a file when
-  every group `lists_file`s it. `root_union_match_groups`/`file_match_admits`
-  take the groups. `x-darkmatter-match` is a flat array for one group and an
+  every group `lists_file`s it. `file_match_admits` takes one alternative's
+  groups; `root_union_match_groups(arm, property, definitions)` returns the
+  file alternatives a top-level string value (or array item) is judged by,
+  agreeing with the lowering: a direct `file` property, or the files reached
+  through `TypeExpr::Ref` alternatives (through property unions) in the arm's
+  table (value admitted when some alternative's groups all admit it; `None`
+  when an alternative accepts a string without an enforced glob, including an
+  arm-level file alternative such as `file(match(..)) | number`). It projects
+  `file_match::file_alternatives(definition, definitions)`, the one walker of
+  a property's `file` alternatives (each with its atom, so
+  `is_eager()`/`match_groups()`, and its list shape; a definition entered once
+  per list depth; `None` when a string could be a non-file or the property
+  offers an acyclic file alternative beside others, which pre-recursion code
+  never read as a file). Claudine's caller
+  arm admission (`supplied.rs::admits_arm_files`) reads the groups; its eager
+  and late-verdict completion targets and its per-arm existence relaxation
+  read `file_alternatives` directly. Compose's caller-file classifier and
+  materializer (`schema_validation.rs::select_file_mode` and
+  `resolve_caller_file_value`) follow local `$ref` in the lowered JSON the
+  same way (`SchemaScope::resolve_text`, a reference cycle that consumes no
+  value ends unclassified). `x-darkmatter-match` is a flat array for one group and an
   array of arrays for several; its rejection still comes from the keyword
   itself (never wrapped in `allOf`), which `validate.rs` relies on. An empty
   intersection is accepted (no file search) and completes nothing.

@@ -204,7 +204,12 @@ types:
 ```
 
 Two types with the same name in different schemas stay separate: `item` in
-this schema and `item@./other.yaml` are two definitions. The child-value
+this schema and `item@./other.yaml` are two definitions. The same holds for
+inline schemas: a document's own `$schema` mapping and the inline `$schema`
+payload of each matching schema trigger each keep their own `item`, so
+validation, completion, and hover under a trigger's properties use that
+trigger's `item` even when the document or another trigger declares one too.
+The child-value
 rule, the error a rejected cycle reports, and how recursion reaches
 validation, phases, conversion, and editors are described in
 [Recursive Named Types](./definition.md#recursive-named-types).

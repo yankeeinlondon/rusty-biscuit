@@ -102,6 +102,12 @@ impl<'a> SchemaScope<'a> {
         let Some(text) = reference.as_str() else {
             return Err(self.unresolved(&reference.to_string(), location));
         };
+        self.resolve_text(text, location)
+    }
+
+    /// [`Self::resolve`] for the text of a `$ref`, for a schema that does not
+    /// live in this scope's root.
+    pub(crate) fn resolve_text(&self, text: &str, location: &str) -> Result<Option<&'a Value>, SchemaError> {
         let Some(pointer) = local_pointer(text) else {
             return Ok(None);
         };

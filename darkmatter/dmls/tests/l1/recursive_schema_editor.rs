@@ -2,8 +2,9 @@
 //! harness: completion and hover at recursion levels 1 to 3 (empty items and
 //! key-less objects included), lazy definition lookup, whole-type hover with
 //! its named back-reference, go-to-definition across a two-file cycle, a deep
-//! validation failure at its node, and non-descending cycles as schema
-//! diagnostics on their references.
+//! validation failure at its node, non-descending cycles as schema
+//! diagnostics on their references, and same-named definitions in two
+//! triggers' inline payloads kept apart.
 //!
 //! Every completion and hover assertion below a recursion point offers
 //! nothing if DMLS does not open the `TypeExpr::Ref` it stands on.
@@ -555,6 +556,73 @@ fn a_two_file_alias_cycle_relates_both_files_and_clears_when_fixed() {
     let errors = type_definition_errors(&diagnostics);
     assert_eq!(errors.len(), 1, "{diagnostics:#?}");
     assert_eq!(errors[0]["range"], name_range(second, "a@"));
+
+    fixture.shutdown();
+}
+
+/// A schema-trigger matching any document with a `prompt`, whose inline
+/// payload declares its own recursive `node` as `property`.
+fn node_trigger(property: &str, node: &str) -> String {
+    format!(
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  node: \"{node}\"\n  {property}: node\n"
+    )
+}
+
+/// Two disk triggers whose inline payloads each declare a recursive `node`:
+/// completion, hover, and validation under `right` use the right-hand
+/// trigger's body, never the left-hand one that shares its name.
+#[test]
+fn same_named_inline_trigger_definitions_keep_their_own_bodies() {
+    let workspace = LspWorkspace::new();
+    std::fs::create_dir(workspace.path().join("schemas")).unwrap();
+    write(
+        &workspace,
+        "schemas/left.trigger.yaml",
+        &node_trigger("left", "{ left_value: string, children: node[] }"),
+    );
+    write(
+        &workspace,
+        "schemas/right.trigger.yaml",
+        &node_trigger("right", "{ children: node[], right_value: number -> The right-hand number }"),
+    );
+    let mut fixture = session(&workspace);
+
+    // `right:` with no keys yet, the cursor on the indented line below it.
+    let (document, _) = open_text(
+        &mut fixture,
+        &workspace,
+        "keyless.md",
+        &markdown("prompt: x\nleft: {}\nright:\n  \nother: 1\n"),
+    );
+    let at = offset(&document.text, "right:\n  ", 0, "right:\n  ".len());
+    let items = completion_at(&mut fixture, &document, at);
+    let labels: Vec<&str> = item_keys(&items).into_iter().map(|(label, _)| label).collect();
+    assert_eq!(labels, ["children", "right_value"], "{items:?}");
+
+    let frontmatter = concat!(
+        "prompt: x\n",
+        "left:\n",
+        "  left_value: a\n",
+        "right:\n",
+        "  right_value: 2\n",
+        "  children:\n",
+        "    - right_value: 3\n",
+        "      children: []\n",
+    );
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "valid.md", &markdown(frontmatter));
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    for occurrence in 0..2 {
+        let markup = hover_at(&mut fixture, &document, offset(&document.text, "right_value", occurrence, 0));
+        assert!(markup.contains("Type: **number**"), "#{occurrence}: {markup}");
+        assert!(markup.contains("The right-hand number"), "#{occurrence}: {markup}");
+    }
+
+    let invalid = frontmatter.replace("    - right_value: 3\n", "    - right_value: \"x\"\n");
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "invalid.md", &markdown(&invalid));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert_eq!(diagnostics[0]["code"], json!("dm.schema.type_mismatch"), "{diagnostics:#?}");
+    assert_eq!(diagnostics[0]["data"]["instance_path"], json!("/right/children/0/right_value"), "{diagnostics:#?}");
+    assert_eq!(diagnostics[0]["range"], range_of(&document.text, "\"x\"", 0), "{diagnostics:#?}");
 
     fixture.shutdown();
 }

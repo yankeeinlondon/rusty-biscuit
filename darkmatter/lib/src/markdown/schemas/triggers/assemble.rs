@@ -301,7 +301,15 @@ fn resolve_file_payload(
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
-    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
+    // The trigger file owns an inline payload's named types, so its
+    // definitions never share keys with the document's or another trigger's.
+    let resolved = resolve::resolve_yaml_schema_owned_by(
+        payload,
+        resolve::InlineOwner::Trigger(source),
+        base_dir,
+        schema_roots,
+        context,
+    )?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;

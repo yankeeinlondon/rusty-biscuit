@@ -985,6 +985,25 @@ The rules:
 - Each simplified arm in a root union enforces its own declared glob, including
   beside an arm written as raw JSON Schema. The raw arm follows its own schema;
   it may still accept a value the simplified arm rejects.
+- The glob is enforced in two places: on a property of the arm whose type is
+  `file` or `file[]` (written directly or through a named type that is just
+  that file), and on every file inside a
+  [recursive named type](./local-type-references.md) the arm uses, at every
+  depth and wherever in the arm the type is used. Any other file in the arm
+  only suggests: a file alternative of a union (`file(match(…)) | number`,
+  also through a named type), a file inside an inline object, a dictionary
+  value, a tuple slot, or a list of a union. Outside a root union every glob
+  only suggests.
+
+  ```yaml
+  $schema:
+      - node: "file(match('./notes/*.md')) | { children: node[] }"
+        tree: node                                 # enforced, at every depth
+        main: "file(match('./notes/*.md'))"        # enforced
+        either: "file(match('./notes/*.md')) | number" # suggests only
+        meta: "{ path: file(match('./notes/*.md')) }"  # suggests only
+      - kind: "literal(other)"
+  ```
 - Only an **existing** file is judged. A value that names no file yet (a lazy
   output path, a partial a chooser is about to complete, a value still holding
   `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.

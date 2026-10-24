@@ -850,6 +850,62 @@ fn select_file_mode(
     root: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
 ) -> Option<CallerFileMode> {
+    select_file_mode_on_path(value, schema, root, context, &[])
+}
+
+/// The definition a local `$ref` in `schema` names in `root`, unless `entered`
+/// already holds it.
+///
+/// `entered` is the definitions followed since the value last descended (into
+/// an array item), so a cycle that consumes no value ends instead of
+/// recursing. `Err(())` is a reference that names nothing or closes such a
+/// cycle: classification must not guess past it.
+fn caller_reference_target<'r>(
+    schema: &serde_json::Value,
+    root: &'r serde_json::Value,
+    entered: &[&'r serde_json::Value],
+) -> Result<Option<&'r serde_json::Value>, ()> {
+    let Some(text) = schema.get("$ref").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(target) = crate::markdown::schemas::scope::SchemaScope::new(root)
+        .resolve_text(text, "")
+        .map_err(|_| ())?
+    else {
+        return Ok(None);
+    };
+    if entered.iter().any(|seen| std::ptr::eq(*seen, target)) {
+        return Err(());
+    }
+    Ok(Some(target))
+}
+
+fn select_file_mode_on_path<'r>(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    root: &'r serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+    entered: &[&'r serde_json::Value],
+) -> Option<CallerFileMode> {
+    match caller_reference_target(schema, root, entered) {
+        Err(()) => return None,
+        Ok(Some(target)) => {
+            // The value must satisfy the target and the reference's siblings
+            // alike, so they must not name different modes.
+            let path = [entered, &[target]].concat();
+            let through = select_file_mode_on_path(value, target, root, context, &path);
+            let mut siblings = schema.clone();
+            if let Some(map) = siblings.as_object_mut() {
+                map.remove("$ref");
+            }
+            let beside = select_file_mode_on_path(value, &siblings, root, context, entered);
+            return match (through, beside) {
+                (Some(through), Some(beside)) => (through == beside).then_some(through),
+                (mode, None) | (None, mode) => mode,
+            };
+        }
+        Ok(None) => {}
+    }
     let mode = match schema.get("format").and_then(serde_json::Value::as_str) {
         Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT) => {
             Some(CallerFileMode::Eager)
@@ -865,7 +921,7 @@ fn select_file_mode(
     if let Some(items) = schema.get("items") && let Some(values) = value.as_array() {
         let modes: Vec<_> = values
             .iter()
-            .filter_map(|item| select_file_mode(item, items, root, context))
+            .filter_map(|item| select_file_mode_on_path(item, items, root, context, &[]))
             .collect();
         if !values.is_empty() && modes.len() == values.len() && modes.iter().all(|m| *m == modes[0])
         {
@@ -879,9 +935,10 @@ fn select_file_mode(
                 .filter(|arm| {
                     // Which file mode applies is independent of a contested
                     // `match`: an arm that glob rules out is still a file arm.
-                    // The arm compiles alone, so it takes its root's definitions.
+                    // The arm compiles alone, so it takes its root's
+                    // definitions, whose enforcing copies carry `match` too.
                     crate::markdown::schemas::validate::build_validator_in_context(
-                        &crate::markdown::schemas::scope::with_root_definitions(&without_match_keyword(arm), root),
+                        &without_match_keyword(&crate::markdown::schemas::scope::with_root_definitions(arm, root)),
                         Some(context.cwd()),
                         None,
                         context,
@@ -892,7 +949,7 @@ fn select_file_mode(
             if applicable.len() != 1 {
                 return None;
             }
-            return select_file_mode(value, applicable[0], root, context);
+            return select_file_mode_on_path(value, applicable[0], root, context, entered);
         }
     }
     None
@@ -1204,6 +1261,22 @@ fn resolve_caller_file_value(
     occurrence: &str,
     mode: CallerFileMode,
 ) -> Result<Option<ResolvedCallerFileValue>, CallerProjectionFailure> {
+    resolve_caller_file_value_on_path(value, schema, root, context, key, occurrence, mode, &[])
+}
+
+/// [`resolve_caller_file_value`] below the definitions `entered` since the
+/// value last descended; see [`caller_reference_target`].
+#[allow(clippy::too_many_arguments)]
+fn resolve_caller_file_value_on_path<'r>(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    root: &'r serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+    key: &str,
+    occurrence: &str,
+    mode: CallerFileMode,
+    entered: &[&'r serde_json::Value],
+) -> Result<Option<ResolvedCallerFileValue>, CallerProjectionFailure> {
     let failure = |message, diagnostic, candidate| {
         caller_projection_failure(key, message, diagnostic, context, candidate)
     };
@@ -1401,6 +1474,18 @@ fn resolve_caller_file_value(
             }],
         }));
     }
+    match caller_reference_target(schema, root, entered) {
+        Err(()) => return Ok(None),
+        Ok(Some(target)) => {
+            let path = [entered, &[target]].concat();
+            if let Some(resolved) = resolve_caller_file_value_on_path(
+                value, target, root, context, key, occurrence, mode, &path,
+            )? {
+                return Ok(Some(resolved));
+            }
+        }
+        Ok(None) => {}
+    }
     if let Some(items) = schema.get("items")
         && let Some(values) = value.as_array()
     {
@@ -1439,9 +1524,9 @@ fn resolve_caller_file_value(
     for combinator in ["allOf", "anyOf", "oneOf"] {
         if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
             for arm in arms {
-                if let Some(resolved) =
-                    resolve_caller_file_value(value, arm, root, context, key, occurrence, mode)?
-                {
+                if let Some(resolved) = resolve_caller_file_value_on_path(
+                    value, arm, root, context, key, occurrence, mode, entered,
+                )? {
                     return Ok(Some(resolved));
                 }
             }
@@ -3426,5 +3511,84 @@ mod tests {
             Some(&serde_json::json!("spec.md")),
             "rewrite must produce the document-relative value regardless of process CWD",
         );
+    }
+
+    /// An arm's enforcing copy of a recursive definition, reached through
+    /// `$ref`, the way root-union lowering emits it.
+    fn match_copy_root() -> serde_json::Value {
+        serde_json::json!({
+            "$defs": {
+                "node@match:spec": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "format": crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT,
+                            crate::markdown::schemas::file_match::DARKMATTER_MATCH_KEYWORD: ["./*.md"],
+                            crate::markdown::schemas::file_match::DARKMATTER_MATCH_PROPERTY_KEYWORD: "spec",
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "children": { "type": "array", "items": { "$ref": "#/$defs/node@match:spec" } }
+                            }
+                        }
+                    ]
+                }
+            },
+            "properties": {
+                "spec": { "anyOf": [{ "$ref": "#/$defs/node@match:spec" }, { "type": "number" }] }
+            }
+        })
+    }
+
+    /// A file the copy's glob rules out is still a file alternative: which
+    /// mode applies does not depend on a contested `match`, also when the
+    /// property union's arm is a `$ref` and the keyword sits in the root
+    /// `$defs` rather than on the arm.
+    #[test]
+    fn a_file_outside_a_match_copy_reached_through_a_reference_is_still_eager() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("notes")).unwrap();
+        std::fs::write(dir.path().join("spec.md"), "# Spec\n").unwrap();
+        std::fs::write(dir.path().join("notes/notes.md"), "# Notes\n").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let root = match_copy_root();
+        let fragment = &root["properties"]["spec"];
+        for raw in ["spec.md", "notes/notes.md"] {
+            assert_eq!(
+                select_file_mode(&serde_json::json!(raw), fragment, &root, &context),
+                Some(CallerFileMode::Eager),
+                "{raw}",
+            );
+        }
+        assert_eq!(
+            select_file_mode(&serde_json::json!({ "children": [] }), fragment, &root, &context),
+            None,
+            "an object is not a caller file",
+        );
+    }
+
+    /// A reference cycle that consumes no value ends unclassified instead of
+    /// recursing, in both the classifier and the resolver.
+    #[test]
+    fn a_reference_cycle_ends_caller_file_classification() {
+        let context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
+        let root = serde_json::json!({
+            "$defs": { "a": { "$ref": "#/$defs/b" }, "b": { "$ref": "#/$defs/a" } },
+            "properties": { "spec": { "$ref": "#/$defs/a" } }
+        });
+        let fragment = &root["properties"]["spec"];
+        let value = serde_json::json!("spec.md");
+        assert_eq!(select_file_mode(&value, fragment, &root, &context), None);
+        let resolved = resolve_caller_file_value(
+            &value,
+            fragment,
+            &root,
+            &context,
+            "spec",
+            "/spec",
+            CallerFileMode::Eager,
+        );
+        assert!(matches!(resolved, Ok(None)));
     }
 }

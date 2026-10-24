@@ -180,6 +180,46 @@ pub fn resolve_yaml_schema_with_roots(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolve_yaml_schema_owned_by(value, InlineOwner::Document, base_dir, schema_roots, request_context)
+}
+
+/// Who authored an inline `$schema` mapping, which decides the
+/// [`DefNamespace`] its named types (and its root-union arms' named types)
+/// are stored under.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InlineOwner<'a> {
+    /// The document being prepared.
+    Document,
+    /// The schema-trigger file at this path.
+    Trigger(&'a Path),
+}
+
+impl InlineOwner<'_> {
+    fn root(self) -> DefNamespace {
+        match self {
+            Self::Document => DefNamespace::InlineRoot,
+            Self::Trigger(path) => DefNamespace::TriggerPayload(canonical_path(path)),
+        }
+    }
+
+    fn union_arm(self, index: usize) -> DefNamespace {
+        match self {
+            Self::Document => DefNamespace::RootUnionArm(index),
+            Self::Trigger(path) => DefNamespace::TriggerPayloadUnionArm(canonical_path(path), index),
+        }
+    }
+}
+
+/// [`resolve_yaml_schema_with_roots`] for an inline value authored by
+/// `owner`. A string reference resolves exactly as it does for a document;
+/// only the namespaces of inline named types differ.
+pub(crate) fn resolve_yaml_schema_owned_by(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
     let mut stack = ReferenceStack::default();
     match value {
         YamlValue::String(reference) => {
@@ -195,14 +235,14 @@ pub fn resolve_yaml_schema_with_roots(
             let schema = parse_yaml_schema(value)?;
             // Inline the definitions of any `Name@file` named-type imports
             // (Feature B) before conversion — `to_json_schema` rejects a
-            // surviving import. This is the top-level document, so `@this`
-            // resolves against the inline root (`DefNamespace::InlineRoot`).
+            // surviving import. `@this` resolves against this mapping, whose
+            // namespace is its owner's.
             let mut searched = BTreeSet::new();
             let mut definitions = DefinitionTable::default();
             let (schema, imports) = expand_document_imports(
                 schema,
                 base_dir,
-                DefNamespace::InlineRoot,
+                owner.root(),
                 &SchemaSourcePath::root(),
                 schema_roots,
                 request_context,
@@ -234,7 +274,7 @@ pub fn resolve_yaml_schema_with_roots(
             })
         }
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, base_dir, schema_roots, request_context, &mut stack)
+            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -371,6 +411,7 @@ pub fn expand_named_types(
 
 fn resolve_root_union(
     items: &[YamlValue],
+    owner: InlineOwner<'_>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -403,7 +444,7 @@ fn resolve_root_union(
                     expand_document_imports(
                         arm_schema,
                         base_dir,
-                        DefNamespace::RootUnionArm(index),
+                        owner.union_arm(index),
                         &SchemaSourcePath::root().union_arm(index),
                         schema_roots,
                         request_context,
@@ -422,7 +463,12 @@ fn resolve_root_union(
                 )?);
                 hoist_definitions(&mut arm_json, &mut root_defs);
                 if let SimplifiedSchema::Single(shape) = &arm_schema {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                 }
                 if let SimplifiedSchema::Single(shape) = &arm_schema
                     && let Some(arms) = all_simplified_arms.as_mut()
@@ -461,7 +507,12 @@ fn resolve_root_union(
                     deferred_arms.push(any_of.len());
                 }
                 if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                 }
                 match (&resolved.simplified, all_simplified_arms.as_mut()) {
                     (Some(SimplifiedSchema::Single(shape)), Some(arms)) => {
@@ -1252,7 +1303,12 @@ fn resolve_standalone_root_union(
                     &mut searched,
                 )?);
                 hoist_definitions(&mut arm_json, &mut root_defs);
-                super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
+                super::simplified::convert::attach_root_union_match(
+                    &mut arm_json,
+                    &shape,
+                    &definitions,
+                    &mut root_defs,
+                )?;
                 simplified_arms.push(SchemaArm::Inline(shape));
                 any_of.push(strip_schema_uri(arm_json));
             }
@@ -1281,7 +1337,12 @@ fn resolve_standalone_root_union(
                     deferred_arms.push(any_of.len());
                 }
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        &shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                     simplified_arms.push(SchemaArm::Inline(shape));
                 } else {
                     all_simplified = false;
@@ -2042,6 +2103,8 @@ impl ImportEngine<'_> {
             // embedded schema is lowered (`prepare_embedded_schema`).
             DefNamespace::InlineRoot
             | DefNamespace::RootUnionArm(_)
+            | DefNamespace::TriggerPayload(_)
+            | DefNamespace::TriggerPayloadUnionArm(..)
             | DefNamespace::Embedded(_)
             | DefNamespace::Shipped(_) => Ok(base),
         }

@@ -114,3 +114,88 @@ fn unresolvable_schema_keeps_its_error_and_reports_partial_timings() {
     assert_stage_report(&report);
     assert!(report.contains("compile cache: not requested"), "{report}");
 }
+
+/// A document whose only schema is its own unseen inline `$schema`, so the
+/// process has to build its validator.
+fn cold_inline_document(name: &str) -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named(name);
+    let document = write(
+        &fixture,
+        "doc.md",
+        "---\n$schema:\n  review_counter: number(required)\nreview_counter: 1\n---\nbody\n",
+    );
+    (fixture, document)
+}
+
+#[test]
+fn a_cold_assignment_request_reports_its_compile_miss() {
+    let (fixture, document) = cold_inline_document("schema-validate-timings-assignment");
+    let args = ["--no-baseline-schema", "review_counter=2"];
+
+    let quiet = validate(&fixture, &args, &document);
+    let verbose = validate(&fixture, &["-vv", args[0], args[1]], &document);
+
+    assert_eq!(quiet.status.code(), Some(0), "{}", stderr(&quiet));
+    assert_eq!(verbose.status.code(), Some(0));
+    assert_eq!(verbose.stdout, quiet.stdout);
+    let report = stderr(&verbose);
+    assert_stage_report(&report);
+    assert!(report.contains("compile cache: miss"), "the validator built while preparing assignments is a miss:\n{report}");
+}
+
+#[test]
+fn a_failing_assignment_preparation_keeps_its_error_and_reports_partial_timings() {
+    let fixture = CliProcessFixture::named("schema-validate-timings-assignment-failure");
+    let document = write(&fixture, "broken.md", "---\n$schema: ./missing-schema.yaml\ntitle: x\n---\n");
+    let args = ["--no-baseline-schema", "title=y"];
+
+    let quiet = validate(&fixture, &args, &document);
+    let verbose = validate(&fixture, &["-vv", args[0], args[1]], &document);
+
+    assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
+    assert_eq!(verbose.status.code(), Some(2));
+    assert_eq!(verbose.stdout, quiet.stdout);
+    assert!(String::from_utf8_lossy(&quiet.stdout).contains("schema definition error"));
+    let report = stderr(&verbose);
+    assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
+    assert_stage_report(&report);
+    assert!(report.contains("compile cache: not requested"), "{report}");
+}
+
+#[test]
+fn an_assignment_that_activates_a_trigger_is_timed_against_the_new_schema() {
+    let (fixture, _) = triggered_repository();
+    let document = write(&fixture, "untriggered.md", "---\ntitle: x\n---\nbody\n");
+
+    let unassigned = validate(&fixture, &["-vv"], &document);
+    let assigned = validate(&fixture, &["-vv", "timed_prompt=hello"], &document);
+
+    assert_eq!(unassigned.status.code(), Some(0));
+    assert!(stderr(&unassigned).contains("matched triggers: none"), "{}", stderr(&unassigned));
+    assert_eq!(assigned.status.code(), Some(1), "the activated payload requires `timed_model`");
+    assert!(String::from_utf8_lossy(&assigned.stdout).contains("timed_model"));
+    let report = stderr(&assigned);
+    assert_stage_report(&report);
+    assert!(report.contains("matched triggers: timed-trigger.yaml"), "{report}");
+    assert!(report.contains("compile cache: miss"), "{report}");
+}
+
+#[test]
+fn a_discovery_failure_keeps_its_error_and_reports_partial_timings() {
+    let fixture = CliProcessFixture::named("schema-validate-timings-discovery-failure");
+    assert!(fixture.initialize_repository());
+    write(&fixture, "schemas/bad-trigger.yaml", "kind: schema-trigger\nmatch: 42\n$schema: nope.yaml\n");
+    let document = write(&fixture, "doc.md", "---\ntitle: x\n---\nbody\n");
+
+    let quiet = validate(&fixture, &[], &document);
+    let verbose = validate(&fixture, &["-vv"], &document);
+
+    assert_eq!(quiet.status.code(), Some(2), "a malformed trigger exits 2");
+    assert_eq!(verbose.status.code(), Some(2));
+    assert_eq!(verbose.stdout, quiet.stdout);
+    assert!(String::from_utf8_lossy(&quiet.stdout).contains("schema-trigger file malformed"));
+    let report = stderr(&verbose);
+    assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
+    assert_stage_report(&report);
+    assert!(report.contains("compile cache: not requested"), "{report}");
+}

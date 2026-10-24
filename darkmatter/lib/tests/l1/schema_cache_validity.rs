@@ -320,3 +320,306 @@ fn match_globs_are_judged_from_each_documents_own_folder_directly_and_through_a_
     }
 }
 
+
+// ── `match()` reached through a recursive reference ──────────────────────────
+
+/// A recursive type whose file alternative declares a glob.
+const NODE: &str = "\"file(match('./notes/*.md')) | { children: node[] }\"";
+
+/// Validates the same `schema` from `a/doc.md` (whose `./notes` holds the
+/// file) and then from `b/doc.md` (whose `./notes` does not) on one
+/// long-lived cache. The first must pass and the second fail, and the second
+/// must build its own validator: the glob makes the verdict depend on the
+/// document's folder, so a structural (context-free) hit would be wrong.
+fn assert_match_judged_from_each_folder(case: &str, repo: &Repo, schema: &str) {
+    let api = repo.schemas();
+    repo.write("a/notes/x.md", "# x\n");
+    let inside = repo.document("a/doc.md", &format!("---\n{schema}spec: ./notes/x.md\n---\n"));
+    let outside = repo.document("b/doc.md", &format!("---\n{schema}spec: ../a/notes/x.md\n---\n"));
+
+    let (inside_report, inside_timings) = api.validate_timed(&inside);
+    let (outside_report, outside_timings) = api.validate_timed(&outside);
+
+    let inside_report = inside_report.expect("the schema resolves");
+    assert!(inside_report.valid, "{case}: the file is under `a/notes`: {:#?}", inside_report.problems);
+    assert!(!outside_report.expect("the schema resolves").valid, "{case}: `./notes` is judged from `b`");
+    assert_eq!(inside_timings.compile_cache(), CompileCache::Miss, "{case}");
+    assert_eq!(
+        outside_timings.compile_cache(),
+        CompileCache::Miss,
+        "{case}: the glob keeps each document's context in the validator's identity"
+    );
+    assert!(valid(&api, &inside), "{case}: the second document's verdict is not reused");
+}
+
+#[test]
+fn match_below_a_recursive_reference_in_an_inline_root_union_arm_is_enforced() {
+    let repo = Repo::new();
+    let schema = format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - spec: number\n");
+    assert_match_judged_from_each_folder("inline arm", &repo, &schema);
+
+    // The glob belongs to the type, so a file nested in the tree is judged too.
+    let api = repo.schemas();
+    let nested = |folder: &str, value: &str| {
+        repo.document(
+            &format!("{folder}/nested.md"),
+            &format!("---\n{schema}spec:\n  children:\n    - children:\n        - {value}\n---\n"),
+        )
+    };
+    assert!(valid(&api, &nested("a", "./notes/x.md")));
+    assert!(!valid(&api, &nested("b", "../a/notes/x.md")), "a nested file outside `b/notes` rules the arm out");
+}
+
+#[test]
+fn match_below_a_recursive_reference_in_a_referenced_simplified_arm_is_enforced() {
+    let repo = Repo::new();
+    repo.write("schemas/node-arm.yaml", &format!("$schema:\n  node: {NODE}\n  spec: node(required)\n"));
+    let schema = "$schema:\n  - ../schemas/node-arm.yaml\n  - spec: number\n";
+    assert_match_judged_from_each_folder("referenced arm", &repo, schema);
+}
+
+#[test]
+fn match_below_a_recursive_reference_in_a_referenced_root_union_file_is_enforced() {
+    // The two files resolve to the same schema, so each case gets its own
+    // repository rather than reusing the other's validators.
+    let inline_arm = Repo::new();
+    inline_arm.write(
+        "schemas/node-union.yaml",
+        &format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - spec: number\n"),
+    );
+    assert_match_judged_from_each_folder("inline arm of the file", &inline_arm, "$schema: ../schemas/node-union.yaml\n");
+
+    let file_arm = Repo::new();
+    file_arm.write("schemas/node-arm.yaml", &format!("$schema:\n  node: {NODE}\n  spec: node(required)\n"));
+    file_arm.write("schemas/file-arm-union.yaml", "$schema:\n  - ./node-arm.yaml\n  - spec: number\n");
+    assert_match_judged_from_each_folder("file arm of the file", &file_arm, "$schema: ../schemas/file-arm-union.yaml\n");
+}
+
+#[test]
+fn match_below_a_recursive_reference_beside_a_raw_arm_is_enforced() {
+    let repo = Repo::new();
+    repo.write(
+        "schemas/number-arm.json",
+        &json!({"type": "object", "properties": {"spec": {"type": "number"}}, "required": ["spec"]}).to_string(),
+    );
+    let schema = format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - ../schemas/number-arm.json\n");
+    assert_match_judged_from_each_folder("beside a raw arm", &repo, &schema);
+}
+
+#[test]
+fn match_on_a_direct_file_property_of_a_root_union_arm_is_enforced() {
+    let repo = Repo::new();
+    let schema = "$schema:\n  - spec: \"file(match('./notes/*.md'))\"\n  - spec: number\n";
+    assert_match_judged_from_each_folder("direct", &repo, schema);
+}
+
+#[test]
+fn match_through_an_acyclic_named_file_type_is_enforced() {
+    let repo = Repo::new();
+    let schema = "$schema:\n  - note: \"file(match('./notes/*.md'))\"\n    spec: note(required)\n  - spec: number\n";
+    assert_match_judged_from_each_folder("acyclic named type", &repo, schema);
+}
+
+// ── Acyclic arms keep their suggestion-only `match()` ───────────────────────
+
+/// An arm's `(name, type)` lines.
+type ArmLines = Vec<(&'static str, &'static str)>;
+
+/// The six acyclic shapes whose `match()` sits below an arm property without
+/// being that property's own `file` type: each arm's `(name, type)` lines and
+/// a `spec` value naming `a/notes/x.md` from `b/`. None recurses, so each
+/// lowers exactly as before recursive types existed: the glob only suggests.
+fn suggestion_only_arms() -> [(&'static str, ArmLines, serde_json::Value); 6] {
+    let file = "../a/notes/x.md";
+    [
+        ("property union", vec![("spec", "\"file(match('./notes/*.md')) | number\"")], json!(file)),
+        (
+            "acyclic name bound to the union",
+            vec![("choice", "\"file(match('./notes/*.md')) | number\""), ("spec", "choice")],
+            json!(file),
+        ),
+        ("inline object", vec![("spec", "\"{ path: file(match('./notes/*.md')) }\"")], json!({ "path": file })),
+        (
+            "pattern dictionary",
+            vec![("spec", "\"{ <pattern::^n>: file(match('./notes/*.md')) }\"")],
+            json!({ "n1": file }),
+        ),
+        ("tuple slot", vec![("spec", "\"tuple([file(match('./notes/*.md')), number])\"")], json!([file, 1])),
+        ("list of a union", vec![("spec", "\"(file(match('./notes/*.md')) | number)[]\"")], json!([file])),
+    ]
+}
+
+/// The arm's lines as the body of a `$schema` mapping (`indent` spaces) or
+/// of a root-union list item.
+fn arm_yaml(lines: &[(&str, &str)], first: &str, indent: &str) -> String {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, (name, ty))| format!("{}{name}: {ty}\n", if index == 0 { first } else { indent }))
+        .collect()
+}
+
+/// For each acyclic shape, the root union `schema(index, arm)` assembles is
+/// lowered with no `x-darkmatter-match` anywhere, and a document in `b/`
+/// naming `a/notes/x.md` (outside `b/notes`) is valid. When `phases`, the
+/// Launch and Completion re-lowerings accept that value too.
+fn assert_acyclic_arms_only_suggest(route: &str, phases: bool, schema: impl Fn(&Repo, usize, &str) -> String) {
+    let repo = Repo::new();
+    let api = repo.schemas();
+    repo.write("a/notes/x.md", "# x\n");
+    for (index, (shape, lines, value)) in suggestion_only_arms().into_iter().enumerate() {
+        let case = format!("{route}, {shape}");
+        let schema = schema(&repo, index, &arm_yaml(&lines, "  - ", "    "));
+        let document = repo.document(&format!("b/{index}.md"), &format!("---\n{schema}spec: {value}\n---\n"));
+        let effective = api.effective_for(&document).expect("resolves").expect("a schema");
+        let lowered = effective.json_schema.to_string();
+        assert!(lowered.contains("darkmatter-file-reference"), "{case}: the file arm applies: {lowered}");
+        assert!(!lowered.contains("x-darkmatter-match"), "{case}: an acyclic glob only suggests: {lowered}");
+        let report = api.validate(&document).expect("the schema resolves");
+        assert!(report.valid, "{case}: an existing file outside the glob is accepted: {:#?}", report.problems);
+        if phases {
+            for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+                let verdict = effective.validate_for_phase(&json!({ "spec": value }), phase).expect("phase schema");
+                assert!(verdict.valid, "{case}, {phase:?}: {:#?}", verdict.problems);
+            }
+        }
+    }
+}
+
+/// The arm, as the body of its own simplified schema file.
+fn arm_file(repo: &Repo, index: usize, arm: &str) -> String {
+    let body = arm.replacen("  - ", "  ", 1).replace("\n    ", "\n  ");
+    repo.write(&format!("schemas/arm-{index}.yaml"), &format!("$schema:\n{body}"));
+    format!("arm-{index}.yaml")
+}
+
+#[test]
+fn acyclic_match_in_an_inline_document_arm_only_suggests() {
+    assert_acyclic_arms_only_suggest("inline arm", true, |_, _, arm| format!("$schema:\n{arm}  - spec: boolean\n"));
+}
+
+#[test]
+fn acyclic_match_in_a_referenced_simplified_arm_only_suggests() {
+    assert_acyclic_arms_only_suggest("referenced arm", true, |repo, index, arm| {
+        format!("$schema:\n  - ../schemas/{}\n  - spec: boolean\n", arm_file(repo, index, arm))
+    });
+}
+
+#[test]
+fn acyclic_match_in_an_inline_arm_of_a_referenced_union_file_only_suggests() {
+    assert_acyclic_arms_only_suggest("inline arm of a union file", true, |repo, index, arm| {
+        repo.write(&format!("schemas/union-{index}.yaml"), &format!("$schema:\n{arm}  - spec: boolean\n"));
+        format!("$schema: ../schemas/union-{index}.yaml\n")
+    });
+}
+
+#[test]
+fn acyclic_match_in_a_file_arm_of_a_referenced_union_file_only_suggests() {
+    assert_acyclic_arms_only_suggest("file arm of a union file", true, |repo, index, arm| {
+        let arm = arm_file(repo, index, arm);
+        repo.write(&format!("schemas/union-{index}.yaml"), &format!("$schema:\n  - ./{arm}\n  - spec: boolean\n"));
+        format!("$schema: ../schemas/union-{index}.yaml\n")
+    });
+}
+
+#[test]
+fn acyclic_match_beside_a_raw_arm_only_suggests() {
+    assert_acyclic_arms_only_suggest("beside a raw arm", false, |repo, _, arm| {
+        repo.write(
+            "schemas/boolean-arm.json",
+            &json!({"type": "object", "properties": {"spec": {"type": "boolean"}}, "required": ["spec"]}).to_string(),
+        );
+        format!("$schema:\n{arm}  - ../schemas/boolean-arm.json\n")
+    });
+}
+
+/// A recursive reference nested in an arm's acyclic inline object still
+/// enforces through the arm's copy, while a sibling file in that same object
+/// only suggests.
+#[test]
+fn a_reference_inside_an_acyclic_inline_object_is_enforced_but_its_file_sibling_is_not() {
+    let repo = Repo::new();
+    let api = repo.schemas();
+    repo.write("a/notes/x.md", "# x\n");
+    let schema = format!(
+        "$schema:\n  - node: {NODE}\n    spec: \"{{ inner: node, path: file(match('./notes/*.md')) }}\"\n  - spec: number\n"
+    );
+    let at = |name: &str, folder: &str, value: serde_json::Value| {
+        valid(&api, &repo.document(&format!("{folder}/{name}.md"), &format!("---\n{schema}spec: {value}\n---\n")))
+    };
+    assert!(at("inner", "a", json!({ "inner": "./notes/x.md" })));
+    assert!(!at("inner", "b", json!({ "inner": "../a/notes/x.md" })), "the reference is judged through its copy");
+    assert!(!at("nested", "b", json!({ "inner": { "children": ["../a/notes/x.md"] } })));
+    assert!(at("path", "b", json!({ "path": "../a/notes/x.md" })), "the acyclic sibling only suggests");
+}
+
+#[test]
+fn an_explicit_match_keyword_behind_a_raw_local_reference_is_enforced() {
+    let repo = Repo::new();
+    repo.write(
+        "schemas/raw-node.json",
+        &json!({
+            "type": "object",
+            "properties": {"spec": {"$ref": "#/$defs/node"}},
+            "required": ["spec"],
+            "$defs": {"node": {"anyOf": [
+                {"type": "string", "x-darkmatter-match": ["./notes/*.md"]},
+                {"type": "object", "properties": {"children": {"type": "array", "items": {"$ref": "#/$defs/node"}}}},
+            ]}},
+        })
+        .to_string(),
+    );
+    assert_match_judged_from_each_folder("raw reference", &repo, "$schema: ../schemas/raw-node.json\n");
+}
+
+#[test]
+fn phase_projections_of_a_root_union_keep_match_below_a_recursive_reference() {
+    let repo = Repo::new();
+    let api = repo.schemas();
+    repo.write("a/notes/x.md", "# x\n");
+    let schema = format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - spec: number\n");
+    let effective_in = |folder: &str| {
+        let document = repo.document(&format!("{folder}/doc.md"), &format!("---\n{schema}---\n"));
+        api.effective_for(&document).expect("resolves").expect("a schema")
+    };
+    let (inside, outside) = (effective_in("a"), effective_in("b"));
+
+    for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+        let at = |effective: &darkmatter::markdown::schemas::EffectiveSchema, value: &str| {
+            effective.validate_for_phase(&json!({ "spec": value }), phase).expect("phase schema builds").valid
+        };
+        assert!(at(&inside, "./notes/x.md"), "{phase:?}");
+        assert!(!at(&outside, "../a/notes/x.md"), "{phase:?}: the re-lowered arms keep the glob");
+    }
+}
+
+#[test]
+fn match_below_a_reference_keeps_context_and_leaves_shared_uses_suggestion_only() {
+    let repo = Repo::new();
+    let api = repo.schemas();
+    repo.write("a/notes/x.md", "# x\n");
+    let union = format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - spec: number\n");
+    let first = repo.document("b/first.md", &format!("---\n{union}spec: ../a/notes/x.md\n---\n"));
+    let second = repo.document("b/second.md", &format!("---\n{union}spec: ../a/notes/x.md\n---\n"));
+
+    let (first_report, first_timings) = api.validate_timed(&first);
+    let (second_report, second_timings) = api.validate_timed(&second);
+
+    assert!(!first_report.expect("resolves").valid);
+    assert!(!second_report.expect("resolves").valid);
+    assert_eq!(first_timings.compile_cache(), CompileCache::Miss);
+    assert_eq!(second_timings.compile_cache(), CompileCache::Hit, "one folder's documents share its validator");
+
+    // The arm enforces through its own copy of the definition; the shared
+    // definition itself stays the suggestion-only body other uses lower to.
+    let effective = api.effective_for(&first).expect("resolves").expect("a schema");
+    let defs = effective.json_schema["$defs"].as_object().expect("union root $defs");
+    assert!(!defs["node"].to_string().contains("x-darkmatter-match"), "{:#}", defs["node"]);
+    assert!(defs.values().any(|body| body.to_string().contains("x-darkmatter-match")), "{defs:#?}");
+
+    // A single schema only suggests: the same type outside a root union
+    // rejects no file.
+    let single = format!("$schema:\n  node: {NODE}\n  spec: node(required)\n");
+    let suggested = repo.document("b/single.md", &format!("---\n{single}spec: ../a/notes/x.md\n---\n"));
+    assert!(valid(&api, &suggested));
+}

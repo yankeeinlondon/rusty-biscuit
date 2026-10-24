@@ -620,6 +620,129 @@ fn embedded_payload_namespaces_join_a_recursive_document_without_collision() {
     assert!(effective.definition(&embedded_item).is_some() && effective.definition(&library_item).is_some());
 }
 
+// ── Same-named definitions in independent inline payloads ─────────────────
+
+/// A trigger matching any document with a `prompt`, whose payload is `payload`.
+fn prompt_trigger(payload: &str) -> String {
+    format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:{payload}")
+}
+
+/// An inline payload declaring its own recursive `node`, exposed as `property`
+/// and carrying `value_key` of `value_type`.
+fn inline_node_payload(property: &str, value_key: &str, value_type: &str) -> String {
+    format!("\n  node: \"{{ {value_key}: {value_type}, children: node[] }}\"\n  {property}: node\n")
+}
+
+const LEFT_RIGHT_DOCUMENT: &str = "---\nprompt: x\nleft: {}\nright: {}\n---\nbody\n";
+
+/// The keys completion offers for the value of top-level `property`, through
+/// the layered property shape every editor walk starts from.
+fn completion_keys(effective: &EffectiveSchema, frontmatter: &Value, property: &str) -> Vec<String> {
+    use darkmatter::markdown::schemas::SimplifiedSchema;
+    use darkmatter::markdown::schemas::completion::{PathStep, for_path_in};
+
+    let shape = SimplifiedSchema::Single(effective.property_shape(&[], frontmatter));
+    let completion =
+        for_path_in(&shape, effective, frontmatter, &[PathStep::Key(property)]).unwrap_or_else(|| panic!("{property}"));
+    completion.keys.iter().map(|key| key.name.clone()).collect()
+}
+
+/// Two disk triggers whose inline payloads each declare a recursive `node`
+/// must keep their own bodies: each payload's definitions are keyed by its
+/// trigger file, not by a shared inline-root identity.
+#[test]
+fn inline_trigger_payloads_keep_their_own_same_named_definitions() {
+    let repo = Repository::new(&[
+        ("left.trigger.yaml", &prompt_trigger(&inline_node_payload("left", "left_value", "string"))),
+        ("right.trigger.yaml", &prompt_trigger(&inline_node_payload("right", "right_value", "number"))),
+    ]);
+    let effective = repo.effective(LEFT_RIGHT_DOCUMENT).expect("both payloads merge").expect("effective");
+    let frontmatter = json!({"prompt": "x", "left": {}, "right": {}});
+
+    assert_eq!(completion_keys(&effective, &frontmatter, "left"), ["left_value", "children"]);
+    assert_eq!(completion_keys(&effective, &frontmatter, "right"), ["right_value", "children"]);
+    for (trigger, value_key) in [("left", "left_value"), ("right", "right_value")] {
+        let path = biscuit_file::canonicalize_simplified(&repo.root.join(format!("schemas/{trigger}.trigger.yaml")))
+            .expect("trigger path");
+        let definition = effective
+            .definition(&DefKey::new(DefNamespace::TriggerPayload(path), "node"))
+            .unwrap_or_else(|| panic!("{trigger}'s node"));
+        assert!(format!("{:?}", definition.body).contains(value_key), "{trigger}: {:?}", definition.body);
+    }
+    assert!(effective.definition(&DefKey::new(DefNamespace::InlineRoot, "node")).is_none());
+
+    // The validator already agreed; the typed lookup now agrees with it.
+    let deep = |key: &str, leaf: Value| json!({key: leaf.clone(), "children": [{key: leaf, "children": []}]});
+    let good = json!({"prompt": "x", "left": deep("left_value", json!("a")), "right": deep("right_value", json!(2))});
+    assert!(effective.validate(&good).valid, "{:#?}", effective.validate(&good).problems);
+    let bad = json!({"prompt": "x", "right": {"right_value": 1, "children": [{"right_value": "x", "children": []}]}});
+    assert!(problem_paths(&effective.validate(&bad)).contains(&"/right/children/0/right_value".to_string()));
+}
+
+/// The document's own inline `node` and each trigger's inline `node` are
+/// three bodies: no layer's lookup returns another layer's definition.
+#[test]
+fn a_document_node_and_trigger_nodes_keep_separate_bodies() {
+    let repo = Repository::new(&[
+        ("left.trigger.yaml", &prompt_trigger(&inline_node_payload("left", "left_value", "string"))),
+        ("right.trigger.yaml", &prompt_trigger(&inline_node_payload("right", "right_value", "number"))),
+    ]);
+    let document = "---\nprompt: x\n$schema:\n  node: \"{ own_value: boolean, children: node[] }\"\n  own: node\n\
+        left: {}\nright: {}\nown: {}\n---\nbody\n";
+    let effective = repo.effective(document).expect("all layers merge").expect("effective");
+    let frontmatter = json!({"prompt": "x", "left": {}, "right": {}, "own": {}});
+
+    assert_eq!(completion_keys(&effective, &frontmatter, "left"), ["left_value", "children"]);
+    assert_eq!(completion_keys(&effective, &frontmatter, "right"), ["right_value", "children"]);
+    assert_eq!(completion_keys(&effective, &frontmatter, "own"), ["own_value", "children"]);
+    let own = effective.definition(&DefKey::new(DefNamespace::InlineRoot, "node")).expect("the document's node");
+    assert!(format!("{:?}", own.body).contains("own_value"), "{:?}", own.body);
+}
+
+/// Control: the same `node` declared in two referenced payload files is keyed
+/// by each file, so the bodies were never shared.
+#[test]
+fn referenced_payload_files_keep_their_own_same_named_definitions() {
+    let file_payload = |property: &str, value_key: &str, value_type: &str| {
+        format!("$schema:{}", inline_node_payload(property, value_key, value_type))
+    };
+    let repo = Repository::new(&[
+        ("left.trigger.yaml", &prompt_trigger(" left.yaml\n")),
+        ("left.yaml", &file_payload("left", "left_value", "string")),
+        ("right.trigger.yaml", &prompt_trigger(" right.yaml\n")),
+        ("right.yaml", &file_payload("right", "right_value", "number")),
+    ]);
+    let effective = repo.effective(LEFT_RIGHT_DOCUMENT).expect("both payloads merge").expect("effective");
+    let frontmatter = json!({"prompt": "x", "left": {}, "right": {}});
+
+    assert_eq!(completion_keys(&effective, &frontmatter, "left"), ["left_value", "children"]);
+    assert_eq!(completion_keys(&effective, &frontmatter, "right"), ["right_value", "children"]);
+}
+
+/// Control: inline payloads in an embedded bundle are keyed by each trigger's
+/// virtual path.
+#[test]
+fn embedded_inline_payloads_keep_their_own_same_named_definitions() {
+    // A bundle holds compiled-in (`'static`) documents.
+    let left = prompt_trigger(&inline_node_payload("left", "left_value", "string")).leak();
+    let right = prompt_trigger(&inline_node_payload("right", "right_value", "number")).leak();
+    let documents: &'static [(&'static str, &'static str)] = Vec::leak(vec![("left.yaml", &*left), ("right.yaml", &*right)]);
+    let bundle = darkmatter::markdown::schemas::EmbeddedSchemaBundle::new("same-name-bundle", documents);
+    let repo = Repository::new(&[]);
+    let snapshot = RequestSnapshot::new(&repo.root).with_home(Some(repo.home.clone()));
+    let context = build_resolution_context(&snapshot).expect("fixture context");
+    let schemas = DarkmatterSchemas::new(context)
+        .with_trigger_discovery()
+        .expect("discovery")
+        .with_embedded_trigger_bundle(bundle)
+        .expect("the embedded payloads are merge-compatible");
+    let effective = effective(&schemas, LEFT_RIGHT_DOCUMENT);
+    let frontmatter = json!({"prompt": "x", "left": {}, "right": {}});
+
+    assert_eq!(completion_keys(&effective, &frontmatter, "left"), ["left_value", "children"]);
+    assert_eq!(completion_keys(&effective, &frontmatter, "right"), ["right_value", "children"]);
+}
+
 // ── Phases ────────────────────────────────────────────────────────────────
 
 /// `name` is required only at completion; `stamp` is eager, so it is required
