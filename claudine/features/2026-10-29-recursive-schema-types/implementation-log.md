@@ -2005,10 +2005,26 @@ phase's additions:
 | 14 Recorded results | Wave 8A waste table and before/after table; all existing Darkmatter and Claudine schema tests pass unchanged (except the one unit-test row of Decision 10) |
 | 15 Cache and trigger behavior | darkmatter `schema_cache_validity::*` (12, including `documents_in_their_own_contexts_reuse_a_validator_over_the_baseline`, which fails with the old `judges_files` substring), `trigger_payload_load_errors::*` (4, matched = unmatched); dmls `validation_timing_log::{a_second_document_with_the_same_structural_schema_hits_and_keeps_its_positions, a_file_arm_below_a_union_keeps_each_documents_context}` |
 
-Known gap against criterion 15: `match()` below a recursive `$ref` does not
-take part in union-arm selection at all (only top-level arm properties carry
-it; existing behavior, not a cache issue), so its cache test uses a named
-type; file formats below a `$ref` are covered.
+Criterion 15's `match()`-through-a-reference coverage is recursive (review
+repair R1-F2; the acyclic named-type substitute recorded here earlier was a
+gap): darkmatter `schema_cache_validity::{match_below_a_recursive_reference_in_an_inline_root_union_arm_is_enforced, match_below_a_recursive_reference_in_a_referenced_simplified_arm_is_enforced, match_below_a_recursive_reference_in_a_referenced_root_union_file_is_enforced, match_below_a_recursive_reference_beside_a_raw_arm_is_enforced, phase_projections_of_a_root_union_keep_match_below_a_recursive_reference, match_below_a_reference_keeps_context_and_leaves_shared_uses_suggestion_only}`
+with the controls `match_on_a_direct_file_property_of_a_root_union_arm_is_enforced`,
+`match_through_an_acyclic_named_file_type_is_enforced`, and
+`an_explicit_match_keyword_behind_a_raw_local_reference_is_enforced`;
+the caller-context case is `glob_consumers::a_caller_value_below_a_recursive_reference_is_judged_from_the_launch_directory`.
+Each asserts the inside document passes, the outside one fails, and the
+second validation builds its own context-keyed validator. A root-union arm
+enforces a glob on a property that is directly a `file` (unchanged) and on
+every file inside its per-arm enforcing copy of a recursive definition
+(`<key>@match:<property>`), wherever in the arm the reference sits; shared
+definitions are unchanged. Every other acyclic placement (property-union
+alternative, acyclic name bound to a union, inline object, pattern
+dictionary, tuple slot, list of a union) keeps its suggestion-only,
+byte-identical lowering, as the spec's "acyclic types are unchanged"
+decision requires (review repair R2-F1 withdrew a broader policy that the
+R1-F2 repair had introduced): `schema_cache_validity::acyclic_match_*` (five
+assembly routes, six shapes, Launch and Completion) and
+`a_reference_inside_an_acyclic_inline_object_is_enforced_but_its_file_sibling_is_not`.
 
 Input robustness matrix: the one new configuration field,
 `schema.slow_validation_ms`, is a plain integer through DMLS's existing
@@ -2068,3 +2084,28 @@ This spec is pipeline step 19. Downstream active specs not yet implemented
   recursive seams; Wave 2, 3 and 5 tasks were adjusted to match.
 
 No critical decision for the author.
+
+## Review iteration 1
+
+### Design Decisions
+
+1. **Continue the full review without a human decision gate.**
+   - Decision: retain the implementation's settled engineering choices and set the review's `human_in_the_loop` to null. Both independent decision audits found an empty `decisions_for_author` list and no choice meeting the specification's human-review exception.
+   - Alternatives considered: request author approval for every recorded implementation choice; stop at the log's acknowledged gaps.
+   - Why: the choices have support in the spec and are reversible. The acknowledged gaps can be repaired within the existing public contract.
+   - Downsides: the review owns its interpretation of ambiguous acceptance wording; those interpretations are stated in the review.
+2. **Recursive file matching and caller file projection remain required scope.**
+   - Decision: the substituted acyclic `match()` test and the omitted caller classifier reference following become high findings R1-F2 and R1-F3. Repair must deliver the recursive behavior.
+   - Alternatives considered: document both limitations; move them to later work; treat the absence of a shipped recursive caller schema as sufficient coverage.
+   - Why: criterion 15 explicitly includes references to context-sensitive rules, and the design preserves existing transformations through references. Public-API probes reproduced accepted out-of-glob files and caller overrides losing their launch-file identity.
+   - Downsides: lowering and caller classification/materialization must be fixed together with their existing scope and union policies; changing documentation alone cannot close these findings.
+3. **Keep the existing interpretation of documentation-only invocation and editor laziness coverage.**
+   - Decision: accept the unchanged-termination interpretation for `md schema about` and the cursor-path editor tests' bounded lookup assertions.
+   - Alternatives considered: add a new schema-input mode to `about`; require removal of the editor's existing authored-key walk as part of this feature.
+   - Why: `about` has no schema input, and the editor tests distinguish opened cursor-path definitions from unused recursive definitions without imposing a new authoring-state cache.
+   - Downsides: these tests do not claim schema introspection from `about` or constant total editor-request work independent of the authored document's size.
+4. **Accumulate CLI assignment preparation in the reported validation request.**
+   - Decision: R1-F4 requires timing pre-assignment schema preparation and counting or eliminating the post-validation schema-presence lookup.
+   - Alternatives considered: define the report as final instance checking only; alter the cache label without recording the missing work.
+   - Why: Part A explicitly counts resolution and every validator build within the request. A fresh CLI process with an assignment currently reports a hit after compiling its validator outside the recording.
+   - Downsides: the fix must retain re-resolution after assignments that change trigger activation and avoid duplicate trigger-name reporting when combining recordings.
