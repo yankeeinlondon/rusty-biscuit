@@ -207,7 +207,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (`DocumentRecord::dependency`: headings and transclusions only; excluded
   from wiki candidates, path completion, workspace symbols, `transcluded_by`,
   and the index store; its folder joins the schema-location watches; tests in
-  `tests/l1/referenced_targets.rs`). Tests use `context::test_support`
+  `tests/l1/referenced_targets.rs`). Opening a dependency is a role change:
+  `open_buffer` rebuilds even when the text's hash is unchanged, so never
+  gate publication on the content hash alone. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`

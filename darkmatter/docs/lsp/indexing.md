@@ -598,9 +598,12 @@ The code is `WorkspaceIndex::prepare_targets` and `ensure_parsed` in
   headings are never served. A listed target stays in the list, unparsed.
   A target outside the list is dropped.
 - **Open buffers win.** An open buffer replaces the disk parse, including an
-  unsaved file that is not on disk. Closing it restores the disk view: a
-  listed file becomes unparsed again, and an unsaved or unlisted document
-  leaves the index.
+  unsaved file that is not on disk. Opening a
+  [dependency](#targets-outside-the-file-list) makes it an ordinary document
+  at once, even with unchanged text: wiki links resolve to it and
+  completion offers it. Closing it restores the disk view: a listed file
+  becomes unparsed again, and an unsaved or unlisted document leaves the
+  index.
 - **Markdown only.** A target is parsed only when it is a Markdown file
   (`.md` or `.markdown`). `::code ./mod.rs` resolves, but `mod.rs` is never
   read as Markdown.

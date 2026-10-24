@@ -59,9 +59,11 @@ buffer, a target parsed for the first time, a file joining the list)
 publishes a new `WorkspaceGraph` with the next generation.
 `WorkspaceIndex::rebuild` in
 [`graph/invalidate.rs`](../../dmls/src/graph/invalidate.rs) builds it. A
-change that leaves a document's bytes as they were publishes nothing, and a
-batch of disk changes (one watched-files notification) publishes once, at
-the end.
+change that leaves a document's bytes as they were publishes nothing, unless
+it changes the document's role: opening a
+[dependency](./indexing.md#targets-outside-the-file-list) with its disk
+bytes publishes it as an ordinary open document. A batch of disk changes
+(one watched-files notification) publishes once, at the end.
 
 Snapshots are immutable. A reader still holding the previous snapshot keeps
 getting exactly the answers it got before; nothing in a new snapshot
