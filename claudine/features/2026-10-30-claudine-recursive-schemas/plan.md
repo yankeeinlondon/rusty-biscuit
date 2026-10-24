@@ -10,6 +10,120 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - claudine
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+source_files_during_phase_2:
+    - claudine/lib/src/composition/lifecycle/tests/mixed_span.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - darkmatter/justfile
+    - darkmatter/lib/examples/lifecycle_schema_generator.rs
+    - darkmatter/lib/src/effects/mod.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/operands.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/tests/overloads.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/deferred.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/lib/tests/l1/lifecycle_generated_operands.rs
+    - darkmatter/lib/tests/l1/lifecycle_operand_validation.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+docs_updated_during_phase_2:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/side-effects.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/sequence-types.yaml
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/lib/tests/l1/container_schema_recursion.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md
+    - claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md
+    - claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md
+    - claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md
+    - claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+    - claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md
+    - claudine/lib/tests/fixtures/sequence-schema/level4-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md
+    - darkmatter/lib/src/markdown/compose/expression/deferred.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/schemas/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/schema.md
 ---
 
 # Recursive Lifecycle Schema Implementation Plan
@@ -107,13 +221,13 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 3 — Shared Metadata and Validation (parallel)
 
-- [ ] **Complete Effect Metadata**
+- [x] **Complete Effect Metadata**
   - Compare every public side-effect descriptor with Darkmatter-owned action parameter definitions. Add a coverage test that fails for a missing typed definition; use a removed-entry test fixture to prove the failure is detected.
   - Extend only proven metadata gaps, preserving overloads, parameter names, requiredness, nullability, constraints, and rest structure. Check against established runtime behavior, not guessed types from names.
   - Expose the existing shared metadata to the authoring generator as needed. Keep the generator free of local effect-type tables. Record excluded estimate cost for gaps.
   - Ownership: shared action metadata and its coverage tests; prerequisite: Wave 2 inventory.
 
-- [ ] **Integrate Operand Validation**
+- [x] **Integrate Operand Validation**
   - Implement the spike's minimal shared projection hook using Darkmatter's conversion engine, a `BindOptions.defer` predicate driven by the template parser, and passive `bind_call` for overload selection. Passivity includes structured operands containing deferred values, not only whole scalar strings.
   - Add a parity test that binds every fixture call through `bind_call` and through the generated value schema and requires the same verdict and overload, including an overloaded action where both rules could disagree (two overloads that both need conversion).
   - Preserve operand constraints, source spans, and optional-versus-null distinctions. Do not add an unrestricted string alternative to typed parameters or widen `unknown` beyond genuine catalog acceptance.
@@ -122,7 +236,7 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 4 — Generator Projection (serial)
 
-- [ ] **Adapt Schema Generator**
+- [x] **Adapt Schema Generator**
   - Implement the Phase 1 authoring entry point using authoritative signature APIs/grammar and descriptor metadata. Use checkout-relative inputs/outputs; do not run or overwrite the historical generator/spike fixtures.
   - Emit ordinary value schemas, never `function` value imports or return-type projections. Inline catalog helper types (`agentic-cli`, `ip-address`, `recent-commits`) instead of importing `functions.yaml`, with a drift test against the catalog body. Skip any function with a `function`-typed (callback) parameter and record the exclusion in the parity test. Preserve tuple positions/arity, fixed prefixes/rest tails, scalar and zero-argument forms admitted by the parser, and separate overload arms; deduplicate identical shapes only.
   - Emit nonvariadic long forms with catalog parameter names and supported `no_error`; variadic actions remain positional-only. All categories, standalone actions, and short-only bundles reference the same projected definitions.
@@ -136,7 +250,7 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 5 — Recursive Schemas (serial)
 
-- [ ] **Replace Recursive Families**
+- [x] **Replace Recursive Families**
   - Replace numbered stack/item/conditional types and loose deep bodies with ordinary and initialization recursive families under their proper owners. Preserve public Claudine imports/exports unless a prerequisite already moved them.
   - Replace the numbered container types (`step-2`, `task-2`, `group-2`) and the hand-unrolled `cancelled-*` family with one recursive `task`, one recursive `group`, and a recursive cancellation family (literal `then`/`else` keys, `stop` the only flow directive), also used by document-level `cancelled`. Type every container event with its family; keep scalar steps and string file-reference alternatives for `sequence:` and `group:` (spec criterion 10).
   - Keep conditionals separate from single-verb actions and bundles. Require `when`/`then`, allow `else`, and reject sibling actions or sibling `no_error`; reject `else` without `then`.
@@ -145,13 +259,13 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 6 — Embedding and Grammar Evidence (parallel)
 
-- [ ] **Verify Embedded Payload**
+- [x] **Verify Embedded Payload**
   - Resolve every exported type, ordinary and initialization imports, and loop gate using only embedded sources in an isolated fixture without checkout schemas.
   - Assert local `$ref`/`$defs`, absence of numbered unroll/loose deep-body definitions (by authored type and `DefKey` names, Rule 11), correct reference resolution, nested task/group references in the size-checked payload, and the final resolved payload size under the Phase 1 byte convention.
   - Add a disk-origin negative fixture with a same-basename embedded file to prove missing/broken disk imports never silently substitute it.
   - Ownership: embedding tests and import evidence; manifest edits stay coordinator-owned.
 
-- [ ] **Verify Grammar Parity**
+- [x] **Verify Grammar Parity**
   - Populate production fixtures and matrix tests from the approved inventory. At depths 1, 3, and 5 cover both branches, bundles, bare actions, loop gates, malformed long forms, typo verbs, conditional/action mixtures, and initialization shells in unselected branches.
   - Preserve initialization `set` shell-expansion rejection and runtime backstop through fakes; preserve valid open application mappings and event-specific availability.
   - Assert depth 5 passes S/P; `depth6.md` passes S and fails P at the sixth conditional path. Assert `depth6-wrong-verb.md` fails S with offending key/path/span without demanding parser error ordering.
