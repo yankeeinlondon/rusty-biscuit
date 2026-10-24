@@ -1,9 +1,14 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Plan: Merman Text Fallback
@@ -83,7 +88,7 @@ The spec leaves these open. Each carries a recommendation so the author can
 accept with one word; implementers may not start the affected phase until it
 is decided. Record each ruling (and its date) in the implementation log.
 
-- [ ] **Rule A — the hook's success shape (blocks Phase 2).** Today
+- [x] **Rule A — the hook's success shape (blocks Phase 2).** Today
   `DiagramRenderer::render_terminal_diagram` returns
   `Result<String, DiagramRenderError>` and the renderer prints the string. D9
   requires fallbacks to be render-tree code and block-quote *nodes* so the
@@ -97,13 +102,13 @@ is decided. Record each ruling (and its date) in the implementation log.
   string return and add a second trait method for node output. Pre-release, so
   the signature change is acceptable; update the one in-tree implementor and
   the test doubles.
-- [ ] **Rule B — `MermaidMode` in darkmatter's output options.** Its
+- [x] **Rule B — `MermaidMode` in darkmatter's output options.** Its
   `Image`/`Text`/`Off` variants map onto `TerminalMermaidMode` (`Text` maps to
   `Code` today). Recommendation: add `MermaidMode::Automatic`, map it to
   `TerminalMermaidMode::Automatic`, and have `md --mermaid` pass `Automatic`;
   leave `Image` meaning image-only so library callers keep today's behavior
   (the spec's "callers that set nothing keep today's behavior").
-- [ ] **Rule C — where the `--feature` parsing lives (D4).** Two CLIs (`bt`,
+- [x] **Rule C — where the `--feature` parsing lives (D4).** Two CLIs (`bt`,
   `md`) share three fallback features and `md` adds a fourth.
   Recommendation: define a `MermaidFallbackFeature` clap `ValueEnum`
   (`no-mermaid-fallbacks`, `no-mermaid-partial-fallbacks`,
@@ -111,26 +116,26 @@ is decided. Record each ruling (and its date) in the implementation log.
   restrictive wins" function in `biscuit-visualized` behind its `clap` feature,
   next to the policy type it produces. `md` wraps it with its own enum that adds
   `no-mermaid-rendering`. No new shared crate (two consumers).
-- [ ] **Rule D — empty and unknown names.** Confirm clap's `ValueEnum` with
+- [x] **Rule D — empty and unknown names.** Confirm clap's `ValueEnum` with
   `value_delimiter(',')` and `ignore_case` rejects `--feature a,,b` with a
   usage error that lists the valid names; if it does not, Rule C's helper adds a
   custom `value_parser`. This is verified in Wave 1 task 1.3, not guessed.
-- [ ] **Rule E — what "available image support" means in Automatic mode.**
+- [x] **Rule E — what "available image support" means in Automatic mode.**
   Spec: image at `Rich` when graphics are allowed; text at `Vector`; code at
   `Off`. Recommendation: the hook trusts the request's `graphics_mode` and
   `terminal` capabilities (no probing) and also chooses text at `Rich` when
   biscuit-terminal's effective route says no image route exists
   (`AC-F1`'s "explicit no-image capabilities").
-- [ ] **Rule F — drawing character set source.** The spec says use the existing
+- [x] **Rule F — drawing character set source.** The spec says use the existing
   `Terminal` capability for Unicode vs ASCII drawing. Recommendation: use the
   terminal's existing Unicode-support capability; add no new capability. Wave 1
   task 1.2 names the exact accessor.
-- [ ] **Rule G — `bt git-graph` and features.** `GitGraph` text is
+- [x] **Rule G — `bt git-graph` and features.** `GitGraph` text is
   `StructuredText` and is never used (D1), but D4 lists `git-graph` among
   commands that accept `--feature`. Recommendation: accept the flags, apply
   them to any Mermaid-component path they reach, and document that they have no
   visible effect on the typed Git graph.
-- [ ] **Rule H — wider measurement.** The spec requires no spike and no
+- [x] **Rule H — wider measurement.** The spec requires no spike and no
   benchmark. No wider measurement is proposed; if the author wants text-render
   cost sampled, that is a separate, one-host quick sample.
 
@@ -143,7 +148,7 @@ re-check in later phases.
 
 ### Wave 1 (parallel recon; read-only, then record in the implementation log)
 
-- [ ] **1.1 Prerequisite gate.**
+- [x] **1.1 Prerequisite gate.**
     - Confirm `2026-10-21-merman` has landed: `biscuit-visualized/src/Cargo.toml`
       depends on `merman` at a pinned rev, the old renderer is gone, and
       `src/src/mermaid/render.rs` exposes the prerequisite's parse/config/
@@ -153,7 +158,7 @@ re-check in later phases.
       `docs/rendering/ASCII_SUPPORT_MATRIX.md` at that rev; if it is not
       `482fcde`, the spec's table figures (AC-F3, AC-F6, AC-F11) are updated by
       the author before implementation, not silently by the implementer.
-- [ ] **1.2 Merman ascii API recon.**
+- [x] **1.2 Merman ascii API recon.**
     - From the delivered rev's source, write down the exact names and shapes of
       `ascii_capabilities`, `AsciiCapability` (`diagram_type`,
       `primary_projection`, `semantic_coverage`, `layout_profiles`),
@@ -163,7 +168,7 @@ re-check in later phases.
       reported.
     - Name the biscuit-terminal accessor for Unicode drawing support and the
       display-width function (Rule F).
-- [ ] **1.3 CLI and workspace recon.**
+- [x] **1.3 CLI and workspace recon.**
     - Enumerate `bt` subcommands that render through Mermaid
       (`biscuit-terminal/cli/src/commands/`) and where each builds its component.
     - Locate `md render` and the implicit `md <INPUT>` path

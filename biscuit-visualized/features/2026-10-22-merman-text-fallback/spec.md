@@ -322,6 +322,13 @@ fallback policy, the CLI convention, Mermaid highlighting, and highlighting in
   with no `semantic_coverage` value is treated as partial.
 - At rev `482fcde` this admits flowchart, sequence, state, class, ER, and
   XY chart, all partial.
+- *Amended during implementation (2026-10-24, under D10):* Merman's
+  metadata at the delivered rev (`6e6b1e6`, `482fcde` plus one gitGraph-only
+  commit) also lists **swimlane** as `Diagrammatic` and partial, with the
+  `Auto` layout profile; it shares flowchart's text projection but is a
+  separate parser family. The support-matrix document folds it into the
+  flowchart row, which is why the list above omits it. Swimlane is therefore
+  eligible, and the R-F2 snapshot lists seven families.
 
 ### D2. Presentation: a `txt` code block, then the partial note
 
@@ -582,7 +589,7 @@ options trade off things Ken would weigh, the implementer stops and sets
 | --- | --- | --- |
 | AC-F1 | A flowchart renders as text on a terminal without images; a mindmap (`StructuredText`) and a pie chart (`None`) render as source | Component tests with explicit no-image capabilities |
 | AC-F2 | A class or ER input whose result's `projection` is `StructuredText` renders as source | Component test with a dense class diagram at a narrow width; assertion on the reported projection |
-| AC-F3 | Eligibility comes from Merman's metadata; the snapshot lists exactly flowchart, sequence, state, class, ER, and XY chart as eligible at rev `482fcde` | Snapshot test over the derived table (R-F2); code review finds no family-name list in the eligibility path |
+| AC-F3 | Eligibility comes from Merman's metadata; the snapshot lists exactly flowchart, sequence, state, class, ER, XY chart, and swimlane (amended under D1) as eligible at the delivered rev | Snapshot test over the derived table (R-F2); code review finds no family-name list in the eligibility path |
 | AC-F4 | Fallback text is a render-tree code node with language `txt`, and source fallback one with language `mermaid`; a partial result is followed by a blank line and the exact note text, with `Note:` bold, the bracketed id dimmed, and the id italic; with `show_partial_note = false` there is no note | Exact text snapshots (plain), style assertions on the rendered spans, and assertions on the emitted node kinds and languages |
 | AC-F5 | Policy precedence: an explicit library setting ignores `MERMAID_FALLBACK`; with nothing set, `MERMAID_FALLBACK=Code-Block` yields source; another value yields text; a CLI flag beats the variable; the variable does not change the note | Unit tests through the injected environment seam; CLI tests for `bt mermaid` and `md render` |
 | AC-F6 | "No partial text" yields source for every family at rev `482fcde` | Component test per eligible family |
