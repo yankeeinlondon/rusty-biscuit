@@ -1121,6 +1121,7 @@ each.
 | `workspace discovery incomplete` | `warn` | a listing walk hit an error |
 | `slow request` / `request complete` | `warn` / `debug` | every request, by elapsed time |
 | `slow notification` / `notification complete` | `warn` / `debug` | every notification, by elapsed time |
+| `slow schema validation` / `schema validation complete` | `warn` / `debug` | every diagnostics refresh of a document with frontmatter, by its schema work |
 
 Earlier versions logged `startup index complete documents=…` after parsing
 every file at startup. That line no longer exists; startup now logs the
@@ -1372,6 +1373,48 @@ the worker's queue and the time it took to prepare; it does not separate the
 two. Each parked interval ends when the request resumes, is cancelled, or is
 answered at shutdown, so a cancelled request reports it too, and handler work
 or an index wait between two intervals is not included.
+
+### Schema validation timing lines
+
+Each time DMLS publishes diagnostics for a document with frontmatter, it
+logs one event with the time its schema validation took, split into
+stages. The code is
+[`validation_timing.rs`](../../dmls/src/validation_timing.rs) and
+`refresh_diagnostics` in [`router.rs`](../../dmls/src/router.rs).
+
+- At or above `schema.slow_validation_ms` (default **200 ms**; see
+  [Configuration](./configuration.md#schema)), the event is a `warn`:
+  `slow schema validation`. Below it, it is a `debug`: `schema validation
+  complete`. A threshold of `0` makes every one a `warn`, which is the
+  easiest way to see the breakdown without `--log-level debug`.
+- A refresh that waits for its document's trigger registry logs nothing
+  until the registry is prepared and the refresh runs; preparing the
+  registry is logged by the registry worker, not here.
+- A schema that fails to resolve still logs its event, with the stages
+  that ran, beside its usual `dm.schema.prepare` diagnostic.
+
+```text
+2026-10-23T10:02:11.402116Z  WARN dmls::validation_timing: slow schema validation path="/Users/me/repo/.claude/agents/review.md" matched_triggers="agent.trigger.yaml" discover_ms=0 match_ms=3 resolve_ms=96 compile_ms=268 validate_ms=4 total_ms=372 unassigned_ms=1 compile_cache="miss"
+2026-10-23T10:02:14.118530Z DEBUG dmls::validation_timing: schema validation complete path="/Users/me/repo/.claude/agents/review.md" matched_triggers="agent.trigger.yaml" discover_ms=0 match_ms=0 resolve_ms=0 compile_ms=0 validate_ms=4 total_ms=4 unassigned_ms=0 compile_cache="hit"
+```
+
+| Field | Meaning |
+| --- | --- |
+| `path` | the document's path |
+| `matched_triggers` | file names of the trigger schemas whose `match:` held, comma-separated in registry order; empty when none matched |
+| `discover_ms` | checking that the document's trigger registry is fresh and looking it up (never preparing it) |
+| `match_ms` | evaluating trigger conditions against the frontmatter |
+| `resolve_ms` | resolving `$schema`, trigger payloads, and configured extensions, and merging them with the baseline |
+| `compile_ms` | building validators; zero when every one came from a cache |
+| `validate_ms` | checking the frontmatter against the schema |
+| `total_ms` | the schema work alone; other diagnostics are not included |
+| `unassigned_ms` | the part of `total_ms` no stage claims, such as parsing the frontmatter |
+| `compile_cache` | `miss` when any validator was built, `hit` when validators were looked up and all were cached (or the document's unchanged schema was reused whole), `not requested` when no validator was looked up, as for a document whose context could not be built |
+
+Stages do not overlap, so the five stage figures and `unassigned_ms` add
+up to `total_ms` (each is rounded down to whole milliseconds). Validating
+an unchanged document again reuses its assembled schema, so only
+`validate_ms` remains, as in the second sample.
 
 Timing events never contain source text, frontmatter values, or protocol
 payloads. At `debug`, the `lsp_server` crate's own transport trace does

@@ -230,7 +230,7 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path> | --no-baseline-schema] [--no-schema-triggers] [--format pretty|json] [--quiet]
+md schema validate <file>... [--schema <path> | --no-baseline-schema] [--no-schema-triggers] [--format pretty|json] [--quiet] [-vv]
 ```
 
 Pretty output (the default) renders one styled block per file:
@@ -260,6 +260,58 @@ for the full rules and fallbacks.
 | 64 | Usage error. |
 
 A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
+
+### Stage timings (`-vv`)
+
+To see where a slow validation spends its time, pass `-v` twice. After each
+document's normal output, `md` prints a stage breakdown to **stderr**; stdout
+(pretty or JSON) and the exit code are exactly what they are without it. A
+single `-v` changes nothing, and neither `--debug` nor `RUST_LOG` is needed.
+
+```console
+$ md schema validate docs/prompt.md -vv
+- ✔ the document docs/prompt.md has a schema definition and is valid.
+Validation timings for docs/prompt.md
+matched triggers: prompt.trigger.yaml
+compile cache: miss
+┌────────────┬───────────┐
+│ stage      │ time      │
+├────────────┼───────────┤
+│ discover   │ 2.13 ms   │
+│ match      │ 0.02 ms   │
+│ resolve    │ 17.14 ms  │
+│ compile    │ 84.65 ms  │
+│ validate   │ 0.07 ms   │
+│ unassigned │ 0.09 ms   │
+│ total      │ 104.09 ms │
+└────────────┴───────────┘
+```
+
+The stages never overlap; each one's time is work done in it and nowhere else:
+
+| Stage | Work it covers |
+|-------|----------------|
+| `discover` | Scanning the schema roots for trigger files and checking each trigger's envelope and `match:` definition. Zero when trigger discovery does not run (outside a repository, or with `--no-schema-triggers`). |
+| `match` | Judging each trigger's `match:` conditions against the document. |
+| `resolve` | Resolving `$schema` and trigger payloads, lowering SimplifiedSchema to JSON Schema, and merging the baseline, trigger, and document layers. |
+| `compile` | Building validators. A validator reused from the cache costs nothing here, so this time is taken out of the stage that asked for it. |
+| `validate` | Checking the frontmatter against the compiled schema, including the conversion of its values. |
+| `unassigned` | The rest of `total`: reading the frontmatter and other bookkeeping no stage claims. |
+
+`compile cache` says whether the validators were already built:
+
+| State | Meaning |
+|-------|---------|
+| `hit` | Validators were looked up and every one was cached. |
+| `miss` | At least one validator was built during this validation. |
+| `not requested` | No validator was needed: the document has no schema at all, or validation stopped earlier. |
+
+When a document fails before validating, for example because its `$schema`
+does not resolve, the error is printed as usual and the breakdown that follows
+covers the work done before the failure. Documents that cannot be opened or
+parsed get no breakdown. With `key=value` assignments, `md` resolves the schema
+once before validating to coerce the assigned values, so the validation itself
+usually reports a `hit`.
 
 ## CLI: `md schema detect`
 
@@ -552,7 +604,30 @@ if !report.valid {
 }
 ```
 
-`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`. See [the topic reference](../topics/schemas/definition.md#library-api) for the full type surface.
+`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`.
+
+`validate_timed(&Markdown)` returns the same result as `validate` together
+with a `ValidationTimings` (the stages above, `total()`, `unassigned()`,
+`compile_cache()`, and `matched_triggers()`), on failure too. Trigger
+discovery happens when the instance is built, so record it separately and fold
+it in:
+
+```rust
+use darkmatter::markdown::schemas::{ValidationStage, ValidationTimings};
+
+let (api, discovery) = ValidationTimings::record(|| api.with_trigger_discovery());
+let (report, mut timings) = api?.validate_timed(&markdown);
+timings.absorb(discovery);
+for (stage, elapsed) in timings.stages() {
+    eprintln!("{}: {elapsed:?}", stage.name());
+}
+```
+
+`ValidationTimings::record` times any span of work on the calling thread, and
+`ValidationStage::time` lets a host attribute its own work (such as checking
+whether a cached trigger registry is still fresh) to a stage. Timings carry
+durations, trigger file names, and the cache state, never document values or
+schema bodies. See [the topic reference](../topics/schemas/definition.md#library-api) for the full type surface.
 
 ## Limitations (v1)
 

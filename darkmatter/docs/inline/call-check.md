@@ -94,6 +94,16 @@ A few rules decide the category:
   `number("4", "x")` is category 5 because the fallback itself cannot bind.
 - **Wrong argument counts** (`min(1)`) and calls no overload can take are
   category 5.
+- **A recursive type is judged by its definition, and named in messages.** A
+  property typed by a
+  [recursive named type](../topics/schemas/definition.md#cross-file-named-type-imports-namefile)
+  is checked against what one level of the type holds, never by expanding it,
+  so the check always finishes. With `node: "{ label: string, children:
+  node[] }"` and `tree: node(required)`, `keys(tree)` is category 1 and
+  `min(tree, 5)` is category 5, reported as "argument 1 (`a`) is node,
+  expected number". A recursive union such as `[string, number, "{ items:
+  data[] }"]` passed to `min` is category 3: its text might convert, its
+  object never does.
 - **`numberlike` and `boolish` may hold text.** Both keep a value exactly as
   sent, so a declared `boolish` is either a native boolean or a boolean word
   such as `"yes"` or `"1"`, and a `numberlike` is a number or numeric text
@@ -231,7 +241,9 @@ argument is category 4 (type not known), and the call is judged when it runs:
   unknown.
 - **SimplifiedSchema only.** When `$schema` is a raw JSON Schema, every
   variable is unknown. In a root union, a property is typed only when every
-  arm that declares it declares it the same way; when any arm is a raw JSON
+  arm that declares it declares it the same way (each inline arm has its own
+  named types, so a recursive type that two arms each declare counts as two
+  different types); when any arm is a raw JSON
   Schema, every variable is unknown. This document composes to `ok`, because
   `raw.json` hides the type of `flag`:
 

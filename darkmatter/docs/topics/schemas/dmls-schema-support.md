@@ -26,7 +26,7 @@ tags:
     - hover
     - diagnostics
 hash: 7c075441cf9b6eef-e377c118e10a1054
-last_updated: 2026-09-19
+last_updated: 2026-10-23
 ---
 # DMLS Schema Support
 
@@ -163,13 +163,14 @@ Standalone schema documents **own their problems**: when a `kind: schema` file i
 Named-type failures are defects of the schema, not of a document value, so
 DMLS publishes them as `dm.schema.invalid_type_definition` wherever the
 reference is written: in a Markdown document's inline `$schema` or in a
-standalone schema file. Four library errors are projected this way:
+standalone schema file. Five library errors are projected this way:
 
 | Library error | Example | Primary range | Related locations |
 |---|---|---|---|
 | `UnknownNamedType` | `title: nope` | the reference name | the reference and the schema searched, when they are in another file |
 | `ConstraintConflict` | `title: label(max(2))` over `label: string(min(5))`; `c: slug(allow-periods)` over `slug: alphanumeric(allow-dashes)` | the consuming reference name | each conflicting declaration, in its own file (for options, the definition's option group and the use site) |
-| `ImportCycle` | `a: b`, `b: a` | the whole `$schema` declaration | none |
+| `NonDescendingCycle` | `a: b`, `b: a`; `a: [a, string]` | the first reference of the cycle this document wrote, else this document's reference into the file that did | every other reference of the cycle, in this buffer or its own file |
+| `ImportCycle` | a non-recursive reference chain deeper than 32 | the whole `$schema` declaration | none |
 | `UnionReference` | `p: choice(max(10))` over `choice: [string, number]` | the consuming reference name | the reference, when it is in another file, and the union's definition (`` `choice` is defined here``), in this buffer or its own file |
 
 - The primary range is the consuming reference's name, for bare, `@this`, and
@@ -185,7 +186,9 @@ standalone schema file. Four library errors are projected this way:
 - A type cycle that never descends into a child value (`a: b` with `b: a`)
   is ranged on the first of its references this document wrote; each other
   reference of the cycle, in this file or another, is related information.
-  The message names every reference.
+  The message names every reference. A recursive type that does descend
+  (`item: "{ children: item[] }"`) is valid; see
+  [Recursive types](#recursive-types).
 - A union reference accepts only `[]` with list constraints, `required`,
   `generated`, `eager`, and a description (see
   [Named Union References](./definition.md#named-union-references)). Anything
@@ -216,6 +219,7 @@ Completion is a merged provider chain (substrate → wiki → frontmatter → DS
 - **`style.*` keys** — the style descriptor catalog when the cursor is inside the opaque `style` object
 - **`suggest(...)` candidates** — advisory value suggestions (including block-sequence items) that aid discovery but never validate
 - **literal-discriminated union arms** — when a union's arms are discriminated by a `literal(...)` value, selecting the authored discriminant narrows key completion to that arm's shape
+- **a new list item** — on an empty `- ` line of a list of objects, the object's keys; of a union list, every alternative's keys and values
 - **items of a union list** — inside one item of a `U[]` list, completion combines every applicable alternative's keys and values, unless a `literal(...)` tag in the item selects exactly one; each item is judged on its own (see [Items of an array of a union](../../../dmls/docs/autocomplete.md#items-of-an-array-of-a-union))
 - **named types** — while authoring a schema, local names are offered bare (`person`), including types declared later in the same table. A local name that is also a built-in keyword is offered as `string@this`, and a type from another file with its target (`person@./people.yaml`). Root-union schema files, whole-file reference files, and raw JSON Schema export no names, so they contribute none
 - **`ctx.*` variables** — the generated context keys, fully qualified
@@ -238,7 +242,7 @@ All items are **eager and self-contained**: every item carries an explicit `text
 
 Hovering a named-type reference (`person`, `person@this`, or `person@./people.yaml`) shows the definition it selects, with local references inside it spelled bare. When the referenced file is not valid YAML or its envelope is malformed, the hover shows that file's error instead, so a broken import never reads as a file that defines nothing.
 
-Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
+Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes, and for a recursive type its name followed by its definition; see [Recursive types](#recursive-types)), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
 
 Hover also understands schema *authoring*:
 
@@ -248,10 +252,84 @@ Hover also understands schema *authoring*:
 
 A property typed by a postfixed union reference (`U[]`, `U(required)`) has no single type, so its hover lists every alternative with its own description. Hovering one item of a `U[]` list names an alternative only when exactly one alternative accepts the item; a missing, invalid, or multiply-matching item shows every alternative instead. Acceptance is decided by the Darkmatter library, never by a closest-match guess (see [Union-typed properties and list items](../../../dmls/docs/hover.md#union-typed-properties-and-list-items)).
 
+### Recursive types
+
+A named type may refer to itself, directly or through other named types in
+the same file or another file, as long as every cycle passes through a child
+value (an object property, a dictionary value, a list item, or a tuple slot).
+DMLS edits such a document at any depth:
+
+```yaml
+---
+$schema:
+  item: "{ children: item[](required), value: string(required) -> The node text }"
+  tree: item(required)
+tree:
+  value: a
+  children:
+    - value: b              # level 1
+      children:
+        - value: c          # level 2
+          children:
+            -               # level 3: offers `children` and `value`
+---
+```
+
+- **Completion and hover descend lazily.** The schema keeps one copy of
+  `item`; each use is a reference to it. A request follows the cursor's path
+  and opens one definition per step on the way (`tree` → `item`, `children`
+  → `item`, …), plus the shape it offers or describes at the cursor. A type
+  the path never reaches is never opened, however many other recursive types
+  the schema declares, so the work grows with the cursor's depth, not with
+  the size of the type.
+- **Incomplete items still complete.** An empty `- ` item, an item that is
+  still `null`, and an object with no keys yet (`tree:` followed by an
+  indented blank line) offer the definition's keys, with required keys
+  marked, at every level.
+- **Hover shows the whole type once.** Hovering a property typed by a
+  recursive type names the type and then its definition, in which every
+  recursive use is written by name instead of being expanded again:
+
+  ```text
+  tree
+  Type: item(required)
+  `item` is defined as: `{children: item[](required),value: string(required) -> The node text}`
+  ```
+
+  A leaf below the recursion (`value` at level 3) hovers exactly as it does
+  at the top: its type, presence, and description.
+- **Navigation crosses files.** Go-to-definition on a reference in a cycle
+  that spans two files (`next: link[]@./links.yaml` in `nodes.yaml`, and
+  `target: node@./nodes.yaml` back in `links.yaml`) lands on the defining
+  key in the other file, in either direction.
+- **Deep errors keep their position.** A value that breaks the type six or
+  more levels down is reported at that value's line and column, with its JSON
+  path (for example `/tree/children/0/…/value`), as `md schema validate`
+  reports it.
+- **Cycles that never descend are schema errors.** `a: b` with `b: a`, or a
+  self-union such as `a: [a, string]`, is published as
+  `dm.schema.invalid_type_definition` on one reference of the cycle, with
+  every other reference, in this document or another file, as related
+  information (see [Named-type references](#named-type-references)). The
+  failed schema depends on every file of the cycle, so fixing any of them
+  clears the error at the next edit of the document.
+
+```mermaid
+flowchart LR
+    cursor["cursor at tree.children[0].children[0]"] --> tree["tree: item"]
+    tree -->|open item| l1["children: item[]"]
+    l1 -->|open item| l2["children: item[]"]
+    l2 -->|open item| keys["offer value, children"]
+    meta["types the path never reaches"] -.->|never opened| keys
+```
+
+A recursive type declared by a configured extension baseline, a matched
+trigger payload, or the document's own `$schema` is descended the same way.
+
 ### Navigation
 
 - **go-to-definition** on a `$schema` file reference or a `file(...)` value jumps to the target file; both also render as clickable **document links**
-- **go-to-definition** on a named-type reference (bare, `@this`, or cross-file) lands on the defining key in the file that defines it
+- **go-to-definition** on a named-type reference (bare, `@this`, or cross-file) lands on the defining key in the file that defines it, including a reference that closes a cycle back into another file
 - an interpolation variable in the body jumps to the frontmatter key that defines it, and a key the effective schema declares counts as a known identifier even when the document has not set it
 - **references** answers "who transcludes this file" across the workspace graph
 
@@ -364,7 +442,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 4. Constraint violations for enums; `invalid_suggestion` linting for advisory candidates.
 5. Enum choices rigid; `suggest(...)` candidates advisory — they never validate.
 6. Alternatives combine; an authored `literal(...)` discriminant that selects one union arm narrows key completion to it, per item in a `U[]` list.
-7. Unknown names, constraint conflicts, cycles, and unsupported union postfixes are `dm.schema.invalid_type_definition` at the reference, with related locations for conflicting declarations and for the union's definition.
+7. Unknown names, constraint conflicts, cycles that never descend into a child value, and unsupported union postfixes are `dm.schema.invalid_type_definition` at the reference, with related locations for conflicting declarations, the cycle's other references, and the union's definition. A recursive type that descends is supported at any depth (see [Recursive types](#recursive-types)).
 8. Local names offered bare; `name@this` only for a built-in collision; imported names with their target.
 9. Go-to-definition on every reference spelling; whole-file `$schema` references also render as links.
 10. Pattern keys validate but are not offered as completions — an inline object's keys are the author's own.

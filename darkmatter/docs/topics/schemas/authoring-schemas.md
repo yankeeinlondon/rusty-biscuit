@@ -290,6 +290,8 @@ $schema:
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
+A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its recursive definitions are merged beside the document's own; a type named `item` in both stays two separate types.
+
 #### Passive Activation Expressions
 
 Choosing a schema should only answer a question: does this schema apply to this document? It should never run a command or start a runtime action. We call this _passive activation_.
@@ -438,6 +440,39 @@ The full rule, including how ties are settled, is in
 [Choosing a Union Option](./definition.md#choosing-a-union-option); the
 grammar is in [The `|` Operator and Grouping](./definition.md#the--operator-and-grouping)
 and [Tuples](./definition.md#tuples).
+
+### Recursive Types
+
+Some data nests to a depth you cannot know in advance: a tree of sections, a
+list of steps where a step can hold more steps. Describe it with a named type
+that refers to itself:
+
+```yaml
+$schema:
+    step: "{ say: string(required), then: step[](required) }"
+    plan: step(required)
+plan:
+    say: start
+    then:
+        - say: check
+          then: []      # an empty list ends this branch
+```
+
+Every level is checked against `step`, however deep the document goes, and
+an error deep in the tree still points at its own line. Types can also refer
+to each other, in one file or across files with `Name@file`.
+
+One rule keeps recursion meaningful: each cycle must pass through a **child
+value**, meaning an object property, a dictionary value, a list item, or a
+tuple slot. `step` above recurses through the list items of `then`, so it is
+fine. `a: b` with `b: a`, or `a: [a, string]`, never reaches a child value
+and is a schema error that names each reference in the cycle.
+
+The definition describes the value. Whether a property using it is
+`required`, `eager`, or nullable is decided where the type is used, so
+`plan: step(required)` and `draft: step` can share one definition. See
+[Recursive Named Types](./definition.md#recursive-named-types) for the full
+rules.
 
 ### Examples: using Inline Syntax
 

@@ -66,10 +66,15 @@ them is a schema error.
   frontmatter, or runtime globals. A misspelled built-in such as `strng`
   therefore fails at the reference, unless a local type happens to have that
   name.
-- **Cycles and depth are bounded.** A type that references itself, directly
-  or through other types, is a `SchemaError::ImportCycle` whose message shows
-  the chain (for example `b -> a -> b`), whether the hops are bare or
-  explicit. Chains deeper than 32 references are rejected.
+- **A type may refer to itself.** A local name can close a cycle, directly
+  (`item: "{ children: item[] }"`) or through other types, as long as the
+  cycle passes through a child value: an object property, a dictionary value,
+  a list item, or a tuple slot. A cycle that never does, such as `a: b` with
+  `b: a`, or `a: [a, string]`, is a `SchemaError::NonDescendingCycle` naming
+  each reference in it, whether the hops are bare or explicit. See
+  [Recursive Named Types](#recursive-named-types) below.
+- **Chains are bounded.** A chain of references that never repeats a type
+  and is deeper than 32 is a `SchemaError::ImportCycle`.
 
 ### Resolution stays in the defining file
 
@@ -164,6 +169,45 @@ from the higher-precedence schema.
 
 For how presence inheritance interacts with optional values and `generated`,
 see [Presence travels with the type](./authoring-schemas.md#presence-travels-with-the-type).
+
+## Recursive Named Types
+
+A local type can use its own name to describe a structure that nests to any
+depth:
+
+```yaml
+kind: schema
+types:
+    item: "{ value: string(required), children: item[](required) }"
+    tree: item(required)
+```
+
+`tree` holds an `item` whose `children` are items, and `children: []` ends a
+branch. Mutual recursion (`group: "{ members: member[] }"` with
+`member: "{ name: string, group: group }"`) and a cycle that crosses into
+another file through `Name@file` work the same way.
+
+A recursive type keeps the rules on this page. A bare name inside it resolves
+in its defining file, and every use inherits its constraints. The difference
+is in storage: the type is stored once and each property refers to it, so the
+use site, not the shared definition, decides presence (`required`,
+`generated`, `eager`), whether `null` is accepted, the description, and any
+extra bounds:
+
+```yaml
+kind: schema
+types:
+    item: "{ value: string(required), children: item[](required) }"
+    root: item(required)       # must be present and not null
+    optional: item             # may be missing or null
+    few: item[](min(1))        # one or more items, none of them null
+```
+
+Two types with the same name in different schemas stay separate: `item` in
+this schema and `item@./other.yaml` are two definitions. The child-value
+rule, the error a rejected cycle reports, and how recursion reaches
+validation, phases, conversion, and editors are described in
+[Recursive Named Types](./definition.md#recursive-named-types).
 
 ## Serialization
 

@@ -147,8 +147,9 @@ Important contracts:
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
   `md schema validate`, and DMLS; see [schema.md](schema.md#runtime-baseline).
 
-Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
-suggestions, triggers, and DMLS schema behavior.
+Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
+`TypeExpr::Ref`), unions, pattern dictionaries, suggestions, triggers, and
+DMLS schema behavior.
 
 The global catalog `darkmatter/schemas/darkmatter.yaml` declares every
 global's shape; the built-in baseline is its resolved `fm`. A catalog is

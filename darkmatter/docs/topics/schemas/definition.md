@@ -335,7 +335,8 @@ the selected arm still governs the value. Interactive collection is a
 top-level-property UI, so a missing nested property is reported rather than
 synthesized.
 
-The same holds at every level of a recursive named type: each property nested
+The same holds at every level of a
+[recursive named type](#recursive-named-types): each property nested
 in its definition is timed by its own markers, whatever the timing of the
 property that uses the type. With
 `item: "{ name: string(required), kids: item[](required) }"`, a `name` missing
@@ -1204,7 +1205,7 @@ $schema:
     deep: "{ a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: string } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }"
 ```
 
-If you need deeper typing, reference an external JSON Schema file with `$schema: ./path/to/schema.yaml` (or use a root-level union whose arm is a file reference).
+The cap limits how deeply one type string is written, not how deeply a document may nest. For a structure that repeats at every level, such as a tree, declare a [recursive named type](#recursive-named-types). Otherwise, if you need deeper typing, reference an external JSON Schema file with `$schema: ./path/to/schema.yaml` (or use a root-level union whose arm is a file reference).
 
 ### `additionalProperties: false`
 
@@ -1257,7 +1258,7 @@ and the inline form on any other type is a schema-load error.
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
-`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. The one exception is a type that refers back to itself, which is stored once and referenced (see [Recursive Named Types](#recursive-named-types)). A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
 
 A type defined in the same schema may be referenced by its **bare name**: `type` and `type@this` are the same reference. See [Local Type References](./local-type-references.md) for where local names live, built-in collisions, and why a bare name inside an imported definition still resolves in its defining file.
 
@@ -1288,22 +1289,16 @@ Rules:
 - The right side resolves as a `biscuit_file::FileReference` whose `cwd` is the schema file's directory, in the request's file-resolution context when one is supplied — the same resolution as root-union file refs and `$schema`.
 - The target must be a SimplifiedSchema file whose payload is a mapping with a matching named type. Importing from a raw JSON Schema file, from a root-union schema file, from a file whose whole payload is a reference to another file, or from a missing file is a schema error. A name the target does not define is `SchemaError::UnknownNamedType`, naming the type, the schema searched, and the property that holds the reference.
 - **Every constraint of the definition survives the reference**, including `required` and `generated`. An inherited `required` keeps its scope: on `people: person[]` it makes `people` required, and inside one arm of a property-level union it is hoisted to the property like any arm's `required`. Requiring a field *inside* an object type does not require the property that holds the object.
-- Expansion is **eager, bounded, and cycle-checked**. A named type may refer back to itself, directly or through other named types in the same or other files, as long as every cycle passes through a child value: an object property, a dictionary value, a list item, or a tuple position. `item: "{ value: string, children: item[] }"` is valid, and an empty `children: []` ends it. A cycle that never reaches a child value — an alias cycle (`a: b`, `b: a`), a self-union (`a: [a, string]`), or a cycle through a `function(...)` signature — is `SchemaError::NonDescendingCycle`, naming every reference in the cycle with its location in each file. A recursive type is stored once and every use of it lowers to a `$ref` into the schema's root `$defs`; a type that does not recurse is still inlined at each use, so its JSON Schema is unchanged. A chain of non-repeating references deeper than 32 is rejected (`SchemaError::ImportCycle`) — the same protection as the inline-object nesting cap.
-
-  ```yaml
-  $schema:
-    item: "{ value: string(required), children: item[](required) }"
-    tree: item(required)
-  ```
-
-  Each schema keeps its own `$defs`: a root-union arm that names another schema file, a trigger payload, and a baseline each bring theirs to the merged root, and a key two of them share with different bodies is renamed in the schema that joins (`item` becomes `item-2`) along with that schema's own references, so a reference never binds to another layer's type. See [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions).
+- Expansion is **eager, bounded, and cycle-checked**. A named type may refer back to itself, directly or through other named types in the same or other files, as long as every cycle passes through a child value; see [Recursive Named Types](#recursive-named-types). A type that does not recurse is inlined at each use, so its JSON Schema is unchanged. A chain of non-repeating references deeper than 32 is rejected (`SchemaError::ImportCycle`) — the same protection as the inline-object nesting cap.
 - Each import of another file is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes. A local reference adds no edge.
 - An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
 
-> **Implementation note:** within one schema resolution, each target file's
-> named types are parsed once and shared, unexpanded, by every import of that
-> file, and the document's own table is shared by every `@this`. Each use site
+> **Implementation note:** each target file's named types are parsed once
+> per revision of its contents and shared, unexpanded, by every import of
+> that file, in this resolution and later ones; the file is still read every
+> time, so an edit is seen at once. The document's own table is shared by
+> every `@this`. Each use site
 > still receives its own copy of the selected definition, so a constraint,
 > description, or `[]` on one import never affects another:
 >
@@ -1446,6 +1441,188 @@ too: `string(min(10); max(5))`, `url(scheme(http); scheme(ftp))`, and two
 different defaults are each a `SchemaError::Convert` naming the property.
 
 Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
+
+### Recursive Named Types
+
+A named type can describe a structure that nests to any depth — a tree, a
+linked list, a grammar whose items hold more items — by referring to itself.
+There is no new syntax: the bare name, `Name@this`, and `Name@file` spellings
+work in a cycle exactly as they do anywhere else.
+
+```yaml
+$schema:
+  item: "{ value: string(required), children: item[](required) }"
+  tree: item(required)
+tree:
+  value: root
+  children:
+    - value: a
+      children: []      # an empty list is a finite leaf
+```
+
+Every level is checked against the same definition: each `item` needs a
+`value` and a `children` list, and `children: []` ends the branch. A missing
+`children` or `children: null` four levels down fails at that node. The schema
+has no depth setting; a document may nest as deeply as its values do. A tool
+that needs a nesting limit enforces it in its own parser.
+
+#### Supported cycles
+
+| Cycle | Example |
+|---|---|
+| Direct | `item: "{ children: item[] }"` |
+| Mutual, in one file | `group: "{ members: member[] }"` and `member: "{ name: string, group: group }"` |
+| Across two files | `a.yaml`: `node: "{ name: string(required), next: leaf(required)@./b.yaml }"`; `b.yaml`: `leaf: "{ back: node[](required)@./a.yaml }"` |
+| Alias into a cycle | `node: "{ kids: node[] }"`, then `tree: node -> A tree` |
+
+Both files of a two-file cycle are dependency edges of the resolved schema
+(`ResolvedSchema.imports`), including the one reached only by the reference
+that closes the cycle, so a change to either file is seen by the schema
+cache and by DMLS. A
+repeated import of the same recursive type shares one definition.
+
+#### The child-value rule
+
+Every cycle must pass through a **child value**, because only then does each
+round of the recursion judge a smaller part of the document. Four positions
+are child values:
+
+| Position | Example |
+|---|---|
+| Object property | `item: "{ next: item }"` |
+| Dictionary value | `item:` with the YAML mapping `<string>: item` |
+| List item | `item: "{ children: item[] }"` |
+| Tuple slot | `item: "tuple([string, item?])"` |
+
+Nothing else counts. An alias and a union arm stand for the same value, and a
+type inside a `function(...)` signature describes a parameter, not part of the
+document. A cycle made only of those would ask the same question about the
+same value forever, so it is rejected with `SchemaError::NonDescendingCycle`:
+
+| Rejected schema | Why |
+|---|---|
+| `a: b` and `b: a` | An alias cycle never reaches a value. |
+| `a: [a, string]` | A self-union, rejected even though the `string` arm could accept a value. |
+| `f: "function(parameters(x: f); returns(string))"` | A cycle through a callable signature. |
+
+Admission looks at the whole group of types that reach each other: after
+setting aside every child-value edge, no cycle may remain. Finding one
+child-value edge somewhere in the group is not enough.
+
+```mermaid
+flowchart TD
+    A["Collect every named-type reference<br/>reachable from the schema"] --> B{"Does the reference sit at a child value?<br/>property, dictionary value, list item, tuple slot"}
+    B -->|yes| D[descending edge]
+    B -->|"no: alias, union arm, function signature"| N[non-descending edge]
+    D --> C{"Is there a cycle made of<br/>non-descending edges only?"}
+    N --> C
+    C -->|yes| E["SchemaError::NonDescendingCycle<br/>names each reference of that cycle"]
+    C -->|"no, but the types form a cycle"| R["stored once in the root $defs;<br/>every use becomes a $ref"]
+    C -->|no cycle at all| I[inlined at each use, as before]
+```
+
+So a group holding a good cycle and a bad one reports only the bad one.
+`a: [b, "{ x: a }"]` with `b: a` is rejected, and the error names the two
+references `b → a` and `a[0] → b`; the descending `x: a` is not mentioned.
+Change `b` to `"{ y: a }"` and the same group resolves.
+
+The error names every reference of each rejected cycle, with the schema it is
+written in and the schema of its target. `md schema validate` prints:
+
+```text
+SchemaError: non-descending type cycle
+┃ b in the inline $schema refers to a from the inline $schema
+┃ a in the inline $schema refers to b from the inline $schema
+```
+
+Each entry is a `CycleReference` carrying the reference site (source and
+path), the target name and source, and, for a reference written in a schema
+file, the byte span of the name, so a cycle between two files has a span in
+each. DMLS shows the error as a schema diagnostic on the cycle's first
+reference in the open document and lists the others as related locations.
+When the cycle sits in a schema the document references,
+`SchemaError::ReferencedSchema` wraps it, as for other named-type errors.
+
+#### Definitions and use sites
+
+A recursive type is stored once, as a **definition**, and each property that
+uses it is a **use site**. The definition holds the value's shape: its
+properties, item types, and its own bounds. Everything about the property
+holding the value belongs to the use site:
+
+- **presence:** `required`, `generated`, and `eager`;
+- **nullability:** an optional property accepts a missing value or `null`,
+  while a list element of the same type does not;
+- **annotations:** the description and `default`;
+- **extra bounds** such as `min-keys(1)` or, on a list, `min(1)`.
+
+```yaml
+$schema:
+  item: "{ value: string(required), children: item[](required) }"
+  root: item(required)       # must be present and not null
+  optional: item             # may be missing or null
+  list: item[]               # elements must be items; [null] is rejected
+  wide: item(min-keys(1))    # a bound beside the shared definition
+```
+
+Markers written on the definition are inherited by every use, exactly as for
+an inlined type, so `node: "{ kids: node[] }(required)"` makes every property
+typed `node` required. They apply to the property, never to the shared body.
+The other inherited rules hold too:
+
+- Two uses with different constraints share one unchanged definition.
+- A use-site bound that contradicts the definition's own bound is a
+  `SchemaError::ConstraintConflict` naming the definition first, then the use.
+- A definition that admits `null` (`link: [null, "{ next: link(required) }"]`)
+  is never required at any use, whatever its markers say.
+- `[]` on a definition that is already a list is an error, as for any named
+  type, and `suggest(...)` at a use site of a recursive type is a
+  `SchemaError::Grammar`.
+
+A definition's identity is the schema that declares it plus its name. The
+`item` in a document's inline `$schema` and the `item` in `types.yaml` are two
+different definitions, and each inline arm of a root union is its own
+namespace. A bare name inside a definition still resolves in its defining
+file (see [Local Type References](./local-type-references.md)).
+
+In JSON Schema, a use lowers to a `$ref` into the schema's root `$defs`, with
+the use site's annotations and bounds beside it. With `node: "{ kids: node[]
+}"` and `tree: node -> A tree`, the property `root: tree(required)` lowers to
+`{ "$ref": "#/$defs/node", "description": "A tree" }`, `root` joins the
+root's `required` list, and the `node` body appears once under `$defs`. An
+optional use wraps the reference with a `null` arm. Generated `$defs` keys
+follow the type name (`item`, then `item-2` for a second, different `item`),
+are the same on every run, and never contain a file path.
+
+#### Where recursive types reach
+
+- **Validation** follows a reference at every depth, and an error deep inside
+  keeps its JSON path and its line and column in the document:
+  `tree/children/0/children/0/value [42] is not of type "string" (at line 10, column 18)`.
+- **Phases.** Launch and Completion apply each property's own markers at
+  every level below a recursive reference; one definition can serve an eager
+  and a deferred property at once. See
+  [Universal Constraints](#universal-constraints).
+- **Conversion** continues at every depth, up to the conversion engine's
+  64-level limit; see [Recursive Types](#recursive-types) under Type Coercion.
+- **Merges.** Each schema keeps its own `$defs`: a root-union arm that names
+  another schema file, a trigger payload, and a baseline each bring theirs to
+  the merged root, and a key two of them share with different bodies is
+  renamed in the schema that joins (`item` becomes `item-2`) along with that
+  schema's own references, so a reference never binds to another layer's
+  type. A raw JSON Schema baseline or trigger payload stays a simple object
+  schema with no root `$ref` or root union; see
+  [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions).
+- **Function types** are still not allowed anywhere a document schema can
+  reach: a `function(...)` property inside a recursive definition is a
+  `SchemaError::Convert` at the use-site path, such as `root.f`.
+- **Editors.** Completion and hover descend through a recursive type one level
+  at a time, following the cursor's path, and never expand recursive branches
+  the cursor is not in. A whole-type display names the back-reference
+  (`kids: node[]`) instead of expanding it forever. See
+  [Completing inside a union value](#completing-inside-a-union-value) for the
+  library API and [DMLS Schema Support](./dmls-schema-support.md) for the
+  editor.
 
 ### Pattern / Dictionary Keys
 
@@ -2697,6 +2874,34 @@ assertion accepts it, including keywords that drive no conversion (`allOf`,
 fails. A key matching both `properties` and `patternProperties` must satisfy
 both. Remote references are never fetched.
 
+### Recursive Types
+
+A [recursive named type](#recursive-named-types), or a raw
+`$ref` cycle that passes through a child value (a property, a list item, a
+tuple position, a pattern or additional property), converts at every depth:
+
+```yaml
+$schema:
+  item: "{ value: string(required), children: item[](required) }"
+  tree: item(required)
+tree:
+  value: root
+  children:
+    - value: a
+      children:
+        - value: 42      # converts to "42", however deep it sits
+          children: []
+```
+
+The same rules apply at every level: a value with no conversion is an error at
+its own path, an ambiguous union is never coerced, and if any value in a
+property fails, that property is kept as written. The engine walks values up
+to 64 levels deep (every object and list counts one level). A value deeper
+than that is an error that says the limit was reached, never silently
+accepted. A raw `$ref` cycle that never reaches a child value (`{ "anyOf": [
+{ "type": "number" }, { "$ref": "#/$defs/a" } ] }` inside `a`) drives no
+conversion at the self-reference; the complete schema judges that part.
+
 ### Values Waiting on Composition
 
 A value that still holds `$(...)` or an unresolved `{{ ... }}` is not
@@ -2719,6 +2924,7 @@ written for the earlier rules may see:
 | a property-level union | converted only when exactly one option validated | the union rule |
 | unions, `numberlike`/`boolish`, and pattern-key values inside a nested object | not converted | converted at every declared depth |
 | a number or boolean against `enum(...)` or a string literal | rejected | converted to text, then checked (`2` against `enum("1", "2")` becomes `"2"`) |
+| a value below the fourth level of a recursive raw `$ref` | validation-only, never converted | converted at every depth, up to the [64-level limit](#recursive-types) |
 | a raw JSON Schema | converted through a few keywords | converted through every keyword listed in [Converting Through Raw JSON Schema](#converting-through-raw-json-schema) |
 | a mapping serialized into `json`/`yaml` | keys sorted alphabetically | keys in written order |
 | `numberlike` and `boolish` values | numeric text became a number, `"true"`/`"false"` a boolean | validated, then kept exactly as written |
@@ -2782,7 +2988,7 @@ md schema validate a.md b.md c.md title=shared
 
 Malformed YAML on the right-hand side (e.g. `user={broken`) is reported as a **usage error** with exit code `64` rather than silently treated as a file path. Bare strings with special YAML characters (commas in flow context, leading `&`, etc.) should be quoted in the shell.
 
-**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, `file`, or `alphanumeric`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)`, and `slug=123` against `slug: alphanumeric`, without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly.
+**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, `file`, or `alphanumeric`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)`, and `slug=123` against `slug: alphanumeric`, without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly. A property typed by a [recursive named type](#recursive-named-types) is judged by that type's definition: given `node: [string(min(4)), { children: node[] }]` and `label: node`, `label=1.20` stays the text `"1.20"`.
 
 Coercion is intentionally conservative:
 
@@ -3132,6 +3338,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `ValidationTimings`   | Stage breakdown of one validation, from `DarkmatterSchemas::validate_timed` (same result as `validate`, timings on failure too) or `ValidationTimings::record(|| ...)`: per-`ValidationStage` durations (`discover`, `match`, `resolve`, `compile`, `validate`), `total()`, `unassigned()`, `compile_cache()` (`CompileCache::Hit` / `Miss` / `NotRequested`), and `matched_triggers()`. See [Stage timings](../../inline/schema-validation.md#stage-timings--vv). |
 | `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`. |
 | `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it is a whole-value `$(...)` shell expression or still holds an unresolved `{{ }}` template. |
@@ -3282,6 +3489,23 @@ Editors that complete inside one value of a union — typically an element of a 
 - `completion::for_list_item(&effective, "name", &item)` — the alternatives of one array element;
 - `completion::for_property_value(&effective, "name", &value)` — the alternatives of a non-array property's own value;
 - `completion::alternatives_for_def(&def, site, &value)` — the same answer for a `PropertyDef` the caller already resolved.
+- `completion::for_path(&effective, &frontmatter, &[PathStep::Key("tree"), PathStep::Key("children"), PathStep::Index(0)])` — the same answer at any depth, following a recursive type one level per path step; `completion::def_at_path(…)` returns the declaration there, for hover.
+
+Below a recursive type, lookup opens only the definitions on the cursor's path, so an unused recursive descendant is never expanded. An element not authored yet, or an object still missing its required keys, still offers the keys for the next insertion:
+
+```yaml
+types:
+  item: "{ value: string(required), children: item[](required) }"
+tree: item(required)
+```
+
+| Cursor inside                      | Keys offered          |
+|------------------------------------|-----------------------|
+| `tree`                             | `value`, `children`   |
+| `tree.children[0]` (any depth)     | `value`, `children`   |
+| `tree.children[3]`, not yet written | `value`, `children`  |
+
+The `*_in` variants (`alternatives_for_def_in`, `alternative_accepts_in`) take a `DefinitionLookup` (an `EffectiveSchema` or a `DefinitionTable`); a reference whose definition is missing offers nothing. Without a lookup, `alternative_accepts` treats a recursive reference as accepting nothing.
 
 Pass the value as authored so far (`Value::Null` when it is missing or empty). The result, an `AlternativeCompletion`, lists `keys` from the inline-object alternatives and `values` from the scalar alternatives (`enum` members, `literal(...)` values, and lint-valid `suggest(...)` candidates, YAML-quoted where they are strings):
 
@@ -3326,7 +3550,10 @@ All failure modes are variants of `SchemaError`:
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
 | `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
-| `ImportCycle`           | A named-type reference (bare or `Name@file`) references itself directly or transitively (or exceeds the import-depth cap). |
+| `ImportCycle`           | A chain of named-type references (bare or `Name@file`) that never repeats a type is deeper than 32 levels. A type that refers back to itself is not this error. |
+| `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, or a cycle through a `function(...)` signature). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](#recursive-named-types). |
+| `UnresolvedReference`   | A local `$ref` names no definition in the schema it was written in, or a chain of references never reaches a schema. Carries the schema's label, the reference, and its JSON Pointer location. |
+| `UnsupportedMergeReference` | A schema joined at a merge (a baseline or a root-union arm; a trigger payload reports it inside `TriggerPayloadNotMergeable`) uses a reference form whose meaning would change at the merged root (`$id`, an anchor, a dynamic or external reference, or a local reference outside `#/$defs/…`). See [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
 | `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
@@ -3432,9 +3659,9 @@ written. See [Selecting the Baseline](#selecting-the-baseline).
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No authored `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile). Non-recursive named types are inlined at each use site; recursive ones lower to generated `$ref`s into the root `$defs`.
+- **No authored `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile). Non-recursive named types are inlined at each use site; [recursive ones](#recursive-named-types) lower to generated `$ref`s into the root `$defs`.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
-- **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
+- **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Use a [recursive named type](#recursive-named-types) for repeating structures, or reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
@@ -3602,7 +3829,12 @@ names the field it is about, from `match` down: `` `match[1].group[0]` ``.
 
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger
-payloads must be merge-compatible object schemas. Discovery is transactional:
+payloads must be merge-compatible object schemas. A payload may declare
+[recursive named types](#recursive-named-types), or, as raw JSON Schema, a
+root `$defs`; its definitions join the effective schema's root `$defs` under
+the rules in [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions)
+and [Merge Semantics](#merge-semantics-baseline--document), and a broken
+reference is reported as `SchemaError::TriggerPayloadNotMergeable`. Discovery is transactional:
 an invalid opted-in envelope rejects the scan, while YAML files that do not
 [claim the envelope](#which-files-claim-the-envelope) are ignored, even when
 they are not valid YAML. Library hosts opt in explicitly with

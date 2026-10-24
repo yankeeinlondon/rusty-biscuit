@@ -220,6 +220,7 @@ these; see [Who wins](../topics/markdown-formatting.md#who-wins-precedence).
 | `schema.strict` | `false` | yes |
 | `schema.extensions.<name>.path` | (required per entry) | yes |
 | `schema.extensions.<name>.globs` | `[]` | yes |
+| `schema.slow_validation_ms` | `200` | yes |
 | `style.strict` | `false` | **parsed only** |
 | `expressions.strict` | `false` | yes |
 | `shell.policy_path` | unset | yes |
@@ -391,6 +392,21 @@ globs = ["prompts/**", ".claude/**"]
 | `strict` | `false` | Off: a missing required key is not reported (a value may arrive at compose time), and an unknown key is a warning. On: missing required keys are errors, and unknown keys are errors. |
 | `extensions.<name>.path` | required | A SimplifiedSchema (or JSON Schema) file merged over the built-in baseline for matching documents. A relative path resolves against the first workspace folder. It names a document schema, never a trigger schema. |
 | `extensions.<name>.globs` | `[]` | Which documents the extension applies to, matched against the document's path relative to its workspace folder. An extension with no globs never applies. |
+| `slow_validation_ms` | `200` | The time, in whole milliseconds, at or above which a document's schema validation is logged at `warn` (`slow schema validation`) rather than `debug`. `0` logs every validation at `warn`. It changes only the log level, never a diagnostic. |
+
+`slow_validation_ms` must be a whole number of zero or more. Like any other
+value outside `[formatting]`, a wrong one (`-1`, `1.5`, `"200"`, or an
+editor `null`) is rejected: in `.dmls.toml` none of the file's settings
+apply, and in the editor settings the file layer stays (see
+[A malformed file degrades to defaults](#a-malformed-file-degrades-to-defaults)
+and [Precedence](#precedence-editor-settings-the-file-defaults)). What the
+event carries is described in [Schema validation timing
+lines](./indexing.md#schema-validation-timing-lines).
+
+```toml
+[schema]
+slow_validation_ms = 0   # log every validation's stage breakdown at warn
+```
 
 Extensions are applied in name order, a later one winning over an earlier
 one. Trigger schemas need no entry here; DMLS finds them in the schema roots.

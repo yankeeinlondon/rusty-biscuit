@@ -321,7 +321,10 @@ In template mode, before anything runs:
    object, or a string holding a NUL byte, is refused, even under a `string`
    rule. The original value must pass the placeholder's declared type,
    constraints included (`min`, `pattern`, …); nothing is converted first, so
-   a number never passes `alphanumeric`. A placeholder typed under a guard
+   a number never passes `alphanumeric`. A placeholder typed by a recursive
+   named type (`data: [string, number, "{ items: data[] }"]`) is checked
+   against that type's definition: with `value: data(required)`, `3` and
+   `"a b"` pass `{{ value }}`. A placeholder typed under a guard
    (see [Guarded values](#guarded-values)) must also pass the type
    the guard narrowed it to. A refused value fails with
    `TemplateValueRejected`, which names the placeholder and its declared type

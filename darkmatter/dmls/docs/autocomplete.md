@@ -83,6 +83,17 @@ steps:
     # offers `text`, not `run`
 ```
 
+### Recursive types and new list items
+
+Below a recursive named type (`item: "{ value: string, children: item[] }"`),
+completion offers the referenced definition's keys and values at every
+depth. Each step of the cursor's path opens only the definition it stands
+on, through the library's `resolved_alternatives`, so a type the path never
+reaches is never read. On an empty `- ` line of a list of objects, recursive
+or not, the object's keys are offered (marked `(required)` where they are),
+as they are for an object that has no keys yet. See
+[Recursive types](../../docs/topics/schemas/dmls-schema-support.md#recursive-types).
+
 ### Lifecycle stacks
 
 The items of md's lifecycle events (`initialize`, `composed`, `failed`,

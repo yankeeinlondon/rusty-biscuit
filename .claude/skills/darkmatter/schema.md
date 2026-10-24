@@ -161,6 +161,24 @@ source snapshot, shared by every problem and root-union arm):
   a top-level property to collect. Never reduce a problem to its first
   pointer segment for display.
 
+**Stage timings.** `DarkmatterSchemas::validate_timed` returns `validate`'s
+result unchanged plus a `ValidationTimings` (`schemas/timings.rs`):
+non-overlapping `ValidationStage`s `discover`/`match`/`resolve`/`compile`/
+`validate`, `total()`, `unassigned()`, `compile_cache()` (`Hit`, `Miss`,
+`NotRequested`), and `matched_triggers()` (file names). A thread-local stack
+recorder attributes time to the innermost open stage, so a validator built
+while resolving counts once, as `compile`; the markers live in
+`build_validator_with` (compile, miss), `ValidatorCache::lookup` (requested),
+`scan_with_source` (discover), trigger evaluation (match), payload resolution
+and `effective_for`/phase projection (resolve), and
+`validate_with_positions`/`validate_raw_with_positions` (validate). Discovery
+runs in `with_trigger_discovery`, outside `validate`: wrap it in
+`ValidationTimings::record` and `absorb` the result; a host attributes its own
+work (a registry freshness check) with `ValidationStage::time`. Recordings
+nest (the innermost wins) and never carry values or schema bodies. A new
+validator build path must go through `build_validator_with` or open
+`timings::compiling()` itself. `md schema validate -vv` renders it.
+
 ## Runtime baseline
 
 The runtime baseline is the resolved `fm` declaration of the global catalog
@@ -287,8 +305,12 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   pinned byte-for-byte by `lib/tests/l1/recursive_schema_golden.rs`. Lower
   with `to_json_schema_with_definitions` (`$ref` with use-site siblings, one
   root `$defs` body per reachable definition, in allocation order); plain
-  `to_json_schema` errors on a `Ref`. Typed walkers that cannot follow a `Ref`
-  yet treat it as opaque.
+  `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a
+  `Ref` (see the reference-aware entry points under "Named union
+  references" and "Conversion engine"); none treats it as opaque. User docs:
+  `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
+  definition vs use site, errors, reach) is the one description; other pages
+  link there.
 - **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
   schema's root. A sub-schema compiled alone (a root-union arm, a
   discriminated arm, a property union arm, an example target) goes through
@@ -394,7 +416,13 @@ References; Choosing an Arm: Reporting versus Changing Data).
   is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
   value)` to judge a present value (so `null` matches only a null-accepting
   arm). Editors use `completion::{for_list_item, for_property_value,
-  alternatives_for_def}`; never add a DMLS-local union interpretation.
+  alternatives_for_def}`, and below a recursive type `for_path`/`def_at_path`
+  (one definition opened per path step) and the `*_in` variants with a
+  `DefinitionLookup`; never add a DMLS-local union interpretation. A typed
+  walker meeting `TypeExpr::Ref` resolves it through
+  `query::resolved_alternatives(def, lookup)`, `is_subtype_with_definitions`,
+  or `DeclaredTypes::with_definitions`; a `Ref` judged without a table is a
+  defect (it fails closed).
 - Safety rule per consumer: validation accepts any arm; literal-tag narrowing
   (and root-union closest arm) only shapes reports; conversion follows the
   engine's union rule (exact match, one reachable option, number over
@@ -411,6 +439,16 @@ References; Choosing an Arm: Reporting versus Changing Data).
   `compose::expression::call_binding::shape_from_property_def` (grammar).
   `tests/l1/coercion_translator_conformance.rs` requires identical outcomes;
   a new construct needs both translators and a row there.
+- Recursion is `Shape::Ref(ShapeRef)`: the first use of a recursive target
+  owns it strongly, back-references are weak (dropping the root frees the
+  cycle). Both translators build it (`json_shape.rs` for a raw or generated
+  `$ref` cycle that descends, `translate.rs`'s `*_with_definitions` entry
+  points for `TypeExpr::Ref`), so conversion continues at any depth; the
+  value bound (`BindOptions.max_depth`, `MAX_DEPTH` 64) and
+  `MAX_REFERENCE_HOPS` (64 hops at one value) end in `ResourceLimit`, never
+  acceptance. A raw cycle that never descends stays validation-only; grammar
+  `TooDeep` (32) remains only for over-deep acyclic chains and loops that
+  never descend.
 - `schemas/coerce.rs` decides only what is committed: an instance the complete
   schema accepts is kept; else the whole converted document if the complete
   schema accepts it; else each top-level property that converts cleanly
@@ -642,16 +680,26 @@ For grammar or schema changes, cover:
   process-wide memos, each holding its inputs alive and keyed by `Arc`
   identity (plus value equality for small authored schemas): embedded
   trigger loads (`discovery.rs::load_embedded_trigger`, successes only),
-  trigger merges (`mod.rs::merged_trigger_schema`), phase schemas
-  (`phase_json_schema`), and wrapped root-union arms (`wrapped_root_arms`).
-  Payload and layer JSON are `Arc<Value>`; a lone trigger layer is shared,
-  never cloned. `ValidatorCache` compiles a schema that names no
+  trigger merges and document schemas with or without the baseline
+  (`mod.rs::merged_trigger_schema`, so an unchanged schema keeps one `Arc`
+  and its digest is computed once), phase schemas (`phase_json_schema`), and
+  wrapped root-union arms (`wrapped_root_arms`). Import namespaces are
+  parsed once per file revision (`resolve.rs::load_named_types`, keyed by
+  path and a hash of the bytes read on every use) and once per shipped
+  partial. Payload and layer JSON are `Arc<Value>`; a lone trigger layer is
+  shared, never cloned. `ValidatorCache` compiles a schema that names no
   `darkmatter-file*` format and no `x-darkmatter-match` once for every
-  context (structural slot); a root union compiles only its arms
+  context (structural slot), and conversion reuses that validator
+  (`ConversionPlan::validator`); a root union compiles only its arms
   (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
   `None` for it). Coercion skips validating union arms when no arm changes
-  the value. Do not reintroduce a per-call clone, serialization, or
-  uncached compile of an effective schema.
+  the value. Lowering builds nested fragments by moving them
+  (`convert.rs::any_of_value`), never `json!` with an interpolated `Value`,
+  which re-serializes the subtree. Every trigger payload is still resolved
+  and lowered at discovery, matched or not, because its load errors are
+  reported there (`tests/l1/trigger_payload_load_errors.rs`). Do not
+  reintroduce a per-call clone, serialization, or uncached compile of an
+  effective schema.
 - A test fixture for roots builds its context with `build_resolution_context`
   from a `RequestSnapshot` carrying a fixture home and env, never
   `FileResolutionContext::new` (ambient `HOME` would add a real `~/schemas`).

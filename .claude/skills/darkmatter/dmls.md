@@ -366,6 +366,19 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   A request parked on a registry job uses `begin_registry_wait`; `proceed`
   and `answer_waiter` call `end_registry_wait`, so `trigger_registry_wait_ms`
   sums every parked interval (requeue, cancel, shutdown included).
+- Slow-validation log (`validation_timing`): `refresh_diagnostics` opens
+  `validation_timing::collect`; schema work inside it runs in
+  `validation_timing::part` (each a library `ValidationTimings::record`,
+  absorbed), so other providers never count. Parts today: the registry
+  freshness check and lookup (`ValidationStage::Discover.time`),
+  `schema::assemble` (DMLS extension merge and baseline setup timed as
+  `Resolve`), and the diagnostics `validate_with_options`. `schema_for`
+  calls `note_assembly`; a ready bundle served from the overlay cache is
+  reported as compile `hit`. One event per refresh that reached
+  `schema_for` (`slow schema validation` at `warn` when total >=
+  `schema.slow_validation_ms`, default 200, else `schema validation
+  complete` at `debug`). `schema_cache_key` excludes the threshold. Tests:
+  `tests/l1/validation_timing_log.rs`.
 - Payload memo (`triggers/assemble.rs::file_payload_memo`, process-wide,
   32-entry true LRU, successes only): keyed by what resolution reads, never
   the requester's folder — trigger path, payload value, schema roots, the
@@ -408,9 +421,11 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Named-type references (`overlay/named_types.rs`,
   `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
   hover and go-to-definition on bare, `@this`, and cross-file spellings;
-  `UnknownNamedType`/`ConstraintConflict`/`ImportCycle` publish as
-  `dm.schema.invalid_type_definition` on the reference's `ImportName` span
-  with conflict origins as `relatedInformation`. Standalone schema files
+  `UnknownNamedType`/`ConstraintConflict`/`NonDescendingCycle`/`ImportCycle`
+  publish as `dm.schema.invalid_type_definition` on the reference's
+  `ImportName` span with conflict origins as `relatedInformation` (a
+  non-descending cycle is ranged on the first cycle reference this document
+  wrote; the others are related information). Standalone schema files
   resolve their references through `resolve::expand_named_types`. Imported
   files are dependency edges, and a failed assembly records the files its
   error names so a fix clears it; local references add no edge.
@@ -452,6 +467,17 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Claudine's prompt parameters) read. DMLS reads triggers from disk only; it
   registers no embedded bundle.
 - Workspace dependency tracking for referenced schemas and documents.
+- Recursive named types: every DMLS walk of a `PropertyDef` opens a
+  `TypeExpr::Ref` through `providers::frontmatter::definitions(ctx)`, the
+  bundle's `DefinitionLookup` (`overlay/schema.rs`: the effective schema's
+  tables, then `SchemaBundle::extension_definitions`), with
+  `query::resolved_alternatives` / `alternatives_for_def_in` /
+  `alternative_accepts_in`; never `flattened_alternatives` or a table-less
+  `alternative_accepts` on a shape that can hold a `Ref`. One definition per
+  path step; `work_counters::record_definition_lookups`/`definition_lookups`
+  record lookups for laziness tests (`tests/l1/recursive_schema_editor.rs`).
+  `NonDescendingCycle` failures record every cycle file as a dependency
+  (`overlay/mod.rs::error_dependencies`).
 
 Completion and validation must call the same schema-arm selection and parser
 authorities. A completion-only reconstruction is drift.

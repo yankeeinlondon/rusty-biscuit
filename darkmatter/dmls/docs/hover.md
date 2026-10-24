@@ -109,6 +109,21 @@ list. Whether an alternative accepts an item is decided by the Darkmatter
 library: the alternative is lowered to JSON Schema and checked with its
 structural validator, which judges a file value by syntax alone.
 
+### Recursive types
+
+A property typed by a recursive named type is described by name, followed
+by the definition once; inside it, each recursive use is again written by
+name, so the hover is finite however deep the type goes:
+
+```markdown
+Type: **item[](required)**
+
+`item` is defined as: `{children: item[](required),value: string(required) -> The node text}`
+```
+
+A property below the recursion (`value` four levels down) hovers exactly as
+it does at the top level.
+
 ## Formatting rule: interpolation `ctx.*` hover
 
 Inside a `{{ … }}` body interpolation, a cursor on an explicitly `ctx.`-qualified variable renders the shared catalog-backed block followed by an interpolation-only note. The variable counts as the root through member access and index access too (for example `ctx.packages[0].first`), because the lexer keeps a dotted `ctx.packages` as a single token.
