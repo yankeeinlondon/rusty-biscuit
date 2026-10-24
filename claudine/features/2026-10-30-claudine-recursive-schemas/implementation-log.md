@@ -9,6 +9,7 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - claudine
+    - claudine-cli
     - darkmatter
     - darkmatter-cli
     - dmls
@@ -79,31 +80,6 @@ skills_files_updated_during_phase_2:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/schema.md
-message_to_agent: |-
-    Read the log's "## Phase 3", especially D16, D17, D19.
-    (1) Claudine's schemas are now recursive and select Darkmatter's typed
-    per-verb forms. Payload: 0.66 MB claudine.yaml / 0.70 MB sequence.yaml
-    (claudine_schemas_embedded::embedded_trigger_payloads_resolve_within_two_megabytes).
-    The resolver still inlines every NON-recursive named type at each
-    reference, so do not add references to bundle/expression/loop casually.
-    (2) Shared corpus for Wave 7: claudine/lib/tests/fixtures/claudine-schemas/
-    (new: depth6-wrong-verb, depth5-guarded-bundle, generated-verb-*,
-    optional-nonnullable-null, ensure-file-overloads, variadic-and-or) and the
-    four valid container controls
-    claudine/lib/tests/fixtures/sequence-schema/containers-depth4-*.md
-    (D17: invalid container cells are one in-test edit of a control; the
-    manifest's three invalid container fixture files were not created).
-    depth4-completion.md for DMLS is not created yet; it is yours.
-    (3) D19: the lifecycle parser does not type-check literal operands
-    (pr_list: three is S reject, P accept, R reject). Launch still blocks
-    via the schema verdict. D16: launch pre-validation judges a malformed
-    {{ … }} as written (darkmatter expression::is_malformed_template);
-    DMLS's validate_with_options(Defer) and compose's gate still set any
-    template problem aside, so check what DMLS reports for
-    generated-verb-malformed-template when you assert CLI/DMLS parity.
-    (4) Docs for schemas.md were already corrected in Phase 3; Phase 5 still
-    owns the full guidance pass (Mermaid passive-validation flow, authoring
-    command, examples).
 source_files_during_phase_3:
     - claudine/schemas/action.yaml
     - claudine/schemas/lifecycle.yaml
@@ -149,6 +125,156 @@ skills_files_updated_during_phase_3:
     - .claude/skills/claudine/cli-commands.md
     - .claude/skills/claudine/timeline.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+docs_updated_during_phase_4:
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/lib/src/composition/lifecycle/tests/mixed_span.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md
+    - claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md
+    - claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md
+    - claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md
+    - claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md
+    - claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+    - claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/level4-invalid.md
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/container_schema_recursion.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/sequence-types.yaml
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/justfile
+    - darkmatter/lib/examples/lifecycle_schema_generator.rs
+    - darkmatter/lib/src/effects/mod.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/operands.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/tests/overloads.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/deferred.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/lib/tests/l1/lifecycle_generated_operands.rs
+    - darkmatter/lib/tests/l1/lifecycle_operand_validation.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/schema.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - claudine/schemas/README.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/side-effects.md
+completed_phase: 5
+implemented: true
+pipeline_refreshed:
+    - 2026-10-31-type-aware-evaluation
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-30-claudine-recursive-schemas (5 phases)
@@ -1499,3 +1625,499 @@ generated verbs), `claudine/docs/topics/execution-flow.md` (§9),
 - **Frozen fixtures:** `darkmatter/lib/tests/fixtures/recursive_schema_golden/`
   and the bench copy were not touched (`recursive_schema_frozen_fixture`
   passed).
+
+## Phase 4
+
+Phase 4 proves the recursive schemas at the three consumer boundaries:
+`md schema validate`/`md schema triggers` (Darkmatter CLI), DMLS, and
+Claudine's launch preflight. The coordinator created the last manifest
+fixture first, then ran three foreground subagents in parallel with disjoint
+file ownership (darkmatter/cli tests, darkmatter/dmls tests, claudine/cli
+tests).
+
+### Coordinator: the shared fixture
+
+- `claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md`
+  (manifest): four nested conditionals in `initialize`, `start`,
+  `cancelled`, and `loop.gate`, with generated long forms
+  (`ensure_file: {file, content}`, `pr_list: {count}`) in the innermost
+  `then`/`else`. Registered in `AC5_GROUPS` and `ac5_depths_and_stack_shapes`
+  (S valid, P accepts) and in `passive_parity_tests!`
+  (`passive_parity_depth4_completion`). 52/52 targeted tests passed.
+
+### Wave 7: Verify Schema CLI (`darkmatter/cli`)
+
+- `darkmatter/cli/tests/l1/claudine_schema_bundle.rs` (extended; the bundle
+  is copied to a fixture repository's `schemas/`, as before):
+  - `recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions`:
+    `md schema triggers depth6.md` lists `claudine.yaml` matched and
+    `sequence.yaml` not matched (asserted on its own, not as a verdict); one
+    batched `md schema validate --format json` over 18 corpus fixtures gives
+    the Phase 3 S verdicts. 11 valid (depth1/3/5/6, depth4-completion,
+    depth5-guarded-bundle, typed-value, convertible-text, deferred,
+    ensure-file-overloads, variadic-and-or); `depth6-wrong-verb` at the
+    sixth-level item naming `sya`, and `generated-verb-wrong-type` at
+    `/start/0/pr_list`, each with the `line`/`column` computed from the
+    fixture text (15:43 and 3:16; the CLI counts from the opening `---`,
+    Claudine's in-process test from the first frontmatter line, so 14 there);
+    unknown parameter, extra argument, bad sibling, malformed template, and
+    both optional-nonnullable-null pointers. For the extra-argument and
+    bad-sibling cells the deferred operand itself carries no problem.
+  - `depth_four_container_controls_validate_and_their_innermost_defects_are_located`:
+    triggers on a container control select `sequence.yaml` alone; the four
+    `containers-depth4-*` controls are valid; three in-test edits (a
+    misspelled verb in the innermost `start`, `retry` in the innermost
+    `cancelled`, `shell` in the innermost group `initialize`) fail at their
+    container-depth-4 pointers. Each edit asserts the control still holds
+    the text it replaces.
+- `md` embeds only Darkmatter's own baseline, not Claudine's bundle, so the
+  disk copy is the only route for these documents (no embedded case exists
+  to add). Disagreements with the agreed table: none.
+
+### Wave 7: Verify Editor Parity (`darkmatter/dmls`)
+
+- New `darkmatter/dmls/tests/l1/claudine_editor_parity.rs` (registered in
+  `main.rs`; shared helpers in `claudine_schema_discovery.rs` became
+  `pub(crate)`, plus `editor_answers_at`, which takes a byte offset):
+  - `the_shared_corpus_valid_depth_fixtures_raise_no_schema_diagnostic`
+    (depth1/3/5/6, depth5-guarded-bundle, depth4-completion, and the alias
+    `speak` at depth 4 in `then` short and `else` long);
+  - `the_shared_corpus_valid_generated_verb_fixtures_raise_no_schema_diagnostic`;
+  - `the_shared_corpus_invalid_fixtures_are_rejected_where_the_cli_rejects_them`:
+    seven invalid fixtures, each with exactly the CLI's set of instance
+    paths, a range starting at the CLI's line/column minus one, and the
+    offending text in the message;
+  - `depth4_start_branches_complete_and_hover_generated_verbs_and_parameters`;
+  - `depth4_branches_keep_each_events_profile`: `initialize` offers generated
+    verbs but not `shell`; the loop gate offers the ordinary set with
+    `shell`; `cancelled` offers `stop` and none of `retry`, `resume`,
+    `proxy`, `prep`, `skip`, `error`, `break`, `defer` (criterion 10);
+  - `claudine_schema_validation_and_editor_requests_run_no_actions`:
+    validation, hover, and completion over stacks that would create files,
+    run a shell, and call a registered recording function; no sentinel file
+    appears and, with `effects-instrumentation` (enabled for dmls in CI), no
+    function is entered, no effect engine is built, and no network attempt
+    is made. A positive control shows the counter sees a real evaluation.
+- **Hover defect fixed** (`darkmatter/dmls/src/providers/frontmatter.rs`):
+  hover on a parameter that only a later overload declares (`content` of
+  `ensure_file`, `count` of `pr_list`, `timeout` of `ping`) returned nothing
+  at every depth, because the arm-local lookup only descends the first
+  object arm. It now falls back to the context-aware resolver that merges
+  the arms. Documented in `darkmatter/dmls/docs/hover.md`.
+- **Parity defect fixed by the coordinator** (D21):
+  `generated-verb-malformed-template` was rejected by the CLI and by the
+  launch verdict but published no DMLS diagnostic.
+  `EffectiveSchema::validate_with_options` (DMLS's only production entry)
+  set aside any problem whose authored value held `{{`, malformed or not.
+  It now excludes a malformed template through
+  `expression::is_malformed_template`, the same predicate Claudine's launch
+  check uses; the DMLS invalid-fixture test carries the row, and
+  `validate_with_options_judges_a_malformed_template_as_written` pins the
+  library rule.
+
+### Wave 7: Verify Launch Boundary (`claudine/cli`)
+
+- `claudine/cli/tests/l1/launch_trigger_schemas.rs` (still `#[cfg(unix)]`:
+  `common` has no portable recording provider; both the marker stub and
+  `launch_recorder` are `sh` scripts):
+  - four `ROWS` entries, each generated for `compose` and `inline-compose`:
+    `generated_verb_wrong_type` (`pr_list: three`),
+    `generated_verb_malformed_template` (`"{{ 1 + }}"`),
+    `generated_verb_bad_sibling_beside_deferred`
+    (`min: [three, "{{ fm.x }}"]` at `/start/0/min/0`),
+    `optional_nonnullable_null` (`/start/0/ping/1`). Each exits 1 with the
+    schema verdict, names the pointer, never prints a "dropped" scrub line,
+    and leaves the provider marker absent;
+  - `a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time`
+    (`ensure_file: "{{ target }}"`: exit 0, `notes.md` created, one launch,
+    no audio published);
+  - `deferred_structured_arguments_pass_preflight_and_bind_at_event_time`
+    (`min: [1, "{{ fm.x }}"]` and the `ensure_file` long form);
+  - `compose_fails_a_wrong_evaluated_type_before_dispatch` /
+    `inline_compose_…`: `target: [a, b]` fails binding at
+    `start[0].ensure_file` ("expected string; received list"); no file
+    appears, the provider never launches, and the document still holds
+    `"{{ target }}"`;
+  - `a_failed_expression_verb_conversion_maps_like_any_raising_start_expression`:
+    `min` with `x: three` fails at `start[0].min` with output identical to
+    `info: "{{ min(1, fm.x) }}"`; the next action does not run;
+  - `no_error_does_not_suppress_a_binding_failure` (D15);
+  - `dry_run_shows_the_deferred_operand_as_authored` (preflight leaves the
+    operand as written; `Deferred: interpolated at event-time: start`);
+  - `compose_runs_initialize_before_a_generated_verb_verdict`: the parser
+    accepts a wrong-typed literal (D19), so `initialize` runs, then the
+    verdict rejects `/start/1/pr_list` and `start` never runs.
+- **Observed binding-failure mapping:** exit 1, provider not launched,
+  `CompositionError: lifecycle evaluation error` naming the event and the
+  `start[0].<verb>` path, with a `Reason:` line naming the parameter. It is
+  the mapping of any raising `start` expression.
+- No Claudine source change was needed.
+
+### Design Decisions
+
+**D21. `validate_with_options` judges a malformed template as written.**
+- **Decision:** Darkmatter's `EffectiveSchema::validate_with_options`
+  (DMLS's frontmatter validation) no longer sets aside a problem whose
+  authored value holds a malformed `{{ … }}` span; it uses
+  `expression::is_malformed_template`, the predicate D16 gave Claudine's
+  launch check.
+- **Alternatives considered:**
+  - A DMLS-local second validation pass that re-adds the dropped problems.
+    It duplicates the library's filtering rule in a consumer.
+  - Leave the defect. Criteria 5 and 8 require DMLS to match the CLI and
+    require malformed templates to fail passively; the CLI and launch
+    already reject `generated-verb-malformed-template`.
+- **Why:** D16 declined to widen this rule because no test needed it then;
+  the Phase 4 DMLS parity test showed DMLS was the one surface still
+  silent. DMLS is the only production caller of `validate_with_options`
+  (grep over `darkmatter/*/src` and `claudine/*/src`), so the change affects
+  editor diagnostics only.
+- **Downsides:** a malformed template in a schema-typed frontmatter field
+  now shows a schema mismatch in the editor beside any expression parse
+  diagnostic DMLS already gives for the same span.
+
+**D22. DMLS parameter completion is proven in block long form.**
+- **Decision:** the depth-4 parameter-completion cells use a block
+  long form (`ensure_file:` then `co` on the next line); hover cells use the
+  fixture's flow form.
+- **Alternatives considered:** build key completion inside a flow mapping
+  (`{ fi }`).
+- **Why:** DMLS offers no key completion inside a flow mapping at any depth,
+  even under a plain `$schema`; that is independent of recursion and of
+  this feature. Both spellings are the same long form to the schema.
+- **Downsides:** an author typing inside `{ … }` still gets no parameter
+  completion.
+
+**D23. The launch-boundary process tests stay Unix-only.**
+- **Decision:** the new launch rows and event-time binding tests live in
+  `launch_trigger_schemas.rs`, which is `#[cfg(unix)]`.
+- **Alternatives considered:** write a portable compiled fake provider for
+  this phase.
+- **Why:** every provider-launch stub in `claudine/cli/tests` (the marker
+  stub, `launch_recorder`, `compose_schema_cli.rs`) is an `sh` script; a
+  portable fake would be new shared test infrastructure. The verdict being
+  wired is OS-independent and is covered on every OS in-process
+  (`claudine_schemas_embedded::passive_parity_*`, `ac5_*`), and the binder
+  is covered by Darkmatter's `lifecycle_event_binding` tests.
+- **Downsides:** native Windows has no process-level evidence that these
+  rows block the launch.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+|---|---|
+| AC4: `depth6` passes `md schema validate`; `depth6-wrong-verb` fails with verb, path, and position; triggers listed separately; guarded bundle S-valid | `claudine_schema_bundle::recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions`, `parser_only_defects_pass_schema_validation` (existing) |
+| AC4/AC5: DMLS matches the CLI on both depth-six fixtures and the corpus, with ranges | `claudine_editor_parity::the_shared_corpus_*` (three tests) |
+| AC5: completion/hover at depth 4 in `then`/`else`, initialize shell filtered, loop-gate profile, alias accepted | `depth4_start_branches_complete_and_hover_generated_verbs_and_parameters`, `depth4_branches_keep_each_events_profile`, `the_shared_corpus_valid_depth_fixtures_raise_no_schema_diagnostic` |
+| AC5/AC8: recording fakes show passive validation and editor requests | `claudine_schema_validation_and_editor_requests_run_no_actions` (+ existing `no_side_effects::*`) |
+| AC6: malformed generated literal blocks launch, control not scrubbed, no provider | `launch_trigger_schemas::{generated_verb_wrong_type, generated_verb_malformed_template, generated_verb_bad_sibling_beside_deferred, optional_nonnullable_null}::{compose, inline_compose}` |
+| AC6/AC8: deferred scalar/structured pass preflight unchanged, bind at the event; wrong evaluated type fails before dispatch; input unchanged; `no_error` does not suppress | `a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time`, `deferred_structured_arguments_pass_preflight_and_bind_at_event_time`, `{compose,inline_compose}_fails_a_wrong_evaluated_type_before_dispatch`, `a_failed_expression_verb_conversion_maps_like_any_raising_start_expression`, `no_error_does_not_suppress_a_binding_failure`, `dry_run_shows_the_deferred_operand_as_authored` |
+| Initialization order/prohibition preserved | `compose_runs_initialize_before_a_generated_verb_verdict` (+ existing initialize tests) |
+| AC8: malformed templates fail passively on every surface (D21) | `validate_with_options_judges_a_malformed_template_as_written` (lib), the DMLS invalid-fixture row, the CLI corpus test, `passive_parity_generated_verb_malformed_template` |
+| AC10: container depth 4 through the CLI; DMLS completes `cancelled` `then`/`else` | `depth_four_container_controls_validate_and_their_innermost_defects_are_located`, `depth4_branches_keep_each_events_profile` |
+| Hover on later-overload parameters | `depth4_start_branches_complete_and_hover_generated_verbs_and_parameters` (`content`, `count`) |
+
+Fidelity: F3 process tests for the CLI (`md`) and the launch (`claudine`),
+the boundary each criterion names; in-process LSP sessions for DMLS (its
+existing harness, no editor window); in-process library tests for the
+deferral rule. All L1.
+
+**Input robustness matrix:** no loader or configuration reader changed. The
+D21 change is to a field validator's deferral filter, whose shapes were walked
+in the corpus: valid template (deferred, accepted), malformed template
+(rejected), literal convertible text, wrong literal, literal sibling beside a
+template, null into a non-nullable parameter. Code-smell grep over the
+touched source (`schemas/mod.rs` filter, `frontmatter.rs` hover): no
+`serde(default)`, `unwrap_or_default`, or `.ok()` added on a load-bearing parse.
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, test-toolkit]`,
+  `change_class: package`, so every gate ran.
+- **`claudine`:** `just test`: 10,750 run, 10,750 passed (3 slow), 9 skipped,
+  172 s. `just lint`: passed. `just check-tier-coverage claudine`: 0 stranded.
+- **Darkmatter (changed directly: `schemas/mod.rs`, a DMLS hover fix, DMLS
+  and `darkmatter-cli` tests):** `just lint` passed (plus
+  `cargo clippy -p dmls --all-targets --features effects-instrumentation -- -D warnings`,
+  since `just lint` does not build the feature-gated tests); full `dmls`
+  suite with `effects-instrumentation`: 1,359 passed; `darkmatter-cli`
+  `claudine_schema_bundle | schema_validate`: 147 passed; `darkmatter --lib`
+  `markdown::schemas`: 1,133 passed; `just check-tier-coverage darkmatter`:
+  0 stranded. Other Darkmatter dependents were not run: the only library
+  behavior change is in `validate_with_options`, whose one production caller
+  is DMLS (tested in full).
+- **Load-sensitive failures:** none.
+- **Cross-OS:** not run. No path, process, or `cfg` code changed; the new
+  launch tests sit in the existing `#[cfg(unix)]` module (D23).
+
+## Phase 5
+
+Phase 5 documents the landed behavior, validates the shipped corpus, and
+gathers the final evidence. The coordinator ran two subagents in parallel
+with disjoint ownership (corpus test in `claudine/lib/tests/l1/`; docs and
+skills only), then ran Wave 9 itself.
+
+### Wave 9: deterministic regeneration
+
+- **Print mode, twice:** `cargo run -q -p darkmatter --example lifecycle_schema_generator`
+  into two temporary files (`$TMPDIR/…/run1.yaml`, `run2.yaml`): the runs are
+  byte-identical (1,404 lines, the four regions `types`, `expression`,
+  `bundle`, `initialize-bundle`), and every printed line equals the
+  checked-in region line (compared after stripping indentation, which the
+  print mode does not reproduce).
+- **The documented command:** `just -f darkmatter/justfile regen-lifecycle-schema`
+  run twice; `shasum` of `darkmatter/schemas/partials/lifecycle.yaml` is
+  unchanged after both runs (the file was backed up first; no restore was
+  needed).
+- **Parsed structures:** `darkmatter/lib/tests/l1/lifecycle_schema_generation.rs`
+  compares the parsed checked-in types, inlined helper bodies, category and
+  bundle keys, and host filters with the projection, and pins byte equality
+  of a regeneration (run in the gates below).
+- **Frozen inputs untouched:** `shasum` of the 218 files under
+  `darkmatter/lib/tests/fixtures/recursive_schema_golden/` is identical
+  before and after, and `git status` is clean for it, for
+  `darkmatter/schemas/`, and for the `2026-10-20-lifecycle-grammar` spike.
+- **Final payload** (`embedded_trigger_payloads_resolve_within_two_megabytes`,
+  the Rule 6 convention): `claudine.yaml` 660,284 B, `sequence.yaml`
+  704,904 B, against 2,000,000 B. Unchanged from Phase 3.
+
+### Wave 8: current guidance (docs agent; docs and skills only)
+
+- `claudine/docs/topics/schemas.md`: the `initialize` rule at every depth and
+  in unselected branches (with the parser-only `set` `$( … )` case); a "Who
+  owns what" table (Darkmatter shapes, catalogs, projection, generated region;
+  Claudine selection) with the side-effect metadata guard; "Changing a
+  generated verb" with the exact command (`just -f darkmatter/justfile
+  regen-lifecycle-schema` / `just regen-lifecycle-schema`), print versus
+  `--write`, the four regions, the drift test, and the extra Claudine edit an
+  added or removed verb needs; the parser's `LifecycleStackInvalidShape` and
+  the guarded-bundle case; "Generated verbs have typed arguments" (argument
+  forms, overloads, optional is not nullable, numeric text, deferred values,
+  and the observed event-time binding failure from Phase 4); "Where each check
+  runs", one Mermaid flow of schema check → parser → event-time binding →
+  dispatch with each failure exit and a note on launch ordering; DMLS generated
+  verbs at depth, profile filtering, later-overload hover, and the absence of
+  flow-mapping key completion (D22).
+- `claudine/docs/topics/flow-control/lifecycle.md`: removed a false "typed
+  only within three conditional levels" claim.
+- `claudine/docs/topics/composition.md`: `sequence.yaml` listed among the
+  launch triggers; a deferred operand waits for its event, a malformed
+  template does not.
+- `darkmatter/docs/topics/schemas/definition.md`: md's three-level, untyped
+  argument typing is now described as md's deliberately tolerant profile; the
+  false "short form only" claim about the `lifecycle` partial is fixed (only
+  `set`, `and`, `or` are short-only); the generated typed verbs, regions,
+  command, and drift test.
+- Skills: `.claude/skills/claudine/{SKILL.md,cli-commands.md,timeline.md}`
+  (optional/null rule, regen command, the seven-file bundle row was "five"),
+  `.claude/skills/darkmatter/schema.md` (md's tolerant profile; the
+  malformed-template rule through `is_malformed_template` on every passive
+  surface).
+- Checked, no drift: `claudine/schemas/README.md`,
+  `claudine/docs/topics/state-management/side-effects.md`.
+- Coordinator: `darkmatter/schemas/partials/md-lifecycle.yaml`'s header
+  comment said md's stacks are three levels deep "as Claudine's are" and use
+  one `then`/`else` pattern key "as Claudine's `cancelled` stack does"; both
+  false since Phase 3. Comment-only fix.
+- Coordinator review: each example in the new sections was checked against the
+  generated partial (`ping-short`, `min-short`, `ensure_file` overloads) and
+  the Phase 2–4 fixtures.
+
+### Wave 8: shipped corpus (corpus agent)
+
+- New `claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs` (declared in
+  `claudine/lib/tests/l1/main.rs`): 66 per-document tests plus the guard
+  `every_shipped_document_has_one_test`, which lists the four corpus
+  directories through `manifest_dir!()` and requires exactly one test per
+  document (checked by adding a dummy example, which failed it). Each test
+  holds its own `include_str!` literal, so CI's test-input index maps the
+  document to that test; no macro, because a literal in a `macro_rules!`
+  invocation is outside any test function to `scripts/ci/test_inputs.py`.
+- Corpus: `claudine/docs/examples/sequence-containers.md`; every research
+  `_fleet.md` (22) and `_research.md` (23) under `claudine/docs/research/`;
+  every frozen prompt copy under `claudine/lib/tests/fixtures/frozen_prompts/`
+  and `claudine/cli/tests/fixtures/frozen_prompts/` (20). No live `prompts/`
+  folder is read; live checks stay in `just test-prompts`.
+- Each test asserts the selecting triggers, that the payload applied, the
+  exact expected problem set (S), and parse-only P (`parse_lifecycle_config`,
+  `resolve_loop_config`, `resolve_sequence_plan` for inline sequences).
+- **Verdicts:** every document is S-valid on every Claudine control and
+  P-accepted. No shipped document uses a merged-only long form (D3's open
+  check is closed). Ten frozen prompts are S-invalid only on parameters their
+  own authored `$schema` declares: a caller-supplied `spec` is required, and
+  whole-value templates under authored `file`/`number` types are judged as
+  written (they are not marked `deferred`). Those are correct passive
+  verdicts and are declared as such; the frozen copies are unchanged.
+- **Input declaration:** no `source-inputs` entry; `docs/cicd/test-inputs.md`
+  reserves it for another package's source files, and these `.md` fixtures
+  are not source.
+- **Speed:** most tests 0.3–0.5 s; the eight documents with an authored
+  `$schema` take about 1.2 s, almost all in resolving the effective schema.
+  Within the 5 s budget.
+
+### Wave 9: AC11 validation time sample
+
+- **Command:** `target/release/md schema validate -vv doc.md`, release build
+  of the current tree, in a temporary repository whose `schemas/` holds a copy
+  of the seven `claudine/schemas/` files.
+- **Document:** `claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md`
+  (group → group to container depth 4, every container event set).
+- **Result:** valid, exit 0; `md schema triggers` shows `sequence.yaml`
+  matched alone.
+- **Host load:** load average 8.86 / 5.93 / 7.05 (dev Mac, no subagents
+  running).
+- **Stages** (three one-shot runs, compile cache miss each time):
+
+  | stage | run 1 | run 2 | run 3 |
+  |---|---|---|---|
+  | discover | 2.52 ms | 1.30 ms | 1.31 ms |
+  | match | 0.01 ms | 0.01 ms | 0.01 ms |
+  | resolve | 40.03 ms | 38.00 ms | 38.42 ms |
+  | compile | 21.21 ms | 21.27 ms | 20.83 ms |
+  | validate | 0.44 ms | 0.03 ms | 0.05 ms |
+  | total | 64.55 ms | 60.68 ms | 60.69 ms |
+
+  Wall clock 0.09–0.14 s. The 200 ms goal is met; resolve is the dominant
+  stage.
+- **Defect found and fixed:** the report printed `matched triggers:
+  sequence.yaml, sequence.yaml`. See D24.
+
+### Design Decisions
+
+**D24. A matched trigger is named once in the validation timings.**
+- **Decision:** `ValidationTimings` records each matched trigger file name
+  once. A repeated match within one recording, or in a recording folded in
+  with `absorb`, is dropped (`timings.rs::push_unique`).
+- **Alternatives considered:**
+  - Deduplicate only in `md schema validate`'s `emit_timings`. That leaves
+    the library accessor reporting repeats to every other caller.
+  - Stop the second registry evaluation (`validate` then `effective_for`).
+    That is a wider change to the CLI's request flow, outside this feature.
+- **Why:** `matched_triggers()` is documented as "the triggers whose
+  conditions matched", a set in registry order. The CLI evaluates the
+  registry twice in one recording, so every `-vv` report named each trigger
+  twice. The existing CLI tests asserted with `contains`, which a repeated
+  name still satisfies. Those assertions now compare the whole line, and both
+  failed before the fix.
+- **Downsides:** the accessor can no longer show how many passes matched a
+  trigger. No caller used that.
+
+**D25. Frozen prompts' own-schema problems are declared verdicts, not fixed.**
+- **Decision:** the corpus test declares ten frozen prompts S-invalid on their
+  own authored parameters and leaves the copies unchanged.
+- **Alternatives considered:**
+  - Edit the frozen copies. They are frozen inputs.
+  - Judge only Claudine-control problems. That would hide what
+    `md schema validate` actually reports for these files.
+- **Why:** AC6 asks for "declared verdicts". Every such problem is on a
+  parameter declared by the document's own `$schema`, and none is on a
+  Claudine control. The test fails if a Claudine-control problem appears.
+- **Downsides:** a later edit to a live prompt's `$schema` is not reflected
+  until its frozen copy is refreshed. That is already true for every frozen
+  copy.
+
+**D26. A stale Phase 4 test helper is corrected to the D21 rule.**
+- **Decision:** `schema_nested_template_deferral.rs::assert_fails_at_against`
+  now exempts a problem from `validate_with_options(Defer)` only when its
+  authored value holds a well-formed template (`!is_malformed_template`).
+- **Alternatives considered:** revert D21. That reopens the DMLS/CLI
+  disagreement criteria 5 and 8 forbid.
+- **Why:** the full Darkmatter `just test` (not run in Phase 4, which ran a
+  targeted set) failed `malformed_template_is_judged_as_written`. The helper
+  still encoded the pre-D21 rule ("any `{{` waits for rendering"), while the
+  test's own name, and D21, say a malformed template is judged as written.
+- **Downsides:** none; the helper now uses the library's predicate.
+
+### Requirement-to-test mapping (Phase 5)
+
+| Requirement | Tests / evidence |
+|---|---|
+| Ordinary shipped examples, lifecycle documents, and frozen prompts pass with declared S and P verdicts (AC6) | `claudine_schema_shipped_corpus::*` (66 documents), guard `every_shipped_document_has_one_test` |
+| No shipped document uses a merged-only long form (D3 follow-up) | the same corpus: no Claudine-control problem anywhere |
+| Live internal prompts stay opt-in; DMLS parity tests stay in the graph | no `prompts/` read (corpus guard lists only the four directories); `claudine_editor_parity` and `claudine_schema_discovery` ran in the Darkmatter `just test` |
+| Deterministic regeneration (AC7) | two print runs byte-identical; `just -f darkmatter/justfile regen-lifecycle-schema` leaves the partial's `shasum` unchanged; `lifecycle_schema_generation::*` (11 tests) |
+| Frozen fixtures untouched | `shasum` of 218 golden files unchanged; `recursive_schema_frozen_fixture` passes |
+| Final payload ≤ 2 MB (AC1) | `embedded_trigger_payloads_resolve_within_two_megabytes`: 660,284 B / 704,904 B |
+| `-vv` names each matched trigger once (D24) | `schema_validate_timings::{double_verbose_adds_a_stage_report_to_stderr_only, an_assignment_that_activates_a_trigger_is_timed_against_the_new_schema}` (failed before the fix), `timings::tests::a_trigger_matched_by_several_passes_is_named_once` |
+| Malformed template judged as written under `Defer` (D21, D26) | `schema_nested_template_deferral::malformed_template_is_judged_as_written` |
+
+Fidelity: the corpus is in-process L1 at the crate's public API (schema
+`ValidationReport` with paths, lifecycle and sequence parsers), since no CLI
+wiring changed. The timings fix is proven at F3 through the spawned `md` (the
+user-visible line) and by a unit test of the accessor.
+
+**Input robustness matrix:** no loader or configuration reader changed in
+this phase. The corpus walks the field validators over real shipped
+documents, which adds control rows for every Claudine control the corpus
+uses. Code-smell grep over the phase's source files
+(`claudine_schema_shipped_corpus.rs`, `timings.rs`,
+`schema_validate_timings.rs`, `schema_nested_template_deferral.rs`): no
+`#[serde(default)]`, `unwrap_or_default()`, or `.ok()` on a load-bearing
+parse. The one `filter_map` is in the corpus guard's self-scan of its own
+`include_str!` literals and decides no verdict.
+
+### Review evidence: acceptance criteria
+
+| AC | Evidence |
+|---|---|
+| 1 Recursive shape and embedding | `claudine_schemas_embedded::{embedded_trigger_payloads_resolve_within_two_megabytes (DefKey families, 660,284 / 704,904 B), embedded_*_exports_resolve_without_disk_schemas, embedded_payloads_apply_without_disk_schemas}`; `every_file_loads_and_every_export_resolves` (Phase 3) |
+| 2 Catalog and generated-definition parity | `lifecycle_generated_operands` (parity table, overloads, arity, unknown/missing/extra), `lifecycle_schema_generation::*`, `generated_verb_keys_equal_the_darkmatter_catalogs` (Phases 2–3) |
+| 3 Recursive restrictions | `event_stacks_are_typed_at_every_depth`, `initialize_stacks_exclude_shell_at_every_depth`, `loop_gate_is_typed_at_every_depth`, `ac5_*` (Phase 3) |
+| 4 Depth fixtures | `ac5_depths_and_stack_shapes`, `depth6_wrong_verb_is_positioned_at_the_verb` (Phase 3); `claudine_schema_bundle::recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions` with `md schema triggers` (Phase 4); DMLS `the_shared_corpus_*` |
+| 5 Editor parity and passivity | `claudine_editor_parity::*` incl. `claudine_schema_validation_and_editor_requests_run_no_actions` (Phase 4) |
+| 6 Launch integration and corpus | `launch_trigger_schemas::*` (Phase 4); `claudine_schema_shipped_corpus::*` (Phase 5) |
+| 7 Docs and regeneration | Wave 8 docs above (no feature directory named); Wave 9 regeneration above |
+| 8 Deferred arguments and conversions | `lifecycle_operand_validation`, `schema_nested_template_deferral`, `lifecycle_event_binding` (Phase 2); `passive_parity_*` (Phase 3); launch event-time tests (Phase 4) |
+| 9 Side-effect metadata coverage | `effects::types::tests::*`, `lifecycle_schema_generation::a_side_effect_without_a_typed_entry_fails_the_projection` (Phase 2) |
+| 10 Recursive containers | `container_schema_recursion::*`, forbidden-`cancelled` suites (Phase 3); `depth_four_container_controls_validate_and_their_innermost_defects_are_located`, `depth4_branches_keep_each_events_profile` (Phase 4) |
+| 11 Validation time goal | Wave 9 sample above: 60.7–64.6 ms total, resolve dominant; goal met |
+
+**Final diff check:** the grammar, event permissions, ownership, trigger
+selection, validation phases, and CI scope are unchanged in this phase. Its
+production changes are the D24 timings deduplication and a comment in
+`md-lifecycle.yaml`. No fixture verdict changed in this phase. Added metadata
+or integration cost: none beyond Phase 4's.
+
+
+### Gates
+
+- **Scope calculator** (after every edit): `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, test-toolkit]`,
+  `change_class: package` (the tree still holds uncommitted Phase 4 work),
+  so every gate ran.
+- **`claudine`:** `just test`: 10,817 run, 10,817 passed (3 slow, the
+  existing `sequence_sources_cli` and `wrap_sequence_composition` tests),
+  9 skipped, 181 s. `just lint`: passed. `just check-tier-coverage claudine`:
+  0 stranded.
+- **Darkmatter (`darkmatter`, `darkmatter-cli`, `dmls`):** the first
+  `just test` stopped at `schema_nested_template_deferral::malformed_template_is_judged_as_written`
+  (a stale helper, D26; a deterministic assertion on the report, not a
+  load effect). After the fix: 12,097 run, 12,097 passed, 10 skipped
+  (includes 603 `dmls` and the 11 `lifecycle_schema_generation` tests).
+  `just lint`: passed (includes the zed-dmls wasm check).
+  `just check-tier-coverage darkmatter`: 0 stranded.
+- **Dependents:** `ValidationTimings`/`matched_triggers` has no consumer
+  outside Darkmatter (`git grep`); the comment-only `md-lifecycle.yaml`
+  change was covered by both full suites.
+- **Load-sensitive failures:** none.
+- **Cross-OS:** not run. This phase changed docs, an in-process corpus test
+  that reads files through `include_str!`/`manifest_dir!()`, a `Vec`
+  deduplication, and a YAML comment. No path, process, or `cfg` code changed.
+- **Status:** implementation complete, ready for review.
+
+## Pipeline Refresh
+
+- `2026-10-31-type-aware-evaluation` (step 21, plan not started): changed.
+  Wave 8's `is_file_type` step said to add the function to hand-maintained
+  verb lists in `lifecycle.yaml`/`md-lifecycle.yaml` and Claudine's
+  `action.yaml`/`lifecycle.yaml`. Those verbs are now generated typed
+  definitions. The step now runs `just -f darkmatter/justfile
+  regen-lifecycle-schema` for Darkmatter's generated regions, edits only
+  `md-lifecycle.yaml`'s two name patterns by hand, and adds Claudine's
+  per-verb references, which the generation drift test and
+  `generated_verb_keys_equal_the_darkmatter_catalogs` pin. A matching
+  reconciliation decision was added to its Phase 1 rulings. The spec itself
+  is unchanged, since its outcomes do not move.
+- No other active spec has a higher `pipeline_step` or names this spec in
+  `depends-on`.

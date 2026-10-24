@@ -39,6 +39,8 @@ related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-24-sequence-containers
     - 2026-10-28-schema-enhancements
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Claudine Lifecycle Schemas Use Recursive Types

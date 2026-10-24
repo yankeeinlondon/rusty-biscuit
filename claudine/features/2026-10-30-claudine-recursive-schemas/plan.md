@@ -10,6 +10,7 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - claudine
+    - claudine-cli
     - darkmatter
     - darkmatter-cli
     - dmls
@@ -124,6 +125,153 @@ skills_files_updated_during_phase_3:
     - .claude/skills/claudine/cli-commands.md
     - .claude/skills/claudine/timeline.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+docs_updated_during_phase_4:
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/lib/src/composition/lifecycle/tests/mixed_span.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md
+    - claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md
+    - claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md
+    - claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md
+    - claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md
+    - claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md
+    - claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+    - claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md
+    - claudine/lib/tests/fixtures/sequence-schema/level4-invalid.md
+    - claudine/lib/tests/l1/claudine_schema_parity.rs
+    - claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/container_schema_recursion.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/sequence-types.yaml
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/justfile
+    - darkmatter/lib/examples/lifecycle_schema_generator.rs
+    - darkmatter/lib/src/effects/mod.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/operands.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/tests/overloads.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/deferred.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/lib/tests/l1/lifecycle_generated_operands.rs
+    - darkmatter/lib/tests/l1/lifecycle_operand_validation.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/schemas/partials/mutations.yaml
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/schema.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - claudine/schemas/README.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/side-effects.md
+completed_phase: 5
+implemented: true
 ---
 
 # Recursive Lifecycle Schema Implementation Plan
@@ -279,19 +427,19 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 7 — Consumer Parity (parallel)
 
-- [ ] **Verify Schema CLI**
+- [x] **Verify Schema CLI**
   - Use Darkmatter's isolated `CliProcessFixture` to run `md schema validate` against the shared corpus, checking exit status, offending paths/keys, and source positions.
   - Prove the intended trigger is discovered with `md schema triggers`, independently of validation results. Preserve declaration precedence and validation phases, including disk versus embedded import behavior.
   - Assert valid depth 6 succeeds and the deep misspelled verb fails; all generated literal/deferred/matrix cases use the agreed verdicts.
   - Ownership: `darkmatter/cli` integration tests; declared repository reads only.
 
-- [ ] **Verify Editor Parity**
+- [x] **Verify Editor Parity**
   - Exercise DMLS using its existing in-process/LSP session harness, without opening an editor window. Match CLI diagnostic verdicts and source ranges for the shared corpus, including both depth-six fixtures.
   - At depth 4 in `then` and `else`, assert completion/hover for generated canonical verbs and long-form parameters. Preserve alias acceptance, initialization shell filtering, and ordinary loop-gate availability.
   - Recording fake evaluator/host/effect services prove passive requests. If integration changes are necessary, use the existing recursive traversal and shared projection; generic recursive traversal remains a prerequisite responsibility.
   - Ownership: `darkmatter/dmls` integration and tests; fixture manifest is read-only.
 
-- [ ] **Verify Launch Boundary**
+- [x] **Verify Launch Boundary**
   - Use Claudine's isolated command fixture and a portable recording fake provider. A malformed generated literal must fail preflight with its control key retained and no provider invocation; absence of invocation is observable evidence.
   - Supported deferred scalar and structured arguments must survive preflight unchanged, then bind through the established event-time check. Assert valid evaluated values succeed and wrong types fail using fake action/effect services.
   - Preserve optional events, initialization prohibition/backstop, precedence, and current failure mapping; no scrubbing invalid Claudine controls and no real shell/audio/provider execution.
@@ -303,13 +451,13 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 8 — Current Docs and Corpus (parallel)
 
-- [ ] **Update Current Guidance**
+- [x] **Update Current Guidance**
   - Update `claudine/docs/topics/schemas.md`, affected Darkmatter schema topic pages, and relevant `.claude/skills/claudine/` and `.claude/skills/darkmatter/` guidance. Lead with what authors can do and compact valid/invalid examples.
   - Explain recursive families, positional/long/bundle arguments, optional/null distinctions, numeric text conversion, deferred values, initialization restrictions, parser-only five-level limit, shared metadata ownership, and the exact deterministic authoring command.
   - Include a compact Mermaid flow for passive schema validation followed by parser/event-time checks. Remove current-doc claims of unrolled/untyped behavior; do not name feature directories in docs or alter historical specs/spikes.
   - Review behavior-changing symbol docs/comments for drift in touched production code. Update dependency docs only if dependencies actually change.
 
-- [ ] **Validate Shipped Corpus**
+- [x] **Validate Shipped Corpus**
   - Validate ordinary shipped examples and lifecycle documents plus frozen prompt copies against explicit schema/parser expectations. Declare repository-input reads using recognized patterns and source-input metadata when another package's source is read.
   - Keep live internal prompts out of ordinary L1/CI; retain opt-in `just test-prompts`. Ensure existing DMLS parity tests remain in the test graph.
   - Audit the complete per-field/per-format robustness matrix and suspicious parse patterns. Record the state of the full affected row and column for any discovered defect and fix it before closure.
@@ -317,17 +465,17 @@ Implement one parameterized matrix test per supported format, walking **all** po
 
 ### Wave 9 — Final Verification (serial)
 
-- [ ] **Prove Deterministic Regeneration**
+- [x] **Prove Deterministic Regeneration**
   - Run the documented generator with isolated temporary outputs; compare parsed structures with checked-in YAML for all projected definitions, short forms, bundles, and host filters. Repeat to prove stable output; confirm historical/frozen fixtures are untouched.
   - Resolve the final embedded payload and report byte size using the established convention. This is the final artifact regression assertion, not a repeated spike.
 
-- [ ] **Run Scoped Gates**
+- [x] **Run Scoped Gates**
   - Run nextest through `just test` in `claudine/` and `darkmatter/`, then `just lint` in both areas. Confirm the Darkmatter area recipe includes DMLS and the chosen authoring generator's tests are included; run its existing targeted recipe if necessary.
   - All new tests are hermetic L1: no terminal/browser focus, live network, real providers/effects/shells/audio, interactive prompts, or ambient checkout/home dependence. Do not run `cargo test` or `cargo fmt`.
   - Require portable fixture paths, public process fixtures, and registrations for macOS, Linux, native Windows, and WSL2. Use existing CI scheduling for environment evidence; do not add matrix cells or claim unexecuted OS results. Load the `os` skill if an OS-specific implementation or failure requires it.
   - Fix failures and rerun affected checks; broaden only for an actual changed dependency surface or unresolved failure. Record commands/results and any evidence limitations.
 
-- [ ] **Prepare Review Evidence**
+- [x] **Prepare Review Evidence**
   - Map specification AC1–AC11 to passing tests and artifact/doc evidence: AC1 embedding; AC2 catalog projection; AC3 restrictions; AC4 depth fixtures; AC5 editor/passivity; AC6 launch/corpus; AC7 docs/regeneration; AC8 conversion/deferred checks; AC9 metadata coverage; AC10 recursive containers (container paths to depth 4, every container event, forbidden `cancelled` actions, independent conditional-depth counts, DMLS `then`/`else` completion in `cancelled`); AC11 one `md schema validate -vv` sample of a nested-container Claudine document with command, document, result, host load, and stage breakdown recorded (a goal, not a gate).
   - Check the final diff for unintended grammar, permission, ownership, trigger, validation-phase, or CI-scope changes. Record departures, added metadata/integration cost, final payload size, and each deliberately changed fixture verdict in the implementation log.
   - Mark completed tasks and report implementation complete, ready for review. Preserve feature lifecycle location and specification snapshot; do not commit or move the feature.
