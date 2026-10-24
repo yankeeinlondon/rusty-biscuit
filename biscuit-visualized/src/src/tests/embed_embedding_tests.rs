@@ -1,4 +1,4 @@
-//! The page's embedded font: one `@font-face` per face and weight the page
+//! The page's embedded font: one `@font-face` per family and weight the page
 //! draws, covering the union of its diagrams' code points (AC-E3, R-E3), the
 //! budget log (AC-E6), the failure path (AC-E7), the family Inter is declared
 //! under (AC-E8), the page comments (AC-E14), and Inter's OFL line (AC-E15).
@@ -49,7 +49,7 @@ fn inter_chain() -> FontChain {
 }
 
 fn faces(chain: &FontChain) -> EmbeddedFaces {
-    choose_embedded_faces(&[MERMAID_STACK], chain)
+    choose_embedded_faces(&[MERMAID_STACK], &[], chain)
 }
 
 fn build(faces: &EmbeddedFaces, used: &[UsedGlyphs], chain: &FontChain) -> FontEmbedding {
@@ -135,7 +135,7 @@ fn real_diagrams_on_one_page_are_covered_by_the_subset() {
         })
         .collect();
     let used: Vec<UsedGlyphs> = svgs.iter().map(|svg| collect_used_glyphs(svg).expect("parses")).collect();
-    let faces = choose_embedded_faces(&[MERMAID_STACK], chain);
+    let faces = choose_embedded_faces(&[MERMAID_STACK], &[], chain);
     assert_eq!(faces.families[0].family, "Inter");
     let embedding = build(&faces, &used, chain);
     let rules = rules(&embedding.css);
@@ -197,7 +197,8 @@ fn a_page_embedding_only_a_host_face_has_no_ofl_line() {
 fn a_restricted_resolved_face_embeds_inter_and_says_why() {
     let installed = arial(0x0002, 0x0002);
     let chain = chain(&installed, None);
-    let (faces, _) = capture_warnings(|| faces(&chain));
+    // Forced, as a render drawing the refused face forces it.
+    let faces = choose_embedded_faces(&[MERMAID_STACK], &[MERMAID_STACK.to_string()], &chain);
     let embedding = build(&faces, &[drawn("Inter", "Animal", "")], &chain);
     assert_eq!(
         embedding.comments,
@@ -211,7 +212,7 @@ fn a_restricted_resolved_face_embeds_inter_and_says_why() {
 fn a_family_the_page_never_draws_is_not_embedded() {
     let installed = arial(0x0000, 0x0000);
     let chain = chain(&installed, None);
-    let faces = choose_embedded_faces(&[MERMAID_STACK, "Inter, sans-serif"], &chain);
+    let faces = choose_embedded_faces(&[MERMAID_STACK, "Inter, sans-serif"], &[], &chain);
     assert_eq!(faces.families.len(), 2);
     let embedding = build(&faces, &[drawn("Arial", "x", "")], &chain);
     assert_eq!(rules(&embedding.css).len(), 1);
@@ -297,7 +298,7 @@ fn a_subsetting_failure_embeds_nothing_and_warns() {
 fn the_css_references_nothing_outside_the_page() {
     let installed = arial(0x0000, 0x0000);
     let chain = chain(&installed, None);
-    let faces = choose_embedded_faces(&[MERMAID_STACK, "Inter"], &chain);
+    let faces = choose_embedded_faces(&[MERMAID_STACK, "Inter"], &[], &chain);
     let embedding = build(&faces, &[drawn("Arial", "ab", "cd"), drawn("Inter", "ef", "gh")], &chain);
     assert_eq!(rules(&embedding.css).len(), 4);
     let urls = embedding.css.matches("url(").count();
@@ -309,4 +310,82 @@ fn the_css_references_nothing_outside_the_page() {
         assert!(!rules_only.contains(external), "{external}");
     }
     assert!(!embedding.markup().contains("</style>\n<style>"), "one style element");
+}
+
+/// A chain whose only installed face is a permitted regular `Arial`, which
+/// the chain resolves for both weights.
+fn regular_only_arial_chain() -> FontChain {
+    let [regular, _] = arial(0x0000, 0x0000);
+    chain(&[regular], None)
+}
+
+/// The `(family declaration, weight)` of each rule, in order.
+fn rule_keys(css: &str) -> Vec<(String, u16)> {
+    rules(css).into_iter().map(|(family, weight, _)| (family, weight)).collect()
+}
+
+#[test]
+fn one_face_serving_both_weights_gets_a_rule_per_weight_drawn() {
+    let chain = regular_only_arial_chain();
+    let faces = faces(&chain);
+    let choice = &faces.families[0];
+    assert_eq!(choice.family, "Arial");
+    assert_eq!(choice.regular.id, choice.bold.id, "precondition: one face for both weights");
+    let embedding = build(&faces, &[drawn("Arial", "+String name ", "Zebra ")], &chain);
+    let rules = rules(&embedding.css);
+    assert_eq!(rule_keys(&embedding.css), [("'Arial'".to_string(), 400), ("'Arial'".to_string(), 700)]);
+    assert!(maps_all(&rules[0].2, "+String name "));
+    assert!(!maps_all(&rules[0].2, "Z"), "the regular subset keeps regular characters only");
+    assert!(maps_all(&rules[1].2, "Zebra "), "the bold rule carries the bold-only characters");
+    assert_eq!(embedding.comments.len(), 1, "one comment per family");
+}
+
+#[test]
+fn bold_only_use_of_a_face_serving_both_weights_embeds_one_bold_rule() {
+    let chain = regular_only_arial_chain();
+    let embedding = build(&faces(&chain), &[drawn("Arial", "", "Zebra ")], &chain);
+    assert_eq!(rule_keys(&embedding.css), [("'Arial'".to_string(), 700)]);
+    assert!(maps_all(&rules(&embedding.css)[0].2, "Zebra "));
+}
+
+#[test]
+fn requested_families_choosing_one_family_share_its_rules_and_union() {
+    for chain in [regular_only_arial_chain(), chain(&arial(0x0000, 0x0000), None)] {
+        let faces = choose_embedded_faces(&[MERMAID_STACK, "Arial, sans-serif"], &[], &chain);
+        assert_eq!(faces.families.len(), 2);
+        assert!(faces.families.iter().all(|choice| choice.family == "Arial"));
+        let used = [drawn("Arial", "ab ", "Z "), drawn("Arial", "cd ", "Y ")];
+        let embedding = build(&faces, &used, &chain);
+        let rules = rules(&embedding.css);
+        assert_eq!(rule_keys(&embedding.css), [("'Arial'".to_string(), 400), ("'Arial'".to_string(), 700)]);
+        assert!(maps_all(&rules[0].2, "abcd "));
+        assert!(maps_all(&rules[1].2, "YZ "));
+        assert_eq!(embedding.comments.len(), 1, "{:?}", embedding.comments);
+    }
+}
+
+/// A refused face is never embedded, even when glyphs reach it (which a
+/// render prevents by forcing the family to Inter): debug builds assert, and
+/// release builds skip the weight.
+#[test]
+#[cfg_attr(debug_assertions, should_panic(expected = "a refused face"))]
+fn a_refused_face_is_never_embedded() {
+    let chain = chain(&arial(0x0000, 0x0002), None);
+    let faces = faces(&chain);
+    let (embedding, _) = capture_warnings(|| build(&faces, &[drawn("Arial", "ab", "cd")], &chain));
+    assert_eq!(rule_keys(&embedding.css), [("'Arial'".to_string(), 400)]);
+}
+
+/// An installed face named Inter is not chosen, so a page whose other family
+/// falls back to the bundled Inter declares one face per weight as `Inter`.
+#[test]
+fn an_installed_inter_and_the_bundled_inter_never_share_a_page() {
+    let mut installed = arial(0x0002, 0x0002).to_vec();
+    installed.extend(super::embed_faces_tests::installed_inter());
+    let chain = chain(&installed, None);
+    let faces = choose_embedded_faces(&[MERMAID_STACK, "Inter, sans-serif"], &[MERMAID_STACK.to_string()], &chain);
+    assert!(faces.families.iter().all(|choice| choice.family == "Inter" && choice.bundled_inter), "{faces:?}");
+    let embedding = build(&faces, &[drawn("Inter", "ab", "cd")], &chain);
+    assert_eq!(rule_keys(&embedding.css), [("'Inter'".to_string(), 400), ("'Inter'".to_string(), 700)]);
+    assert!(embedding.rules.iter().all(|rule| chain.is_bundled_inter(rule.id)), "{:?}", embedding.rules);
 }

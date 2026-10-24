@@ -1,4 +1,4 @@
-//! The page's embedded font: one `@font-face` rule per embedded face and
+//! The page's embedded font: one `@font-face` rule per embedded family and
 //! weight the page's diagrams draw, the comments that say which face and
 //! why, and Inter's OFL attribution.
 //!
@@ -13,7 +13,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use resvg::usvg::fontdb::ID;
 
 use super::comment::{ofl_attribution, page_comment};
-use super::faces::{EmbeddedFace, EmbeddedFaces, FamilyChoice};
+use super::faces::{ChoiceReason, EmbeddedFace, EmbeddedFaces, FamilyChoice};
 use super::glyphs::UsedGlyphs;
 use super::subset::{SubsetError, subset, whole_face};
 use crate::fonts::FontChain;
@@ -28,7 +28,7 @@ type MakeFile<'a> = dyn Fn(&[u8], u32, Option<&BTreeSet<char>>) -> Result<Vec<u8
 /// embedded.
 pub(crate) const BUDGET_BYTES: usize = 60_000;
 
-/// One embedded face and weight.
+/// One embedded family and weight.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EmbeddedRule {
     /// The family the rule declares, which the labels lead with.
@@ -82,10 +82,13 @@ pub enum FontEmbeddingError {
 /// Builds the embedded font for a page whose diagrams chose `faces` and draw
 /// `used` (one entry per diagram).
 ///
-/// Each face is embedded once per weight that some diagram draws in its
-/// family (a weight no label uses is not embedded), as a subset holding the
-/// union of those diagrams' code points, or whole when its `fsType` forbids
-/// subsetting. A file over [`BUDGET_BYTES`] is still embedded, and logged.
+/// Each family gets one rule per weight that some diagram draws in it (a
+/// weight no label uses is not embedded, and a face that may not be embedded
+/// never is), whichever requested families chose it, as a subset of that weight's face holding the union of those
+/// diagrams' code points at that weight, or the whole face when its `fsType`
+/// forbids subsetting. A face serving both weights is embedded under each, as
+/// a separate file. A file over [`BUDGET_BYTES`] is still embedded, and
+/// logged.
 ///
 /// ## Errors
 ///
@@ -127,7 +130,11 @@ fn build(
     make_file: &MakeFile<'_>,
 ) -> Result<FontEmbedding, FontEmbeddingError> {
     let mut embedding = FontEmbedding::default();
-    let mut embedded: Vec<ID> = Vec::new();
+    // A rule is the family and weight it declares, and the face its file is
+    // cut from: one face can serve both weights of a family, with a
+    // different subset under each.
+    let mut embedded: Vec<(&str, u16, ID)> = Vec::new();
+    let mut commented: Vec<Commented<'_>> = Vec::new();
     for choice in &faces.families {
         let (mut regular, mut bold) = (BTreeSet::new(), BTreeSet::new());
         for glyphs in used.iter().flat_map(|diagram| diagram.for_family(&choice.family)) {
@@ -137,10 +144,20 @@ fn build(
         let mut css = String::new();
         let mut unsubset = None;
         for (face, weight, code_points) in [(&choice.regular, 400, regular), (&choice.bold, 700, bold)] {
-            if code_points.is_empty() || embedded.contains(&face.id) {
+            let seen = embedded.iter().any(|&(family, seen_weight, id)| {
+                family.eq_ignore_ascii_case(&choice.family) && (seen_weight, id) == (weight, face.id)
+            });
+            if code_points.is_empty() || seen {
                 continue;
             }
-            embedded.push(face.id);
+            // A render that draws a refused weight chooses the family as Inter
+            // instead (`faces::forced_inter`), so no glyphs reach this branch.
+            if let Err(refusal) = face.permission {
+                debug_assert!(false, "a refused face ({refusal:?}) has glyphs to embed");
+                tracing::warn!(family = choice.family, weight, ?refusal, "not embedding a face that may not be embedded");
+                continue;
+            }
+            embedded.push((&choice.family, weight, face.id));
             let file = face_file(choice, face, weight, &code_points, chain, make_file)?;
             css.push_str(&font_face_rule(&choice.family, weight, &file));
             if face.unsubset {
@@ -154,20 +171,41 @@ fn build(
                 unsubset: face.unsubset,
             });
         }
-        if css.is_empty() {
-            continue;
+        if !css.is_empty() {
+            if is_inter(choice) {
+                embedding.css.push_str(&ofl_attribution());
+                embedding.css.push('\n');
+            }
+            embedding.css.push_str(&css);
         }
-        if is_inter(choice) {
-            embedding.css.push_str(&ofl_attribution());
-            embedding.css.push('\n');
-        }
-        embedding.css.push_str(&css);
-        let comment = page_comment(choice, unsubset);
-        if !embedding.comments.contains(&comment) {
-            embedding.comments.push(comment);
+        // One comment per embedded family. Several requested families can
+        // share one (a generic that resolves nothing and a refused face both
+        // become Inter); the comment gives the reason that most explains the
+        // substitution, whichever choice embedded the rules.
+        if let Some(slot) = commented.iter_mut().find(|slot| slot.choice.family.eq_ignore_ascii_case(&choice.family)) {
+            if reason_rank(&choice.reason) > reason_rank(&slot.choice.reason) {
+                slot.choice = choice;
+            }
+            slot.unsubset = slot.unsubset.or(unsubset.copied());
+            embedding.comments[slot.index] = page_comment(slot.choice, slot.unsubset.as_ref());
+        } else if !css.is_empty() {
+            embedding.comments.push(page_comment(choice, unsubset));
+            commented.push(Commented {
+                choice,
+                index: embedding.comments.len() - 1,
+                unsubset: unsubset.copied(),
+            });
         }
     }
     Ok(embedding)
+}
+
+/// The comment of one embedded family: the choice whose reason it gives, its
+/// index among the page's comments, and the family's face embedded unsubset.
+struct Commented<'a> {
+    choice: &'a FamilyChoice,
+    index: usize,
+    unsubset: Option<EmbeddedFace>,
 }
 
 /// The TrueType file embedded for `face` at `weight`, logged when it is over
@@ -221,6 +259,17 @@ fn font_face_rule(family: &str, weight: u16, file: &[u8]) -> String {
         css_quoted(family),
         BASE64.encode(file)
     )
+}
+
+/// How much `reason` explains which face a family is embedded as: a refusal
+/// most, the chain reaching no face least.
+fn reason_rank(reason: &ChoiceReason) -> u8 {
+    match reason {
+        ChoiceReason::NoInstalledFace => 0,
+        ChoiceReason::Resolved => 1,
+        ChoiceReason::MermaidFontInter => 2,
+        ChoiceReason::Refused { .. } => 3,
+    }
 }
 
 /// Whether `choice` embeds Inter, whose license notice the page repeats.

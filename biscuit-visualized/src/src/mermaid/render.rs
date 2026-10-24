@@ -28,8 +28,11 @@
 //!    (step 10′); PNG never does.
 //! 5. With the [embedded-font opt-in](MermaidDiagram::with_embedded_font)
 //!    (HTML static SVG only), labels are measured in the face the page will
-//!    embed for their family, with plain glyph advances, and the code points
-//!    each family draws are kept beside the SVG in the cache.
+//!    embed for their family, as the embedded file draws them (plain glyph
+//!    advances from a subset, normal shaping from a face embedded whole), and
+//!    the code points each family draws are kept beside the SVG in the cache.
+//!    A diagram that draws a weight whose face may not be embedded is laid
+//!    out again with that family in Inter, under the first layout's key.
 //!
 //! Every failure, a time budget exceeded included, is a
 //! [`MermaidError::RenderFailed`]; callers show the source as a code block
@@ -56,6 +59,7 @@ use super::config::{MermaidConfig, MermaidTheme};
 use super::contrast::{author_text_colors, parse_css_color, readable_text};
 use super::design;
 use super::embed::glyphs::{UsedGlyphs, collect_used_glyphs};
+use super::embed::faces::forced_inter;
 use super::embed::page::{DiagramFont, FontRecord};
 use super::error::MermaidError;
 use super::gitgraph::{GitGraphGeometry, TAG_GAP_EM};
@@ -303,10 +307,16 @@ impl MermaidDiagram {
     /// unchanged.
     ///
     /// With it on, each requested font family is measured in the face the
-    /// HTML page will embed for it: the face the font chain resolves when its
-    /// `OS/2` `fsType` permits embedding, else the bundled Inter. Labels are
-    /// measured with plain glyph advances, which is what the embedded subset
-    /// draws, and every label's `font-family` leads with that face's family.
+    /// HTML page will embed for it: the face the font chain resolves when the
+    /// `OS/2` `fsType` of every weight the diagram draws permits embedding,
+    /// else the bundled Inter for the whole family. Those weights are known
+    /// only after layout, so a diagram that draws a refused weight is laid
+    /// out a second time in Inter. Labels are
+    /// measured as the embedded file draws them: plain glyph advances for a
+    /// subset, which carries no layout tables, and normal shaping (kerning
+    /// included) for a face whose `fsType` forbids subsetting, which is
+    /// embedded whole. Every label's `font-family` leads with that face's
+    /// family.
     /// [`render_with_font`](Self::render_with_font) returns, beside the
     /// artifact, the [`DiagramFont`] the page builds its `@font-face` rules
     /// from ([`page_font`](super::page_font)). The output has its own cache
@@ -411,7 +421,9 @@ impl MermaidDiagram {
         request: &RenderRequest,
     ) -> Result<(RenderedArtifact, Option<DiagramFont>), MermaidError> {
         let embed = self.embeds_font(request.format);
-        let prepared = self.prepare(chain, embed)?;
+        let prepared = self.prepare(chain, embed.then_some(NONE_FORCED))?;
+        // A second opt-in pass (below) is stored under this first key, which
+        // is the key a later render's hit path computes.
         let cache_key = self.cache_key_for(&prepared, chain, request);
 
         let cache = FileCache::new();
@@ -430,16 +442,30 @@ impl MermaidDiagram {
             }
         }
 
-        let label_measurer = label_measurer(chain, embed);
-        let svg = self.render_svg(&prepared, chain, &label_measurer, &cache_key, self.output_target(request.format))?;
-        let svg = with_background(&svg, self.background_color(request.background));
-        let font = match label_measurer.embedded_faces() {
-            Some(faces) => {
-                let glyphs = collect_used_glyphs(&svg).unwrap_or_else(|error| {
-                    tracing::warn!(%error, "the embedded font's characters could not be read from the SVG; it embeds none");
-                    UsedGlyphs::default()
-                });
-                let record = FontRecord::new(&faces, &glyphs);
+        let target = self.output_target(request.format);
+        let measurer = label_measurer(chain, embed.then_some(NONE_FORCED));
+        let mut svg = with_background(
+            &self.render_svg(&prepared, chain, &measurer, &cache_key, target)?,
+            self.background_color(request.background),
+        );
+        let font = match measurer.embedded_faces() {
+            Some(mut faces) => {
+                let mut glyphs = used_glyphs(&svg);
+                // The weights a diagram draws are known only now: a family
+                // that draws a refused weight is laid out again as Inter.
+                let forced = forced_inter(&faces, &glyphs);
+                if !forced.is_empty() {
+                    let prepared = self.prepare(chain, Some(&forced))?;
+                    let forced_measurer = label_measurer(chain, Some(&forced));
+                    svg = with_background(
+                        &self.render_svg(&prepared, chain, &forced_measurer, &cache_key, target)?,
+                        self.background_color(request.background),
+                    );
+                    faces = forced_measurer.embedded_faces().unwrap_or(faces);
+                    glyphs = used_glyphs(&svg);
+                    debug_assert!(forced_inter(&faces, &glyphs).is_empty(), "the bundled Inter is always embeddable");
+                }
+                let record = FontRecord::new(&faces, &forced, &glyphs);
                 let json = serde_json::to_vec(&record).map_err(|error| MermaidError::RenderFailed(error.to_string()))?;
                 // Stored before the SVG, so a stored SVG always has its record.
                 cache.store_sidecar(VisualizationKind::Mermaid, &cache_key, OutputFormat::Svg, FONT_RECORD_SUFFIX, &json)?;
@@ -520,7 +546,7 @@ impl MermaidDiagram {
     #[doc(hidden)]
     pub fn gitgraph_geometry(&self) -> Result<Option<GitGraphGeometry>, MermaidError> {
         let chain = default_chain();
-        let prepared = self.prepare(chain, false)?;
+        let prepared = self.prepare(chain, None)?;
         let measurer = LabelMeasurer::text_measurer(chain);
         let Some(json) = self.layout_json(&prepared.source, &prepared, &measurer)? else {
             return Ok(None);
@@ -539,8 +565,9 @@ impl MermaidDiagram {
 
     /// Pipeline steps 1–3b: the site config, then the source rewrites. A
     /// gitGraph's tags are measured as the render measures them, so with
-    /// `embed` in the faces of the embedded-font opt-in.
-    fn prepare(&self, chain: &Arc<FontChain>, embed: bool) -> Result<Prepared, MermaidError> {
+    /// `embed` (the requested families forced to Inter) in the faces of the
+    /// embedded-font opt-in.
+    fn prepare(&self, chain: &Arc<FontChain>, embed: Option<&[String]>) -> Result<Prepared, MermaidError> {
         if is_zenuml(&self.instructions) {
             return Err(MermaidError::RenderFailed(
                 "ZenUML diagrams are not rendered; showing the source".to_string(),
@@ -697,21 +724,21 @@ impl MermaidDiagram {
         chain: &Arc<FontChain>,
         request: &RenderRequest,
     ) -> Result<String, MermaidError> {
-        let prepared = self.prepare(chain, self.embeds_font(request.format))?;
+        let prepared = self.prepare(chain, self.embeds_font(request.format).then_some(NONE_FORCED))?;
         Ok(self.cache_key_for(&prepared, chain, request))
     }
 
     /// The site config [`render`](Self::render) hands Merman.
     #[cfg(test)]
     pub(crate) fn prepared_site_config(&self) -> serde_json::Value {
-        self.prepare(default_chain(), false).map(|prepared| prepared.site_config).unwrap_or_default()
+        self.prepare(default_chain(), None).map(|prepared| prepared.site_config).unwrap_or_default()
     }
 
     /// The compiled design's JSON [`render`](Self::render) applies, `None`
     /// when the author's theme keys own the styling.
     #[cfg(test)]
     pub(crate) fn prepared_design(&self) -> Option<serde_json::Value> {
-        self.prepare(default_chain(), false).ok().and_then(|prepared| prepared.design)
+        self.prepare(default_chain(), None).ok().and_then(|prepared| prepared.design)
     }
 
     /// Merman's theme evidence for the SVG [`render`](Self::render) draws:
@@ -720,7 +747,7 @@ impl MermaidDiagram {
     #[cfg(test)]
     pub(crate) fn theme_evidence(&self) -> Result<(String, Vec<String>), MermaidError> {
         let chain = default_chain();
-        let prepared = self.prepare(chain, false)?;
+        let prepared = self.prepare(chain, None)?;
         let measurer = LabelMeasurer::text_measurer(chain);
         let request = svg_request(measurer, "bv-evidence")?;
         let control = self.control();
@@ -750,7 +777,7 @@ impl MermaidDiagram {
     /// The source after pipeline step 3b, as Merman receives it.
     #[cfg(test)]
     pub(crate) fn rewritten_source(&self) -> Result<String, MermaidError> {
-        Ok(self.prepare(default_chain(), false)?.source)
+        Ok(self.prepare(default_chain(), None)?.source)
     }
 
     /// Merman's resvg-safe SVG for the prepared source, measured by
@@ -893,9 +920,24 @@ impl MermaidDiagram {
     }
 }
 
-/// The measurer for one render: with `embed`, the embedded-font opt-in's.
-fn label_measurer(chain: &Arc<FontChain>, embed: bool) -> Arc<LabelMeasurer> {
-    Arc::new(if embed { LabelMeasurer::embedding(chain) } else { LabelMeasurer::new(chain) })
+/// The measurer for one render: with `embed`, the embedded-font opt-in's,
+/// with those requested families forced to Inter.
+fn label_measurer(chain: &Arc<FontChain>, embed: Option<&[String]>) -> Arc<LabelMeasurer> {
+    Arc::new(match embed {
+        Some(forced_inter) => LabelMeasurer::embedding_forcing(chain, forced_inter),
+        None => LabelMeasurer::new(chain),
+    })
+}
+
+/// The opt-in's first pass forces no family to Inter.
+const NONE_FORCED: &[String] = &[];
+
+/// The code points `svg` draws, or none (logged) when it cannot be read.
+fn used_glyphs(svg: &str) -> UsedGlyphs {
+    collect_used_glyphs(svg).unwrap_or_else(|error| {
+        tracing::warn!(%error, "the embedded font's characters could not be read from the SVG; it embeds none");
+        UsedGlyphs::default()
+    })
 }
 
 /// The [`DiagramFont`] kept beside the cached SVG `key`, or `None` when the

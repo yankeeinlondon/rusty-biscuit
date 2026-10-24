@@ -46,7 +46,7 @@ let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
 
 - `biscuit-visualized/docs/merman.md`: the Mermaid pipeline with owners, time budget, fallback, themes (fixed and terminal palettes, readable text, accents, author precedence), fonts (`MERMAID_FONT`, resolution chain, bundled Inter / Noto Emoji), the `\n` rewrite, post-process, the HTML static target, and cache identity.
 - `biscuit-visualized/docs/mermaid-gitgraph.md`: gitGraph tag spacing (`commitSpacing` written only when tags on different commits collide, to a one-em gap; an author's own value wins) and the `gitgraph_geometry()` test API.
-- `biscuit-visualized/docs/mermaid-embedded-font.md`: the HTML static embedded-font opt-in: `fsType` and the face rule (Inter fallback), subsetting and the 60 KB budget, page markup, failure fallback, cache record.
+- `biscuit-visualized/docs/mermaid-embedded-font.md`: the HTML static embedded-font opt-in: `fsType` and the face rule (Inter fallback when a drawn weight is refused, decided per diagram), subsetting and the 60 KB budget, page markup, failure fallback, cache record.
 - `biscuit-visualized/docs/dot-graph.md`: the DOT subset, cluster syntax, and the resolution-tuning case study.
 
 ## Mermaid in one paragraph
@@ -94,7 +94,7 @@ let req = RenderRequest::default().with_target_width(540).with_row_height(18); /
 `target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
 - Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/`)
-- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv5`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv6`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
 - `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
@@ -136,7 +136,7 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `cache/file_cache.rs` | `FileCache`, `MERMAID_BACKEND` |
 | `raster/png.rs` | SVG-to-PNG rasterization via resvg |
 | `fonts/` | Font chain (`chain.rs`, cache identity), shaper (`shaper.rs`), Merman measurer (`measure.rs`); crate-private |
-| `mermaid/embed/` | Embedded-font opt-in (`MermaidDiagram::with_embedded_font`, HTML static SVG only): `fsType` classifier and per-family face choice (`FaceChooser`, used by `LabelMeasurer::embedding`, which measures plain advances), code-point/weight collector (`roxmltree` + `simplecss` cascade, as usvg), `allsorts` subsetter, `@font-face` builder and page comments; public `DiagramFont` (from `render_with_font`, or the component's `with_embedded_font` + `render_to_svg_with_font`, which Darkmatter's page path uses), `page_font` → `PageFont` (`page.rs`). The cache keeps a `{key}.font.json` record beside the SVG, never the subset |
+| `mermaid/embed/` | Embedded-font opt-in (`MermaidDiagram::with_embedded_font`, HTML static SVG only): `fsType` classifier and per-family, per-diagram face choice (`FaceChooser`, used by `LabelMeasurer::embedding_forcing`; a family drawing a refused weight is laid out again as Inter, see `forced_inter`; the measurer measures plain advances for a subset face and normal shaping for one embedded whole), code-point/weight collector (`roxmltree` + `simplecss` cascade, as usvg), `allsorts` subsetter, `@font-face` builder and page comments; public `DiagramFont` (from `render_with_font`, or the component's `with_embedded_font` + `render_to_svg_with_font`, which Darkmatter's page path uses), `page_font` → `PageFont` (`page.rs`). The cache keeps a `{key}.font.json` record beside the SVG, never the subset |
 
 ## Dependencies
 

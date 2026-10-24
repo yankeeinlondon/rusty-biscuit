@@ -55,15 +55,24 @@ pub(crate) fn ofl_attribution() -> String {
 pub(crate) fn page_comment(choice: &FamilyChoice, unsubset: Option<&EmbeddedFace>) -> String {
     let reason = match &choice.reason {
         ChoiceReason::Resolved => {
-            let (regular, bold) = (&choice.regular, &choice.bold);
-            if (regular.fs_type, regular.permission) == (bold.fs_type, bold.permission) {
-                format!("the face the font chain resolved, {}", permission_text(regular))
-            } else {
-                format!(
+            // A refused weight is never drawn, so the comment describes only
+            // the permitted ones.
+            match (choice.regular.permission, choice.bold.permission) {
+                (Ok(regular), Ok(bold)) if (choice.regular.fs_type, regular) == (choice.bold.fs_type, bold) => {
+                    format!("the face the font chain resolved, {}", permission_text(choice.regular.fs_type, regular))
+                }
+                (Ok(regular), Ok(bold)) => format!(
                     "the face the font chain resolved, {} regular, {} bold",
-                    permission_text(regular),
-                    permission_text(bold)
-                )
+                    permission_text(choice.regular.fs_type, regular),
+                    permission_text(choice.bold.fs_type, bold)
+                ),
+                (Ok(regular), Err(_)) => {
+                    format!("the face the font chain resolved, {}", permission_text(choice.regular.fs_type, regular))
+                }
+                (Err(_), Ok(bold)) => {
+                    format!("the face the font chain resolved, {}", permission_text(choice.bold.fs_type, bold))
+                }
+                (Err(_), Err(_)) => "the face the font chain resolved".to_string(),
             }
         }
         ChoiceReason::MermaidFontInter => "selected by MERMAID_FONT=Inter".to_string(),
@@ -93,11 +102,11 @@ pub(crate) fn page_comment(choice: &FamilyChoice, unsubset: Option<&EmbeddedFace
     )
 }
 
-fn permission_text(face: &EmbeddedFace) -> String {
-    let permission = match face.permission {
+fn permission_text(fs_type: u16, permission: Permission) -> String {
+    let permission = match permission {
         Permission::Installable => "Installable",
         Permission::Editable => "Editable",
         Permission::PreviewAndPrint => "Preview & Print",
     };
-    format!("fsType {:#06X} ({permission})", face.fs_type)
+    format!("fsType {fs_type:#06X} ({permission})")
 }

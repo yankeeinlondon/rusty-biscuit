@@ -30,15 +30,21 @@ type FaceKey = (Option<String>, Option<String>, Option<String>);
 ///
 /// A measurer made with [`embedding`](Self::embedding) measures for the
 /// embedded-font opt-in instead: each requested family in the face the opt-in
-/// embeds for it (chosen once per family by a [`FaceChooser`], over both
-/// weights), with plain glyph advances, because the embedded subset carries no
-/// OpenType layout tables. Nothing global changes: other renders over the
-/// same chain still measure as resolved.
+/// embeds for it (chosen once per family by a [`FaceChooser`]; a refused
+/// weight is measured in its resolved face, and a render that draws it is
+/// measured again with the family forced to Inter), shaped as the browser
+/// draws the file embedded for that face:
+/// plain glyph advances for a subset, which carries no OpenType layout
+/// tables, and normal shaping (kerning, `GSUB`) for a face embedded whole
+/// because its `fsType` forbids subsetting. Nothing global changes: other
+/// renders over the same chain still measure as resolved.
 pub(crate) struct LabelMeasurer {
     chain: Arc<FontChain>,
     /// usvg's family for text that names none (`usvg::Options::font_family`).
     default_family: String,
-    faces: Mutex<HashMap<FaceKey, Option<ID>>>,
+    /// The face each style key resolves to, and whether it shapes with its
+    /// layout tables.
+    faces: Mutex<HashMap<FaceKey, Option<(ID, bool)>>>,
     shaped: Mutex<HashMap<(String, FaceKey, u32), Arc<Shaped>>>,
     /// Set for the embedded-font opt-in.
     chooser: Option<FaceChooser>,
@@ -57,9 +63,16 @@ impl LabelMeasurer {
 
     /// A measurer for the embedded-font opt-in over `chain` (see the type's
     /// docs).
+    #[cfg(test)]
     pub(crate) fn embedding(chain: &Arc<FontChain>) -> Self {
+        LabelMeasurer::embedding_forcing(chain, &[])
+    }
+
+    /// [`embedding`](Self::embedding), with the requested families in
+    /// `forced_inter` measured as the bundled Inter.
+    pub(crate) fn embedding_forcing(chain: &Arc<FontChain>, forced_inter: &[String]) -> Self {
         LabelMeasurer {
-            chooser: Some(FaceChooser::new(chain)),
+            chooser: Some(FaceChooser::new(chain, forced_inter)),
             ..LabelMeasurer::new(chain)
         }
     }
@@ -147,13 +160,16 @@ impl LabelMeasurer {
             return Arc::clone(hit);
         }
         let query = self.query(style);
-        let params = ShapeParams {
-            layout_tables: self.chooser.is_none(),
-            ..ShapeParams::for_query(&query, size)
-        };
-        let shaped = Arc::new(self.face_for(&key.1, &query).map_or_else(Shaped::default, |face| {
-            shaper::shape(&self.chain, face, text, &params)
-        }));
+        let shaped = Arc::new(self.face_for(&key.1, &query).map_or_else(
+            Shaped::default,
+            |(face, layout_tables)| {
+                let params = ShapeParams {
+                    layout_tables,
+                    ..ShapeParams::for_query(&query, size)
+                };
+                shaper::shape(&self.chain, face, text, &params)
+            },
+        ));
         lock(&self.shaped).insert(key, Arc::clone(&shaped));
         shaped
     }
@@ -170,7 +186,7 @@ impl LabelMeasurer {
         if let Some(chooser) = &self.chooser {
             return Some(chooser.choice(&self.requested_family(&key)).family);
         }
-        let face = self.face_for(&key, &self.query(style))?;
+        let (face, _) = self.face_for(&key, &self.query(style))?;
         self.chain
             .database()
             .face(face)
@@ -178,12 +194,17 @@ impl LabelMeasurer {
             .map(|(name, _)| name.clone())
     }
 
-    /// The face `query` (built from the style `key` names) resolves to,
-    /// cached per key.
-    fn face_for(&self, key: &FaceKey, query: &FontQuery) -> Option<ID> {
+    /// The face `query` (built from the style `key` names) resolves to, and
+    /// whether it shapes with its OpenType layout tables, cached per key.
+    /// Only an opt-in face embedded as a subset shapes without them: the
+    /// subset keeps none, while a whole face keeps them all.
+    fn face_for(&self, key: &FaceKey, query: &FontQuery) -> Option<(ID, bool)> {
         *lock(&self.faces).entry(key.clone()).or_insert_with(|| match &self.chooser {
-            Some(chooser) => Some(chooser.choice(&self.requested_family(key)).face_for_weight(query.weight)),
-            None => self.chain.resolve(query),
+            Some(chooser) => {
+                let face = chooser.choice(&self.requested_family(key)).face_for_weight(query.weight);
+                Some((face.id, face.unsubset))
+            }
+            None => self.chain.resolve(query).map(|face| (face, true)),
         })
     }
 

@@ -27,7 +27,8 @@ pub(crate) struct ShapeParams {
     /// Whether the face's OpenType layout tables (`GSUB`, `GPOS`, `GDEF`,
     /// `kern`, and the AAT ones) take part. Off, each face is shaped as only
     /// the tables an embedded subset keeps (see [`subset_tables`]): plain glyph
-    /// advances, which is what a browser draws from that subset.
+    /// advances, which is what a browser draws from that subset. A face
+    /// embedded whole keeps them on.
     pub(crate) layout_tables: bool,
     /// Font variations, before the automatic `opsz`.
     pub(crate) variations: Vec<rustybuzz::Variation>,

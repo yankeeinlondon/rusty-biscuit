@@ -121,39 +121,62 @@ comment.
 
 ## Which face is embedded
 
-The face embedded is always the face measured, so the choice is made per
-requested `font-family` list, for regular and bold, **before** any label of
-that family is laid out, and kept for the whole render.
+The face embedded is always the face measured. The choice is made per
+requested `font-family` list and per diagram, from the weights that diagram
+actually draws, and is kept for the whole render.
 
 ```mermaid
 flowchart TD
-    R["requested font-family"] --> M{"MERMAID_FONT=Inter<br/>selects the bundled Inter?"}
-    M -->|yes| I["embed Inter"]
+    R["requested font-family"] --> M{"MERMAID_FONT=Inter, or the<br/>resolved face is named Inter?"}
+    M -->|yes| I["embed the bundled Inter"]
     M -->|no| C{"font chain resolves<br/>an installed face?"}
     C -->|no| I
-    C -->|yes| O{"TrueType outlines<br/>(glyf), not variable?"}
-    O -->|no| I
-    O -->|yes| P{"fsType permits embedding<br/>(regular and bold)?"}
+    C -->|yes| P{"every weight the diagram draws<br/>may be embedded?"}
     P -->|no| I
     P -->|yes| S{"no-subsetting bit?"}
     S -->|no| F["embed the face, subset"]
     S -->|yes| W["embed the face, whole"]
 ```
 
+A face may be embedded when its outlines are static TrueType (`glyf`, not
+variable) and its `fsType` permits it (the table above).
+
+Which weights a diagram draws is known only after it is laid out, so a
+diagram is first laid out in the resolved faces. If it turns out to draw a
+weight whose face may not be embedded, it is laid out again with that family
+measured in Inter, and the second layout is the one returned and cached. For
+example, with an installed Arial:
+
+| Arial's `fsType` | Diagram | Draws | Embedded |
+| --- | --- | --- | --- |
+| regular Installable, bold Restricted | `flowchart LR` with plain nodes | regular only | Arial, a 400 rule |
+| regular Restricted, bold Installable | `classDiagram` with only `class Zebra` | bold only (the title) | Arial, a 700 rule |
+| regular Installable, bold Restricted | `classDiagram` with a title and members | regular and bold | Inter, 400 and 700 rules |
+
 - **The resolved face first.** The face is the one the normal
   [resolution chain](./merman.md#the-resolution-chain) picks for the family:
   `MERMAID_FONT`, then the requested CSS stack, then the OS's generic family,
   then the sans-serif rule. It is the family's own face, not a fallback face
   used for characters it lacks.
-- **One family, one face.** If the regular or the bold face of a family may
-  not be embedded, the whole family becomes Inter, so one family never mixes
-  two faces' metrics. A refused face is logged as a warning.
+- **One family, one face.** If any weight a diagram draws in a family may not
+  be embedded, the whole family becomes Inter for that diagram, so one family
+  never mixes two faces' metrics. A weight the diagram never draws does not
+  count. The substitution is logged as a warning when the diagram is
+  rendered (a later cache hit repeats the choice without logging).
+- **Per diagram, on one page.** Two diagrams on one page can choose
+  differently for the same requested family: one drawing only the permitted
+  regular keeps Arial, one also drawing the Restricted bold uses Inter. The
+  page then embeds both: Arial's regular for the first diagram, and Inter's
+  rules for the second.
 - **Outline format.** The page declares `format("truetype")`, so only
   TrueType-outline (`glyf`) faces qualify. A CFF or CFF2 face, a variable
   face (`fvar`), or a face with no `glyf` table embeds Inter instead.
 - **Inter by name.** `MERMAID_FONT=Inter` (or a stack that names `Inter`)
-  gives the bundled Inter. Where a copy of Inter is installed, the chain finds
-  that copy first, and it is judged by its own `fsType` like any other face.
+  gives the bundled Inter. Where a copy of Inter is installed and the chain
+  resolves to it, the opt-in still measures and embeds the bundled Inter: the
+  page declares Inter's faces under the name `Inter`, and another family of
+  the same page may fall back to the bundled Inter, so two different files
+  can never share that name and weight.
 
 The page comment before the `<style>` element says, for each embedded family,
 which face was embedded and why:
@@ -169,6 +192,13 @@ which face was embedded and why:
 <!-- mermaid font: "Y" embedded; the face the font chain resolved, fsType 0x0100 (Installable); embedded unsubset because fsType 0x0100 forbids subsetting -->
 ```
 
+When several requested families end up as one embedded family (for example
+an unresolvable `sans-serif` and a refused Arial both become Inter), the page
+has one comment for it, giving the reason that best explains the
+substitution: a refusal first, then `MERMAID_FONT=Inter`, then the resolved
+face, then "no installed face". A Resolved comment names the permission of
+the weights that may be embedded only.
+
 Font names in the comment lose control characters, `<`, `>`, every `--` and
 `*/`, and a trailing `-`, so a crafted name cannot end the comment early.
 
@@ -177,9 +207,17 @@ Font names in the comment lose control characters, `<`, `>`, every `--` and
 After the diagrams are rendered, the characters each family draws are read
 from the final SVGs through their CSS, the way the rasterizer reads them:
 bold text (weight 600 and up, `bold`, `bolder`) is counted for the bold face,
-the rest for the regular face, and a space is always added. Each face is
-embedded once per weight a page draws, holding the union of every diagram's
-characters; a weight or family the page never draws is not embedded.
+the rest for the regular face, and a space is always added. Each family gets
+one `@font-face` rule per weight a page draws, holding the union of every
+diagram's characters at that weight; a weight or family the page never draws
+is not embedded. Two diagrams whose `font-family` lists choose the same family
+share its rules.
+
+A family with only one installed face uses that face for both weights. It
+still gets a rule for each weight it draws, each a separate subset: for
+example, a class diagram whose title `Zebra` is bold and whose member
+`+String name` is regular gets a 400 rule without `Z` and a 700 rule that has
+it.
 
 The subset is made with [`allsorts`](https://github.com/yeslogic/allsorts) and
 keeps the tables a browser needs: `cmap` (characters to glyphs), `OS/2`
@@ -191,13 +229,26 @@ therefore measures labels with the face's plain glyph advances, which is
 exactly what the browser draws from the subset; text is slightly wider than in
 a kerned render, and the boxes match it.
 
+A face embedded whole (see **Unsubset faces** below) keeps every table, so the browser
+kerns it, and the opt-in measures its labels with normal shaping instead. The
+choice follows the file emitted for each weight: with `0x0100` on the regular
+face only, regular labels are measured kerned and bold labels with plain
+advances.
+
+```text
+AVAVAVAVAVAVAVAV at 16 px in Inter Regular
+  subset (no GPOS):  176.625 px   plain advances
+  whole face:        160.219 px   kerned
+```
+
 - **Budget.** Each weight's file should stay under 60,000 bytes (measured
   before base64). A file over the budget is still embedded, and its size is
   logged at `info`.
 - **Unsubset faces.** A face with the no-subsetting bit is embedded whole (one
   file per weight, the same `@font-face` shape), which is far larger: Inter
   whole is about 410 KB per weight. This is logged at `info` and named in the
-  page comment.
+  page comment. Its labels are measured with kerning, as the browser draws
+  them.
 - **Characters the face lacks.** CJK, emoji, and other characters the face
   does not map are left out of the subset; the reader's browser draws them in
   its own fallback face.
@@ -220,7 +271,10 @@ Restricted face replaced by Inter, or a different `MERMAID_FONT`) changes the
 key through the font identity it already carries.
 
 Beside an opt-in SVG the cache stores a small record, `{key}.font.json`, with
-the requested families and the characters each family draws per weight, so a
-cache hit can return its `DiagramFont` without reading the SVG again. The
+the requested families, those the render chose as Inter because it draws a
+refused weight, and the characters each family draws per weight, so a cache
+hit can return the same `DiagramFont` without laying the diagram out or
+reading the SVG again. A diagram laid out a second time is stored under the
+key of its first layout, which is the key a later render checks. The
 subset itself is never cached; `page_font` builds it for each page. An SVG
 whose record is missing or unreadable is rendered again.

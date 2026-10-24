@@ -29,7 +29,9 @@ pub enum SubsetError {
 /// reader's fallback font, never taken from another face. The subset keeps
 /// `cmap`, `OS/2`, and `name` (with its copyright and license records) along
 /// with the outline and metric tables; `allsorts` writes no `GPOS`, `GSUB`,
-/// or `kern`, so the subset draws plain glyph advances.
+/// or `kern`, so the subset draws plain glyph advances. A face embedded
+/// [whole](whole_face) keeps those tables, and the opt-in measures it with
+/// normal shaping.
 pub(crate) fn subset(data: &[u8], index: u32, code_points: &BTreeSet<char>) -> Result<Vec<u8>, SubsetError> {
     with_provider(data, index, |provider| {
         let glyph_ids = glyph_ids(provider, code_points)?;

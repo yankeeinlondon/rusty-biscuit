@@ -668,7 +668,7 @@ actually receive. It changes when any of these change:
 
 - the backend id ([`MERMAID_BACKEND`](../src/src/cache/file_cache.rs)),
   `merman@<first 12 characters of the pinned rev>+bv<n>`
-  (currently `merman@6e6b1e6554e8+bv5`). `<n>` versions this crate's own
+  (currently `merman@6e6b1e6554e8+bv6`). `<n>` versions this crate's own
   layer (source rewrites, post-process, accents, contrast pass, background)
   and is bumped whenever
   that layer changes output, so older artifacts are never served;

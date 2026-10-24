@@ -89,7 +89,7 @@ fn css_strings_escape_quotes_backslashes_and_markup() {
 fn face(permission: Permission, fs_type: u16) -> EmbeddedFace {
     EmbeddedFace {
         id: ID::dummy(),
-        permission,
+        permission: Ok(permission),
         fs_type,
         unsubset: fs_type & 0x0100 != 0,
     }
@@ -145,6 +145,20 @@ fn the_comment_names_a_resolved_face_and_its_permission() {
         "<!-- mermaid font: \"Arial\" embedded; the face the font chain resolved, \
          fsType 0x0000 (Installable) regular, fsType 0x0008 (Editable) bold -->"
     );
+    // A refused weight is never drawn, so only the permitted one is named.
+    let restricted = EmbeddedFace {
+        permission: Err(Refusal::Restricted { fs_type: 0x0002 }),
+        ..face(Permission::Installable, 0x0002)
+    };
+    for (regular, bold) in [
+        (face(Permission::Editable, 0x0008), restricted),
+        (restricted, face(Permission::Editable, 0x0008)),
+    ] {
+        assert_eq!(
+            page_comment(&choice("Arial", regular, bold, ChoiceReason::Resolved), None),
+            "<!-- mermaid font: \"Arial\" embedded; the face the font chain resolved, fsType 0x0008 (Editable) -->"
+        );
+    }
 }
 
 #[test]

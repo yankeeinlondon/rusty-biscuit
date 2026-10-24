@@ -16,6 +16,8 @@ use resvg::usvg;
 use serial_test::serial;
 
 use super::embed_faces_tests::{arial, chain};
+use super::embed_permission_tests::collection;
+use super::embed_subset_tests::tables_of;
 use super::golden_tests::golden_chain;
 use super::postprocess_tests::{CLASS, FLOWCHART, families};
 use crate::artifact::{OutputFormat, RenderRequest, RenderedArtifact};
@@ -23,7 +25,7 @@ use crate::fonts::bundled::{INTER_BOLD, INTER_REGULAR};
 use crate::fonts::{FontChain, FontQuery, LabelMeasurer};
 use crate::mermaid::embed::subset::subset;
 use crate::mermaid::{DiagramFont, MermaidDiagram, MermaidTarget, page_font};
-use crate::tests::isolated_cache_dir;
+use crate::tests::{capture_warnings, isolated_cache_dir};
 
 const STACK: &str = r#""trebuchet ms", verdana, arial, sans-serif"#;
 /// Wide enough to grow its node past the minimum width, short enough not to
@@ -136,13 +138,19 @@ fn opt_in_labels_lead_with_the_embedded_family() {
 #[test]
 fn the_measurer_measures_each_family_in_its_embedded_face() {
     let restricted = arial_chain(RESTRICTED, None);
+    let forced = [STACK.to_string()];
     let inter = |weight| restricted.bundled_inter(&FontQuery::from_css(STACK, weight, false)).expect("Inter");
     let arial_face = |chain: &FontChain, weight| chain.resolve(&FontQuery::from_css(STACK, weight, false)).expect("Arial");
     for (weight, css_weight) in [(400, None), (700, Some("bold")), (700, Some("600")), (400, Some("500"))] {
-        let embedding = LabelMeasurer::embedding(&restricted);
+        // A family forced to Inter (a render drew its refused face) is
+        // measured in Inter; unforced, the refused face is measured as
+        // resolved until the render knows whether it draws it.
+        let embedding = LabelMeasurer::embedding_forcing(&restricted, &forced);
         let faces = embedding.faces("Label", &style(css_weight));
         assert!(faces.iter().all(|face| *face == inter(weight)), "{css_weight:?}: {faces:?}");
         assert!(!restricted.is_bundled_inter(arial_face(&restricted, weight)));
+        let unforced = LabelMeasurer::embedding(&restricted).faces("Label", &style(css_weight));
+        assert!(unforced.iter().all(|face| *face == arial_face(&restricted, weight)), "{css_weight:?}");
         let plain = LabelMeasurer::new(&restricted).faces("Label", &style(css_weight));
         assert!(plain.iter().all(|face| *face == arial_face(&restricted, weight)), "{css_weight:?}");
 
@@ -151,7 +159,7 @@ fn the_measurer_measures_each_family_in_its_embedded_face() {
         assert!(faces.iter().all(|face| *face == arial_face(&permitted, weight)), "{css_weight:?}");
     }
     // The choice made while measuring is the one returned for the page.
-    let embedding = LabelMeasurer::embedding(&restricted);
+    let embedding = LabelMeasurer::embedding_forcing(&restricted, &forced);
     assert!(embedding.embedded_faces().expect("an opt-in measurer").families.is_empty());
     embedding.width("Label", &style(None));
     let faces = embedding.embedded_faces().expect("an opt-in measurer");
@@ -303,6 +311,14 @@ fn an_opt_in_svg_without_a_readable_record_is_rendered_again() {
         // The render restored the record, so the next one is a hit.
         assert!(render(&diagram, golden_chain(), &svg_request()).0.cache_hit, "{damage:?}");
     }
+
+    // A record from before the families forced to Inter were kept lacks the
+    // required field.
+    let mut old: serde_json::Value = serde_json::from_slice(&std::fs::read(&record).expect("record")).expect("json");
+    assert!(old.as_object_mut().expect("an object").remove("forced_inter").is_some());
+    std::fs::write(&record, old.to_string()).expect("write");
+    assert!(!render(&diagram, golden_chain(), &svg_request()).0.cache_hit, "an old record");
+    assert!(render(&diagram, golden_chain(), &svg_request()).0.cache_hit);
 }
 
 #[test]
@@ -331,3 +347,268 @@ fn a_page_of_rendered_diagrams_embeds_one_rule_per_face_and_weight() {
     assert!(page_font(std::iter::empty()).expect("empty page").is_empty());
     assert_eq!(page_font(std::iter::empty()).expect("empty page").markup(), "");
 }
+
+/// The width of `text` at 16 px in `font`, shaped by rustybuzz with its
+/// default features: what a browser draws from the emitted file, kerning
+/// included when the file keeps its layout tables.
+fn shaped_width(font: &[u8], text: &str) -> f64 {
+    let face = rustybuzz::Face::from_slice(font, 0).expect("font parses");
+    let mut buffer = rustybuzz::UnicodeBuffer::new();
+    buffer.push_str(text);
+    let glyphs = rustybuzz::shape(&face, &[], buffer);
+    let units: i32 = glyphs.glyph_positions().iter().map(|position| position.x_advance).sum();
+    f64::from(units) * 16.0 / f64::from(face.units_per_em())
+}
+
+/// A class whose title (bold) and member (regular) are both `AV` pairs.
+const KERNED_CLASS: &str = "classDiagram\n  class AVAVAVAVAVAVAVAV {\n    +AVAVAVAVAVAVAVAV\n  }";
+
+/// For each weight's `fsType`, an opted-in class diagram's labels are
+/// measured at the width the emitted file draws: shaped with kerning from a
+/// whole face (`fsType` 0x0100 forbids subsetting), plain advances from a
+/// subset, whether the face is a file of its own or a collection member.
+#[test]
+#[serial]
+fn the_opt_in_measures_each_weight_as_its_emitted_file_draws() {
+    const NO_SUBSETTING: u16 = 0x0100;
+    let _cache = isolated_cache_dir();
+    let label = "AVAVAVAVAVAVAVAV";
+    let combinations = [
+        (NO_SUBSETTING, NO_SUBSETTING, false),
+        (NO_SUBSETTING, INSTALLABLE, false),
+        (INSTALLABLE, NO_SUBSETTING, false),
+        (INSTALLABLE, INSTALLABLE, false),
+        // Collection members: a whole one is rebuilt with every table.
+        (NO_SUBSETTING, NO_SUBSETTING, true),
+        (NO_SUBSETTING, INSTALLABLE, true),
+    ];
+    for (regular_fs_type, bold_fs_type, in_collection) in combinations {
+        let faces = arial(regular_fs_type, bold_fs_type);
+        let installed = if in_collection {
+            vec![collection(&[tables_of(&faces[0]), tables_of(&faces[1])])]
+        } else {
+            faces.to_vec()
+        };
+        let chain = Arc::new(chain(&installed, None));
+        let (_, font, _) = render(&html_static(KERNED_CLASS, true), &chain, &svg_request());
+        let css = page_font([&font.expect("font")]).expect("page font").css().to_string();
+        for (weight, css_weight, fs_type) in [(400, None, regular_fs_type), (700, Some("bold"), bold_fs_type)] {
+            let file = embedded_file(&css, weight);
+            let whole = ttf_parser::Face::parse(&file, 0)
+                .expect("font parses")
+                .tables()
+                .gpos
+                .is_some();
+            assert_eq!(whole, fs_type == NO_SUBSETTING, "{fs_type:#06x} weight {weight}: only a whole face keeps GPOS");
+            let drawn = shaped_width(&file, label);
+            let measured = LabelMeasurer::embedding(&chain).width(label, &style(css_weight));
+            assert!(
+                (measured - drawn).abs() < 1e-3,
+                "{regular_fs_type:#06x}/{bold_fs_type:#06x} (collection: {in_collection}) weight {weight}: measured {measured}, drawn {drawn}"
+            );
+            // Load-bearing: the whole face kerns the label, the subset does not.
+            let plain = hmtx_width(&file, label);
+            assert_eq!(drawn < plain - 1.0, whole, "weight {weight}: {drawn} vs {plain}");
+        }
+    }
+}
+
+/// A whole face's kerning reaches the layout: the opted-in node box is the
+/// emitted file's shaped label plus the node's padding.
+#[test]
+#[serial]
+fn an_opt_in_label_in_a_whole_face_is_laid_out_kerned() {
+    let _cache = isolated_cache_dir();
+    let label = "AVAVAVAVAVAVAVAV";
+    let chain = arial_chain(0x0100, None);
+    let (_, font, svg) = render(&html_static(KERNED, true), &chain, &svg_request());
+    let css = page_font([&font.expect("font")]).expect("page font").css().to_string();
+    let drawn = shaped_width(&embedded_file(&css, 400), label);
+
+    let (_, _, plain) = render(&html_static(KERNED, false), &chain, &svg_request());
+    let kerned = LabelMeasurer::new(&chain).width(label, &style(None));
+    let padding = first_node_width(&String::from_utf8(plain).expect("utf-8")) - kerned;
+
+    let width = first_node_width(&String::from_utf8(svg).expect("utf-8"));
+    assert!((width - (drawn + padding)).abs() < 0.01, "{width} vs {drawn} + {padding}");
+}
+
+/// A class whose title (bold) holds characters its member (regular) lacks.
+const ZEBRA_CLASS: &str = "classDiagram\n    class Zebra {\n        +String name\n    }";
+
+/// A chain whose only installed face is a permitted regular `Arial`, which
+/// `MERMAID_FONT=Arial` selects for both weights.
+fn regular_only_arial_chain() -> Arc<FontChain> {
+    let [regular, _] = arial(INSTALLABLE, INSTALLABLE);
+    Arc::new(chain(&[regular], Some("Arial")))
+}
+
+/// The weights of the page's `@font-face` rules, in order.
+fn rule_weights(css: &str) -> Vec<u16> {
+    css.split("font-weight:")
+        .skip(1)
+        .map(|rest| rest[..rest.find(';').expect("weight ends")].parse().expect("a weight"))
+        .collect()
+}
+
+/// The TrueType file of the page's `@font-face` rule for `family` at
+/// `weight`.
+fn family_file(css: &str, family: &str, weight: u16) -> Vec<u8> {
+    let declared = format!("font-family:'{family}';font-style:normal;font-weight:{weight};");
+    let rule = css
+        .split("@font-face")
+        .find(|rule| rule.contains(&declared))
+        .unwrap_or_else(|| panic!("a {family} weight {weight} rule in {css}"));
+    embedded_file(rule, weight)
+}
+
+/// Every character the diagram draws in `family` is mapped by the page's
+/// file for that family at the weight it is drawn at.
+fn assert_covered(css: &str, font: &DiagramFont, family: &str) {
+    let glyphs = &font.glyphs.families[family];
+    for (weight, drawn) in [(400, &glyphs.regular), (700, &glyphs.bold)] {
+        if drawn.is_empty() {
+            continue;
+        }
+        let file = family_file(css, family, weight);
+        let face = ttf_parser::Face::parse(&file, 0).expect("font parses");
+        for c in drawn {
+            assert!(face.glyph_index(*c).is_some(), "{c:?} at weight {weight}");
+        }
+    }
+}
+
+/// Renders `source` opted in over `chain` twice (a miss, then a hit) and
+/// returns each render's page CSS.
+fn fresh_and_cached_css(source: &str, chain: &Arc<FontChain>) -> [(String, DiagramFont); 2] {
+    let diagram = html_static(source, true);
+    [false, true].map(|hit| {
+        let (artifact, font, _) = render(&diagram, chain, &svg_request());
+        assert_eq!(artifact.cache_hit, hit);
+        let font = font.expect("font");
+        (page_font([&font]).expect("page font").css().to_string(), font)
+    })
+}
+
+#[test]
+#[serial]
+fn one_installed_face_carries_both_weights_rules_fresh_and_cached() {
+    let _cache = isolated_cache_dir();
+    let chain = regular_only_arial_chain();
+    let [(fresh, font), (cached, _)] = fresh_and_cached_css(ZEBRA_CLASS, &chain);
+    assert_eq!(rule_weights(&fresh), [400, 700], "{fresh}");
+    assert_eq!(cached, fresh, "a cache hit gives the same rules");
+    let bold_file = embedded_file(&fresh, 700);
+    let bold = ttf_parser::Face::parse(&bold_file, 0).expect("font parses");
+    for c in ['Z', 'b'] {
+        assert!(bold.glyph_index(c).is_some(), "the bold title's {c:?}");
+    }
+    assert_covered(&fresh, &font, "Arial");
+}
+
+#[test]
+#[serial]
+fn one_installed_face_drawn_regular_only_gets_one_rule() {
+    let _cache = isolated_cache_dir();
+    let [(css, font), _] = fresh_and_cached_css(FLOWCHART, &regular_only_arial_chain());
+    assert_eq!(rule_weights(&css), [400], "{css}");
+    assert_covered(&css, &font, "Arial");
+}
+
+#[test]
+#[serial]
+fn separate_regular_and_bold_faces_get_a_rule_each_fresh_and_cached() {
+    let _cache = isolated_cache_dir();
+    let [(fresh, font), (cached, _)] = fresh_and_cached_css(ZEBRA_CLASS, &arial_chain(INSTALLABLE, None));
+    assert_eq!(rule_weights(&fresh), [400, 700], "{fresh}");
+    assert_eq!(cached, fresh);
+    assert_covered(&fresh, &font, "Arial");
+}
+
+/// A class whose only text is its (bold) title.
+const BOLD_ONLY_CLASS: &str = "classDiagram\n    class Zebra";
+
+/// The `(family, weight)` each of the page's `@font-face` rules declares, in
+/// order.
+fn rule_families(css: &str) -> Vec<(String, u16)> {
+    css.split("@font-face{font-family:'")
+        .skip(1)
+        .map(|rest| {
+            let family = rest[..rest.find('\'').expect("family ends")].to_string();
+            (family, rule_weights(rest)[0])
+        })
+        .collect()
+}
+
+/// The family decision is made over the weights a diagram draws: a refused
+/// weight the diagram never draws keeps the permitted resolved face, and a
+/// refused weight it draws makes the whole family Inter. A cache hit
+/// reproduces the fresh render's font.
+#[test]
+#[serial]
+fn only_a_drawn_refused_weight_makes_the_family_inter_fresh_and_cached() {
+    let resolved = "the face the font chain resolved";
+    let refused_bold = r#"resolved face "Arial" is Restricted (fsType 0x0002)"#;
+    let cases = [
+        // A refused bold, regular drawn only.
+        (INSTALLABLE, RESTRICTED, FLOWCHART, "Arial", vec![400], resolved),
+        // A refused regular, bold drawn only.
+        (RESTRICTED, INSTALLABLE, BOLD_ONLY_CLASS, "Arial", vec![700], resolved),
+        // A refused bold that the class title draws.
+        (INSTALLABLE, RESTRICTED, ZEBRA_CLASS, "Inter", vec![400, 700], refused_bold),
+        // Control: both permitted.
+        (INSTALLABLE, INSTALLABLE, FLOWCHART, "Arial", vec![400], resolved),
+    ];
+    for (regular_fs_type, bold_fs_type, source, family, weights, reason) in cases {
+        let _cache = isolated_cache_dir();
+        let chain = Arc::new(chain(&arial(regular_fs_type, bold_fs_type), None));
+        let label = format!("{regular_fs_type:#06x}/{bold_fs_type:#06x} {source:?}");
+        let diagram = html_static(source, true);
+        let ((fresh, fresh_font, svg), warnings) = capture_warnings(|| render(&diagram, &chain, &svg_request()));
+        let (cached, cached_font, cached_svg) = render(&diagram, &chain, &svg_request());
+        assert!(!fresh.cache_hit && cached.cache_hit, "{label}");
+        assert_eq!(cached_svg, svg, "{label}");
+        let (fresh_font, cached_font) = (fresh_font.expect("font"), cached_font.expect("font"));
+        assert_eq!(cached_font.faces, fresh_font.faces, "{label}: a hit chooses the same faces");
+        assert_eq!(cached_font.glyphs, fresh_font.glyphs, "{label}");
+
+        assert_every_label_leads_with(&String::from_utf8(svg).expect("utf-8"), family);
+        assert_eq!(fresh_font.families(), [family], "{label}");
+        let page = page_font([&fresh_font]).expect("page font");
+        assert_eq!(page_font([&cached_font]).expect("page font"), page, "{label}");
+        let expected: Vec<(String, u16)> = weights.iter().map(|weight| (family.to_string(), *weight)).collect();
+        assert_eq!(rule_families(page.css()), expected, "{label}");
+        assert_eq!(page.comments().len(), 1, "{label}");
+        assert!(page.comments()[0].contains(reason), "{label}: {:?}", page.comments());
+        assert_covered(page.css(), &fresh_font, family);
+        // Only a family that becomes Inter because of a refusal warns.
+        let warned = warnings.iter().filter(|warning| warning.contains("may not be embedded")).count();
+        assert_eq!(warned, usize::from(family == "Inter"), "{label}: {warnings:?}");
+    }
+}
+
+/// Two diagrams over one chain and requested family choose differently (one
+/// draws only the permitted regular, one also the refused bold), and the
+/// page embeds each choice for the diagram that made it.
+#[test]
+#[serial]
+fn a_page_embeds_each_diagrams_own_choice_for_one_requested_family() {
+    let _cache = isolated_cache_dir();
+    let chain = Arc::new(chain(&arial(INSTALLABLE, RESTRICTED), None));
+    let regular_only = render(&html_static(FLOWCHART, true), &chain, &svg_request()).1.expect("font");
+    let with_bold = render(&html_static(ZEBRA_CLASS, true), &chain, &svg_request()).1.expect("font");
+    assert_eq!(regular_only.families(), ["Arial"]);
+    assert_eq!(with_bold.families(), ["Inter"]);
+
+    let page = page_font([&regular_only, &with_bold]).expect("page font");
+    let css = page.css();
+    assert_eq!(
+        rule_families(css),
+        [("Arial".to_string(), 400), ("Inter".to_string(), 400), ("Inter".to_string(), 700)],
+        "{css}"
+    );
+    assert_covered(css, &regular_only, "Arial");
+    assert_covered(css, &with_bold, "Inter");
+    assert_eq!(page.comments().len(), 2, "{:?}", page.comments());
+}
+

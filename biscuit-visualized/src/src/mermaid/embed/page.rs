@@ -3,7 +3,8 @@
 //! from every diagram on it ([`page_font`]).
 //!
 //! A diagram's cache entry keeps, beside its SVG, a [`FontRecord`]: the
-//! families the render requested and the code points it draws. The subset is
+//! families the render requested, those it chose as Inter because it draws a
+//! refused weight, and the code points it draws. The subset is
 //! never cached (it covers a whole page); a cache hit rebuilds the face
 //! choice from the record and re-scans nothing.
 
@@ -47,7 +48,7 @@ impl DiagramFont {
     }
 }
 
-/// The embedded font of one page: one `@font-face` rule per face and weight
+/// The embedded font of one page: one `@font-face` rule per family and weight
 /// its diagrams draw, Inter's license line before Inter's rules, and one HTML
 /// comment per embedded family saying which face was embedded and why.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -79,10 +80,11 @@ impl PageFont {
 
 /// The embedded font for a page holding `diagrams`.
 ///
-/// Each face is embedded once per weight some diagram draws, as a subset of
-/// the union of those diagrams' characters (whole when its `fsType` forbids
-/// subsetting). Every diagram of one process measures over the same font
-/// chain; the first diagram's chain reads the faces.
+/// Each family is embedded once per weight some diagram draws, as a subset
+/// of that weight's face holding the union of those diagrams' characters at
+/// that weight (the whole face when its `fsType` forbids subsetting). Every
+/// diagram of one process measures over the same font chain; the first
+/// diagram's chain reads the faces.
 ///
 /// ## Errors
 ///
@@ -94,8 +96,10 @@ pub fn page_font<'a>(diagrams: impl IntoIterator<Item = &'a DiagramFont>) -> Res
     let mut chain = None;
     for diagram in diagrams {
         chain.get_or_insert(&diagram.chain);
+        // Two diagrams can choose differently for one requested family (one
+        // draws a refused weight, one does not), so whole choices are kept.
         for choice in &diagram.faces.families {
-            if !faces.families.iter().any(|known| known.requested == choice.requested) {
+            if !faces.families.contains(choice) {
                 faces.families.push(choice.clone());
             }
         }
@@ -112,6 +116,9 @@ pub fn page_font<'a>(diagrams: impl IntoIterator<Item = &'a DiagramFont>) -> Res
 pub(crate) struct FontRecord {
     /// The CSS `font-family` lists the render chose faces for, in order.
     requested: Vec<String>,
+    /// Those of `requested` the render chose as the bundled Inter because it
+    /// draws a weight whose resolved face is refused.
+    forced_inter: Vec<String>,
     /// Per leading family, the code points drawn at each weight, as sorted
     /// strings.
     families: BTreeMap<String, RecordedGlyphs>,
@@ -124,10 +131,11 @@ struct RecordedGlyphs {
 }
 
 impl FontRecord {
-    pub(crate) fn new(faces: &EmbeddedFaces, glyphs: &UsedGlyphs) -> Self {
+    pub(crate) fn new(faces: &EmbeddedFaces, forced_inter: &[String], glyphs: &UsedGlyphs) -> Self {
         let text = |set: &BTreeSet<char>| set.iter().collect::<String>();
         FontRecord {
             requested: faces.families.iter().map(|choice| choice.requested.clone()).collect(),
+            forced_inter: forced_inter.to_vec(),
             families: glyphs
                 .families
                 .iter()
@@ -143,8 +151,9 @@ impl FontRecord {
     }
 
     /// The diagram's font over `chain`: the recorded families' faces chosen
-    /// again (the choice depends only on the chain, which the cache key
-    /// covers), and the recorded code points.
+    /// again with the recorded families forced to Inter (the choice depends
+    /// only on the chain, which the cache key covers, and on that list), and
+    /// the recorded code points.
     pub(crate) fn into_diagram_font(self, chain: &Arc<FontChain>) -> DiagramFont {
         let requested: Vec<&str> = self.requested.iter().map(String::as_str).collect();
         let glyphs = UsedGlyphs {
@@ -161,7 +170,7 @@ impl FontRecord {
                 .collect(),
         };
         DiagramFont {
-            faces: choose_embedded_faces(&requested, chain),
+            faces: choose_embedded_faces(&requested, &self.forced_inter, chain),
             glyphs,
             chain: Arc::clone(chain),
         }

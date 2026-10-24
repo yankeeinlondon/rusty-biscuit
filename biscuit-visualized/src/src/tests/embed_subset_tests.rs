@@ -32,7 +32,7 @@ fn table_tags(font: &[u8]) -> Vec<String> {
 }
 
 /// `font`'s tables, for building a collection around them.
-fn tables_of(font: &[u8]) -> Tables {
+pub(super) fn tables_of(font: &[u8]) -> Tables {
     table_tags(font)
         .into_iter()
         .map(|tag| {
