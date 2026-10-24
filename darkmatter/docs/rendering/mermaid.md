@@ -292,8 +292,10 @@ subset of it holding only the characters the page's diagrams draw; its
 page explains the choice. In short: the face the font chain resolves is
 embedded when its `fsType` permission allows it (Installable, Editable, or
 Preview & print), and the bundled Inter (SIL Open Font License 1.1) is
-embedded instead when the face is Restricted, bitmap-only, not a TrueType
-outline face, or unreadable, or when no installed face is found.
+embedded instead when a weight the diagram draws resolves to a face that is
+Restricted, bitmap-only, not a TrueType outline face, or unreadable, or when
+no installed face is found. The choice is made per diagram, so two diagrams
+on one page can embed different faces for the same font stack.
 
 ```mermaid
 flowchart LR
@@ -319,7 +321,7 @@ diagram, shared by every diagram and by both light and dark themes:
 - **One HTML comment per embedded family** names the face and why it was
   chosen, for example `"Trebuchet MS" embedded; the face the font chain
   resolved, fsType 0x0008 (Editable)`.
-- **One `@font-face` rule per face and weight** the page draws (400 regular,
+- **One `@font-face` rule per family and weight** the page draws (400 regular,
   700 bold), each a TrueType subset of the union of every diagram's
   characters, as a `data:font/ttf;base64` URL. A weight no label uses is not
   embedded.
@@ -368,7 +370,8 @@ body that is not a plain declaration list) fails closed.
   as plain static SVG.
 - **Kerning.** The subset carries no kerning or ligature tables, so labels are
   measured and drawn with plain glyph advances, a little wider than a kerned
-  render.
+  render. A face embedded whole keeps them, and its labels are measured and
+  drawn kerned.
 
 # CLI Switches
 
