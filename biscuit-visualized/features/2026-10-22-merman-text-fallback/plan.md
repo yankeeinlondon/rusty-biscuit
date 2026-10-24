@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -12,6 +12,9 @@ packages:
 - renderable
 - biscuit-terminal
 - biscuit-visualized
+- darkmatter
+- biscuit-terminal-cli
+- darkmatter-cli
 source_files_during_phase_2:
 - renderable/src/tree/mod.rs
 - biscuit-terminal/lib/src/render_tree/options.rs
@@ -47,6 +50,144 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/biscuit-visualized/SKILL.md
 - .claude/skills/biscuit-visualized/mermaid-rendering.md
+source_files_during_phase_4:
+- biscuit-visualized/src/src/components/fallback_policy.rs
+- biscuit-visualized/src/src/components/mermaid.rs
+- biscuit-visualized/src/src/components/mod.rs
+- biscuit-visualized/src/src/components/render_hook.rs
+- biscuit-visualized/src/src/mermaid/render.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/component_fallback_tests.rs
+- biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+- biscuit-visualized/src/tests/l1/display_size.rs
+- biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+- biscuit-terminal/lib/src/components/terminal_image/tests.rs
+- biscuit-terminal/lib/src/render_tree/options.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+docs_updated_during_phase_4:
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-terminal/docs/render-tree.md
+- renderable/docs/tree-rendering.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/biscuit-visualized/SKILL.md
+- .claude/skills/biscuit-visualized/diagram-components.md
+- .claude/skills/biscuit-terminal/diagrams.md
+source_files_during_phase_5:
+- Cargo.lock
+- biscuit-terminal/cli/Cargo.toml
+- biscuit-terminal/cli/src/args.rs
+- biscuit-terminal/cli/src/commands/block.rs
+- biscuit-terminal/cli/src/commands/erd.rs
+- biscuit-terminal/cli/src/commands/flowchart.rs
+- biscuit-terminal/cli/src/commands/git_graph.rs
+- biscuit-terminal/cli/src/commands/mermaid.rs
+- biscuit-terminal/cli/src/commands/pie.rs
+- biscuit-terminal/cli/src/commands/quadrant.rs
+- biscuit-terminal/cli/src/commands/quote.rs
+- biscuit-terminal/cli/src/commands/shared.rs
+- biscuit-terminal/cli/src/commands/state_diagram.rs
+- biscuit-terminal/cli/src/commands/timeline.rs
+- biscuit-terminal/cli/src/commands/xy_chart.rs
+- biscuit-terminal/cli/tests/l1/integration_test.rs
+- biscuit-terminal/cli/tests/l1/main.rs
+- biscuit-terminal/cli/tests/l1/mermaid_features.rs
+- biscuit-terminal/cli/tests/level2/diagrams.rs
+- biscuit-visualized/src/src/components/mermaid.rs
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/enums.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/lib/assets/syntaxes/mermaid/Mermaid.sublime-syntax
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/highlighting/grammars.rs
+- darkmatter/lib/src/markdown/highlighting/mod.rs
+- darkmatter/lib/src/markdown/language_grammar.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/code_block.rs
+- darkmatter/lib/src/markdown/output/terminal.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+- darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+- darkmatter/lib/tests/l1/style_features_baseline.rs
+- darkmatter/lib/tests/l1/style_features_phase5.rs
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_valid/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_fileref/expected.json
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.json
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap
+- darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+docs_updated_during_phase_5:
+- biscuit-terminal/README.md
+- biscuit-terminal/cli/README.md
+- biscuit-terminal/docs/dependencies.md
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/topics/code-blocks.md
+- docs/dependencies.md
+docs_created_during_phase_5:
+- biscuit-terminal/docs/cli.md
+- darkmatter/lib/assets/syntaxes/mermaid/SOURCE.md
+- darkmatter/lib/assets/syntaxes/mermaid/LICENSE
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/darkmatter/terminal.md
+- .claude/skills/biscuit-visualized/diagram-components.md
 ---
 
 # Plan: Merman Text Fallback
@@ -342,7 +483,7 @@ Requires Phases 2 and 3.
 
 ### Wave 1
 
-- [ ] **4.1 Fallback policy (D3).**
+- [x] **4.1 Fallback policy (D3).**
     - Public policy type with two independently settable options:
       text fallback (`Allowed` default, `NoPartial`, `Never`) and
       `show_partial_note` (default `true`).
@@ -363,7 +504,7 @@ Requires Phases 2 and 3.
 
 ### Wave 2 (depends on 4.1; 4.2 and 4.3 are parallel, both touching different files)
 
-- [ ] **4.2 Component presentation (D2, D9).**
+- [x] **4.2 Component presentation (D2, D9).**
     - In `components/mermaid.rs`, selection per the Selection table: decide
       image availability first from biscuit-terminal's effective capabilities
       and route policy (including caller overrides), before any SVG
@@ -382,7 +523,7 @@ Requires Phases 2 and 3.
     - Text width bound = columns at the actual nested position less the `txt`
       code block's padding and borders; explicit cell/percentage/fill limits
       respected; the image scale factor does not trigger SVG measurement.
-- [ ] **4.3 Markdown hook (D5).**
+- [x] **4.3 Markdown hook (D5).**
     - In `components/render_hook.rs`, honor the request's `graphics_mode` and
       the Rule E decision: at `Rich` with a usable image route, image; at
       `Rich` without one, or at `Vector`, eligible text as `Nodes`; otherwise
@@ -395,19 +536,19 @@ Requires Phases 2 and 3.
 
 ### Validation checkpoint 4 (L1)
 
-- [ ] AC-F1: flowchart → text with explicit no-image capabilities; mindmap and
+- [x] AC-F1: flowchart → text with explicit no-image capabilities; mindmap and
   pie → source.
-- [ ] AC-F4: node kinds and languages (`txt`, `mermaid`), exact plain text
+- [x] AC-F4: node kinds and languages (`txt`, `mermaid`), exact plain text
   snapshots, style assertions on bold/dim/italic spans, no note when
   `show_partial_note = false`, blank line before the note.
-- [ ] AC-F8: the real hook through biscuit-terminal's generic renderer, one case
+- [x] AC-F8: the real hook through biscuit-terminal's generic renderer, one case
   per row: image at Rich with image support, text at Vector, code at Off,
   ineligible → code with no diagnostic under strict/warn/permissive, parse
   error rejected under strict / recorded under warn / silent under permissive,
   no hook → code, `Code` and `Image` modes unchanged.
-- [ ] AC-F13 (full): existing image tests pass untouched; counters show text
+- [x] AC-F13 (full): existing image tests pass untouched; counters show text
   selection bypasses image generation.
-- [ ] `just test`, `just lint` in `biscuit-visualized`; `cargo check
+- [x] `just test`, `just lint` in `biscuit-visualized`; `cargo check
   --workspace` still compiles.
 
 ## Phase 5: darkmatter and `bt`
@@ -418,7 +559,7 @@ so the syntax task is first in Wave 1 and `bt` highlighting tests wait for it.
 
 ### Wave 1 (darkmatter; 5.1 is independent of 5.2)
 
-- [ ] **5.1 Vendored Mermaid syntax (D8).**
+- [x] **5.1 Vendored Mermaid syntax (D8).**
     - Fetch SublimeText/Mermaid at commit
       `a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859` into a fresh empty directory
       (untrusted download; no interpreter run from inside it). Flatten the base
@@ -434,7 +575,7 @@ so the syntax task is first in Wave 1 and `bt` highlighting tests wait for it.
     - Tests (AC-F12): the file has no `extends` key; loads with syntect; a
       gantt block highlights header, comment and `%%{init}%%`; flowchart and
       sequence blocks highlight nodes and arrows; terminal and HTML both.
-- [ ] **5.2 Automatic mode and features in `md`.**
+- [x] **5.2 Automatic mode and features in `md`.**
     - Rule B: add `MermaidMode::Automatic`, map it in `entrypoints.rs`, and
       switch `md --mermaid` to it (AC-F9). Install the Phase 4 hook with the
       policy folded from `--feature`.
@@ -452,7 +593,7 @@ so the syntax task is first in Wave 1 and `bt` highlighting tests wait for it.
 
 ### Wave 1 (bt; parallel with the darkmatter tasks)
 
-- [ ] **5.3 `bt` features.**
+- [x] **5.3 `bt` features.**
     - Add `--feature` to `flowchart`, `state-diagram`, `erd`, `pie`, `quadrant`,
       `timeline`, `xy-chart`, `git-graph` (Rule G) and `mermaid`, using Rule C's
       enum; `no-mermaid-rendering` is rejected by `bt` (AC-F7).
@@ -461,7 +602,7 @@ so the syntax task is first in Wave 1 and `bt` highlighting tests wait for it.
       export failure into success.
     - CLI tests for `bt mermaid`: flag beats variable (AC-F5), usage errors,
       completion.
-- [ ] **5.4 `bt` highlighting (D9).**
+- [x] **5.4 `bt` highlighting (D9).**
     - Add darkmatter's library as a `biscuit-terminal/cli` dependency (check
       its default features for avoidable weight) and install darkmatter's code
       renderer, backed by its public `CodeBlock`, through
