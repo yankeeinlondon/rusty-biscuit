@@ -12,10 +12,12 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use resvg::usvg::fontdb::{ID, Style};
+use merman::svg::TextStyle;
+use resvg::usvg::fontdb::{ID, Source, Style};
 use tracing::span;
 
 use crate::fonts::bundled::{INTER_BOLD, INTER_REGULAR};
+use crate::fonts::LabelMeasurer;
 use crate::fonts::chain::{FaceIdentity, FontChain, ResolutionStep};
 use crate::fonts::metadata::{FaceMetadata, LATIN_BLOCKS, choose_sans_serif_family};
 use crate::fonts::query::{FamilyName, FontQuery, GenericFamily, parse_font_family_list};
@@ -517,6 +519,55 @@ fn metadata_of_inter_regular_matches_its_tables() {
 }
 
 // ---------------------------------------------- AC-M10, D59: fallback order
+
+/// A file-backed face the chain resolves or falls back to is kept mapped
+/// for drawing (same ID, held in memory), while the metadata database still
+/// names the file; text measures and draws exactly as the same fonts held in
+/// memory from the start.
+#[test]
+fn file_faces_the_chain_answers_with_stay_mapped_and_draw_as_in_memory() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let anter = renamed(INTER_REGULAR, "Inter", "Anter");
+    let zebra = renamed(NOTO_EMOJI_FILE, "Noto Emoji", "Zebra Mono");
+    let anter_path = dir.path().join("anter.ttf");
+    let zebra_path = dir.path().join("zebra.ttf");
+    std::fs::write(&anter_path, &anter).expect("writes Anter");
+    std::fs::write(&zebra_path, &zebra).expect("writes Zebra");
+    let generics = [(GenericFamily::SansSerif, "Anter")];
+    let from_files = Arc::new(FontChain::injected_files(&[&anter_path, &zebra_path], &generics, None));
+    let in_memory = Arc::new(FontChain::injected(&[&anter, &zebra], &generics, None));
+    let file_backed = |chain: &FontChain, id: ID| matches!(chain.drawing_database().face(id).expect("face").source, Source::File(_));
+    let mapped = |chain: &FontChain, id: ID| {
+        matches!(chain.drawing_database().face(id).expect("face").source, Source::SharedFile(..))
+    };
+    let named_file = |chain: &FontChain, id: ID| matches!(chain.database().face(id).expect("face").source, Source::File(_));
+    let unresolved: Vec<ID> = from_files.database().faces().map(|face| face.id).collect();
+    assert!(unresolved.iter().filter(|id| named_file(&from_files, **id)).all(|id| file_backed(&from_files, *id)));
+
+    let anter_id = from_files.resolve(&stack(MERMAID_STACK)).expect("Anter");
+    assert!(mapped(&from_files, anter_id));
+    let zebra_id = from_files.fallback('\u{1F600}', &[anter_id]).expect("Zebra");
+    assert!(mapped(&from_files, zebra_id));
+    assert!(named_file(&from_files, anter_id) && named_file(&from_files, zebra_id));
+
+    let style = TextStyle {
+        font_family: Some(MERMAID_STACK.to_string()),
+        font_size: 16.0,
+        font_weight: None,
+        font_style: None,
+    };
+    for text in ["Hello, world", "Hello \u{1F600}"] {
+        assert_eq!(
+            LabelMeasurer::new(&from_files).width(text, &style),
+            LabelMeasurer::new(&in_memory).width(text, &style),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        rasterize_svg_to_png_bytes_with(&text_svg("sans-serif"), 1, &from_files).expect("renders"),
+        rasterize_svg_to_png_bytes_with(&text_svg("sans-serif"), 1, &in_memory).expect("renders")
+    );
+}
 
 /// AC-M10, D59: a character the resolved face lacks falls back to the first
 /// installed face, by case-folded family name, that has it, and the

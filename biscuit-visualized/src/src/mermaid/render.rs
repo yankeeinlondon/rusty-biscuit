@@ -49,7 +49,7 @@ use crate::raster::png::rasterize_svg_for_request_with;
 
 use super::accents::apply_accents;
 use super::config::{MermaidConfig, MermaidTheme};
-use super::contrast::{parse_css_color, readable_text};
+use super::contrast::{author_text_colors, parse_css_color, readable_text};
 use super::design;
 use super::error::MermaidError;
 use super::gitgraph::{GitGraphGeometry, TAG_GAP_EM};
@@ -672,16 +672,16 @@ impl MermaidDiagram {
         match output {
             RenderOutput::Svg(Some(svg)) => {
                 let fixed = postprocess(svg.svg());
-                let fixed = match (&prepared.design, &prepared.family) {
-                    (Some(_), Some(family)) => {
-                        let palette = self.palette();
-                        let accented = apply_accents(&fixed, &palette, family);
-                        Cow::Owned(readable_text(&accented, &palette).into_owned())
-                    }
-                    _ => fixed,
+                let palette = self.palette();
+                let accented = match (&prepared.design, &prepared.family) {
+                    (Some(_), Some(family)) => apply_accents(&fixed, &palette, family),
+                    _ => Cow::Borrowed(fixed.as_ref()),
                 };
+                // With or without a design: an author color displaces the
+                // design, not the library's choice of text color.
+                let fixed = readable_text(&accented, &palette, &author_text_colors(&prepared.source), chain).into_owned();
                 Ok(match target {
-                    MermaidTarget::RasterSafe => fixed.into_owned(),
+                    MermaidTarget::RasterSafe => fixed,
                     MermaidTarget::HtmlStatic => html_static(&fixed, &label_measurer).into_owned(),
                 })
             }

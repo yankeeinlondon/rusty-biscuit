@@ -56,7 +56,7 @@ impl Background {
 
 /// How PNG artifacts are compressed; part of every PNG artifact's cache key,
 /// so changing it never serves bytes encoded the old way.
-pub(crate) const PNG_ENCODING: &str = "png@0.18:compression=balanced,filter=adaptive";
+pub(crate) const PNG_ENCODING: &str = "png@0.18:deflate=level1,filter=up";
 
 /// Parameters for rendering a visualization.
 ///

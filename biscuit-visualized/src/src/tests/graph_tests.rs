@@ -1,12 +1,14 @@
 use crate::{
     artifact::{Background, OutputFormat, RenderRequest},
+    fonts::{FontChain, bundled::INTER_BOLD},
     graph::{
         EdgeKind, GraphBuilder, GraphColorTheme, GraphDiagram, GraphExpression, GraphInputSyntax,
         GraphOrientation,
     },
-    tests::isolated_cache_dir,
+    tests::{font_chain_tests::renamed, isolated_cache_dir},
 };
 use serial_test::serial;
+use std::sync::Arc;
 
 #[test]
 fn expression_parse_simple_chain() {
@@ -426,4 +428,93 @@ fn graph_render_separates_backgrounds_and_geometry() {
     let again = graph.render(&png).unwrap();
     assert!(again.cache_hit);
     assert_eq!(again.path, artifacts[0].path);
+}
+
+/// Two chains drawing the same label stack in different faces: the bundled
+/// Inter Regular (`MERMAID_FONT=Inter`), and Inter Bold renamed `Anter` and
+/// pinned as `MERMAID_FONT`, as when a caller changes the variable.
+fn regular_and_bold_chains() -> (Arc<FontChain>, Arc<FontChain>) {
+    let bold = renamed(INTER_BOLD, "Inter", "Anter");
+    (
+        Arc::new(FontChain::injected(&[], &[], Some("Inter"))),
+        Arc::new(FontChain::injected(&[&bold], &[], Some("Anter"))),
+    )
+}
+
+/// A PNG drawn with one chain is never served for another: the key changes,
+/// the second render misses, and its bytes are the second chain's own fresh
+/// render, not the first chain's pixels.
+fn assert_png_follows_the_font_chain(graph: &GraphDiagram) {
+    let _shared = isolated_cache_dir();
+    let (regular, bold) = regular_and_bold_chains();
+    let request = RenderRequest::default().with_target_width(200);
+    assert_ne!(
+        graph.cache_key_with(&regular, &request),
+        graph.cache_key_with(&bold, &request)
+    );
+
+    let first = graph.render_in(&regular, &request).unwrap();
+    let changed = graph.render_in(&bold, &request).unwrap();
+    assert!(!first.cache_hit);
+    assert!(
+        !changed.cache_hit,
+        "a font change must not reuse the earlier PNG"
+    );
+    let changed_bytes = std::fs::read(&changed.path).unwrap();
+    assert_ne!(
+        changed_bytes,
+        std::fs::read(&first.path).unwrap(),
+        "the faces draw differently"
+    );
+
+    let _fresh = isolated_cache_dir();
+    let fresh = graph.render_in(&bold, &request).unwrap();
+    assert!(!fresh.cache_hit);
+    assert_eq!(std::fs::read(&fresh.path).unwrap(), changed_bytes);
+}
+
+/// An SVG stores the requested `font-family`, not a face, so its key and
+/// artifact are shared across chains.
+fn assert_svg_ignores_the_font_chain(graph: &GraphDiagram) {
+    let _cache_dir = isolated_cache_dir();
+    let (regular, bold) = regular_and_bold_chains();
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        ..RenderRequest::default()
+    };
+    assert_eq!(
+        graph.cache_key_with(&regular, &request),
+        graph.cache_key_with(&bold, &request)
+    );
+
+    let first = graph.render_in(&regular, &request).unwrap();
+    let second = graph.render_in(&bold, &request).unwrap();
+    assert!(!first.cache_hit);
+    assert!(second.cache_hit);
+    assert_eq!(first.path, second.path);
+}
+
+#[test]
+#[serial]
+fn expression_png_cache_follows_the_font_chain() {
+    assert_png_follows_the_font_chain(&GraphDiagram::from_expression("Start -> Finish").unwrap());
+}
+
+/// Themed, so the stack is the theme's `font_family` rather than layout-rs's.
+#[test]
+#[serial]
+fn dot_png_cache_follows_the_font_chain() {
+    let graph = GraphDiagram::from_dot("digraph { Start -> Finish; }")
+        .unwrap()
+        .with_color_theme(GraphColorTheme::dark());
+    assert_png_follows_the_font_chain(&graph);
+}
+
+#[test]
+#[serial]
+fn graph_svg_cache_ignores_the_font_chain() {
+    assert_svg_ignores_the_font_chain(&GraphDiagram::from_expression("Start -> Finish").unwrap());
+    assert_svg_ignores_the_font_chain(
+        &GraphDiagram::from_dot("digraph { Start -> Finish; }").unwrap(),
+    );
 }

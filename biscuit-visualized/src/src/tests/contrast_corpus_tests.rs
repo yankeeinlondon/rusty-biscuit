@@ -20,7 +20,7 @@ use std::sync::{Arc, OnceLock};
 use resvg::tiny_skia::{Color, Pixmap};
 use resvg::usvg;
 
-use super::golden_tests::{DERIVED_GOLDENS, GOLDEN_FIXTURES, derived_palettes};
+use super::golden_tests::{DERIVED_GOLDENS, GOLDEN_FIXTURES, GOLDEN_SOURCES, derived_palettes, golden_svg_text};
 use crate::fonts::FontChain;
 use crate::mermaid::{MermaidTheme, Palette, Rgb};
 use crate::raster::usvg_options;
@@ -126,6 +126,13 @@ const ALLOWED: &[Allowed] = &[
     Allowed {
         fixture: "venn",
         palette: "dark",
+        text: Some("AB"),
+        behind: "#464434",
+        reason: "the author's `style A,B color:#333` on the dark palette's intersection tint: an author's text color is kept on any fill",
+    },
+    Allowed {
+        fixture: "venn",
+        palette: "dark",
         text: Some("React"),
         behind: "#483939",
         reason: "the author's `style A1 color:red` inside their `style A fill:#ff6b6b` set",
@@ -150,27 +157,6 @@ const ALLOWED: &[Allowed] = &[
         text: Some("React"),
         behind: "#fff0f0",
         reason: "the author's `style A1 color:red` inside their `style A fill:#ff6b6b` set",
-    },
-    Allowed {
-        fixture: "sequence",
-        palette: "dark",
-        text: None,
-        behind: "#d3d3d3",
-        reason: "palette text (stylesheet-painted) on the author's `box LightGrey`; the production pass does not know where the box's region ends",
-    },
-    Allowed {
-        fixture: "sequence",
-        palette: "terminal_ansi",
-        text: None,
-        behind: "#d3d3d3",
-        reason: "palette text (stylesheet-painted) on the author's `box LightGrey`; the production pass does not know where the box's region ends",
-    },
-    Allowed {
-        fixture: "sequence",
-        palette: "terminal_background",
-        text: None,
-        behind: "#d3d3d3",
-        reason: "palette text (stylesheet-painted) on the author's `box LightGrey`; the production pass does not know where the box's region ends",
     },
 ];
 
@@ -534,5 +520,157 @@ fn the_oracle_fails_a_low_contrast_label_and_passes_a_readable_one() {
         summary,
         [("Dim", "#888888", "#777777"), ("Faint", "#000000 at 0.30 = #b2b2b2", "#ffffff")],
         "{failures:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Author colors with no compiled design (R2-F1)
+// ---------------------------------------------------------------------------
+
+/// The one author edit of the sweep: a white node fill. An author color
+/// displaces the compiled design, so Merman paints every surface from its
+/// stylesheet and the library's text must still read on the author's fill.
+const WHITE_PRIMARY: &str = "%%{init: {'themeVariables': {'primaryColor': '#ffffff'}}}%%\n";
+
+/// `source` with [`WHITE_PRIMARY`] after its YAML frontmatter, if any, so
+/// the frontmatter's own configuration is kept.
+fn with_white_primary(source: &str) -> String {
+    match source.strip_prefix("---\n") {
+        Some(rest) => {
+            let end = rest.find("\n---\n").expect("the end of the frontmatter") + "\n---\n".len();
+            format!("---\n{}{WHITE_PRIMARY}{}", &rest[..end], &rest[end..])
+        }
+        None => format!("{WHITE_PRIMARY}{source}"),
+    }
+}
+
+/// A text color the fixture's author wrote, which the contrast pass keeps
+/// even where it fails. Each entry must still match a failure.
+struct AuthorText {
+    fixture: &'static str,
+    color: &'static str,
+    #[allow(dead_code, reason = "read in the source, not by the test")]
+    reason: &'static str,
+}
+
+const AUTHOR_TEXT: &[AuthorText] = &[
+    AuthorText {
+        fixture: "c4",
+        color: "#ff0000",
+        reason: "the author's `$fontColor=\"red\"` on their grey element and `$textColor=\"red\"` on a relationship",
+    },
+    AuthorText { fixture: "c4", color: "#0000ff", reason: "the author's `$textColor=\"blue\"` on a relationship" },
+    AuthorText { fixture: "venn", color: "#ff0000", reason: "the author's `style A1 color:red`" },
+    AuthorText { fixture: "venn", color: "#333333", reason: "the author's `style A,B color:#333`" },
+];
+
+/// Every family rendered `Dark` through the public render path with a white
+/// `primaryColor`: every text the library colored reads on what is painted
+/// behind it, by the same independent oracle as the corpus.
+fn assert_white_primary_contrast(fixture: &str) {
+    let (_, source) = GOLDEN_SOURCES
+        .iter()
+        .find(|(name, _)| *name == fixture)
+        .unwrap_or_else(|| panic!("no fixture {fixture}"));
+    let palette = Palette::fixed(MermaidTheme::Dark);
+    let svg = golden_svg_text(&with_white_primary(source), palette);
+    let mut unexpected = Vec::new();
+    let mut author_seen = Vec::new();
+    for failure in contrast_failures(&svg, palette.background()) {
+        match AUTHOR_TEXT.iter().position(|author| author.fixture == fixture && author.color == failure.color) {
+            Some(index) => author_seen.push(index),
+            None => unexpected.push(format!(
+                "{fixture} × white primaryColor: {:?} {} on {} = {:.2}:1",
+                failure.text, failure.color, failure.behind, failure.ratio
+            )),
+        }
+    }
+    let stale: Vec<&str> = AUTHOR_TEXT
+        .iter()
+        .enumerate()
+        .filter(|(index, author)| author.fixture == fixture && !author_seen.contains(index))
+        .map(|(_, author)| author.color)
+        .collect();
+    assert!(stale.is_empty(), "{fixture}: author text colors that no longer fail: {stale:?}");
+    assert!(
+        unexpected.is_empty(),
+        "text below {TEXT_CONTRAST}:1 against the fill behind it:\n{}",
+        unexpected.join("\n")
+    );
+}
+
+macro_rules! white_primary_contrast {
+    ($($test:ident => $fixture:literal),+ $(,)?) => {
+        /// The fixtures with a white-`primaryColor` contrast test.
+        const WHITE_PRIMARY_FIXTURES: &[&str] = &[$($fixture),+];
+
+        $(
+            #[test]
+            fn $test() {
+                assert_white_primary_contrast($fixture);
+            }
+        )+
+    };
+}
+
+white_primary_contrast! {
+    flowchart_text_reads_on_a_white_primary_color => "flowchart",
+    swimlane_text_reads_on_a_white_primary_color => "swimlane",
+    mindmap_text_reads_on_a_white_primary_color => "mindmap",
+    architecture_text_reads_on_a_white_primary_color => "architecture",
+    sequence_text_reads_on_a_white_primary_color => "sequence",
+    c4_text_reads_on_a_white_primary_color => "c4",
+    kanban_text_reads_on_a_white_primary_color => "kanban",
+    class_text_reads_on_a_white_primary_color => "class",
+    er_text_reads_on_a_white_primary_color => "er",
+    gantt_text_reads_on_a_white_primary_color => "gantt",
+    info_text_reads_on_a_white_primary_color => "info",
+    pie_text_reads_on_a_white_primary_color => "pie",
+    requirement_text_reads_on_a_white_primary_color => "requirement",
+    timeline_text_reads_on_a_white_primary_color => "timeline",
+    gitgraph_text_reads_on_a_white_primary_color => "gitgraph",
+    state_text_reads_on_a_white_primary_color => "state",
+    journey_text_reads_on_a_white_primary_color => "journey",
+    quadrant_chart_text_reads_on_a_white_primary_color => "quadrantchart",
+    sankey_text_reads_on_a_white_primary_color => "sankey",
+    packet_text_reads_on_a_white_primary_color => "packet",
+    xychart_text_reads_on_a_white_primary_color => "xychart",
+    block_text_reads_on_a_white_primary_color => "block",
+    event_modeling_text_reads_on_a_white_primary_color => "eventmodeling",
+    tree_view_text_reads_on_a_white_primary_color => "treeView",
+    radar_text_reads_on_a_white_primary_color => "radar",
+    ishikawa_text_reads_on_a_white_primary_color => "ishikawa",
+    treemap_text_reads_on_a_white_primary_color => "treemap",
+    railroad_text_reads_on_a_white_primary_color => "railroad",
+    venn_text_reads_on_a_white_primary_color => "venn",
+    wardley_text_reads_on_a_white_primary_color => "wardley",
+    cynefin_text_reads_on_a_white_primary_color => "cynefin",
+    usecase_text_reads_on_a_white_primary_color => "usecase",
+    agentflow_text_reads_on_a_white_primary_color => "agentflow",
+}
+
+/// Every family fixture on disk has a white-`primaryColor` test.
+#[test]
+fn every_family_fixture_has_a_white_primary_test() {
+    let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/merman/families");
+    let mut on_disk: Vec<String> = std::fs::read_dir(&fixtures_dir)
+        .expect("the family fixture directory")
+        .filter_map(|entry| {
+            let name = entry.expect("a directory entry").file_name().to_string_lossy().into_owned();
+            name.strip_suffix(".mmd").map(str::to_owned)
+        })
+        .collect();
+    on_disk.sort_unstable();
+    let mut tested: Vec<String> = WHITE_PRIMARY_FIXTURES.iter().map(|name| (*name).to_owned()).collect();
+    tested.sort_unstable();
+    assert_eq!(tested, on_disk);
+}
+
+#[test]
+fn the_white_primary_directive_follows_any_frontmatter() {
+    assert_eq!(with_white_primary("pie\n  \"A\": 1\n"), format!("{WHITE_PRIMARY}pie\n  \"A\": 1\n"));
+    assert_eq!(
+        with_white_primary("---\ntitle: T\n---\npie\n"),
+        format!("---\ntitle: T\n---\n{WHITE_PRIMARY}pie\n")
     );
 }

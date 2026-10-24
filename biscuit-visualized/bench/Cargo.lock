@@ -135,6 +135,7 @@ dependencies = [
  "rustybuzz",
  "serde",
  "serde_json",
+ "svgtypes",
  "tempfile",
  "thiserror",
  "tracing",

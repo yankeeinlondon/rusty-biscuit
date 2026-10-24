@@ -22,7 +22,7 @@ pub fn available_font_families() -> Vec<String> {
 /// and missing characters fall back in the chain's order.
 pub(crate) fn usvg_options(chain: &Arc<FontChain>) -> usvg::Options<'static> {
     let mut options = usvg::Options {
-        fontdb: Arc::clone(chain.database()),
+        fontdb: chain.drawing_database(),
         ..usvg::Options::default()
     };
     let select_chain = Arc::clone(chain);

@@ -116,9 +116,9 @@ mod requests {
     }
 
     /// The rasterizer's encoding keeps every pixel of tiny-skia's own encoder
-    /// and is never larger (tiny-skia 0.12 uses the same settings).
+    /// and stays smaller than the raw pixels.
     #[test]
-    fn the_encoding_is_lossless_and_no_larger_than_tiny_skias() {
+    fn the_encoding_is_lossless_and_smaller_than_the_raw_pixels() {
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120">
             <defs><linearGradient id="g"><stop offset="0" stop-color="#123"/><stop offset="1" stop-color="#fa0" stop-opacity="0.4"/></linearGradient></defs>
             <rect width="200" height="120" fill="url(#g)"/>
@@ -133,6 +133,7 @@ mod requests {
         let theirs = pixmap.encode_png().unwrap();
 
         assert_eq!(rgba(&ours), rgba(&theirs));
-        assert!(ours.len() <= theirs.len(), "{} > {}", ours.len(), theirs.len());
+        let raw = pixmap.data().len();
+        assert!(ours.len() < raw, "{} >= {raw}", ours.len());
     }
 }

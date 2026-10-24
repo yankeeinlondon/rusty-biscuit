@@ -11,7 +11,7 @@ Both preserve aspect ratio and run through the same `resvg` + `tiny_skia` pipeli
 
 ## PNG encoding
 
-Every PNG (public functions and `RenderRequest` renders alike) is encoded by the private `encode_png` with the `png` crate (0.18, the version tiny-skia 0.12 already uses) at zlib's default compression level (`Compression::Balanced`) with adaptive filtering, after converting tiny-skia's premultiplied alpha to straight alpha. tiny-skia 0.12's own `encode_png` now uses the same defaults (0.11 used fast compression whose output could exceed the raw pixel size), but the settings stay explicit: they are part of every PNG artifact's cache key (`PNG_ENCODING` in `artifact.rs`), so a change in tiny-skia's defaults or ours never serves bytes encoded the old way. `Compression::High` was measured larger on a gradient test image, so it is not used.
+Every PNG (public functions and `RenderRequest` renders alike) is encoded by the private `encode_png` with the `png` crate (0.18, the version tiny-skia 0.12 already uses) at zlib level 1 (`DeflateCompression::Level(1)`) with the `Up` filter, after converting tiny-skia's premultiplied alpha to straight alpha in place (only partly transparent pixels need it). zlib's default level with adaptive filtering (tiny-skia 0.12's own `encode_png`) took 28–48 ms of the 50 ms warm render limit for sequence and timeline on the Linux reference host; level 1 with `Up` takes 4–7 ms for files about twice as large. fdeflate's modes (`Compression::Fast`) are not used: their output can exceed the raw pixel size. The settings stay explicit: they are part of every PNG artifact's cache key (`PNG_ENCODING` in `artifact.rs`), so a change in tiny-skia's defaults or ours never serves bytes encoded the old way.
 
 ## Width-based API (preferred for display)
 
@@ -91,9 +91,9 @@ let req = RenderRequest::default()
 
 When `target_width` is `Some`, the rasterizer renders at that exact pixel width and `scale` is ignored. When `target_width` is `None`, the rasterizer falls back to `scale × svg_native`.
 
-`row_height` pads the canvas height up to the next multiple of that many pixels; the drawing sits at the top and the padding below it is transparent, or filled with the color of `Background::Solid`. A terminal reserves whole cell rows for an image, so a padded PNG fills them 1:1 instead of being stretched. It is ignored for SVG and has no public-function equivalent: it is reachable only through `RenderRequest` (the crate-private `rasterize_svg_for_request` is the renderers' single SVG-to-PNG path).
+`row_height` pads the canvas height up to the next multiple of that many pixels; the drawing sits at the top and the padding below it is transparent, or filled with the color of `Background::Solid`. A terminal reserves whole cell rows for an image, so a padded PNG fills them 1:1 instead of being stretched. It is ignored for SVG and has no public-function equivalent: it is reachable only through `RenderRequest` (the crate-private `rasterize_svg_for_request_with(svg, request, chain)` is the renderers' single SVG-to-PNG path; they pass the chain whose identity is in the artifact's key).
 
-The cache key incorporates `scale`, `target_width`, `row_height`, `background`, and the PNG encoding, so renders differing in any of them produce distinct cache entries.
+The cache key incorporates `scale`, `target_width`, `row_height`, `background`, the PNG encoding, and (Mermaid and graph PNGs) the font chain's `cache_identity`, so renders differing in any of them produce distinct cache entries.
 
 ## Query available fonts
 
@@ -116,8 +116,8 @@ Mermaid text measurer (`fonts::measure::LabelMeasurer`) resolves with:
   Regular/Bold (family `Inter`) and, on Linux builds, the bundled Noto Emoji.
   `MERMAID_FONT` is read once, there. fontique (the OS generic family) and the
   OS/2 scan of step 4 run only when a query first needs them.
-- `raster::usvg_options(chain)` hands usvg the chain's own
-  `Arc<fontdb::Database>` and a `usvg::FontResolver` whose `select_font`
+- `raster::usvg_options(chain)` hands usvg the chain's drawing database
+  (`FontChain::drawing_database()`) and a `usvg::FontResolver` whose `select_font`
   calls `FontChain::resolve(&FontQuery::from_usvg(font))` and whose
   `select_fallback` calls `FontChain::fallback`.
 - Resolution order: `MERMAID_FONT` (installed or bundled Inter, any casing)
@@ -125,6 +125,17 @@ Mermaid text measurer (`fonts::measure::LabelMeasurer`) resolves with:
   OS `sans-serif` answer (fontique) → an installed OS/2 sans-serif face by a
   fixed rule. Fallback: the resolved face, then installed faces by case-folded
   family name, then Noto Emoji (Linux) last; bundled Inter is never a fallback face.
+- **Two databases, same faces and IDs.** `FontChain::database()` is the
+  metadata index (resolution, cache identity; file faces stay `Source::File`).
+  `drawing_database()` is what the shaper and usvg read glyph data from: every
+  file-backed face `resolve` or `fallback` has returned is made
+  `Source::SharedFile` (memory-mapped once, kept for the process) by cloning the
+  database and swapping it in behind an `RwLock`. fontdb otherwise opens and
+  maps a `Source::File` face on every data read — several per label — which was
+  most of a warm render's text work on hosts whose labels resolve to installed
+  fonts. Mapping every installed face at build time was measured at ~250 ms on
+  a Mac with 3,400 faces, so faces are mapped only when first used. Tests:
+  `font_chain_tests::file_faces_the_chain_answers_with_stay_mapped_and_draw_as_in_memory`.
 - `MERMAID_FONT` therefore overrides every rasterized SVG's fonts, graphs
   included.
 - Tests build a chain with `FontChain::injected(installed_bytes,

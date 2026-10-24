@@ -8,9 +8,16 @@
 //! receives for the PNG with the same background (one code path builds both).
 //! Two tests per family (SVG, PNG) keep each test fast; a guard test keeps the list
 //! equal to the registry.
+//!
+//! The family renders use the goldens' chain of bundled faces
+//! (`render_in`): building the host's chain scans every installed face, and
+//! dozens of test processes doing so at once pushed each past the L1 budget.
+//! One flowchart test renders through the public `render`, so the host's
+//! chain is still exercised end to end.
 
 use serial_test::serial;
 
+use super::golden_tests::golden_chain;
 use crate::artifact::{Background, OutputFormat, RenderRequest};
 use crate::mermaid::{MermaidDiagram, MermaidTheme};
 use crate::tests::isolated_cache_dir;
@@ -31,41 +38,68 @@ const NOT_RENDERED: [(&str, &str); 2] = [
     ),
 ];
 
+fn svg_request() -> RenderRequest {
+    RenderRequest {
+        format: OutputFormat::Svg,
+        background: Background::Theme,
+        ..RenderRequest::default()
+    }
+}
+
+/// Drawn small: the smoke test needs a PNG, not its detail, and
+/// rasterization is most of its time.
+fn png_request() -> RenderRequest {
+    RenderRequest::default().with_target_width(160)
+}
+
+fn assert_svg_without_html_labels(artifact_path: &std::path::Path, context: &str) {
+    let svg = std::fs::read_to_string(artifact_path).unwrap();
+    assert!(svg.contains("<svg"), "{context}");
+    assert!(!svg.contains("foreignObject"), "{context} has HTML labels");
+}
+
+fn assert_png(artifact_path: &std::path::Path, context: &str) {
+    let png = std::fs::read(artifact_path).unwrap();
+    assert!(png.starts_with(b"\x89PNG"), "{context}");
+}
+
 /// Every fixed-palette theme renders `source` to SVG without HTML labels.
 fn smoke_svg(family: &str, source: &str) {
     let _cache = isolated_cache_dir();
     for theme in THEMES {
         let artifact = MermaidDiagram::new(source)
             .with_theme(theme)
-            .render(&RenderRequest {
-                format: OutputFormat::Svg,
-                background: Background::Theme,
-                ..RenderRequest::default()
-            })
+            .render_in(golden_chain(), &svg_request())
             .unwrap_or_else(|error| panic!("{family} {theme:?} SVG: {error}"));
-
-        let svg = std::fs::read_to_string(&artifact.path).unwrap();
-        assert!(svg.contains("<svg"), "{family} {theme:?}");
-        assert!(
-            !svg.contains("foreignObject"),
-            "{family} {theme:?} has HTML labels"
-        );
+        assert_svg_without_html_labels(&artifact.path, &format!("{family} {theme:?}"));
     }
 }
 
-/// Every fixed-palette theme renders `source` to PNG, drawn small: the smoke test
-/// needs a PNG, not its detail, and rasterization is most of its time.
+/// Every fixed-palette theme renders `source` to PNG.
 fn smoke_png(family: &str, source: &str) {
     let _cache = isolated_cache_dir();
     for theme in THEMES {
         let artifact = MermaidDiagram::new(source)
             .with_theme(theme)
-            .render(&RenderRequest::default().with_target_width(160))
+            .render_in(golden_chain(), &png_request())
             .unwrap_or_else(|error| panic!("{family} {theme:?} PNG: {error}"));
-
-        let png = std::fs::read(&artifact.path).unwrap();
-        assert!(png.starts_with(b"\x89PNG"), "{family} {theme:?}");
+        assert_png(&artifact.path, &format!("{family} {theme:?}"));
     }
+}
+
+/// The public `render`, over the host's installed fonts, draws a family to
+/// SVG without HTML labels and to PNG.
+#[test]
+#[serial]
+fn smoke_renders_on_host_fonts_through_the_public_render() {
+    let _cache = isolated_cache_dir();
+    let source = include_str!("fixtures/merman/families/flowchart.mmd");
+    let diagram = MermaidDiagram::new(source);
+
+    let svg = diagram.render(&svg_request()).expect("flowchart SVG on host fonts");
+    assert_svg_without_html_labels(&svg.path, "flowchart on host fonts");
+    let png = diagram.render(&png_request()).expect("flowchart PNG on host fonts");
+    assert_png(&png.path, "flowchart on host fonts");
 }
 
 macro_rules! family_smoke_tests {

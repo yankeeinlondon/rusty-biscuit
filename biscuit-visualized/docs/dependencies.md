@@ -52,7 +52,9 @@ flowchart LR
 
 - [png](https://github.com/image-rs/image-png) _v0.18_ (feature: `image`)
 
-    _Encodes rasterized PNGs at zlib's default level with adaptive filtering.
+    _Encodes rasterized PNGs at zlib level 1 with the `Up` filter, chosen to
+    keep large diagrams under the 50 ms warm render limit (zlib's default
+    level took most of it) at about twice the file size.
     The settings are explicit because they are part of the PNG cache key, so
     a change in tiny-skia's defaults cannot change the bytes behind a key.
     Kept on the major version tiny-skia already uses, so it adds no second
@@ -73,6 +75,13 @@ flowchart LR
 
     _Split label text into bidi and script runs for shaping, as `usvg`'s text
     layout does; both are already in the graph through `usvg`._
+
+- [svgtypes](https://github.com/linebender/svgtypes) _v0.16.1_ (feature: `image`)
+
+    _Parses the colors an author writes in a Mermaid source, CSS color names
+    included, so the contrast pass can tell the author's text colors from the
+    ones the library chose. Kept on the version `usvg` uses, so the lockfile
+    holds one copy._
 
 - [fontique](https://github.com/linebender/parley) _v0.12.0_ (feature: `image`)
 

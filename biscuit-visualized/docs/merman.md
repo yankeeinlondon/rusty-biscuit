@@ -290,15 +290,58 @@ any size:
   toward the background until the text reads on their links;
 - accents, borders, and lines reach 3:1 against the background.
 
-A final **contrast pass** over the SVG catches the labels Merman's compiled
-styles do not reach. Each `<text>` is checked against the shape painted
-behind it (the nearest inline-painted shape in its group or the node group
+A final **contrast pass** over the SVG catches every label the steps above
+do not reach, with or without a compiled theme: labels Merman's compiled
+styles miss, the library's text on an author's `style`/`classDef` fill, and
+every label drawn on an author's `%%{init}%%` colors (see [Author styling
+wins](#author-styling-wins)). A label below 4.5:1 against what is painted
+behind it is recolored to the palette's readable color on that fill, so the
+same SVG goes to SVG export, PNG rasterization, and the HTML static target.
+
+```text
+%%{init: {'themeVariables': {'primaryColor': '#ffffff'}}}%%
+flowchart LR
+  A[Start] --> B[Finish]          Dark palette: the white nodes are kept, and
+                                  "Start"/"Finish" turn dark instead of
+                                  staying light gray at 1.6:1
+```
+
+**What counts as behind a label.** The pass first looks for a shape painted
+with an inline fill: the nearest one in the label's group or the node group
 just before it, following Merman's `<use>` label placements, mixed with what
-it covers when the shape is translucent, or the diagram background), and a
-label below
-4.5:1 is recolored to a readable one. It touches only text where the label
-color or the fill behind it is a palette color, so an author's own text color
-on an author's own fill is left as written.
+it covers when it is translucent, or the diagram background. When the label's
+own color or a shape it may sit on is painted by Merman's stylesheet or a
+`fill` attribute instead, the pass asks usvg (the parser resvg rasterizes
+with) for the document's painted result, and takes the color most of the
+label's box sits on, strokes, translucency, and clipping included. That is
+what reaches every surface under an author `%%{init}%%` color and a sequence
+`box`, a rectangle drawn first whose messages sit far from it in the SVG:
+
+```mermaid
+flowchart TD
+    T["a &lt;text&gt;"] --> I{"its color and the shape<br/>behind it painted inline?"}
+    I -- yes --> J["judge on that shape<br/>(or the background)"]
+    I -- no --> R["usvg resolves the paint;<br/>judge on the color under<br/>most of the label's box"]
+    J --> F{"below 4.5:1 and not<br/>the author's text color?"}
+    R --> F
+    F -- yes --> W["recolor the text and its spans"]
+    F -- no --> K["leave it as written"]
+```
+
+**Whose text is recolored.** A label is recolored only when its color is not
+one the author wrote as a text color. The author's text colors are read from
+the source as written: a CSS `color` in `style`, `classDef`, or `linkStyle`,
+C4's `$fontColor` and `$textColor`, and any theme variable or config key that
+names text, a label, a title, or a font (`primaryTextColor`, `noteTextColor`,
+`titleColor`), never a surface (`primaryColor`, `labelBackground`). Every
+other text color, the palette's or one Merman's `base` theme or a family
+default picked, is the library's choice. An author's own text color is left
+as written on any fill, even where it does not read:
+
+```text
+style A1 color:red              → "A1" stays red, whatever it sits on
+UpdateRelStyle(a, b, $textColor="blue")   → the relationship text stays blue
+```
 
 ### How a palette reaches Merman
 
@@ -354,7 +397,9 @@ darkened until `#333` reads on them.
   override them, and the accent edits only rewrite palette colors.
 - A **color** set in the source's `%%{init}%%` directive or frontmatter
   `themeVariables` wins: such a diagram gets no compiled theme; the palette is
-  passed as `base` theme variables with the author's on top.
+  passed as `base` theme variables with the author's on top. The
+  [contrast pass](#readable-text) still runs, so the library's labels are
+  recolored to read on the author's colors.
 - A `theme` named in the source wins outright: no compiled theme and no
   palette variables.
 - Other theme variables (sizes, widths, `darkMode`) keep the compiled theme,
@@ -395,6 +440,13 @@ exactly the faces the chain can return, so the chain decides the face of
 every rasterized SVG, graphs included. `raster::available_font_families()`
 ([`raster`](../src/src/raster/mod.rs)) lists the installed families plus
 `Inter`.
+
+Installed fonts stay files on disk until a label needs them. The first time
+the chain answers with an installed face (as a label's face or as a fallback
+for a missing character), it maps that face's file into memory and keeps it
+mapped for the rest of the process; measuring and drawing then read the
+mapping. Without this, every glyph lookup reopened the file, which was most
+of a warm render's text work.
 
 ### Choosing a font: `MERMAID_FONT`
 
@@ -616,7 +668,7 @@ actually receive. It changes when any of these change:
 
 - the backend id ([`MERMAID_BACKEND`](../src/src/cache/file_cache.rs)),
   `merman@<first 12 characters of the pinned rev>+bv<n>`
-  (currently `merman@6e6b1e6554e8+bv4`). `<n>` versions this crate's own
+  (currently `merman@6e6b1e6554e8+bv5`). `<n>` versions this crate's own
   layer (source rewrites, post-process, accents, contrast pass, background)
   and is bumped whenever
   that layer changes output, so older artifacts are never served;
@@ -640,6 +692,11 @@ actually receive. It changes when any of these change:
 
 A tagged gitGraph's layout pass (step 2) runs before the cache check, so a
 cache hit for such a graph still costs one Merman layout.
+
+Graph PNGs (expression and DOT) carry the same font identity, computed for
+the one stack their labels request: the color theme's `font_family`, or
+`Times, serif` without a theme. Graph SVG keys carry none, because an SVG
+stores the requested family rather than the face that draws it.
 
 ## HTML static target
 
@@ -721,9 +778,10 @@ and rule. Elsewhere the same findings are printed as information and the run
 exits 0. The rules, flags, and the strict baseline format are described in
 `bench/README.md`.
 
-On the reference host today, sequence (about 56 ms) and timeline (about
-84 ms) are over the 50 ms warm limit, so `just bench` there flags them; every
-cold render is under 100 ms.
+On the reference host today, every family's warm median is under 50 ms (the
+slowest are timeline at about 41 ms and sequence at about 34 ms), and every
+cold render is under 60 ms. Most of what remains in those two is resvg drawing
+their drop shadows and other filters at the default scale of 2.
 
 ## Golden tests
 
@@ -815,10 +873,6 @@ spacing](#gitgraph-tag-spacing) code adapts in that same change.
 - **A text-art fallback.** Merman can also write diagrams as Unicode or ASCII
   art. That could replace the code-block fallback on terminals that cannot
   show images.
-- **Region-aware contrast.** The contrast pass cannot yet reach sequence
-  message text drawn over an author's light `box` in a dark palette.
-- **Speed.** Sequence and timeline are over the 50 ms warm limit on the Linux
-  reference host (see [Benchmark](#benchmark)).
 
 ### Merman churn and rev bumps
 

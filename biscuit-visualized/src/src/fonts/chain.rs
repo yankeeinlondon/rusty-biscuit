@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source, Stretch, Style};
 
@@ -178,6 +178,12 @@ struct NamedFace {
 /// Missing characters fall back in [`fallback_order`](Self::fallback_order).
 pub(crate) struct FontChain {
     db: Arc<Database>,
+    /// `db` with every file-backed face the chain has answered with kept
+    /// memory-mapped ([`Source::SharedFile`]): fontdb otherwise opens and
+    /// maps a face's file on every glyph-data read, several times per label,
+    /// which was most of a warm render's text work. Same faces and IDs as
+    /// `db`; replaced, never edited, when a face is first mapped.
+    drawing_db: RwLock<Arc<Database>>,
     named: Vec<NamedFace>,
     installed: Vec<ID>,
     last_resort: Vec<ID>,
@@ -279,8 +285,10 @@ impl FontChain {
             })
             .collect();
 
+        let db = Arc::new(db);
         let mut chain = FontChain {
-            db: Arc::new(db),
+            drawing_db: RwLock::new(Arc::clone(&db)),
+            db,
             named,
             installed,
             last_resort,
@@ -314,15 +322,46 @@ impl FontChain {
         None
     }
 
-    /// The font database the chain resolves in; hand this `Arc` to usvg.
+    /// The font database the chain resolves in: face metadata. Text is
+    /// shaped and drawn from [`drawing_database`](Self::drawing_database).
     pub(crate) fn database(&self) -> &Arc<Database> {
         &self.db
+    }
+
+    /// The database to shape and draw text from (hand it to usvg): the faces
+    /// and IDs of [`database`](Self::database), with every file-backed face
+    /// [`resolve`](Self::resolve) or [`fallback`](Self::fallback) has
+    /// returned kept memory-mapped.
+    pub(crate) fn drawing_database(&self) -> Arc<Database> {
+        Arc::clone(&self.drawing_db.read().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// The face for `query`, or `None` when no step yields one (no installed
     /// face qualifies and nothing names the bundled Inter).
     pub(crate) fn resolve(&self, query: &FontQuery) -> Option<ID> {
-        self.resolve_with_step(query).map(|(id, _)| id)
+        self.resolve_with_step(query).map(|(id, _)| self.keep_mapped(id))
+    }
+
+    /// `id`, after making sure its font file stays mapped in the drawing
+    /// database. A face that cannot be mapped stays file-backed, as before.
+    fn keep_mapped(&self, id: ID) -> ID {
+        let file_backed =
+            |db: &Database| matches!(db.face(id).map(|face| &face.source), Some(Source::File(_)));
+        if !file_backed(&self.drawing_db.read().unwrap_or_else(|e| e.into_inner())) {
+            return id;
+        }
+        let mut drawing_db = self.drawing_db.write().unwrap_or_else(|e| e.into_inner());
+        if file_backed(&drawing_db) {
+            let mut db = Database::clone(&drawing_db);
+            // SAFETY: the mapping is read-only and fontdb maps the same file
+            // for every read of a file-backed face anyway; keeping it only
+            // lengthens that window. A font file truncated in place while this
+            // process runs could fault on access, as it could mid-read before.
+            if unsafe { db.make_shared_face_data(id) }.is_some() {
+                *drawing_db = Arc::new(db);
+            }
+        }
+        id
     }
 
     /// [`resolve`](Self::resolve), also naming the step that answered.
@@ -486,6 +525,7 @@ impl FontChain {
             .copied()
             .filter(|id| !already_tried.contains(id))
             .find(|id| self.has_glyph(*id, c))
+            .map(|id| self.keep_mapped(id))
     }
 
     /// Every face a missing character can fall back to, in order, for text

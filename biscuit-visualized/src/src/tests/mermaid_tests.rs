@@ -73,7 +73,7 @@ fn warm_merman_time(source: &str, request: impl FnOnce(MermaidDiagram)) -> Durat
 /// A gitGraph large enough that Merman needs well over a few milliseconds.
 fn large_gitgraph() -> String {
     let mut source = String::from("gitGraph\n");
-    for index in 0..200 {
+    for index in 0..400 {
         source.push_str(&format!("    commit id: \"c{index}\"\n"));
     }
     source

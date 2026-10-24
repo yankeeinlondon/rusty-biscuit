@@ -124,7 +124,7 @@ bt graph-expression --font "Georgia, serif" "a -> b -> c"
 Two differences from Mermaid diagrams:
 
 - **Boxes are not measured in the font.** `layout-rs` sizes each node from its label's character count and font size, not from the face that draws it, so a box fits its label only approximately.
-- **The cache does not key on fonts.** A graph PNG is cached by its source, options, theme, and request only, so after `MERMAID_FONT` changes, or a font is installed, a graph rendered before is served in its old face. Remove `biscuit-visualized/v1/graph/` under the OS temp directory (or under `BISCUIT_VISUALIZED_CACHE_DIR` when it is set) to redraw it.
+- **Only the PNG cache keys on fonts.** A graph PNG's cache key carries the same font identity as a Mermaid diagram's (see [Cache identity](../merman.md#cache-identity)), computed for the stack its labels request, so after `MERMAID_FONT` changes, or a font is installed, the graph is drawn again in the new face. An SVG stores the requested `font-family`, never a resolved face, so its key ignores fonts and the cached SVG is reused.
 
 ## CLI
 

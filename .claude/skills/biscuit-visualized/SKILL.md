@@ -93,7 +93,7 @@ let req = RenderRequest::default().with_target_width(540).with_row_height(18); /
 `target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
 - Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/`)
-- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv4`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv5`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
 - `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
@@ -144,6 +144,7 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
 | `resvg` v0.47 | SVG-to-PNG rasterization |
 | `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); rustybuzz and ttf-parser stay on usvg's versions |
+| `svgtypes` 0.16.1 | Parses the author's text colors (CSS names included) for the contrast pass (feature `image`; usvg's version) |
 | Bundled fonts (`src/assets/fonts/`) | Inter 4.1 Regular/Bold (every OS) and Noto Emoji (Linux only), registered in the font chain |
 | `biscuit-hash` | xxHash for cache keys and font identity |
 | `serde` + `serde_json` | Site config and Merman layout data |
@@ -160,6 +161,7 @@ just -f biscuit-visualized/justfile lint    # Run clippy
 ## Implementation Notes
 
 - **Golden corpus** (`src/tests/golden_tests.rs`): every family fixture × 4 fixed palettes as `insta` SVG snapshots (`src/tests/goldens/svg/`), `Dark`/`Default` PNGs within AE share ≤ 0.1% and RMSE ≤ 0.005 (`src/tests/goldens/png/`), plus six derived-palette SVGs. Goldens render through `MermaidDiagram::render_in(chain, …)` with a bundled-Inter-only chain and normalize the `bv-<16 hex>` diagram id. Any output change shows as a golden diff: regenerate with `INSTA_UPDATE=always BISCUIT_VISUALIZED_UPDATE_GOLDENS=1` over `-E 'test(/golden_tests::/)'` and review it. A new family needs a fixture (smoke guard) and goldens (golden guard)
+- **Test font chains**: a test that does not assert installed-font behavior renders through `render_in` with a bundled-face chain (the family smoke tests in `src/tests/mermaid_family_tests.rs` reuse `golden_chain()`; one flowchart smoke test keeps the public `render` over host fonts). On macOS a host-font render asks fontique, whose CoreText scan lists the test executable's directory (`target/debug/deps`, 100,000+ entries in a long-lived target); the package's L1 tests run with nextest's `coretext-small-bundle` setup script (`.config/nextest.toml`) so that listing stays small. See the `os` skill's `macos.md`
 - The package is **gating** in CI (`gates = true`); `just bench` runs the non-member crate `biscuit-visualized/bench/` (never in CI)
 - Graph SVG post-processing trims layout-rs canvas padding and applies custom fonts/colors; layout-rs supports LR and TB
 - Rasterization draws text through `fonts::default_chain()` (lazily built behind `OnceLock`); see [Rasterization](./rasterization.md#font-database-and-resolution)

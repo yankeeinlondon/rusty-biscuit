@@ -324,7 +324,8 @@ fn cache_key_different_mermaid_backend() {
             OutputFormat::Png,
         )
     };
-    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv4");
+    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv5");
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv4"));
     assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv3"));
     assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv2"));
     assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv0"));

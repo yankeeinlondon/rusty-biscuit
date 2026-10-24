@@ -2,8 +2,17 @@
 //! palettes from injected detection results, and the contrast guarantees
 //! every palette carries.
 
+use std::sync::{Arc, OnceLock};
+
+use crate::fonts::FontChain;
 use crate::mermaid::contrast::{parse_css_color, readable_text};
 use crate::mermaid::{MermaidTheme, Palette, Rgb, TerminalColors};
+
+/// Bundled Inter only, for the contrast pass's text layout.
+fn chain() -> &'static Arc<FontChain> {
+    static CHAIN: OnceLock<Arc<FontChain>> = OnceLock::new();
+    CHAIN.get_or_init(|| Arc::new(FontChain::injected(&[], &[], Some("Inter"))))
+}
 
 fn hex(text: &str) -> Rgb {
     Rgb::from_hex(text).expect("test hex")
@@ -259,7 +268,8 @@ fn detection_reports_nothing_when_stdout_is_not_a_terminal_or_in_ci() {
 
 /// A label viewport whose background rect Merman painted with the palette
 /// background but whose text kept the `base` theme's `#333` gets readable
-/// text; the stylesheet and every other byte are untouched.
+/// text, its fill first in the style; the stylesheet and every other
+/// declaration are untouched.
 #[test]
 fn text_on_a_known_label_background_is_made_readable() {
     let palette = Palette::fixed(MermaidTheme::Dark);
@@ -269,13 +279,13 @@ fn text_on_a_known_label_background_is_made_readable() {
         r##"<text x="1" fill="#333" style="text-anchor:middle;fill:#333;font-size:16px">go</text>"##,
         r##"</svg></g></svg>"##
     );
-    let fixed = readable_text(svg, &palette);
+    let fixed = readable_text(svg, &palette, &[], chain());
     let text = palette.text_on(palette.background());
     assert_eq!(
         fixed,
         svg.replace(
             r##"fill="#333" style="text-anchor:middle;fill:#333;"##,
-            &format!(r##"fill="{text}" style="text-anchor:middle;fill:{text};"##)
+            &format!(r##"fill="{text}" style="fill:{text};text-anchor:middle;"##)
         )
     );
     assert!(fixed.contains("<style>#d .x{fill:#333}</style>"));
@@ -299,28 +309,49 @@ fn a_used_label_is_judged_against_its_placement() {
         ),
         text = text
     );
-    let fixed = readable_text(&svg, &palette).into_owned();
+    let fixed = readable_text(&svg, &palette, &[], chain()).into_owned();
     let on_pink = palette.text_on(hex("#ff99ff"));
     assert_ne!(on_pink, text);
     assert!(fixed.contains(&format!(r##"<text fill="{on_pink}" style="fill:{on_pink}">e</text>"##)), "{fixed}");
     assert!(fixed.contains(r##"fill="#f9f" style="fill:#f9f !important""##));
 }
 
-/// Author text on an author fill is left as written even when it fails; text
-/// that already reads, and text behind a stylesheet-only shape, are not
-/// touched. Nothing to fix borrows the input.
+/// A text color the author wrote is left as written even when it fails, on
+/// any fill; text that already reads is not touched. Nothing to fix borrows
+/// the input.
 #[test]
-fn author_paint_and_unknown_fills_are_left_alone() {
+fn author_text_and_readable_text_are_left_alone() {
     let palette = Palette::fixed(MermaidTheme::Dark);
+    let yellow = hex("#ffff00");
     let cases = [
-        // Author's yellow text on the author's white fill: neither is ours.
+        // The author's yellow text on the author's white fill.
         r##"<svg><g><rect style="fill:#ffffff"/><text style="fill:#ffff00">a</text></g></svg>"##,
+        // The author's yellow text on a white fill the stylesheet paints.
+        r##"<svg xmlns="http://www.w3.org/2000/svg"><style>.node{fill:#ffffff}</style><g><rect class="node" width="90" height="40"/><text x="5" y="20" fill="#ffff00" font-family="Inter">a</text></g></svg>"##,
         // Readable palette text on the palette background.
         r##"<svg><g><text fill="#cccccc">b</text></g></svg>"##,
-        // The shape behind is painted by the stylesheet: unknown.
-        r##"<svg><g><rect class="node" fill="#eaeaea"/><text fill="#333">c</text></g></svg>"##,
     ];
     for svg in cases {
-        assert!(matches!(readable_text(svg, &palette), std::borrow::Cow::Borrowed(_)), "{svg}");
+        assert!(matches!(readable_text(svg, &palette, &[yellow], chain()), std::borrow::Cow::Borrowed(_)), "{svg}");
     }
+}
+
+/// A shape the stylesheet paints is resolved: the library's light text on an
+/// author's white node fill (what `primaryColor: '#ffffff'` gives, with no
+/// compiled design) becomes dark, and the fill stays.
+#[test]
+fn text_on_a_stylesheet_painted_fill_is_made_readable() {
+    let palette = Palette::fixed(MermaidTheme::Dark);
+    let svg = concat!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" id="d"><style>#d .node rect{fill:#ffffff}</style>"##,
+        r##"<g class="node"><rect width="90" height="40"/>"##,
+        r##"<text x="5" y="20" fill="#cccccc" font-family="Inter">c</text></g></svg>"##
+    );
+    let fixed = readable_text(svg, &palette, &[], chain());
+    let dark = palette.text_on(Rgb::WHITE);
+    assert!(dark.contrast(Rgb::WHITE) >= 4.5);
+    assert_eq!(fixed, svg.replace(
+            r##"fill="#cccccc" font-family="Inter">"##,
+            &format!(r##"fill="{dark}" font-family="Inter" style="fill:{dark}">"##)
+        ));
 }

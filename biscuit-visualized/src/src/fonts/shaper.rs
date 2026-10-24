@@ -142,9 +142,9 @@ struct Glyph {
 /// characters fall back through `chain`, as the rasterizer's
 /// `FontResolver::select_fallback` does.
 pub(crate) fn shape(chain: &FontChain, base: ID, text: &str, params: &ShapeParams) -> Shaped {
-    let db = chain.database();
+    let db = chain.drawing_database();
     // usvg's `layout_text` drops a span whose face does not load.
-    let Some(base_metrics) = load_metrics(db, base) else {
+    let Some(base_metrics) = load_metrics(&db, base) else {
         return Shaped::default();
     };
     if text.is_empty() {
@@ -165,7 +165,8 @@ fn shape_with_fallback(
     text: &str,
     params: &ShapeParams,
 ) -> Vec<Glyph> {
-    let db = chain.database();
+    let drawing_db = chain.drawing_database();
+    let db = drawing_db.as_ref();
     let mut glyphs = shape_with_face(db, base, base_metrics, text, params).unwrap_or_default();
     let mut used = vec![base];
     while let Some(missing) = glyphs

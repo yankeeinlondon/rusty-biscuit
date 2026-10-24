@@ -20,6 +20,7 @@ image = [
     "dep:unicode-script",
     "dep:fontique",
     "dep:merman",
+    "dep:svgtypes",
 ]
 # The diagram components (`components::{MermaidDiagram, GraphExpression,
 # GitGraph}`) and the render-tree diagram hook. This crate depends on
@@ -45,6 +46,9 @@ ttf-parser = { version = "0.25.1", optional = true }
 # Bidi runs and script itemization for shaping, as usvg's text layout does.
 unicode-bidi = { version = "0.3", optional = true }
 unicode-script = { version = "0.5", optional = true }
+# Parses the colors an author writes (CSS names included) for the contrast
+# pass; keep on the version usvg uses, so the lock holds one copy.
+svgtypes = { version = "0.16.1", optional = true }
 # The OS's own generic font family (fontconfig, CoreText, DirectWrite) for
 # font resolution; the version Merman pins. `fontconfig-dlopen` loads
 # libfontconfig at run time, so Linux builds need no fontconfig development

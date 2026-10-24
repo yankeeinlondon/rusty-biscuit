@@ -40,7 +40,7 @@ pub(crate) fn rasterize_svg_to_png_bytes_with(
 ) -> Result<Vec<u8>, RasterError> {
     let tree = parse_svg_tree_with(svg_data, chain)?;
     let pixmap = render_tree_to_pixmap(&tree, scale.max(1) as f32, None, None)?;
-    encode_png(&pixmap)
+    encode_png(pixmap)
 }
 
 /// Draws `tree` scaled by `scale` onto a canvas whose height is padded up to
@@ -83,31 +83,42 @@ fn scale_for_width(tree: &usvg::Tree, target_width: u32) -> Result<f32, RasterEr
     Ok((target_width.max(1) as f32) / svg_width)
 }
 
-/// Encodes a pixmap as PNG with zlib's default level and adaptive filtering.
+/// Encodes a pixmap as PNG with zlib level 1 and the `Up` filter.
 ///
 /// The settings are spelled out rather than inherited from tiny-skia's
 /// `encode_png`, because they are part of the cache key (`PNG_ENCODING`):
 /// a change in tiny-skia's defaults must not change the bytes behind a key.
-/// Earlier tiny-skia used fast settings whose output could exceed the raw
-/// pixels; these bytes reach terminals unchanged, so size matters.
-fn encode_png(pixmap: &resvg::tiny_skia::Pixmap) -> Result<Vec<u8>, RasterError> {
-    // tiny-skia stores premultiplied alpha; PNG wants straight alpha.
-    let mut rgba = Vec::with_capacity(pixmap.data().len());
-    for pixel in pixmap.pixels() {
-        let color = pixel.demultiply();
-        rgba.extend_from_slice(&[color.red(), color.green(), color.blue(), color.alpha()]);
+/// They are chosen for the 50 ms warm render limit: on a large diagram,
+/// tiny-skia's zlib default level with adaptive filtering took most of it,
+/// and level 1 with `Up` is about five times faster for files about twice as
+/// large. fdeflate's faster modes are not used: their output can exceed the
+/// raw pixels, and these bytes reach terminals unchanged.
+fn encode_png(mut pixmap: resvg::tiny_skia::Pixmap) -> Result<Vec<u8>, RasterError> {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    // tiny-skia stores premultiplied alpha; PNG wants straight alpha, written
+    // over the pixmap in place. Opaque pixels are already straight, and a
+    // transparent one is all zeros either way.
+    for pixel in pixmap.data_mut().as_chunks_mut::<4>().0 {
+        let [red, green, blue, alpha] = *pixel;
+        if !matches!(alpha, 0 | 255)
+            && let Some(color) = resvg::tiny_skia::PremultipliedColorU8::from_rgba(red, green, blue, alpha)
+        {
+            let color = color.demultiply();
+            *pixel = [color.red(), color.green(), color.blue(), color.alpha()];
+        }
     }
+    let rgba = pixmap.data();
 
     let encoding_error = |e: png::EncodingError| RasterError::IoError(io::Error::other(e.to_string()));
     let mut data = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut data, pixmap.width(), pixmap.height());
+        let mut encoder = png::Encoder::new(&mut data, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_compression(png::Compression::Balanced);
-        encoder.set_filter(png::Filter::Adaptive);
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
+        encoder.set_filter(png::Filter::Up);
         let mut writer = encoder.write_header().map_err(encoding_error)?;
-        writer.write_image_data(&rgba).map_err(encoding_error)?;
+        writer.write_image_data(rgba).map_err(encoding_error)?;
         writer.finish().map_err(encoding_error)?;
     }
     Ok(data)
@@ -117,8 +128,8 @@ fn encode_png(pixmap: &resvg::tiny_skia::Pixmap) -> Result<Vec<u8>, RasterError>
 /// target width (or scale), padded to its row height, with padding painted for
 /// a [`Background::Solid`] and transparent otherwise.
 ///
-/// The renderers' one path from SVG to PNG, so geometry and padding agree with
-/// the request's cache identity.
+/// Draws text with the process's default chain.
+#[cfg(test)]
 pub(crate) fn rasterize_svg_for_request(
     svg_data: &str,
     request: &RenderRequest,
@@ -126,8 +137,12 @@ pub(crate) fn rasterize_svg_for_request(
     rasterize_svg_for_request_with(svg_data, request, default_chain())
 }
 
-/// [`rasterize_svg_for_request`], drawing text with `chain`'s faces (the
-/// chain the SVG's labels were measured with).
+/// [`rasterize_svg_for_request`], drawing text with `chain`'s faces: the
+/// chain whose identity is in the artifact's cache key (and, for Mermaid,
+/// the one its labels were measured with).
+///
+/// The renderers' one path from SVG to PNG, so geometry and padding agree with
+/// the request's cache identity.
 pub(crate) fn rasterize_svg_for_request_with(
     svg_data: &str,
     request: &RenderRequest,
@@ -143,7 +158,7 @@ pub(crate) fn rasterize_svg_for_request_with(
         Background::Theme | Background::Transparent => None,
     };
     let pixmap = render_tree_to_pixmap(&tree, scale, request.row_height, padding_fill)?;
-    encode_png(&pixmap)
+    encode_png(pixmap)
 }
 
 /// Rasterizes SVG content to PNG bytes at the SVG's native dimensions
@@ -161,7 +176,7 @@ pub(crate) fn rasterize_svg_for_request_with(
 pub fn rasterize_svg_to_png_bytes(svg_data: &str, scale: u32) -> Result<Vec<u8>, RasterError> {
     let tree = parse_svg_tree(svg_data)?;
     let pixmap = render_tree_to_pixmap(&tree, scale.max(1) as f32, None, None)?;
-    encode_png(&pixmap)
+    encode_png(pixmap)
 }
 
 /// Rasterizes SVG content to PNG bytes at a target *pixel width*.
@@ -201,7 +216,7 @@ pub fn rasterize_svg_to_png_bytes(svg_data: &str, scale: u32) -> Result<Vec<u8>,
 pub fn rasterize_svg_to_png(svg_data: &str, width: u32) -> Result<Vec<u8>, RasterError> {
     let tree = parse_svg_tree(svg_data)?;
     let pixmap = render_tree_to_pixmap(&tree, scale_for_width(&tree, width)?, None, None)?;
-    encode_png(&pixmap)
+    encode_png(pixmap)
 }
 
 /// Rasterizes an SVG file to PNG format.
