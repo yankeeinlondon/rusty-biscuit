@@ -42,6 +42,8 @@ related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-30-claudine-recursive-schemas
     - 2026-10-24-sequence-containers
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Recursive Named Types in SimplifiedSchema

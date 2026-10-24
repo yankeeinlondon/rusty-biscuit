@@ -93,7 +93,15 @@ those changes: this document describes the target after they land.
   (`FunctionRegistration::bind_call`) share. A catalog `function` describes a
   signature; it cannot itself be used as a frontmatter value schema.
 - `2026-10-29-recursive-schema-types` supplies recursive references, local
-  JSON Schema `$ref`/`$defs`, positioned errors, and editor traversal.
+  JSON Schema `$ref`/`$defs`, positioned errors, and editor traversal. A
+  cyclic named type (bare, `@this`, or `@file`, across files too) lowers once
+  into the root `$defs` and every use becomes `#/$defs/<key>`; acyclic types
+  still inline. Conversion follows references to any depth within the
+  conversion engine's 64-level bound; DMLS completion and hover descend
+  recursive references lazily along the cursor path. A trigger payload's
+  `$defs` join the merged root, re-keyed on collision. Its Part A supplies
+  validation stage timings (`md schema validate -vv`, `ValidationTimings`)
+  and DMLS's `schema.slow_validation_ms` log threshold.
 
 Use the ownership prerequisite's `kind: schema-trigger` and
 `--no-schema-triggers` spellings in new fixtures and documentation. The older
@@ -419,6 +427,61 @@ APIs. No outcome of this spec changed.
   (`RegistrationError::FunctionValued`), so the class is empty until that
   feature lands.
 
+### Reconciliation with the implemented recursive schema types
+
+*(added 2026-10-23)* `2026-10-29-recursive-schema-types` is implemented. This
+section records what its delivered behavior settles for this spec. No outcome
+of this spec changed.
+
+- **Every family cycle passes through a child value.** *Decision:* write the
+  ordinary, initialization, cancellation, `task`, and `group` families so
+  every cycle crosses an object property, dictionary value, list item, or
+  tuple slot, as the sketch above does (`stack` reaches `item` through
+  `item[]`, a conditional reaches `stack` through `then`/`else`, containers
+  recurse through `sequence:` items and `tasks:` legs). Never alias one
+  family's stack to another or list a family as an arm of its own union.
+  *Alternatives:* none; this is the prerequisite's admission rule. *Why:* a
+  cycle of only aliases, union arms, or `function(...)` signatures is
+  `SchemaError::NonDescendingCycle`, reported on each reference. *Downsides:*
+  none found.
+- **The 2 MB check uses the prerequisite's measurement.** *Decision:* the
+  byte count is `serde_json::to_string` of the resolved JSON Schema, compact
+  UTF-8, against 2,000,000, as the prerequisite's frozen-fixture size test
+  measures it. *Alternatives:* define a new convention. *Why:* the convention
+  this spec states already exists in code. On the prerequisite's frozen
+  fixtures, the recursive lifecycle grammar wired to seven consumers is
+  430,195 bytes (15.4 ms release resolve) against 37.3 MB (1,561 ms) for the
+  depth-5 unroll. That is headroom evidence for that fixture only, not a size
+  or speed promise for this catalog. *Downsides:* none found.
+- **Absence of the unroll is asserted on type names, not `$defs` keys.**
+  *Decision:* tests check the authored YAML type names and each definition's
+  `DefKey` name. *Alternatives:* match `$defs` keys against numbered
+  patterns. *Why:* a generated key is the type name with a numeric suffix on
+  collision (`item`, `item-2`), so `item-2` is legal recursive output, and
+  the prerequisite's contract forbids parsing keys. *Downsides:* none found.
+- **Frozen spike inputs are now pinned by tests.** *Decision:* leave
+  `2026-10-20-lifecycle-grammar`'s spike files and its generator untouched;
+  the maintained generator is still required. *Alternatives:* update the
+  spike generator in place. *Why:* the spike generator now derives its paths
+  from its own location and writes beside itself, and Darkmatter L1 tests pin
+  that behavior and the byte equality of frozen copies of its `action.yaml`
+  and `lifecycle.yaml`. It still reads Rust source with regular expressions,
+  which this spec forbids for production generation. *Downsides:* none found.
+- **The validation time goal reads the delivered stage report.**
+  *Decision:* criterion 11's sample is `md schema validate -vv`, recording
+  its stage breakdown. *Alternatives:* ad hoc timing. *Why:* Part A of the
+  prerequisite delivered the stage timings this criterion named. Trigger
+  payloads are still resolved at discovery, including for triggers a
+  document does not match, so the payload's resolve cost reaches every
+  document that discovers Claudine's triggers. *Downsides:* none found.
+- **Deep conversion is bounded by the engine, not by this spec.** *Decision:*
+  add no container or conversion depth limit. *Alternatives:* none. *Why:*
+  conversion follows recursive references to any depth up to the
+  conversion engine's 64-level bound, where it reports the limit rather than
+  accepting the value; criterion 10's container-depth-4 fixtures nest well
+  below it. *Downsides:* a document nested past 64 values cannot have a
+  literal converted at that depth.
+
 ### The conditional depth limit remains parser-only
 
 A root-list `when` counts as level one, whether it uses `then`/`else` or
@@ -462,7 +525,7 @@ fixtures with declared repository inputs.
 | Schema embedding, trigger selection, event typing, and launch policy | `2026-10-21-claudine-schemas`; preserve those contracts |
 | Lifecycle event ownership, host profiles, and tolerant Darkmatter baseline | `2026-10-27-darkmatter-lifecycle-ownership`; integrate without reversing ownership |
 | New coercion rules or a second expression evaluator | Reuse Darkmatter's existing mechanisms |
-| DMLS caching and performance infrastructure (stage timings, benchmark) | Part A of `2026-10-29-recursive-schema-types` |
+| DMLS caching and performance infrastructure (stage timings, benchmark) | Part A of `2026-10-29-recursive-schema-types` (delivered) |
 | New CI matrix cells | Not needed for this schema migration |
 
 ## Estimate
@@ -579,7 +642,8 @@ matrix cell or gate; the existing planner schedules changed code normally.
 11. **Validation time goal.** *(amended 2026-10-16)* One-shot `md schema
    validate` of a Claudine document with nested containers targets **under
    200 ms** on the dev Mac. Take a quick sample of one representative nested
-   container document using the prerequisite's existing stage timings; reuse
+   container document using the prerequisite's existing stage timings
+   (`md schema validate -vv`); reuse
    an equivalent measurement if already available. No additional benchmark
    suite, repetition count, or OS run is required. The command, document,
    result, host load, and available stage breakdown are recorded in the

@@ -89,6 +89,321 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/dmls/tests/l1/recursive_call_check.rs
+    - darkmatter/lib/tests/l1/recursive_schema_clean.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_reporting.rs
+    - darkmatter/lib/tests/l1/recursive_schema_rewrite.rs
+    - darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/preflight-checks.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_recursive.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/recursive_schema_frozen_fixture.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/action.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/lifecycle.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/lifecycle-recursive.yaml
+    - claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/README.md
+docs_created_during_phase_5:
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/README.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/validation_timing.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/validation_timing_log.rs
+    - darkmatter/justfile
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/benches/fixtures/claudine-schemas/action.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/claudine.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/globals.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/inline-compose.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/lifecycle.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/linking.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/review.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/sequence-types.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/sequence.yaml
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/example.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/reset_process_caches.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_cache_validity.rs
+    - darkmatter/lib/tests/l1/schema_validation_timings.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - claudine/features/2026-10-30-claudine-recursive-schemas/spec.md
+    - claudine/features/2026-10-30-claudine-recursive-schemas/plan.md
+    - claudine/features/2026-10-31-type-aware-evaluation/spec.md
+    - claudine/features/2026-10-31-type-aware-evaluation/plan.md
+docs_created_during_phase_6:
+    - darkmatter/lib/benches/fixtures/claudine-schemas/README.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/recursive_schema_validator_probe.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/manifest.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/phase.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/coercion/engine.rs
+    - darkmatter/lib/src/markdown/coercion/error.rs
+    - darkmatter/lib/src/markdown/coercion/mod.rs
+    - darkmatter/lib/src/markdown/coercion/shape.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/json_shape.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/dmls/tests/l1/recursive_call_check.rs
+    - darkmatter/lib/tests/l1/recursive_schema_clean.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_reporting.rs
+    - darkmatter/lib/tests/l1/recursive_schema_rewrite.rs
+    - darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_recursive.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/tests/l1/recursive_schema_frozen_fixture.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/action.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/lifecycle.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/lifecycle-recursive.yaml
+    - claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/validation_timing.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/validation_timing_log.rs
+    - darkmatter/justfile
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/benches/fixtures/claudine-schemas/action.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/claudine.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/globals.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/inline-compose.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/lifecycle.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/linking.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/review.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/sequence-types.yaml
+    - darkmatter/lib/benches/fixtures/claudine-schemas/sequence.yaml
+    - darkmatter/lib/src/markdown/schemas/example.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/tests/reset_process_caches.rs
+    - darkmatter/lib/src/markdown/schemas/timings.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/tests/l1/schema_cache_validity.rs
+    - darkmatter/lib/tests/l1/schema_validation_timings.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+documentation:
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/contracts.md
+    - claudine/features/2026-10-29-recursive-schema-types/inventory/consumers.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/README.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_frozen/README.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+    - claudine/features/2026-10-30-claudine-recursive-schemas/spec.md
+    - claudine/features/2026-10-30-claudine-recursive-schemas/plan.md
+    - claudine/features/2026-10-31-type-aware-evaluation/spec.md
+    - claudine/features/2026-10-31-type-aware-evaluation/plan.md
+    - darkmatter/lib/benches/fixtures/claudine-schemas/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Recursive Schema Types Implementation Plan
@@ -221,16 +536,16 @@ Checkpoint: merged and phase-projected schemas validate recursively without key 
 
 ### Wave 4 — JSON Walkers (Parallel)
 
-- [ ] **Report Recursive Failures**
+- [x] **Report Recursive Failures**
   - Own `schemas/validate.rs` and `discriminant.rs`. Follow references for explanations, node lookup, literal-discriminant selection, and synthetic arm validation; retain sibling constraints and existing matching policies.
   - Assert depth ≥ 6 failures have the offending JSON path and source line/column. Add reference-member discriminant tests and synthetic-validator tests that fail if root context is lost.
-- [ ] **Preserve Cleanup Policy**
+- [x] **Preserve Cleanup Policy**
   - Own both walks in `schemas/clean.rs`. Follow recursive values at new instance paths without skipping deeper children, while retaining existing genuine-union cleanup restrictions.
   - Give each clean walk a public-result test through a reference; show permitted cleanup and forbidden ambiguous-union repair independently.
-- [ ] **Convert Recursive Values**
+- [x] **Convert Recursive Values**
   - Own `schemas/coerce.rs`, `schemas/json_shape.rs`, and `compose/expression/call_binding/translate.rs`. Replace bounded inline target expansion in both translators with reusable handles or instance-directed traversal; add no second conversion engine (`markdown/coercion/` stays the only one).
   - Assert declared conversions continue beyond the recorded old cutoff, final validation still runs, union candidate safety is unchanged, failure leaves the original input unchanged, and the engine's `max_depth` (64) limit fails explicitly as `ResourceLimit`. Extend the translator conformance test with recursive cases so both translators give the same outcome.
-- [ ] **Rewrite Recursive Files**
+- [x] **Rewrite Recursive Files**
   - Own `schemas/rewrite.rs`. Follow references using the captured request context and original eager-file/union eligibility policy; do not let explanatory arm choice grant mutation.
   - Test a successful deep rewrite, lazy/ambiguous alternatives unchanged, passive validation doing no rewrite or execution, and successful repeated normalization idempotence.
 
@@ -238,10 +553,10 @@ Checkpoint: every listed JSON walker, both cleanup walks, the translator, and ev
 
 ### Wave 5 — Typed Library Consumers (Parallel)
 
-- [ ] **Resolve Completion Shapes**
+- [x] **Resolve Completion Shapes**
   - Own `schemas/completion.rs` and reference-aware typed query helpers. Follow the finite instance path and expose the next editable properties in incomplete recursive items; retain union narrowing and annotation behavior.
   - Test repeated recursive levels and incomplete objects/list items without eagerly expanding unused descendants. Publish this stable editor-facing interface before Wave 6.
-- [ ] **Describe Recursive Types**
+- [x] **Describe Recursive Types**
   - Own `frontmatter_shape.rs`, `compose/context/catalog.rs`, `schemas/simplified/subtype.rs`, `compose/expression/scope/projection.rs`, `compose/expression/call_check.rs`, and audits of `about.rs`, `detect.rs`, and `triggers/matcher.rs`. `is_subtype`, `DeclaredTypes::top_level_types`, and `check_call` compare recursive references by definition identity and terminate (spec, Decided); test a category 1 and a category 5 call whose argument is a recursive-typed property, through composition's call precheck and DMLS `dm.expression.incompatible_call`. Whole-type operations visit definitions once and render named back-references; no inference/unresolved-trigger path gains file resolution merely to handle the enum.
   - Add focused public tests where resolved references are consumed; record an evidenced non-consumer conclusion for paths needing no change. Review docs/comments affected by every behavior change.
 
@@ -251,11 +566,11 @@ Checkpoint: all inventoried typed consumers have deliberate reference handling o
 
 ### Wave 6 — Editor and CLI (Parallel)
 
-- [ ] **Support Recursive Editing**
+- [x] **Support Recursive Editing**
   - Own DMLS `overlay/schema.rs`, bundle propagation in `overlay/mod.rs`, `providers/frontmatter.rs`, named-type navigation, and diagnostic projection. Carry library definition identities, imported dependencies, and defining file/spans; preserve the existing document-text cache design.
   - Test completion and hover at recursion levels 1, 2, and 3, including incomplete items. Instrument lookup to prove only the cursor path and next editable shape are explored. Whole-type hover uses named back-references; definition navigation reaches the correct file/span.
   - Test positioned deep validation failures and non-descending cycle diagnostics with related spans, including two files, through existing L1 editor/protocol APIs. Do not launch an editor or focus a window.
-- [ ] **Exercise Normal Invocation**
+- [x] **Exercise Normal Invocation**
   - Own CLI `commands/schema/assignment.rs` and hermetic `md schema validate`, `md schema about`, and normal composition tests. Use `CliProcessFixture`, private home/CWD/PATH, runtime binary paths, and the captured request context.
   - Cover direct and two-file recursion at depth ≥ 6; required `children` with a valid `[]` leaf; missing/null children at depth 4; optional-reference missing/null versus null list items; passive expression text; conversions beyond the old cutoff; and repeated successful normalization.
   - Assert source bytes and original input are preserved on passive validation and failed conversion. Expose the same positions/errors as DMLS and complete public matrix assertions without parser-only substitutes.
@@ -264,12 +579,12 @@ Checkpoint: CLI, composition, and DMLS demonstrate consistent recursive semantic
 
 ### Wave 7 — Fixtures and Current Docs (Parallel)
 
-- [ ] **Freeze Measurement Fixtures**
+- [x] **Freeze Measurement Fixtures**
   - Copy committed `action.yaml` with its 143-verb table and depth-5 `lifecycle.yaml` from `2026-10-20-lifecycle-grammar` byte-for-byte into a Darkmatter fixture directory. Add a hand-written `lifecycle-recursive.yaml` using one recursive item type over that same action fixture; retain historical grammar approximations.
   - Own the historical `spike/gen-action-schema.py` path fix: derive repository root from its own location and output beside itself under `spike/schemas/`. Update usage and path-related comments; leave other inputs unchanged. Never regenerate the frozen measurement baseline from current catalogs.
   - In an isolated fresh-checkout-shaped workspace, run the generator from an unrelated CWD and assert adjacent output and no hardcoded absolute path. Separately assert frozen copies equal the committed historical inputs; use CI-indexable literal repository reads.
   - Add L1 checks for recursive serialized size ≤ 2 MB, unchanged definitions/schema as instance depth increases, and equivalent valid/invalid behavior within the unrolled fixture's supported levels; only the recursive fixture exercises deeper levels.
-- [ ] **Update Current Documentation**
+- [x] **Update Current Documentation**
   - Own `darkmatter/docs/topics/schemas/definition.md`, `authoring-schemas.md`, `local-type-references.md`, `schema-triggers.md`, `dmls-schema-support.md`, and `.claude/skills/darkmatter/schema.md`. Update affected README claims and the skill index only where needed.
   - Replace the recursion ban with compact examples of valid finite leaves, supported cycles, prohibited non-descending cycles, namespace/definition versus use-site scope, nullability, phases, raw/baseline restrictions, diagnostics, and lazy editor behavior. Use a Mermaid graph/flow where it explains cycle admission or lookup clearly.
   - Verify examples against the implementation. Current docs never name or link feature/fix directories, and do not claim Claudine production-schema migration or a new schema cache. Update dependency docs only if an intentional dependency change was approved and made.
@@ -280,23 +595,34 @@ Checkpoint: fixture controls are frozen independently of generation, size/depth 
 
 ### Wave 8 — Performance Evidence (Sequential)
 
-- [ ] **Measure Resolve Cost**
+- [x] **Measure Resolve Cost**
   - On one host in one session, using the release profile, take the median of five warm resolves for the frozen recursive and unrolled depth-5 fixtures. Exclude and report I/O and validator compilation separately; use the same resolve boundary for both measurements.
   - Record host description, build/profile, both medians, and the threshold `150 ms × (host unrolled median / 2,683 ms)` in the implementation log. Meet the proportional target; investigate a miss before declaring completion. This is recorded acceptance evidence, never an L1 timing assertion, CI gate, repeat spike, or OS matrix.
 
+### Wave 8A — Part A: Measurement and Validation Waste
+
+Added in Phase 6: the spec's Part A (acceptance criteria 12–15) was never scheduled by this plan and was not delivered elsewhere; see the implementation log's Phase 6 Decision 1.
+
+- [x] **Part A benchmark (criterion 13):** three cold-cache cases in `just bench-schema` over frozen Claudine schema copies under `lib/benches/fixtures/`, process-wide cache reset outside the timed work, warm cases kept; `recursive-schema-before` baseline saved before any waste change.
+- [x] **Part A stage timings, library (criterion 12):** `discover`/`match`/`resolve`/`compile`/`validate` plus total and unassigned, compile hit/miss/not-requested, partial timings on failure.
+- [x] **Part A `md schema validate -vv` (criterion 12):** stage breakdown on stderr with biscuit-terminal components; one `-v` unchanged; stdout and exit codes unchanged.
+- [x] **Part A DMLS slow-validation event (criterion 12):** `warn` above `schema.slow_validation_ms` (default 200, zero logs all), `debug` below, configuration diagnostics for invalid values.
+- [x] **Part A waste items and cache behavior (criteria 14, 15):** each waste hypothesis fixed, already fine, or deferred with its reason; cache-validity and trigger behavior tests.
+- [x] **Part A after-sample (criterion 14):** before/after comparison against `recursive-schema-before` recorded with host load.
+
 ### Wave 9 — Compatibility and Gates (Sequential)
 
-- [ ] **Compare Golden Corpus**
+- [x] **Compare Golden Corpus**
   - Compare all Phase 1 acyclic serialized JSON byte-for-byte, including key order and passive shipped artifacts. Investigate every mismatch rather than refreshing snapshots to accept unexplained churn.
   - Confirm graph cases, repeated resolution stability, absence of absolute paths in generated keys, scope/collision safety, and finite size. Complete the public-type consumer audit and run targeted downstream compile/tests where the changed API reaches consumers such as Claudine.
-- [ ] **Run Scoped Validation**
+- [x] **Run Scoped Validation**
   - Run `just test` and `just lint` in `darkmatter/`; use nextest-backed focused recipes during implementation. Account for the area's existing Zed/WASM lint check without launching/installing editors. Do not run `cargo fmt`, consolidated `cargo test`, or workspace-wide gates.
   - New behavior coverage is portable L1 for macOS, Linux, native Windows, and WSL2; no terminal/browser focus, live provider dependency, or CI cell is added. Reuse qualifying existing required-environment evidence and otherwise follow existing required checks. Load the `os` skill before Windows/path-comparison changes, single-environment failures, or a claim that an OS cannot be tested.
   - Record observed environments and results separately from portability review. Report any environment blocker with the exact failed check; a check that did not run is not a pass. Keep timing measurements separate from correctness portability evidence.
 
 ### Wave 10 — Review Handoff (Sequential)
 
-- [ ] **Audit Acceptance Evidence**
+- [x] **Audit Acceptance Evidence**
   - Map specification criteria 1–11 to concrete test names/results, golden artifacts, documentation, and measurement entries. Include every walker/synthetic validator, matrix row/column, graph descent family, merge namespace, phase case, editor level, normal invocation, and generator check.
   - Review the final diff for silent missing-reference fallbacks, global visited-definition sets in instance walks, dropped siblings, owning `Arc` cycles, use-site contamination, depth-limited conversion, reporting-driven mutations, scope-changing rewrites, invalid-element filtering, and documentation/comment drift.
   - Record deviations in the implementation log without rewriting the finalized spec. Mark tasks only when their public checkpoint is demonstrated. Confirm no unrelated edits, accidental dependency upgrades, CI scheduling changes, or production Claudine schema migration entered this feature.

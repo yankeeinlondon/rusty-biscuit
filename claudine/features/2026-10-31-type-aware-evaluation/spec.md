@@ -86,7 +86,7 @@ Return-type inference never evaluates a function or suppresses a diagnostic on a
 
 `fm` denotes the effective document frontmatter, so `fm.meta.count` and an unshadowed `meta.count` have the same type. Type lookup follows value lookup's precedence: fixed namespaces, registered host globals, then document properties. A host global shadowing a property does not hide that property through `fm`. Catalog presence alone does not register a global or make it available. An unavailable global still produces its binding diagnostic, even under a truthiness guard or `||`; it never falls back to a same-named document property.
 
-For nested paths, retain structured-object and array item types. Literal member access and constant indices use the declared member or item type; add `null` when a member or index can be absent, including an array index not guaranteed by the shape. Dynamic keys or indeterminate shapes fall back to `unknown`. Recursive named types introduced by `2026-10-29-recursive-schema-types` are followed lazily along the requested path, with cycle-aware normalization; projection never expands a recursive type into an infinite tree. Unsupported raw JSON Schema constructs retain the annex's conservative fallback.
+For nested paths, retain structured-object and array item types. Literal member access and constant indices use the declared member or item type; add `null` when a member or index can be absent, including an array index not guaranteed by the shape. Dynamic keys or indeterminate shapes fall back to `unknown`. Recursive named types introduced by `2026-10-29-recursive-schema-types` are followed lazily along the requested path, one definition per segment, with cycle-aware normalization; projection never expands a recursive type into an infinite tree. A variable whose type is recursive projects to its named reference (`TypeExpr::Ref`), not an unfolded level (section 11). Unsupported raw JSON Schema constructs retain the annex's conservative fallback.
 
 The [declarations annex](declarations-design.md) gives the normative detail for union normalization, optionality, root unions, open and pattern-based shapes, and raw JSON Schema; where it mentions strict roots, the strikes at its top apply.
 
@@ -314,6 +314,56 @@ changed.
   *Why:* one catalog grammar and one loader. Phase B's loader rejects a
   function without a category (its Phase 4 decision 8). *Downsides:* a host
   must declare categories even for one function.
+
+### 11. Reconciliation with the implemented recursive schema types
+
+_Added 2026-10-23._ `2026-10-29-recursive-schema-types` is implemented. This
+section records what its delivered code settles for sections 1 and 2. No
+outcome of this spec changed.
+
+- **A recursive variable projects to its named reference.** *Decision:*
+  `DeclaredTypes::top_level_types()` already types a property of a cyclic
+  named type as `TypeExpr::Ref(DefKey)` when given the definition table
+  (`DeclaredTypes::with_definitions`); section 1's extensions keep that
+  reference wherever a recursive type appears (nested members, union arms,
+  call returns), and union normalization compares references by `DefKey`
+  (`is_subtype_with_definitions`). The call check sees through a reference
+  to its definition body. *Alternatives:* unfold one level. *Why:* the
+  prerequisite decided this so comparison stays by identity and messages
+  name the type (`is node, expected …`). *Downsides:* a consumer that
+  needs the body must hold the definition lookup.
+- **Nested paths open one definition per segment.** *Decision:* a constant
+  member path through a recursive type resolves the reference at each
+  segment it crosses and nothing else, as the library's
+  `property_def_at_path_with_definitions` already does for schema lookups; a
+  back-reference reached by the path keeps its name (`node[]`). *Why:*
+  criterion 32 requires termination without expanding the schema.
+  *Downsides:* none found.
+- **Definitions are looked up across every layer.** *Decision:* the declared
+  layer resolves a reference with `EffectiveSchema::definition(&DefKey)` (or
+  the `DefinitionLookup` trait), which searches the document's table and
+  every trigger layer's. *Alternatives:* keep passing
+  `EffectiveSchema::definitions()`, as the call check, composition precheck,
+  DMLS, and `lifecycle_declared_types` do today. *Why:* `definitions()` is
+  the document's table only, and section 1 adds trigger and other layers
+  whose recursive types live in their own tables; a trigger payload's `$defs`
+  keys may have been renamed in the merged JSON, so a JSON-key lookup could
+  bind the wrong body. *Downsides:* `DeclaredTypes::with_definitions` widens
+  from a `&DefinitionTable` to a lookup; its callers change with it.
+- **Guards narrow a recursive arm by its definition.** *Decision:* the
+  section 2 extension gives `TypeScope`'s guard narrowing the same
+  definition lookup, so a `Ref` arm is classified by its definition body's
+  family, one level, without expansion. Without a lookup, a `Ref` arm stays
+  in every family, as delivered. *Alternatives:* keep the delivered
+  behavior. *Why:* section 2 requires a guard to narrow whatever type
+  section 1 projects; today a recursive arm survives on both sides of every
+  guard. *Downsides:* none found; the fallback is the delivered conservative
+  result, which never proves a call valid or invalid falsely.
+- **Raw JSON Schema `$defs` stay conservative.** *Decision:* a raw `$ref`
+  has no typed definition (the prerequisite keeps raw definitions as JSON
+  keys only), so the raw projection types it `unknown`. *Why:* the annex's
+  rule that anything indeterminate is `unknown`. *Downsides:* a raw
+  recursive schema gets no precise variable types.
 
 ## Out of scope
 

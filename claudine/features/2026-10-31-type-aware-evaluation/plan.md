@@ -71,6 +71,8 @@ These rules bind every later phase.
    files read `finalized-spec`. Phase B has since been implemented (as of
    2026-10-23, through its Phase 5; its documentation phase was in progress):
    its seams are named in spec.md section 10 and in the Dependency audit task.
+   `2026-10-29-recursive-schema-types` has also been implemented (2026-10-23);
+   spec.md section 11 records what it settles.
    Task "Dependency audit" below records which landed.
    **If a dependency is not implemented, stop and report to the author**:
    this plan does not absorb Phase B work. The plan below assumes the
@@ -124,6 +126,15 @@ These rules bind every later phase.
       Phase C extends the declaration-only `DeclaredTypes` layer; "the
       compatibility API" is `call_check`; host catalogs use the strict catalog
       loader. Phase 4 and the Dependency audit below were updated to match.
+    - *Reconciliation with the implemented recursive schema types
+      (2026-10-23).* spec.md section 11 records the decisions: a recursive
+      variable projects to its named `TypeExpr::Ref(DefKey)` and compares by
+      identity; nested paths open one definition per segment; the declared
+      layer resolves references across every layer through
+      `EffectiveSchema::definition(&DefKey)` (today `with_definitions` takes
+      the document's table only); guard narrowing classifies a `Ref` arm by
+      its definition body; a raw `$ref` projects `unknown`. Waves 1, 2, 3,
+      and 5 below were updated to match.
 
 ### Input Robustness Matrix
 
@@ -197,7 +208,12 @@ A spike runs once, before the work it informs.
     `compose/expression/scope/projection.rs`), registration facts
     (`call_binding/registration.rs`: `EvaluationMode`, `reject_sources`,
     `numeric_recovery`), narrowing-fact registration slots, and
-    `BindingView`/global catalog loading. Record file paths and signatures
+    `BindingView`/global catalog loading. From `2026-10-29-recursive-schema-types`:
+    `TypeExpr::Ref(DefKey)`, `DeclaredTypes::with_definitions`/`definitions()`,
+    `EffectiveSchema::definitions()`/`definition(&DefKey)`, the
+    `DefinitionLookup` trait, `property_def_at_path_with_definitions`,
+    `is_subtype_with_definitions`, and `Shape::Ref` in the call check.
+    Record file paths and signatures
     in `implementation-log.md`. Apply Rule 2 if any is missing.
 - [ ] **Surface inventory** — parallelizable with Dependency audit
   - Map criteria 1–39 to existing tests and required additions
@@ -215,7 +231,8 @@ A spike runs once, before the work it informs.
 - [ ] **Performance baseline ("before")** — runs before any product edit
   - On the current host, pick one existing representative repository document
     and record composition time and DMLS analysis time, separating checking
-    from unrelated I/O where practical. Record host, input, observations in
+    from unrelated I/O where practical (`md schema validate -vv` reports the
+    schema-validation stages separately). Record host, input, observations in
     `implementation-log.md`.
 - [ ] **Run Spike S1** (see above).
 
@@ -245,7 +262,10 @@ normalization; no competing edits.
 - [ ] **All effective-schema layers**
   - Project from the final `EffectiveSchema` after resolution and merging
     (imported named types, baseline, trigger, document), including layers
-    `EffectiveSchema.simplified` does not represent.
+    `EffectiveSchema.simplified` does not represent. A recursive type from
+    any layer resolves through `EffectiveSchema::definition(&DefKey)`; widen
+    `DeclaredTypes::with_definitions` to that lookup and update its callers
+    (composition precheck, DMLS call check, `lifecycle_declared_types`).
   - Tests: criterion 3 (layered fixture), including pattern-only shapes
     declaring no literal name.
 - [ ] **Raw JSON Schema projection** — parallelizable with Root-union work
@@ -260,7 +280,8 @@ normalization; no competing edits.
   - Constant members/indices yield declared member/item types with `| null`
     when absent-able (including unguaranteed array index); dynamic keys fall
     back to `unknown`. Follow recursive named types lazily along the requested
-    path only.
+    path only: open one definition per segment crossed, keep a back-reference
+    named (`TypeExpr::Ref`), never unfold it.
   - Tests: criteria 4, 32 (finite path through a recursive type terminates
     without expanding the schema).
 - [ ] **`fm` and precedence**
@@ -330,6 +351,11 @@ Single owner (new narrowing module plus the type-environment hook-ins).
     type from a finite union on the false side; `unknown` minus a family stays
     `unknown`; narrowing preserves compatible refinements but never invents
     item types, members, or file existence.
+  - A recursive (`TypeExpr::Ref`) arm is classified by its definition body's
+    family through the declared layer's definition lookup, one level, never
+    expanded; with no lookup it stays in every family (the delivered
+    conservative result). Test: with `x: [number, node]` and `node` a
+    recursive object, the true side of `is_number(x)` is `number` alone.
 - [ ] **Short-circuit and compound flow**
   - `a && b`: right side gets facts from `a` true. `a || b`: right side gets
     facts from `a` false. Compound guards keep only facts valid on every
