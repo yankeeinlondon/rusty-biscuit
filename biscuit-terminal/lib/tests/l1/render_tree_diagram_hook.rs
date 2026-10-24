@@ -33,6 +33,7 @@ struct SeenRequest {
     available_width: u32,
     image_support: ImageSupport,
     graphics_mode: GraphicsMode,
+    mermaid_mode: TerminalMermaidMode,
 }
 
 /// A hook that records each request and answers with a fixed result.
@@ -67,6 +68,7 @@ impl DiagramRenderer for RecordingDiagrams {
             available_width: request.available_width,
             image_support: request.terminal.image_support(),
             graphics_mode: request.graphics_mode,
+            mermaid_mode: request.mermaid_mode,
         });
         self.answer.clone().map_err(DiagramRenderError::new)
     }
@@ -167,6 +169,7 @@ fn diagram_hook_is_consulted_before_the_code_hook() {
             available_width: 80,
             image_support: ImageSupport::Kitty,
             graphics_mode: GraphicsMode::Rich,
+            mermaid_mode: TerminalMermaidMode::Image,
         }],
     );
 }
@@ -312,6 +315,7 @@ fn automatic_mode_offers_the_fence_at_rich_and_vector_with_the_ceiling() {
         let seen = diagrams.seen();
         assert_eq!(seen.len(), 1, "{graphics_mode:?}: exactly one hook call");
         assert_eq!(seen[0].graphics_mode, graphics_mode, "the request carries the ceiling");
+        assert_eq!(seen[0].mermaid_mode, TerminalMermaidMode::Automatic, "and the mode that offered it");
         assert_eq!(seen[0].source, SOURCE);
     }
 }

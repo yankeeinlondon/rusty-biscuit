@@ -24,6 +24,18 @@ pub fn terminal_for_render(plain: bool) -> Terminal {
     }
 }
 
+/// darkmatter's syntax highlighter as a render-tree code renderer for `term`,
+/// so `bt` code blocks look exactly like `md`'s and `CodeBlock`'s.
+///
+/// Under [`ColorDepth::None`] it declines, and the plain fenced block renders.
+#[allow(deprecated)] // the raw `CodeRenderer` hook is what a render tree needs
+pub fn darkmatter_code_renderer(term: &Terminal) -> std::rc::Rc<dyn renderable::tree::CodeRenderer> {
+    use darkmatter::markdown::highlighting::CodeBlockMode;
+    use darkmatter::markdown::render_tree::TerminalCodeRenderer;
+
+    std::rc::Rc::new(TerminalCodeRenderer::for_terminal(term, CodeBlockMode::default()))
+}
+
 /// Returns whether the terminal is in dark mode.
 pub fn is_dark_mode() -> bool {
     use biscuit_terminal::discovery::detection::ColorMode;

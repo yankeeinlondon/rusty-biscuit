@@ -32,10 +32,14 @@ use biscuit_terminal::components::terminal_image::{
 use biscuit_terminal::discovery::fonts::CellSize;
 use biscuit_terminal::utils::layout::LayoutTerminalExt;
 
-use super::display::{display_background, display_image, display_pixels};
-use crate::artifact::{Background, OutputFormat, RenderRequest};
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 
-use renderable::tree::{RenderNode, TreeRenderable};
+use super::display::{display_background, display_image, display_pixels};
+use super::fallback_policy::{MermaidFallbackPolicy, ResolvedFallbackPolicy};
+use crate::artifact::{Background, OutputFormat, RenderRequest};
+use crate::mermaid::{MermaidError, TextCharset, TextCoverage, TextOptions, TextRender};
+
+use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 
 // Re-export types from biscuit-visualized
 pub use crate::mermaid::{DiagramFont, MermaidConfig, MermaidTarget, MermaidTheme, Palette, QuadrantTheme, TerminalColors};
@@ -438,6 +442,65 @@ impl From<&str> for MermaidRenderer {
     }
 }
 
+/// The id the partial note names, so a reader can search for it.
+pub const PARTIAL_NOTE_ID: &str = "mermaid-partial-warning";
+
+/// Columns kept free beside a text drawing for its `txt` code block's own
+/// padding: a highlighting code renderer (darkmatter's pads one column on
+/// the left) may pad either side, while the plain code block pads none.
+pub const TEXT_BLOCK_CHROME_COLUMNS: u32 = 2;
+
+/// What [`MermaidDiagram::present`] chose to show.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum MermaidPresentation {
+    /// The image, exactly as [`MermaidDiagram::try_render`] returns it.
+    Image(MermaidRenderResult),
+    /// The diagram drawn as text: a `txt` code node, followed by the partial
+    /// note's block quote when the drawing is partial and the note is shown.
+    Text(Vec<RenderNode>),
+    /// The source as a `mermaid` code node.
+    Source(Vec<RenderNode>),
+}
+
+impl MermaidPresentation {
+    /// The render-tree nodes of a text or source presentation; `None` for an
+    /// image.
+    pub fn nodes(&self) -> Option<&[RenderNode]> {
+        match self {
+            Self::Image(_) => None,
+            Self::Text(nodes) | Self::Source(nodes) => Some(nodes),
+        }
+    }
+}
+
+/// The note that follows a partial text drawing: `Note:` bold, then the
+/// bracketed id, dim, with the id itself italic.
+pub fn partial_note() -> RenderNode {
+    RenderNode::block_quote(vec![RenderNode::paragraph(vec![
+        RenderNode::strong(vec![RenderNode::text("Note:")]),
+        RenderNode::text(
+            " this textual representation is provided because the current terminal settings do not \
+             allow for a graphical image to be used. This fallback representation, while never arbitrary \
+             or speculative, might be missing attributes that would have been visible in the image's \
+             representation [",
+        ),
+        RenderNode::span(
+            vec!["dim".to_string()],
+            vec![
+                RenderNode::text("id: "),
+                RenderNode::emphasis(vec![RenderNode::text(PARTIAL_NOTE_ID)]),
+            ],
+        ),
+        RenderNode::text("]."),
+    ])])
+}
+
+/// The drawing set a terminal can show.
+pub(crate) fn text_charset(term: &biscuit_terminal::terminal::Terminal) -> TextCharset {
+    if term.supports_unicode { TextCharset::Unicode } else { TextCharset::Ascii }
+}
+
 /// A composable Mermaid diagram that implements [`TerminalRenderable`].
 ///
 /// `MermaidDiagram` wraps [`MermaidRenderer`] and makes diagrams usable
@@ -451,10 +514,13 @@ impl From<&str> for MermaidRenderer {
 /// 2. Hand those PNG bytes to a [`TerminalImage`] unchanged
 /// 3. Render the image inline using the terminal's image protocol
 ///
-/// When image rendering is unavailable (no terminal support, a parse error,
-/// an unsupported family such as ZenUML, a render over its
-/// [time budget](MermaidDiagram::with_time_budget), etc.) the component falls
-/// back to a fenced code block of the Mermaid source.
+/// When the terminal's graphics route has no pixels, the diagram is drawn as
+/// text instead, if Merman draws its family as a diagram, the drawing fits,
+/// and the [fallback policy](MermaidDiagram::with_fallback_policy) allows it
+/// (see [`present`](MermaidDiagram::present)). Otherwise, and whenever the
+/// image route fails (a parse error, an unsupported family such as ZenUML, a
+/// render over its [time budget](MermaidDiagram::with_time_budget), etc.),
+/// the component shows a `mermaid` code block of the source.
 ///
 /// ## Examples
 ///
@@ -502,6 +568,7 @@ pub struct MermaidDiagram {
     renderer: MermaidRenderer,
     width: biscuit_terminal::components::terminal_image::ImageWidth,
     layout: biscuit_terminal::utils::layout::Layout,
+    fallback: MermaidFallbackPolicy,
 }
 
 impl MermaidDiagram {
@@ -518,6 +585,7 @@ impl MermaidDiagram {
             renderer: MermaidRenderer::for_terminal(instructions),
             width: biscuit_terminal::components::terminal_image::ImageWidth::Scale(1.0),
             layout: biscuit_terminal::utils::layout::Layout::default(),
+            fallback: MermaidFallbackPolicy::default(),
         }
     }
 
@@ -613,6 +681,20 @@ impl MermaidDiagram {
     pub fn with_embedded_font(mut self, embed: bool) -> Self {
         self.renderer = self.renderer.with_embedded_font(embed);
         self
+    }
+
+    /// Sets when the diagram may be drawn as text on a terminal without
+    /// images, and whether a partial drawing carries the note. Settings left
+    /// unset resolve at render time ([`MermaidFallbackPolicy::resolve`]).
+    pub fn with_fallback_policy(mut self, policy: MermaidFallbackPolicy) -> Self {
+        self.fallback = policy;
+        self
+    }
+
+    /// The fallback policy set by
+    /// [`with_fallback_policy`](Self::with_fallback_policy).
+    pub fn fallback_policy(&self) -> MermaidFallbackPolicy {
+        self.fallback
     }
 
     /// Uses inverted colors (solid background with opposite theme).
@@ -734,15 +816,118 @@ impl MermaidDiagram {
         ))
     }
 
-    /// Renders the diagram to a terminal image string without layout applied.
+    /// Chooses what the infallible [`render`](TerminalRenderable::render)
+    /// shows on `term`, with this diagram's
+    /// [fallback policy](Self::with_fallback_policy) resolved now.
     ///
-    /// Returns the raw image output on success, or the fallback code block
-    /// on failure.
-    fn render_raw(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
-        match self.render_to_image(term) {
-            Ok((output, _, _, _)) => output,
-            Err(_) => self.renderer.fallback_code_block(),
+    /// The image route is taken when `term`'s graphics route has pixels
+    /// ([`TerminalImage::route_has_pixels`]), decided before any SVG is
+    /// measured, font loaded, or artifact written; if it then fails, the
+    /// source is shown, never text. Otherwise the diagram is drawn as text
+    /// (Unicode or ASCII as `term` supports) within the columns the
+    /// component's width and margins leave, less
+    /// [`TEXT_BLOCK_CHROME_COLUMNS`]; anything Merman does not draw as a
+    /// diagram, a drawing that does not fit, a policy that forbids it, or a
+    /// text failure shows the source. A title set with
+    /// [`with_title`](Self::with_title) leads the text and source nodes,
+    /// unless the source already gives that title.
+    pub fn present(&self, term: &biscuit_terminal::terminal::Terminal) -> MermaidPresentation {
+        self.present_with(term, self.fallback.resolve())
+    }
+
+    /// [`present`](Self::present) under an already resolved `policy`.
+    pub(crate) fn present_with(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+        policy: ResolvedFallbackPolicy,
+    ) -> MermaidPresentation {
+        if TerminalImage::route_has_pixels(term) {
+            return match self.try_render(term) {
+                Ok(result) => MermaidPresentation::Image(result),
+                Err(_) => MermaidPresentation::Source(self.titled(self.source_nodes())),
+            };
         }
+        match self.text_nodes(self.text_columns(term.width()), text_charset(term), policy) {
+            Ok(Some(nodes)) => MermaidPresentation::Text(self.titled(nodes)),
+            Ok(None) | Err(_) => MermaidPresentation::Source(self.titled(self.source_nodes())),
+        }
+    }
+
+    /// The text drawing's nodes for a code block `columns` wide: `Ok(None)`
+    /// when the source should be shown instead (the policy forbids text,
+    /// the family is not drawn as a diagram, or the drawing does not fit).
+    /// At most one Merman text request, and none under
+    /// [`TextFallback::Never`](super::TextFallback::Never).
+    ///
+    /// ## Errors
+    ///
+    /// A parse error, Merman failure, time budget, or resource limit.
+    pub(crate) fn text_nodes(
+        &self,
+        columns: u32,
+        charset: TextCharset,
+        policy: ResolvedFallbackPolicy,
+    ) -> Result<Option<Vec<RenderNode>>, MermaidError> {
+        let diagram = &self.renderer.diagram;
+        // A policy that refuses this family's coverage needs no request.
+        let admitted = diagram
+            .text_eligibility()
+            .is_some_and(|eligibility| policy.text_fallback.admits(eligibility.coverage()));
+        if !admitted {
+            return Ok(None);
+        }
+        let options = TextOptions::new(columns.saturating_sub(TEXT_BLOCK_CHROME_COLUMNS)).with_charset(charset);
+        let TextRender::Drawing(drawing) = diagram.render_text(options)? else {
+            return Ok(None);
+        };
+        let partial = drawing.coverage() == TextCoverage::Partial;
+        // Rows may end in significant spaces; only trailing newlines go.
+        let text = drawing.into_text();
+        let mut nodes = vec![RenderNode::code(Some("txt".to_string()), None, text.trim_end_matches('\n'))];
+        if partial && policy.show_partial_note {
+            nodes.push(partial_note());
+        }
+        Ok(Some(nodes))
+    }
+
+    /// The source as a `mermaid` code node.
+    fn source_nodes(&self) -> Vec<RenderNode> {
+        vec![RenderNode::code(Some("mermaid".to_string()), None, self.instructions())]
+    }
+
+    /// `nodes` led by the component's title, unless the source already
+    /// gives the same title.
+    fn titled(&self, mut nodes: Vec<RenderNode>) -> Vec<RenderNode> {
+        let Some(title) = self.renderer.diagram.title() else {
+            return nodes;
+        };
+        if source_gives_title(self.instructions(), title) {
+            return nodes;
+        }
+        nodes.insert(0, RenderNode::paragraph(vec![RenderNode::strong(vec![RenderNode::text(title)])]));
+        nodes
+    }
+
+    /// The columns a text presentation may use on a terminal `term_width`
+    /// wide: the image width's own limit inside the margins. A scaled width
+    /// takes every available column, so no SVG is measured for text.
+    ///
+    /// A program that lays out [`present`](Self::present)'s nodes itself (to
+    /// install a highlighting code renderer) renders them at this width and
+    /// then applies the component's layout, as
+    /// [`render`](biscuit_terminal::components::renderable::TerminalRenderable::render) does.
+    pub fn text_columns(&self, term_width: u32) -> u32 {
+        TerminalImage::resolve_scaled_dimensions_for(&self.width, &self.layout, term_width, None, None).image_width
+    }
+
+    /// Lays out `nodes` for `term` at [`text_columns`](Self::text_columns),
+    /// with the plain code block (no highlighter).
+    fn render_nodes(&self, nodes: &[RenderNode], term: &biscuit_terminal::terminal::Terminal) -> String {
+        let mut options = TerminalRenderOptions::new(term, RenderStrictness::Lossy);
+        options.context = options.context.with_width(self.text_columns(term.width()));
+        render_terminal_node(&RenderNode::root(nodes.to_vec()), &options)
+            .map(|rendered| rendered.output)
+            .unwrap_or_else(|_| self.fallback_code_block())
     }
 
     /// Core render pipeline: Mermaid → PNG → terminal image string.
@@ -800,17 +985,36 @@ pub struct MermaidRenderResult {
     pub width_cells: u32,
 }
 
+/// Whether a line of `source` gives `title` with a `title` statement: on a
+/// line of its own (`title X`, or `title: X` in frontmatter) or after the
+/// header (`pie title X`), optionally quoted.
+fn source_gives_title(source: &str, title: &str) -> bool {
+    source.lines().any(|line| {
+        let line = line.trim();
+        line.strip_prefix("title")
+            .or_else(|| line.split_once(" title ").map(|(_, rest)| rest))
+            .map(|rest| rest.trim_start().trim_start_matches(':').trim().trim_matches('"'))
+            .is_some_and(|named| named == title.trim())
+    })
+}
+
 impl biscuit_terminal::components::renderable::TerminalRenderable for MermaidDiagram {
+    /// The image, or else the text drawing or source chosen by
+    /// [`present`](MermaidDiagram::present); margins and alignment are
+    /// applied once.
     fn render(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
-        let content = self.render_raw(term);
-        self.layout.apply_block_layout(&content, term.width())
+        match self.present(term) {
+            // `try_render` has applied the layout already.
+            MermaidPresentation::Image(result) => result.output,
+            MermaidPresentation::Text(nodes) | MermaidPresentation::Source(nodes) => {
+                self.layout.apply_block_layout(&self.render_nodes(&nodes, term), term.width())
+            }
+        }
     }
 
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        let term = biscuit_terminal::terminal::Terminal::new_optimistic(width);
-        let content = self.render_raw(&term);
-        self.layout.apply_block_layout(&content, width)
+        self.render(&biscuit_terminal::terminal::Terminal::new_optimistic(width))
     }
 
     fn is_block_level(&self) -> bool {
@@ -1064,8 +1268,13 @@ mod tests {
     /// How far past its budget a cancelled Merman call may return.
     const BUDGET_MARGIN: Duration = Duration::from_millis(250);
 
+    /// The component's output on an image-capable terminal, escapes
+    /// stripped: a failed image shows the source as a plain `mermaid` code
+    /// block, the same text as `fallback_code_block`.
     fn rendered(diagram: &MermaidDiagram) -> String {
-        diagram.render(&biscuit_terminal::terminal::Terminal::new_optimistic(80))
+        biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            diagram.render(&biscuit_terminal::terminal::Terminal::new_optimistic(80)),
+        )
     }
 
     #[test]
@@ -1100,7 +1309,8 @@ mod tests {
 
         let (output, warnings) = capture_warnings(|| rendered(&diagram));
 
-        assert_eq!(output, diagram.fallback_code_block());
+        // The code block drops the source's trailing newline.
+        assert_eq!(output, format!("```mermaid\n{}\n```", diagram.instructions().trim_end()));
         assert!(
             warnings.iter().any(|warning| warning.contains("time budget")),
             "{warnings:?}"

@@ -1752,6 +1752,7 @@ impl Writer<'_> {
                     terminal: &term,
                     available_width: self.opts.context.available_width,
                     graphics_mode: self.opts.context.graphics_mode,
+                    mermaid_mode: self.opts.context.mermaid_mode,
                 };
                 match diagrams.render_terminal_diagram(&request) {
                     Ok(DiagramOutcome::Rendered(output)) => return Ok(output),

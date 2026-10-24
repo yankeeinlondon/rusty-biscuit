@@ -136,3 +136,5 @@ pub(crate) fn capture_logs<T>(level: tracing::Level, run: impl FnOnce() -> T) ->
     let messages = messages.lock().expect("log lock").clone();
     (result, messages)
 }
+#[cfg(feature = "terminal")]
+mod component_fallback_tests;

@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::{CliContext, Run};
 use clap::Args as ClapArgs;
@@ -38,6 +38,9 @@ pub struct FlowchartArgs {
 
     #[command(flatten)]
     pub layout: LayoutArgs,
+
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
 
     /// Render an example diagram and show the command used
     #[arg(long, short = 'e')]
@@ -93,6 +96,7 @@ impl Run for FlowchartArgs {
             self.inverse,
             width_str.as_deref(),
             &self.layout,
+            &self.features,
         )?;
         let terminal = terminal_for_render(ctx.plain);
         display_mermaid(

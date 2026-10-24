@@ -1930,6 +1930,33 @@ mod route_dispatch {
         assert_eq!(encoder_for(&measured), Encoder::Kitty);
     }
 
+    /// `route_has_pixels` answers as `render_with_route` draws: no for a
+    /// route without a pixel format, yes for each pixel format and for a
+    /// Zellij route with a measured cell size. (An unmeasured cell size is
+    /// the encoder's own test above; `Terminal::cell_size` would measure the
+    /// host here.)
+    #[test]
+    fn route_has_pixels_matches_the_routes_encoder() {
+        use crate::discovery::detection::{KittyReply, ProbeReply, ProbeResult};
+        let plain = route_for(&[("TERM_PROGRAM", "Apple_Terminal")]);
+        assert!(!TerminalImage::route_has_pixels(&terminal_with_route(TerminalApp::AppleTerminal, plain)));
+        for support in [ImageSupport::Kitty, ImageSupport::ITerm, ImageSupport::Sixel] {
+            let term = terminal_with_route(TerminalApp::Kitty, support.clone().into());
+            assert!(TerminalImage::route_has_pixels(&term), "{support:?}");
+        }
+
+        let mut inputs = RouteInputs::new(true).with_var("ZELLIJ", "0");
+        inputs.zellij_version = Some(crate::discovery::detection::ToolVersion::new(0, 45, 0));
+        inputs.probe.direct = Some(ProbeResult::Replied(ProbeReply {
+            kitty: KittyReply::Accepted,
+            da1: None,
+        }));
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_measured_cells, "{route:?}");
+        let zellij = terminal_with_route(TerminalApp::Other("zellij".into()), route);
+        assert!(TerminalImage::route_has_pixels(&zellij), "a measured cell size");
+    }
+
     #[test]
     fn an_iterm2_route_uses_the_iterm2_format_on_any_app() {
         let route = route_for(&[("TERM_PROGRAM", "mintty")]);

@@ -126,6 +126,29 @@ impl ImageOutput {
 }
 
 impl TerminalImage {
+    /// Whether [`render_with_route`](Self::render_with_route) would draw
+    /// pixels for `term`, decided from its graphics route alone, before any
+    /// image exists. `false` means the route's answer is
+    /// [`ImageOutput::Fallback`]; a `true` route can still fall back when its
+    /// transport refuses a particular image.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::terminal_image::TerminalImage;
+    /// use biscuit_terminal::discovery::detection::ImageSupport;
+    /// use biscuit_terminal::terminal::Terminal;
+    ///
+    /// let kitty = Terminal::builder().image_support(ImageSupport::Kitty).build();
+    /// let plain = Terminal::builder().image_support(ImageSupport::None).build();
+    /// assert!(TerminalImage::route_has_pixels(&kitty));
+    /// assert!(!TerminalImage::route_has_pixels(&plain));
+    /// ```
+    #[must_use]
+    pub fn route_has_pixels(term: &crate::terminal::Terminal) -> bool {
+        !matches!(encoder_for(term), Encoder::Fallback(_))
+    }
+
     /// Renders the image for `term`'s graphics route.
     ///
     /// Everything that can fail (loading, decoding, encoding) happens before

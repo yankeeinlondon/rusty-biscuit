@@ -441,6 +441,10 @@ pub struct DiagramRenderRequest<'a> {
     pub available_width: u32,
     /// The render's fidelity ceiling: `Rich` or `Vector`, never `Off`.
     pub graphics_mode: GraphicsMode,
+    /// The promotion mode that offered the fence: `Image` (only at `Rich`)
+    /// or `Automatic`, never `Code`. An `Image` request asks for an image
+    /// and nothing else; an `Automatic` one may also be answered with text.
+    pub mermaid_mode: TerminalMermaidMode,
 }
 
 /// Why a [`DiagramRenderer`] could not draw a diagram.

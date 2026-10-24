@@ -256,6 +256,11 @@ impl MermaidDiagram {
         self
     }
 
+    /// The title set by [`with_title`](Self::with_title).
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
     /// Sets the configuration for the diagram.
     pub fn with_config(mut self, config: MermaidConfig) -> Self {
         self.config = config;

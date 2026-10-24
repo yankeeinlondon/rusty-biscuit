@@ -10,6 +10,7 @@ mod about;
 mod dir_targets;
 mod graphics_route;
 mod integration_test;
+mod mermaid_features;
 mod output_markers;
 // The pure output-marker detector the Level 2 helpers use, compiled here so
 // its regression tests run without the `terminal-tests` feature.
