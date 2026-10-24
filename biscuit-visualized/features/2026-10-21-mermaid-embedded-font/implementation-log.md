@@ -127,6 +127,127 @@ decisions_for_review:
       CI) were added to the guard's allow list with that reason.
       Alternative: give the benchmark crate a dependency on the test
       harness to use the macro too. Redo cost: four allow-list entries.
+    - |-
+      Phase 4: the per-render face choice lives in the text measurer, not in
+      the font chain. The plan (Rule A) pictured the chain taking a "family
+      override". Only the measurer needs it: opt-in output is an HTML static
+      SVG that this library never rasterizes. The opt-in measurer decides each
+      requested family the first time it is asked about it (on both weights,
+      before any label of that family is measured) and keeps the answer, so
+      the face is still chosen before layout. Nothing process-wide changes.
+      One small effect: the text-contrast pass still locates text with the
+      chain's normal faces; it only uses them to find which fill sits behind
+      a label. Alternative: a chain-level override object passed everywhere
+      the chain goes; more plumbing for no reader that needs it. Redo cost:
+      the measurer's constructor and `FaceChooser` in `embed/faces.rs`.
+    - |-
+      Phase 4: the opt-in is a separate switch on the diagram,
+      `MermaidDiagram::with_embedded_font(true)`, rather than a field on the
+      "HTML static" target as the plan suggested. The target is a plain
+      enum with no fields; the switch acts only when the target is HTML
+      static and the output is SVG, and is ignored otherwise. Darkmatter is
+      another crate, so it needs a public way to get the data and build the
+      page's font; Phase 4 added it: `render_with_font` returns the artifact
+      plus a `DiagramFont`, and `page_font(&[DiagramFont])` returns a
+      `PageFont` (comments, CSS, markup) or a `FontEmbeddingError`. Phase 5's
+      plan says Darkmatter calls `build_font_embedding`; it calls `page_font`
+      instead, which wraps it. Alternatives: an `HtmlStaticEmbeddedFont`
+      target variant (one value fewer to combine, but it doubles every match
+      on the target), or extending `RenderedArtifact` with a font field
+      (breaks every struct literal of a shared type). Redo cost: the builder
+      and `embed/page.rs`.
+    - |-
+      Phase 4: "plain glyph advances" are measured by shaping each face as if
+      it held only the tables the subset keeps (`cmap`, `head`, `hhea`,
+      `hmtx`, `maxp`, `name`, `OS/2`, `post`, `glyf`, `loca`), so the shaper
+      runs exactly the no-layout-tables path the browser's HarfBuzz runs on
+      the subset. That is more faithful than adding up `hmtx` advances
+      directly (it keeps the shaper's default mark handling, bidi runs and
+      fallback faces), and for ordinary text the two agree, which a test
+      checks. Alternative: turn off `kern`, `liga`, `calt` and every other
+      feature one by one, which can never be complete. Redo cost: one helper
+      in `fonts/shaper.rs`.
+    - |-
+      Phase 4: what the cache keeps beside an opt-in SVG (Rule D) is a small
+      JSON record (`{key}.font.json`): the requested font-family lists and
+      the characters drawn per family and weight. It does not store the
+      chosen faces themselves, because face ids are only valid inside one
+      process; a cache hit re-runs the face choice from the record, which
+      depends only on the fonts the cache key already covers. The record is
+      written before the SVG, and an SVG whose record is missing or
+      unreadable is rendered again rather than served without its data.
+      If the code-point scan of our own SVG ever fails, the diagram is still
+      shown (a warning is logged and that diagram contributes no
+      characters) instead of turning into a code block. Alternatives: store
+      the face file names (fragile across font updates), or re-scan the SVG
+      on every hit (what Rule D wanted to avoid). Redo cost: `FontRecord` in
+      `embed/page.rs`.
+    - |-
+      Phase 5: the `md --feature embed-mermaid-font` flag (task 5.3) is not
+      built. `md` still has no `--feature` flag, because the text-fallback work
+      that introduces it has not landed, and the plan says not to build a
+      stand-in. Everything below the CLI is ready:
+      `DarkmatterPage::with_embed_mermaid_font(true)` is what the flag must
+      call. Alternatives: a standalone `--embed-mermaid-font` flag (the
+      spec's original form, which the author replaced), or building the
+      `--feature` flag here (the other spec's work). Redo cost: none; 5.3 is
+      still to do, plus its CLI wiring test and the "frontmatter key not
+      honored" test.
+    - |-
+      Phase 5: the sanitizer's CSS check for `<style>` uses the `cssparser`
+      tokenizer, which Darkmatter already depends on, instead of the
+      hand-written scanner the plan recommended. A real CSS tokenizer reads
+      escapes, comments, strings and blocks the way the browser does, so the
+      check cannot be fooled by spellings a substring scan misses (for example
+      an escaped `url(` or `@import`). The check also admits the quoted form
+      `url("data:font/ttf;base64,...")`, which the plan's table did not name.
+      Attribute values keep the old substring check unchanged, so a `data:`
+      URL is still never admitted outside a style sheet. One side effect:
+      `url(` inside a CSS comment or string no longer drops a `<style>` block
+      (both are inert), while a malformed string or url token now does.
+      Alternative: the hand scanner (more code to own, and easier to get
+      wrong). Redo cost: the scanner functions in `svg_sanitizer.rs`.
+    - |-
+      Phase 5: where the page font goes. The page body is written diagram by
+      diagram before the union of their characters is known, so the first
+      opt-in diagram writes a placeholder comment
+      (`<!--darkmatter:mermaid-font-->`) ahead of its SVG. After the page is
+      rendered, Darkmatter replaces it with the comments and `<style>`, or
+      with nothing when the font fails. The font therefore sits in the body
+      just before the first diagram, as in the spec's example, not in
+      `<head>`. Nothing an author writes can forge the placeholder, because
+      these pages escape raw HTML and the sanitizer drops SVG comments.
+      Alternatives: a page-level hook in the shared `renderable` crate so the
+      style could go in `<head>` (touches another package's trait for one
+      caller), or rendering every diagram twice. Redo cost:
+      `render_tree/mermaid_font.rs` and the two entry points.
+    - |-
+      Phase 5: additions the plan did not list. (1)
+      `DarkmatterPage::with_embed_mermaid_font`, because the `md` CLI and
+      the page tests build pages through `DarkmatterPage`, not `HtmlOptions`.
+      (2) `components::mermaid::MermaidDiagram::with_embedded_font` and
+      `render_to_svg_with_font` in biscuit-visualized, so Darkmatter keeps
+      the component's terminal palette and background rather than copying
+      them. (3) The nextest macOS CoreText setup script now also covers
+      Darkmatter's two static-Mermaid L1 modules, which took about 3.5 s
+      per test, existing ones included (now about 0.5 s). Redo cost: small
+      for each.
+    - |-
+      Phase 5: Darkmatter's full test run has 42 failures that also fail on
+      the unchanged commit (verified by running them on a clean checkout of
+      HEAD): 40 `schemas_convert_snapshots`, 1 `suggest_constraint_phase3`
+      snapshot, and the CLI's
+      `schema_validate_legacy_json_output_is_byte_identical`. All come from
+      JSON key order. Commit `bbde223e6` ("make semantic hashes key-order
+      insensitive", 2026-10-23) enabled serde_json's `preserve_order` for
+      Darkmatter, so the schema converter and `md schema validate --json` now
+      write keys in insertion order (`$schema` last) instead of sorted. Whether
+      that output order is right is a decision for that work, so I left the
+      snapshots alone. A 43rd failure with the same cause,
+      `as_json5_uses_the_formatter_object_idiom`, was a test expectation
+      about a function that has always kept key order; I fixed the expected
+      string to author order. Alternatives: accept all the snapshots as they
+      are now, or restore sorted output in the converter.
 source_files_during_phase_1:
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
@@ -139,6 +260,7 @@ skills_files_updated_during_phase_1: []
 packages:
     - biscuit-visualized
     - test-toolkit
+    - darkmatter
 source_files_during_phase_2:
     - biscuit-visualized/src/src/mermaid/embed/mod.rs
     - biscuit-visualized/src/src/mermaid/embed/permission.rs
@@ -181,35 +303,69 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-visualized/SKILL.md
+source_files_during_phase_4:
+    - biscuit-visualized/src/src/artifact.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/fonts/shaper.rs
+    - biscuit-visualized/src/src/mermaid/embed/embedding.rs
+    - biscuit-visualized/src/src/mermaid/embed/faces.rs
+    - biscuit-visualized/src/src/mermaid/embed/mod.rs
+    - biscuit-visualized/src/src/mermaid/embed/page.rs
+    - biscuit-visualized/src/src/mermaid/embed/subset.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/embed_render_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+docs_updated_during_phase_4:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-visualized/SKILL.md
 message_to_agent: |-
-    Phase 3 (subset and @font-face payload) is done; read the log's Phase 3 section.
-    New crate-private pieces under src/mermaid/embed/ (Phase 4 wires them in):
-    - glyphs.rs: collect_used_glyphs(final_static_svg) -> Result<UsedGlyphs, GlyphsError>.
-      UsedGlyphs { families: BTreeMap<leading family, WeightGlyphs{regular, bold}> }, keyed by
-      the FIRST family of each label's computed font-family (unquoted, CSS-unescaped), i.e.
-      the name html_static leads labels with. So Phase 4's post-process must lead every label
-      with FamilyChoice.family (css_quoted), or that label's code points are not embedded.
-      Rule D: cache this UsedGlyphs next to the SVG (it is plain data; add serde if needed).
-    - subset.rs: subset(data, index, &BTreeSet<char>) and whole_face(data, index), both
-      return a single-face TrueType file; SubsetError.
-    - embedding.rs: build_font_embedding(&EmbeddedFaces, &[UsedGlyphs], &FontChain) ->
-      Result<FontEmbedding, FontEmbeddingError>; FontEmbedding { comments, css, rules } and
-      markup() = comments + "<style>..</style>" ("" when nothing is drawn). On Err it has
-      already logged the warning (D7); the caller just emits no font.
-      build_font_embedding_with(.., make_file) is the failure-injection seam.
-    - comment.rs: page_comment(&FamilyChoice, unsubset), ofl_attribution(), INTER_COPYRIGHT.
-    - tests/mod.rs: capture_logs(Level, f) (capture_warnings now wraps it).
-    Still true from earlier phases: the measurer must use plain advances with the opt-in
-    (the subset has no GPOS/GSUB/kern; oracle: measured width == sum of subset hmtx
-    advances); remove `#[cfg_attr(not(test), allow(dead_code))]` on `mod embed` once the
-    render path calls it; the md `--feature` flag has NOT landed (re-check before 5.3, no
-    stand-in); family name is `Inter` (no Reserved Font Name).
-    Phase 6 still owes docs/dependencies.md (root and area) for allsorts and its 10
-    transitive crates (aliasable, bitreader, glyph-names, ouroboros, ouroboros_macro,
-    pathfinder_geometry, pathfinder_simd, proc-macro2-diagnostics,
-    unicode-canonical-combining-class, unicode-joining-type); roxmltree, simplecss, base64
-    are direct now but were already in the lock.
-    The test-toolkit archive_path_guard failure Phase 2 reported is fixed (see log).
+    Phase 5 (Darkmatter) is done except task 5.3; read the log's Phase 5 section.
+    - 5.3 (`md --feature embed-mermaid-font`) is NOT built: `md` still has no
+      `--feature` flag (the text-fallback work has not landed), and the plan
+      forbids a stand-in. When it lands, map the feature to
+      `DarkmatterPage::with_embed_mermaid_font(true)` in darkmatter/cli/src/render.rs
+      and add 5.3's CLI wiring and frontmatter-not-honored tests.
+    - Phase 6 docs to write: the darkmatter mermaid page
+      (darkmatter/docs/rendering/mermaid.md) covering
+      `HtmlOptions::embed_mermaid_font`, `DarkmatterPage::with_embed_mermaid_font`,
+      where the comments and `<style>` go (the body, right before the first
+      diagram), and the sanitizer's one `data:font/ttf` exception
+      (`style_sheet_is_safe`, top-level `@font-face` `src` only). The CLI line
+      stays "planned" until 5.3 lands. Also: the biscuit-visualized topic page
+      and docs/dependencies.md (root and area) for allsorts and its 10
+      transitive crates (aliasable, bitreader, glyph-names, ouroboros,
+      ouroboros_macro, pathfinder_geometry, pathfinder_simd,
+      proc-macro2-diagnostics, unicode-canonical-combining-class,
+      unicode-joining-type).
+    - Darkmatter `just test` has 42 failures that predate this work (JSON key
+      order after commit bbde223e6; listed in the log). Do not treat them as
+      regressions of this feature.
+source_files_during_phase_5:
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - darkmatter/lib/src/layout/page.rs
+    - darkmatter/lib/src/markdown/output/html.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/src/markdown/render_tree/mermaid_font.rs
+    - darkmatter/lib/src/markdown/render_tree/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/tests/browser/browser_render.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/mermaid_embedded_font.rs
+    - .config/nextest.toml
+docs_updated_during_phase_5:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-visualized/SKILL.md
 ---
 
 # Implementation Log for 2026-10-21-mermaid-embedded-font (7 phases)
@@ -797,3 +953,275 @@ crate run only by `just bench`.
   (run because `allsorts` brings new transitive crates, including
   `pathfinder_simd`). Code itself is pure byte processing with no paths or
   OS calls.
+
+## Phase 4
+
+Render-path wiring, in `biscuit-visualized` (2026-10-24). The opt-in is now
+reachable from the public API. Without it every render is byte-identical: the
+golden corpus passes unchanged, and `MERMAID_BACKEND` is not bumped because
+plain output did not change.
+
+### What was built
+
+- **Opt-in switch (4.1).** `MermaidDiagram::with_embedded_font(bool)` /
+  `embedded_font()` (default off). It acts only for `MermaidTarget::HtmlStatic`
+  with SVG output (`embeds_font(format)`); PNG and raster-safe SVG ignore it.
+  `render_with_font(&request)` returns `(RenderedArtifact,
+  Option<DiagramFont>)`, `Some` exactly when the opt-in applied; `render` is
+  that minus the font.
+- **Face choice before layout (Rule A).** `FaceChooser` (`embed/faces.rs`)
+  decides each requested CSS `font-family` list the first time it is asked
+  for (regular and bold, Rule B) and keeps the answer.
+  `LabelMeasurer::embedding(chain)` (`fonts/measure.rs`) resolves every style
+  through it (bold from weight 600 up, which matches the browser's choice
+  between 400 and 700 rules and the collector's split). `measured_family`
+  returns the choice's family, so the HTML static post-process leads every
+  label with the embedded family with no change of its own. The same measurer
+  instance drives Merman and the post-process; a tagged gitGraph's
+  `commitSpacing` measurement uses an opt-in measurer too.
+- **Plain advances (S1 decision).** `ShapeParams::layout_tables` (default on).
+  Off, `fonts/shaper.rs` shapes a face rebuilt from only the subset's tables
+  (`subset_tables`: `head`, `hhea`, `maxp`, `cmap`, `hmtx`, `name`, `OS/2`,
+  `post`, `glyf`, `loca`) through `ttf_parser::Face::from_raw_tables`. The
+  opt-in measurer turns it off.
+- **Cache identity (4.2, D9).** The options JSON gets
+  `target: "html-static+embedded-font"` for the opt-in (plain HTML static keeps
+  `"html-static"`, raster-safe keeps no target), so neither output is ever
+  served for the other. The font identity already covers the resolved faces'
+  contents and `MERMAID_FONT`, so a Restricted versus permitted face, or a
+  different `MERMAID_FONT`, changes the key with no extra field.
+- **Cache record (Rule D).** On a miss the render collects `UsedGlyphs` from
+  the final SVG and stores `{key}.font.json` (`FontRecord`: requested families
+  plus each family's characters per weight) *before* the SVG
+  (`FileCache::store_sidecar`, the same staged rename as `store`). A hit reads
+  the record and runs the face choice again from it. A missing or unreadable
+  record means a miss, and the record is written again. The subset is never
+  cached.
+- **Public bridge for Darkmatter.** `embed/page.rs`: `DiagramFont`
+  (`families()`), `page_font(iter of &DiagramFont) -> Result<PageFont,
+  FontEmbeddingError>`, `PageFont` (`comments()`, `css()`, `markup()`,
+  `is_empty()`). `FontEmbeddingError` and `SubsetError` are now public
+  (`#[non_exhaustive]`). All of these are re-exported from `mermaid`.
+  `#[cfg_attr(not(test), allow(dead_code))]` on `mod embed` is removed.
+- **Rule 5 fix.** `cargo clippy --no-default-features -D warnings` failed on
+  three pre-existing dead-code items in `artifact.rs` (`cache_name`,
+  `PNG_ENCODING`, `cache_identity`, read only behind `image`). They and the
+  two new `FileCache` sidecar methods now carry
+  `#[cfg_attr(not(feature = "image"), allow(dead_code))]`, and that build is
+  clean.
+
+### Requirement-to-test mapping
+
+All in `src/tests/embed_render_tests.rs`, L1, over injected chains
+(bundled faces plus `Arial`, which is Inter renamed with a patched `fsType`).
+Boundary: the crate's render path, from source to the cached artifact file
+plus its record, read back from disk (F2: real Merman, real cache directory,
+injected fonts). No CLI, terminal or browser is involved here; the browser
+load is Phase 5.4 and Phase 7.
+
+| Requirement | Test |
+| --- | --- |
+| label `font-family` leads with the embedded family: permitted face → `Arial`, Restricted → `Inter`; plain static SVG on the same chain still leads with `Arial`; flowchart, class (bold), tagged gitGraph; `DiagramFont::families` | `opt_in_labels_lead_with_the_embedded_family` |
+| measurer measures in the chosen face at 400, `bold`, `600`, `500`; plain measurer unchanged; the faces chosen while measuring are the ones returned | `the_measurer_measures_each_family_in_its_embedded_face` |
+| measured width = sum of the **subset's** `hmtx` advances (regular and bold), and differs from the kerned width (load-bearing) | `the_measurer_uses_plain_advances_with_the_opt_in` |
+| end to end: the opt-in node box = advances read from the subset **decoded from the page's `@font-face`** + the node padding (from the plain render) | `an_opt_in_label_is_laid_out_at_the_width_the_embedded_subset_draws` |
+| flag off / raster-safe SVG / PNG / HTML-static PNG: same cache key, byte-identical bytes, no font; default off (AC-E9 library side) | `without_html_static_svg_the_flag_changes_nothing` |
+| opt-in key ≠ plain static key; `MERMAID_FONT=Inter` and Restricted vs permitted change it; control equal (AC-E10, R-E9) | `the_opt_in_has_its_own_cache_keys` |
+| a plain render after an opt-in render is a miss and the reverse; a hit returns equal faces, glyphs and page markup (record round trip) | `plain_and_opt_in_renders_never_serve_each_other` |
+| record missing, not JSON, missing a field → miss, then restored and a hit | `an_opt_in_svg_without_a_readable_record_is_rendered_again` |
+| several rendered diagrams → one rule per face and weight, one comment, subset covers every diagram's characters; empty page → empty markup | `a_page_of_rendered_diagrams_embeds_one_rule_per_face_and_weight` |
+
+Mutation check: with the plain-advance switch forced on, both width tests
+fail and the rest pass. The Input Robustness Matrix applies only to the new
+record reader, our own JSON. Its document shapes (absent, malformed, missing
+field) all fail closed to a re-render and are tested above. Smell grep over
+the changed files: `.ok()` in `read_font_record` maps an unreadable record to
+"render again" (fail closed, logged at debug); there is no
+`unwrap_or_default` on a load-bearing parse (`UsedGlyphs::default()` after
+a failed scan of our own SVG is logged as a warning and only drops that
+diagram's characters).
+
+### Gates
+
+- `just lint` (biscuit-visualized): clean. Also clean:
+  `cargo clippy -p biscuit-visualized --no-default-features --all-targets -D warnings`
+  and `--features image --all-targets`.
+- `just test` (biscuit-visualized): 1054 passed, 4 skipped, 0 failed (9 new).
+- `just check-tier-coverage biscuit-visualized`: stranded 0.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages:
+  [biscuit-visualized, test-toolkit, darkmatter]`, `change_class: package`.
+  `just test test-toolkit`: 476 passed. Darkmatter (more than 200 tests, so only
+  the affected ones): `just test shipped_markdown_` (the skill corpus) 2
+  passed, and `just test mermaid` (its Mermaid and static-SVG tests) 68 passed.
+- Reverse dependencies (`darkmatter`, `biscuit-terminal-cli`, `sniff-cli`,
+  `worktree-cli`): `cargo check` clean; the public API is additive.
+- No cross-OS check: the only new filesystem write is the record file, which
+  uses the existing `FileCache` staged-rename path unchanged. Everything else
+  is in-memory font and string processing.
+- Docs: no `docs/` page was changed. The opt-in's topic page and the
+  dependencies entries are Phase 6 tasks (6.2), and the new public items carry
+  current doc comments.
+
+## Phase 5
+
+Darkmatter (2026-10-24). The opt-in now reaches the browser page through
+`HtmlOptions::embed_mermaid_font` and `DarkmatterPage::with_embed_mermaid_font`.
+Task 5.3 (the `md --feature embed-mermaid-font` flag) is **not done**: it is
+blocked because `md` still has no `--feature` flag, since the text-fallback work
+(`2026-10-22-merman-text-fallback`) has not landed, and the plan's gate forbids
+a stand-in. Rechecked on 2026-10-24 in `darkmatter/cli/src/args/cli.rs`.
+
+Note: Phase 4's changes were still uncommitted when this phase started, so the
+working tree holds Phases 4 and 5 together. The file lists in this phase's
+frontmatter name only the files Phase 5 touched.
+
+### What was built
+
+- **5.1 Sanitizer admission** (`svg_sanitizer.rs`). New
+  `pub(crate) fn style_sheet_is_safe(css)` checks a `<style>` element's CSS.
+  It uses the `cssparser` 0.37 tokenizer, which Darkmatter already depends on,
+  rather than a hand-written scanner (Rule G allows this; see the decisions).
+  The rule is the old one (no `@import`, and every `url()` a local `#…`
+  fragment) with one exception: a **top-level** `@font-face` rule whose single
+  `src` descriptor is one or more `url(data:font/ttf;base64,…)
+  format("truetype")` entries, with the URL quoted or not. The base64 must
+  decode with the standard padded alphabet. Scheme, MIME type, `base64`,
+  `url(`, `format(` and `"truetype"` all match case-insensitively. The check
+  fails closed on:
+    - a bad string or bad url token;
+    - an unterminated `@font-face` block, font `url(`, or `format(`;
+    - a duplicate `src`;
+    - a prelude after `@font-face`;
+    - anything in the body that is not a declaration;
+    - leftover arguments inside `format()`.
+
+  Attribute values keep the old substring check (`css_is_safe`, unchanged), so
+  a `data:` URL is never admitted in `fill`, `filter`, `mask` or `style`.
+  `sanitize_style_element` now calls the new check, and the docs of
+  `sanitize_svg`, `css_is_safe` and `sanitize_style_element` are updated.
+- **5.2 Page assembly.**
+    - `HtmlOptions::embed_mermaid_font` (default `false`). The stale
+      `mermaid_mode` doc, which said `Image` meant interactive mermaid.js, is
+      corrected.
+    - `DarkmatterPage::with_embed_mermaid_font`, the hook the CLI will call; the
+      MarkdownPlus path keeps it `false`.
+    - The code renderer renders each static diagram with
+      `with_embedded_font(true)` and the new component method
+      `render_to_svg_with_font`, and collects each diagram's `DiagramFont`.
+    - The first opt-in diagram writes the placeholder `<!--darkmatter:mermaid-font-->`
+      ahead of its sanitized SVG. Both HTML entry points
+      (`render_tree_html_with_context`, `render_tree_html_page_body`) then
+      replace it with `page_font(...)`'s markup: the comments, then the `<style>`.
+      The markup first passes `style_sheet_is_safe`. On a library `Err` (D7,
+      already logged by biscuit-visualized) or a failed check (a warning is
+      logged here), the placeholder is replaced with nothing and the diagrams
+      stay.
+    - New module `darkmatter/lib/src/markdown/render_tree/mermaid_font.rs`.
+    - `browser_options_from_html_options` now also returns the renderer `Rc`.
+- **Component API (biscuit-visualized).**
+  `components::mermaid::MermaidDiagram::with_embedded_font` and
+  `render_to_svg_with_font` (plus the same on the internal `MermaidRenderer`),
+  and `DiagramFont` is re-exported from `components::mermaid`. These keep the
+  component's terminal palette and background, so Darkmatter does not
+  duplicate them.
+- **5.4 Browser check.** `browser_embedded_mermaid_font_draws_every_label` in
+  `darkmatter/lib/tests/browser/browser_render.rs` (`just test-browser`, headless
+  Chrome via `biscuit-browser-harness`, `require_browser()` like its
+  neighbors).
+- **Test speed.** Darkmatter's static-Mermaid page tests paid macOS's
+  CoreText scan of `target/debug/deps`: about 3.5 s each, including the
+  existing `mermaid_static_svg` ones. `.config/nextest.toml` now applies the
+  existing `coretext-small-bundle` setup script to
+  `package(darkmatter) & test(/^(mermaid_static_svg|mermaid_embedded_font)::/)`,
+  and they now take about 0.5 s.
+
+On this Mac the page embeds the host's Trebuchet MS (`fsType 0x0008`,
+Editable), subset, as regular and bold.
+
+### Requirement-to-test mapping
+
+Boundaries: the CSS check runs in-process through `sanitize_svg`, the public
+result (F1). Page assembly goes through the public page path,
+`DarkmatterPage::render_to_browser` and `render_tree_html`, with real Merman,
+the real cache and host fonts (F2, L1). The browser check runs a real headless
+Chrome (F3, browser tier).
+
+| Requirement | Test |
+| --- | --- |
+| AC-E2 control: generated rule (with OFL comment), two weights, several entries, quoted URL, double-quoted family | `svg_sanitizer::tests::keeps_font_face_with_truetype_data_url_in_src` |
+| uppercase `URL(`/`DATA:`/`FONT/TTF`/`BASE64`/`FORMAT`/`@FONT-FACE`/`SRC` | `font_data_url_admission_is_case_insensitive_for_scheme_and_mime` |
+| `https:`, protocol-relative, PNG/WOFF2/OTF/HTML data, non-base64 form, `;charset=`, invalid char, unpadded, empty body, `#` fragment, whitespace in body, valid + external entry, `format("woff2")`, extra `format` args, no `format`, `local()` entry | `drops_font_face_whose_src_is_not_an_embedded_truetype_data_url` |
+| data URL in another descriptor, `background`/`mask`/`fill` property, `@media`/`@supports`/`@keyframes`, `@font-face` nested in a rule | `drops_truetype_data_url_outside_font_face_src` |
+| data URL in `fill`/`filter`/`mask`/`style` attributes; `@font-face` text in a `style` attribute | `drops_truetype_data_url_in_attributes` |
+| `@import` beside, inside, and escaped (`@\69mport`); duplicate `src`; unterminated block/`url(`/`format(`; prelude; non-declaration body | `drops_font_face_with_import_duplicate_src_or_unterminated_parts` |
+| `@font-face` + safe rule kept; + unsafe rule (either order) dropped | `font_face_beside_other_rules_is_kept_only_when_every_rule_passes` |
+| existing regression guards (external URL, local fragment, filter, import, Merman flowchart) | unchanged existing sanitizer tests, all green |
+| AC-E7 page level: library `Err` → no markup; empty page font → none; failed CSS check → none, warning logged | `mermaid_font::tests::a_failed_page_font_emits_nothing`, `css_that_fails_the_style_sheet_check_is_not_emitted` |
+| placeholder replaced once; removed when the markup is empty; untouched page unchanged | `mermaid_font::tests::the_placeholder_is_replaced_once` |
+| AC-E9 default `false` (unit + page); `Image` with the field unset vs `false` is byte-identical, with no `@font-face` or comment | `html::tests::test_html_options_default`, `l1 mermaid_embedded_font::the_opt_in_is_off_by_default` |
+| AC-E9 `Off` and `Text`: byte-identical with and without the flag on both entry points | `without_static_svg_the_opt_in_changes_nothing` |
+| AC-E4 flowchart + class + sequence, dark and light: one rule per (family, weight), 400 and 700 present, declared families = label lead families, one comment per family immediately before the single `<style>`, before the first `<svg>`, placeholder gone | `a_page_of_diagrams_embeds_one_rule_per_face_and_weight` |
+| AC-E15: OFL line immediately before Inter's first rule; none when only host faces are embedded | `the_ofl_line_accompanies_inter_only` (host-dependent branch), `mermaid_font_inter_embeds_inter_with_its_ofl_line` (`MERMAID_FONT=Inter` pins the Inter branch) |
+| `render_tree_html` emits the same markup as the page path | `the_html_entry_point_embeds_the_font_too` |
+| component returns the font only for opt-in HTML-static SVG, and the SVG equals `render_to_svg` | `components::mermaid::tests::the_component_returns_the_font_of_an_opt_in_html_static_svg` |
+| AC-E12 page level: every `@font-face` loads from `data:` with no font request; every label (incl. bold class name) is drawn in the embedded face (page width = width in a probe copy of the same file) with every glyph in the subset (probe width is equal with monospace and serif fallbacks); control text outside the subset differs | `browser_render::browser_embedded_mermaid_font_draws_every_label` (passes with `BISCUIT_BROWSER_REQUIRED=1`) |
+
+- **Mutation checks on 5.1.** With the base64 check forced to true, the
+  "not an embedded data URL" test fails. With the `@font-face` exception
+  disabled, the four "kept" tests fail. Allowing the exception below the top
+  level fails the "outside `src`" test.
+- **Input Robustness Matrix.** This is a CSS reader, not a config field
+  validator. Every row of the plan's table has a case above, and every shape
+  except the admitted one fails closed to "block dropped".
+- **Smell grep** over the new Darkmatter code: no `#[serde(default)]`,
+  `unwrap_or_default` or `filter_map(.. as_str())`. The `let Ok(page) = page
+  else` in `checked_page_font` is the D7 fail-closed path; the library has
+  already logged that error.
+- **D14 comment cases.** Each case is pinned with injected fonts in
+  biscuit-visualized (Phases 3 and 4). Darkmatter cannot inject a font chain,
+  so its page tests branch on the page's own comments.
+- **A host fact for the test above.** This Mac has Inter installed in
+  `~/Library/Fonts`, so `MERMAID_FONT=Inter` resolves to that copy, and the
+  comment gives the reason "the face the font chain resolved", not "selected
+  by MERMAID_FONT=Inter". This is Phase 2's ruling (3); the test accepts
+  either reason.
+
+### Gates
+
+- `just lint`: clean in `biscuit-visualized` and `darkmatter` (all four crates
+  in the area, plus the zed-dmls wasm check).
+- `just test` in `biscuit-visualized`: 1055 passed, 4 skipped, 0 failed (1
+  new).
+- `just test` in `darkmatter`: **42 failed**, all from before this phase. The
+  recipe is fail-fast, so the full L1 set was also run once with the
+  recipe's own packages, features and tier filter plus `--no-fail-fast`:
+  10677 run, 10635 passed, 42 failed, 10 skipped. The 42 are:
+    - 40 `schemas_convert_snapshots::*`;
+    - `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata`;
+    - `darkmatter-cli` `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`.
+
+  All of them, plus `as_json5_uses_the_formatter_object_idiom`, also fail on
+  a clean `git worktree` of HEAD (`2efa9f95b`): 43 run, 43 failed. Cause:
+  JSON key order, after commit `bbde223e6` turned on serde_json's
+  `preserve_order` for Darkmatter. They are left in place, because the
+  schema output order is a decision for that work (see the decisions). The
+  43rd, `as_json5_uses_the_formatter_object_idiom`, had a test expectation
+  that assumed sorted keys; it is fixed (Rule 5) and passes.
+- `just test-browser browser_embedded_mermaid_font` with
+  `BISCUIT_BROWSER_REQUIRED=1`: passed (about 3 s, real headless Chrome).
+- `just check-tier-coverage`: 0 stranded in `darkmatter` and
+  `biscuit-visualized`.
+- Scope:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `packages: [biscuit-visualized, darkmatter, test-toolkit]` and
+  `change_class: package`. The tree still holds Phase 4's uncommitted work.
+  `just test test-toolkit`: 476 passed, 4 skipped.
+- Reverse dependencies of `biscuit-visualized` (`biscuit-terminal-cli`,
+  `sniff-cli`, `worktree-cli`): `cargo check` is clean. The component API
+  change is additive.
+- No cross-OS check: this phase adds no path, process or OS-specific code.
+  The `nextest.toml` script is scoped to macOS hosts.
+- Docs: no `docs/` page changed. The Darkmatter and biscuit-visualized
+  pages are Phase 6 (6.1, 6.2). The doc comments of every changed symbol are
+  current, including the corrected `HtmlOptions::mermaid_mode` doc.

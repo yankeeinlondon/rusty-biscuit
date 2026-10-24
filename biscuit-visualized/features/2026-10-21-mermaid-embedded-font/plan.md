@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -16,6 +16,7 @@ skills_files_updated_during_phase_1: []
 packages:
 - biscuit-visualized
 - test-toolkit
+- darkmatter
 source_files_during_phase_2:
 - biscuit-visualized/src/src/mermaid/embed/mod.rs
 - biscuit-visualized/src/src/mermaid/embed/permission.rs
@@ -57,6 +58,47 @@ docs_updated_during_phase_3:
 - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+- .claude/skills/biscuit-visualized/SKILL.md
+source_files_during_phase_4:
+- biscuit-visualized/src/src/artifact.rs
+- biscuit-visualized/src/src/cache/file_cache.rs
+- biscuit-visualized/src/src/fonts/measure.rs
+- biscuit-visualized/src/src/fonts/shaper.rs
+- biscuit-visualized/src/src/mermaid/embed/embedding.rs
+- biscuit-visualized/src/src/mermaid/embed/faces.rs
+- biscuit-visualized/src/src/mermaid/embed/mod.rs
+- biscuit-visualized/src/src/mermaid/embed/page.rs
+- biscuit-visualized/src/src/mermaid/embed/subset.rs
+- biscuit-visualized/src/src/mermaid/mod.rs
+- biscuit-visualized/src/src/mermaid/render.rs
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+- biscuit-visualized/src/src/tests/measure_tests.rs
+- biscuit-visualized/src/src/tests/mod.rs
+docs_updated_during_phase_4:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/biscuit-visualized/SKILL.md
+source_files_during_phase_5:
+- biscuit-visualized/src/src/components/mermaid.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/markdown/output/html.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- darkmatter/lib/src/markdown/render_tree/mermaid_font.rs
+- darkmatter/lib/src/markdown/render_tree/mod.rs
+- darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_embedded_font.rs
+- .config/nextest.toml
+docs_updated_during_phase_5:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
 - .claude/skills/biscuit-visualized/SKILL.md
 ---
 
@@ -477,7 +519,7 @@ Depends on Phase 2 and on S1's outcome.
 
 ### Wave 1
 
-- [ ] **4.1 Opt-in on the "HTML static" target.**
+- [x] **4.1 Opt-in on the "HTML static" target.**
     - Add an additive flag to the target option (Merman D60), for example
       `embed_font: bool`, default `false`; with it false, output is unchanged.
     - When on: compute `EmbeddedFaces` (2.3) before layout, feed the per-render
@@ -491,7 +533,7 @@ Depends on Phase 2 and on S1's outcome.
       embedded family; the measured width equals the width computed with the
       embedded face alone (the measured-vs-drawn oracle already used by Merman
       R-V8); flag off gives a byte-identical SVG.
-- [ ] **4.2 Cache identity (D9, R-E9, AC-E10).**
+- [x] **4.2 Cache identity (D9, R-E9, AC-E10).**
     - Add an output format value for "static SVG with embedded font" to the
       cache key (Merman D41). The resolved-face identity (Merman D63) already
       covers the face; the Inter substitution changes the resolved face, so it
@@ -549,7 +591,7 @@ string or `None`). One control case and the invalid shape per row; spawn the
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **5.1 Sanitizer admission (`darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs`).**
+- [x] **5.1 Sanitizer admission (`darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs`).**
     - Implement Rules F and G: a `@font-face` `src`-only, `data:font/ttf;base64`
       admission with the shapes above; every other `url(` rule unchanged; the
       doc comment of `sanitize_svg` and `css_is_safe` (which today says
@@ -559,7 +601,7 @@ string or `None`). One control case and the invalid shape per row; spawn the
     - Tests: the matrix, plus the existing sanitizer tests unchanged and green
       (AC-E2). The existing `drops_style_block_with_external_url` and
       local-fragment tests are the regression guard.
-- [ ] **5.2 `HtmlOptions::embed_mermaid_font` (`darkmatter/lib/src/markdown/output/html.rs`).**
+- [x] **5.2 `HtmlOptions::embed_mermaid_font` (`darkmatter/lib/src/markdown/output/html.rs`).**
     - Add `pub embed_mermaid_font: bool`, default `false`, with `///` docs that
       say it acts only with `MermaidMode::Image` (D3); `HtmlOptions` is
       `#[non_exhaustive]`, so the addition is non-breaking. Update the `mermaid_mode`
@@ -585,7 +627,7 @@ string or `None`). One control case and the invalid shape per row; spawn the
 
 ### Wave 2 (depends on 5.2; parallel within wave)
 
-- [ ] **5.3 `md --feature embed-mermaid-font` (`darkmatter/cli`).**
+- [ ] **5.3 `md --feature embed-mermaid-font` (`darkmatter/cli`).** *(Not done 2026-10-24: blocked. `md` still has no `--feature` flag because the text-fallback work has not landed, and the gate forbids a stand-in. `DarkmatterPage::with_embed_mermaid_font` is ready for the CLI to call; see the implementation log's Phase 5.)*
     - Add `embed-mermaid-font` to `md`'s `--feature` enum (from the text-fallback
       work; do not add a new flag, spec D3), mapped to
       `HtmlOptions::embed_mermaid_font = true`. Unknown names stay a usage error
@@ -595,7 +637,7 @@ string or `None`). One control case and the invalid shape per row; spawn the
       `@font-face`), flag present with `--mermaid` static SVG (one `@font-face`),
       flag present without static SVG (output unchanged), case-insensitive
       spelling, and combination with another `--feature` value. AC-E9.
-- [ ] **5.4 Darkmatter L2 browser check of the page.**
+- [x] **5.4 Darkmatter L2 browser check of the page.**
     - A single headless-Chrome test in the existing `tests/browser` harness that
       loads a rendered page with the opt-in, confirms every label glyph renders in
       the embedded face, and that the `@font-face` loaded (no network request for
