@@ -17,6 +17,10 @@ cyan := '\033[36m'
 # Stand-in for the coming sequence support: alternate implement → review on an
 # implemented spec until a review marks it production ready (at most 5 cycles).
 # A review is ready only when it has no findings, so nothing follows it.
+# A review that sets `human_in_the_loop` pauses the cycle for an interactive
+# rulings session, then the cycle continues; a review that marks every finding
+# blocked without asking for a ruling ends it, because another cycle would
+# change nothing.
 # Pass `--use-defaults` to skip the agent/model prompts and use the defaults.
 [positional-arguments]
 fix +args:
@@ -106,6 +110,28 @@ fix +args:
         echo "${answer:-${default}}"
     }
 
+    # A review waits on a human while it has `human_in_the_loop` items and the
+    # author has not set `human_resolved: true`.
+    waiting_on_human() {
+        local items
+        items="$(md get --raw "$1" human_in_the_loop)"
+        [[ -n "${items}" && "${items}" != "null" && "${items}" != "[]" ]] \
+            && [[ "$(md get --raw "$1" human_resolved)" != "true" ]]
+    }
+    collect_rulings() {
+        local review="$1"
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            echo -e "{{ yellow }}$(just _link "${review}"){{ reset }} needs your rulings; run {{ bold }}just fix ${spec}{{ reset }} in a terminal to record them." >&2
+            exit 1
+        fi
+        echo -e "🧑‍⚖️  $(just _link "${review}") needs your rulings before the cycle can continue"
+        claudine compose "@prompts/_reviews/human-rulings.md" -y -i --${implement_agent} --model "${implement_model}" review="${review}" spec="${spec}"
+        if waiting_on_human "${review}"; then
+            echo -e "{{ yellow }}$(just _link "${review}"){{ reset }} still has items without a ruling; run {{ bold }}just fix ${spec}{{ reset }} again to finish them." >&2
+            exit 1
+        fi
+    }
+
     review_agent="$(choose_agent "Review" codex)"
     review_model="$(choose_model "Review" gpt-6.1-sol)"
     implement_agent="$(choose_agent "Implementation" claude)"
@@ -121,6 +147,9 @@ fix +args:
     while (( cycle < max_cycles )); do
         (( ++cycle ))
         review="$(latest_review)"
+        if [[ -n "${review}" && -f "${review}" ]] && waiting_on_human "${review}"; then
+            collect_rulings "${review}"
+        fi
 
         # Without an unimplemented review there are no findings to implement,
         # so the cycle starts with its review.
@@ -144,6 +173,14 @@ fix +args:
         fi
         if [[ "${ready}" != "false" ]]; then
             echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set a boolean 'ready' frontmatter property" >&2
+            exit 1
+        fi
+        if waiting_on_human "${review}"; then
+            collect_rulings "${review}"
+            continue
+        fi
+        if [[ "$(md get --raw "${review}" blocked)" == "true" ]]; then
+            echo -e "{{ red }}ERROR:{{ reset }} $(just _link "${review}") marks every finding blocked but asks for no ruling ({{ italic }}human_in_the_loop{{ reset }} is empty), so another cycle would change nothing." >&2
             exit 1
         fi
     done

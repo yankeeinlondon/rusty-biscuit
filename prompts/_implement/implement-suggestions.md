@@ -21,6 +21,10 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
     - ensure_file: '{{log}}'
+    - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop')) && frontmatter(review, 'human_resolved') != true"
+      then:
+          - warn: "{{basename(review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings before repairing it"
+          - error: "{{basename(review)}} is waiting on a human"
 
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
@@ -229,7 +233,32 @@ user-visible results, make it: choose the option that best fits the spec, the
 area's `docs/`, and existing behavior, and implement it with tests. Record the
 decision, the alternatives, and why in the ledger row, add a one-line summary
 to the review's `human_review_items`, and set its `human_review` to `true`, so
-the author can confirm or reverse it afterward.
+the author can confirm or reverse it afterward. When the spec pre-authorizes
+bounded implementer autonomy and the choice meets its conditions, also amend
+the spec as that decision directs.
+
+A finding is **blocked** only when it waits on an item in the review's
+`human_in_the_loop` that has no ruling yet, or on a prerequisite this cycle
+cannot produce (an unavailable host or account). A review that calls a
+finding blocked, or a decision "the author's", without such an item does not
+block it: the review asked for no ruling, so you make the decision as above
+and repair the finding. Recording the same finding as blocked in two
+consecutive cycles stops the loop and costs the author a cycle; do not do it
+for anything you could decide.
+
+::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop'))"
+**The author has ruled on this review's `human_in_the_loop` items** under its
+`## Human rulings` heading. A ruling has the same authority as the spec and
+wins where they disagree. Before any code change, add each ruling that
+requires a change to the ledger as a **high** row titled `carry out ruling on
+item N: {short description}`, and carry it out like any other finding: code,
+tests, `docs/`, skills, and, where the ruling changes a decision or an
+acceptance criterion, the spec (mark the decision amended by the ruling, with
+its date). Rulings cannot be disputed. A ruling that cannot be carried out as
+written, or conflicts with another, is **unresolved** with the reason; do not
+guess. A ruling that confirms existing behavior adds no row. Findings the
+rulings unblock are repaired in this same cycle.
+::end-block
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section

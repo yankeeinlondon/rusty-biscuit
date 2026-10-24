@@ -81,7 +81,7 @@ In the rusty-monorepo (where you are currently working), you will find:
         - `_speak` provides TTS services to allow the host to speak a message
         - `_play` and `_play_background` provides a set of sound effects which the user can choose from to indicate some sort of event
         - etc.
-    - `review.just` provides `just fix <spec>`, which alternates implementing a review's findings and re-reviewing an implemented spec until a review marks it production ready (at most 5 cycles; leverages the "claudine" service defined in this monorepo)
+    - `review.just` provides `just fix <spec>`, which alternates implementing a review's findings and re-reviewing an implemented spec until a review marks it production ready (at most 5 cycles; leverages the "claudine" service defined in this monorepo). A review that sets `human_in_the_loop` pauses the loop for an interactive rulings session (`prompts/_reviews/human-rulings.md`, needs a terminal) and the loop then continues; a review with `blocked: true` but no ruling requested ends it
     - `spec.just` provides a way for a users to:
         - create a new feature specification file (`just feature`)
         - clarify the requirements in a specification (`just clarify`)

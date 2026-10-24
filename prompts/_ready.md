@@ -19,12 +19,11 @@
 - set the `findings` frontmatter property to every finding in the review, high, medium, and low, whether or not `ready` is `true`:
     - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
     - the repair step reads this list: it fixes high findings first, then medium and low ones, and the cycle continues until the list is empty, so a finding missing from it is a finding nobody repairs
-- set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
-    - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
-    - you should not assume that _every_ specification requires human review; rather only those which require important design decisions, or involve activities and tests that only the human can do (versus an agent) 
+- set `human_review` to a boolean value to indicate whether the author should look at something **after** the review/fix cycle ends
+    - this list never stops the cycle and never blocks a finding: it is where decisions the agents made on their own are reported so the author can confirm or reverse them later
+    - a decision that must be made **before** a finding can be repaired goes in `human_in_the_loop` instead, and only when it meets the "Stopping for a human" test
     - when you've set `human_review` to `true` you must also set the `human_review_items` as a list of things you want the human to review:
-        - if any of the review's findings are blocked by this need for human review then make sure that the finding is clearly marked as blocked and the what is blocking it is also clear and then set the frontmatter property `has_blocked_findings` to `true`
-            - if ALL of the reviews findings are blocked due to human review then set `blocked` to `true`
+        - set `has_blocked_findings` to `true` when any finding waits on a `human_in_the_loop` item, and `blocked` to `true` when every finding does; a finding is never blocked by a `human_review_items` entry
         - this list should avoid any jargon and should NOT assume that the reviewer has any familiarity with this repo
         - if a review has made "decisions" they do not need to be reaffirmed again during this cycle unless something in the decision has changed enough that the review has changed. In these cases you must describe the change, why it was changed, and rather than referring to an obscure decision reference provide the actual decision text itself.
         - each review item must clearly articulate what the review item is, what is expected from the user, and in cases where a design decision is being asked for, providing an enumeration of possible solutions (as a markdown list). 

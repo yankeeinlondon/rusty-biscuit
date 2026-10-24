@@ -15,12 +15,12 @@ $schema:
       next: string -> the _next_ feature review that was conducted
       previous: string -> the _prior- feature review that was conducted
       findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; any finding makes `ready` false"
-      human_in_the_loop: string[] -> only on a first review that stopped for a human, the decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; a non-empty value halts the review loop
-      human_resolved: boolean -> set to `true` by the human after recording rulings under `## Human rulings`; the next review will not start while a non-empty `human_in_the_loop` is unresolved
+      human_in_the_loop: string[] -> the decisions the author must make before blocked findings can be repaired (plain language, options with pros and cons, a recommendation), set only when an item passes the review prompt's "Stopping for a human" test; `null` otherwise; while non-empty and unresolved, `just fix` pauses for an interactive rulings session
+      human_resolved: boolean -> `true` once every `human_in_the_loop` item has a ruling under `## Human rulings` (set by the rulings session); neither the repair nor the next review starts while a non-empty `human_in_the_loop` is unresolved
       human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)
       human_review_items: string[] -> what the human should review when `human_review` is true
-      has_blocked_findings: boolean -> whether any finding is blocked on that human review
-      blocked: boolean -> whether ALL findings are blocked on that human review
+      has_blocked_findings: boolean -> whether any finding waits on a `human_in_the_loop` item
+      blocked: boolean -> whether ALL findings wait on a `human_in_the_loop` item; `just fix` stops when this is true and no ruling is asked for
       next_spec: string -> in a multi-spec pipeline, the next spec (a path)
       next_plan: string -> in a multi-spec pipeline, the plan beside the next spec
       refresh: "enum(refreshed, needs_human, not_needed) -> only when `ready` is true in a multi-spec pipeline: whether the next spec and plan were refreshed, need a human decision first (halts the loop), or needed nothing"
@@ -35,12 +35,12 @@ $schema:
       next: string
       previous: string
       findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; any finding makes `ready` false"
-      human_in_the_loop: string[] -> only on a first review that stopped for a human, the decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; a non-empty value halts the review loop
-      human_resolved: boolean -> set to `true` by the human after recording rulings under `## Human rulings`; the next review will not start while a non-empty `human_in_the_loop` is unresolved
+      human_in_the_loop: string[] -> the decisions the author must make before blocked findings can be repaired (plain language, options with pros and cons, a recommendation), set only when an item passes the review prompt's "Stopping for a human" test; `null` otherwise; while non-empty and unresolved, `just fix` pauses for an interactive rulings session
+      human_resolved: boolean -> `true` once every `human_in_the_loop` item has a ruling under `## Human rulings` (set by the rulings session); neither the repair nor the next review starts while a non-empty `human_in_the_loop` is unresolved
       human_review: boolean -> whether a human review is still wanted AFTER the review/fix cycle (it never blocks `ready`)
       human_review_items: string[] -> what the human should review when `human_review` is true
-      has_blocked_findings: boolean -> whether any finding is blocked on that human review
-      blocked: boolean -> whether ALL findings are blocked on that human review
+      has_blocked_findings: boolean -> whether any finding waits on a `human_in_the_loop` item
+      blocked: boolean -> whether ALL findings wait on a `human_in_the_loop` item; `just fix` stops when this is true and no ruling is asked for
       next_spec: string -> in a multi-spec pipeline, the next spec (a path)
       next_plan: string -> in a multi-spec pipeline, the plan beside the next spec
       refresh: "enum(refreshed, needs_human, not_needed) -> only when `ready` is true in a multi-spec pipeline: whether the next spec and plan were refreshed, need a human decision first (halts the loop), or needed nothing"
