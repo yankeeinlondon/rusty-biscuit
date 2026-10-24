@@ -4,6 +4,12 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine
 ---
 
 # Recursive Lifecycle Schema Implementation Plan
@@ -38,20 +44,20 @@ Waves are globally numbered and execute in order. Tasks within a wave may run co
 
 ### Wave 1 — Readiness (serial)
 
-- [ ] **Verify Prerequisites**
+- [x] **Verify Prerequisites**
   - Locate delivered schema imports, public exports, embedded source manifest, typed signature API, shared action metadata, descriptor API, template/deferred checks, conversion boundary, parser host profiles, and recursive editor support.
   - Map those actual paths into an implementation log beside this plan. Current entry points include `darkmatter/lib/src/markdown/schemas/`, `darkmatter/lib/src/effects/catalog.rs`, `darkmatter/dmls/src/`, `claudine/schemas/`, and `claudine/docs/topics/schemas.md`; prerequisite changes may relocate shared lifecycle definitions.
   - Verify the prerequisite tests demonstrate tuples, function-catalog parsing, recursive `$ref`/`$defs`, positioned errors, separate event profiles, strict launch validation, and embedded/disk origin separation. Report an unmet prerequisite as a dependency blocker rather than implementing a competing seam.
 
 ### Wave 2 — Contracts and Integration Spike (parallel)
 
-- [ ] **Record Fixture Contracts**
+- [x] **Record Fixture Contracts**
   - Inventory generated canonical verbs, accepted aliases, host filtering, name collisions and winners, effect overloads, exported schema types, and embedding imports. Specify the maintained generator location and its exact checkout-relative invocation after inspecting the landed authoring infrastructure.
   - Review existing schema/parser parity fixtures, including copies of the lifecycle-grammar spike examples, and write expected schema and parser verdicts before running replacements. Record every planned verdict change and its reason; leave historical spike files unchanged.
   - Complete the input robustness tables below against actual public fields and supported configuration formats. Assign shared fixture names and source positions for CLI/DMLS/launch assertions; publish that manifest before downstream test agents start.
   - Ownership: fixture inventory and matrix documentation only; coordinate new shared fixture files centrally.
 
-- [ ] **Probe Deferred Integration**
+- [x] **Probe Deferred Integration**
   - Run one bounded correctness spike, once, on the current host. Using one numeric catalog parameter and one supported structured operand, confirm the delivered pieces: conversion through `markdown/coercion/` (frontmatter validation of a converted copy, `schemas/coerce.rs`), deferral through `BindOptions.defer`, passive overload binding through `bind_call`, and the template parser for recognizing `{{ … }}`; then identify the event-time argument check.
   - Demonstrate `3`, `"3"`, `"three"`, a deferred scalar, and a structured deferred operand with recording evaluator/host/effect fakes. Establish how optional-but-nonnullable parameters are represented without inheriting automatic null acceptance.
   - Deliver a short API/implementation decision with a minimal reproducer and any proven missing integration. Do not benchmark, expand the spike to an OS matrix, or rerun it in later phases. Keep disposable spike code separate from production schema and shared fixture edits.
