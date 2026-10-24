@@ -4,6 +4,12 @@ created: 2026-10-23
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
+start_phase: 2
 ---
 
 # Plan: Frontmatter key order is the contract, the hash ignores it
@@ -132,7 +138,7 @@ leaves open is settled below from a code trace done at planning time
 
 ### Spike (runs once, here only)
 
-- [ ] **S1. Confirm the planning trace (read-only).** N6–N8 are already decided.
+- [x] **S1. Confirm the planning trace (read-only).** N6–N8 are already decided.
   This spike only confirms that the call-site lists in N1 and N8 are still
   complete on the current tree; the decisions do not change. Grep for
   `with_frontmatter(`, `EffectiveState::new(`, `.data()` on an
@@ -145,12 +151,12 @@ leaves open is settled below from a code trace done at planning time
 
 ### Tasks
 
-- [ ] **Baseline run.** On the current tree run `just test` in `darkmatter/` and
+- [x] **Baseline run.** On the current tree run `just test` in `darkmatter/` and
   `biscuit-hash/`; save the failing-test list (the draft says 45) so later
   phases can show each failure resolved or deliberately updated.
-- [ ] **Read skills.** Load the `darkmatter`, `biscuit-hash`, `rust-testing`,
+- [x] **Read skills.** Load the `darkmatter`, `biscuit-hash`, `rust-testing`,
   and `os` skills; load `rust-devops` only if CI scope is touched (not expected).
-- [ ] **Create the implementation log** at
+- [x] **Create the implementation log** at
   `darkmatter/fixes/2026-10-23-frontmatter-key-order/implementation-log.md`
   with sections: Hash audit, Output updates, Strict-baseline correction,
   Departures. Seed it with the S1 findings.
