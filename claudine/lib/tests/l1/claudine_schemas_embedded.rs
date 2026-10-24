@@ -1057,6 +1057,8 @@ passive_parity_tests! {
         ("depth6-wrong-verb", include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md"));
     passive_parity_depth5_guarded_bundle =>
         ("depth5-guarded-bundle", include_str!("../fixtures/claudine-schemas/depth5-guarded-bundle.md"));
+    passive_parity_depth4_completion =>
+        ("depth4-completion", include_str!("../fixtures/claudine-schemas/depth4-completion.md"));
     passive_parity_root_dictionary => ("root-dictionary", include_str!("../fixtures/claudine-schemas/root-dictionary.md"));
     passive_parity_bundle_in_then => ("bundle-in-then", include_str!("../fixtures/claudine-schemas/bundle-in-then.md"));
     passive_parity_loop_gate => ("loop-gate", include_str!("../fixtures/claudine-schemas/loop-gate.md"));

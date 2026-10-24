@@ -522,7 +522,15 @@ pins each reference against `LifecycleSchemaProjection::shipped()`, and the
 parser itself does not type-check literal operands (a wrong-typed literal is
 S-reject, P-accept, R-reject). Side-effect operands are bound to their typed
 signatures at event time, before the effect engine runs; a binding failure
-is an evaluation failure that `no_error` does not suppress.
+is an evaluation failure that `no_error` does not suppress. Optional and
+nullable are independent: an omitted optional operand is fine, an explicit
+`null` only where the parameter type admits it (`ping: ["127.0.0.1", null]`
+is a schema error; `set_frontmatter: [f, k, null]` is not). A catalog
+signature change is regenerated with `just -f darkmatter/justfile
+regen-lifecycle-schema` (only the `# BEGIN/END GENERATED` regions of
+Darkmatter's `lifecycle.yaml`; never hand-edit them); a new or removed verb
+also needs its key in `action.yaml` and `lifecycle.yaml`'s `loop` keys. User
+docs: [Schemas → Generated verbs](topics/schemas.md#generated-verbs-have-typed-arguments).
 
 Darkmatter's design-time call check rejects any composed prompt (compose,
 inline-compose, sequence task) whose authored call is proven wrong, before

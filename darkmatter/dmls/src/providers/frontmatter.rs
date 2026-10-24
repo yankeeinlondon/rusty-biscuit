@@ -1722,8 +1722,12 @@ fn schema_hover(ctx: &DocumentContext, path: &[FmPathSegment<'_>], entry: &FmEnt
         TypeExpr::InlineObject(arm) => Some(arm),
         _ => None,
     });
-    let def = match matched_shape {
-        Some(arm) => Cow::Borrowed(def_at_path(arm, field, definitions(ctx))?),
+    // The arm-local lookup descends only the first object arm below the item,
+    // so a key that only a later overload declares (`content` of
+    // `ensure_file`'s long forms) falls back to the context-aware resolver,
+    // which merges the arms.
+    let def = match matched_shape.and_then(|arm| def_at_path(arm, field, definitions(ctx))) {
+        Some(def) => Cow::Borrowed(def),
         None => def_at_path_ctx(ctx, &shape, path, &mut memo)?,
     };
     let body = schema_hover_body(label, &def, definitions(ctx))?;

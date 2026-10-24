@@ -109,6 +109,12 @@ list. Whether an alternative accepts an item is decided by the Darkmatter
 library: the alternative is lowered to JSON Schema and checked with its
 structural validator, which judges a file value by syntax alone.
 
+A field that only some object forms of a value declare still hovers. In a
+Claudine lifecycle item, `ensure_file`'s long form is one of three overloads,
+and only the later two declare `content`; hovering `content` in
+`- ensure_file: { file: notes.md, content: "# Notes" }` describes it with the
+same item line as `file`.
+
 ### Recursive types
 
 A property typed by a recursive named type is described by name, followed

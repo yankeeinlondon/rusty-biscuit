@@ -2461,9 +2461,15 @@ composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document co
 ```
 
 Each event takes a list of actions or a dictionary of verbs, and a list item
-can be a `when`/`then`/`else` conditional. A stack is typed three conditional
-levels deep; a `then`/`else` body below that is accepted loosely, and the
-lifecycle parser still checks it when the stack runs. A list item is one of:
+can be a `when`/`then`/`else` conditional. md's profile is deliberately
+tolerant, because the baseline is prepared for every document: a stack is
+typed three conditional levels deep, a `then`/`else` body below that is
+accepted loosely, and side-effect and expression-function arguments are not
+typed; the lifecycle parser still checks all of it when the stack runs. A
+host profile built from the `lifecycle` partial can do more: Claudine's
+stacks are recursive, typed at every depth, and type every generated verb's
+arguments (see [The two lifecycle partials](#the-two-lifecycle-partials)). A
+list item in md's profile is one of:
 
 | Item | Example | Typed as |
 |---|---|---|
@@ -2513,12 +2519,57 @@ error at `/composed`.
 
 | Partial | Holds | Use it for |
 |---|---|---|
-| `lifecycle` | `<verb>-short` and `<verb>-long` for every verb the lifecycle parser knows, including the verbs only a host provides (`say`, `notify`, `retry`, `proxy`, `prep`, `break`, …); `interpolation` and `count`; the categories `communicate`, `flow`, `shell`, and `expression`, each exactly one verb in short or long form; `bundle`, and `initialize-bundle`, which has no `shell` | building a host's own action types |
+| `lifecycle` | `<verb>-short` and `<verb>-long` for every verb the lifecycle parser knows, including the verbs only a host provides (`say`, `notify`, `retry`, `proxy`, `prep`, `break`, …) and the side-effect and expression-function verbs generated from Darkmatter's typed catalogs; `interpolation` and `count`; the categories `communicate`, `flow`, `shell`, and `expression`, each exactly one verb in short or long form; `bundle`, and `initialize-bundle`, which has no `shell` | building a host's own action types |
 | `md-lifecycle` | md's profile: `md-stack`, `md-initialize-stack`, and the item, conditional, and bundle types they are built from | typing a key with exactly md's actions |
 
-Both are types-only: neither ever applies to a document by itself. `set` and
-the side-effect and expression-function verbs have a short form only. A host
-schema reuses a verb or a category by reference:
+Both are types-only: neither ever applies to a document by itself. Every verb
+in `lifecycle` has a short form and a closed long form, except `set` (a
+mapping of destinations to values) and the variadic `and` and `or`, which have
+a short form only. A bundle takes short forms only.
+
+The side-effect and expression-function verbs are typed from their catalog
+signatures: `partials/functions.yaml` for expression functions and
+`partials/mutations.yaml` for side-effect parameters. The short form is a
+single value (for an overload with one argument) or a positional list; the
+long form is a closed mapping keyed by parameter name, plus an optional
+`no_error: boolean`; each overload is a separate alternative. Every operand is
+marked `deferred`, so a whole-value `{{ … }}` template is accepted in its
+place and checked when the event runs:
+
+```yaml
+start:
+    - ensure_file: notes.md                                # (file)
+    - ensure_file: [notes.md, "# Notes"]                   # (file, content)
+    - ensure_file: { file: notes.md, content: "# Notes" }  # long form
+    - min: [1, "{{ fm.x }}"]                               # the template is deferred
+    - min: [three, 2]                                      # schema error at /start/4/min/0
+```
+
+The catalog function `set(key, value)` is not generated, because the
+lifecycle verb `set` owns the name. `side-effect-verb` and
+`expression-function-verb` remain in the partial as the former untyped
+values; no shipped host uses them.
+
+These generated types, and their keys in `expression`, `bundle`, and
+`initialize-bundle`, sit between `# BEGIN GENERATED <region>` and
+`# END GENERATED <region>` lines (regions `types`, `expression`, `bundle`, and
+`initialize-bundle`). They are written by
+`darkmatter::lifecycle::schema_projection`; never edit them by hand. When a
+catalog signature changes, regenerate them and commit the YAML:
+
+```sh
+just regen-lifecycle-schema                          # from darkmatter/
+just -f darkmatter/justfile regen-lifecycle-schema   # from the repository root
+```
+
+The recipe runs
+`cargo run -p darkmatter --example lifecycle_schema_generator -- --write`;
+without `--write` the example prints the projection to stdout. The drift test
+`the_generated_regions_are_byte_identical_to_a_regeneration` in
+`lib/tests/l1/lifecycle_schema_generation.rs` fails when a checked-in region
+no longer matches the catalogs.
+
+A host schema reuses a verb or a category by reference:
 
 ```yaml
 kind: schema
@@ -3430,7 +3481,7 @@ the built-in baseline; each configured instance shares the cached JSON Schema.
 
 ### Span-Aware Validation and Normalization
 
-`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
+`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{ 1 + }}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
 
 ### Subtype Relation (`is_subtype`)
 

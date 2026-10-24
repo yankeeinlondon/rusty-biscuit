@@ -67,7 +67,8 @@ fn double_verbose_adds_a_stage_report_to_stderr_only() {
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the report follows the existing output");
     assert_stage_report(&report);
-    assert!(report.contains("matched triggers: timed-trigger.yaml"), "{report}");
+    // Each matched trigger is named once, however many passes evaluate it.
+    assert!(report.lines().any(|line| line.trim_end() == "matched triggers: timed-trigger.yaml"), "{report}");
 }
 
 #[test]
@@ -176,7 +177,7 @@ fn an_assignment_that_activates_a_trigger_is_timed_against_the_new_schema() {
     assert!(String::from_utf8_lossy(&assigned.stdout).contains("timed_model"));
     let report = stderr(&assigned);
     assert_stage_report(&report);
-    assert!(report.contains("matched triggers: timed-trigger.yaml"), "{report}");
+    assert!(report.lines().any(|line| line.trim_end() == "matched triggers: timed-trigger.yaml"), "{report}");
     assert!(report.contains("compile cache: miss"), "{report}");
 }
 

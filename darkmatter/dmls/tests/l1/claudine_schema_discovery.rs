@@ -50,19 +50,19 @@ const LINKING_KEYS: [&str; 11] = [
     "max_turns",
 ];
 
-fn write(path: &Path, text: &str) {
+pub(crate) fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
 }
 
-struct Fixture {
+pub(crate) struct Fixture {
     root: PathBuf,
 }
 
 impl Fixture {
     /// A repository (a `.git` skeleton Git discovery accepts, without running
     /// `git`) whose `claudine/schemas/` holds the bundle, and an empty home.
-    fn new(workspace: &Path) -> Self {
+    pub(crate) fn new(workspace: &Path) -> Self {
         let fixture = Self { root: canonicalize_simplified(workspace).unwrap() };
         let repo = fixture.repo();
         std::fs::create_dir_all(repo.join(".git/objects")).unwrap();
@@ -82,7 +82,7 @@ impl Fixture {
         fixture
     }
 
-    fn repo(&self) -> PathBuf {
+    pub(crate) fn repo(&self) -> PathBuf {
         self.root.join("repo")
     }
 
@@ -95,19 +95,19 @@ impl Fixture {
     }
 
     /// The server's snapshot: fixture home, no environment.
-    fn snapshot(&self) -> RequestSnapshot {
+    pub(crate) fn snapshot(&self) -> RequestSnapshot {
         RequestSnapshot::new(&self.root).with_home(Some(self.home()))
     }
 
     /// Writes `text` to `claudine/lib/tasks/{name}` and returns its path.
-    fn document(&self, name: &str, text: &str) -> PathBuf {
+    pub(crate) fn document(&self, name: &str, text: &str) -> PathBuf {
         let path = self.repo().join("claudine/lib/tasks").join(name);
         write(&path, text);
         path
     }
 }
 
-fn initialize_params(folder: &Path) -> Value {
+pub(crate) fn initialize_params(folder: &Path) -> Value {
     json!({
         "processId": null,
         "clientInfo": { "name": "Neovim", "version": "0.11.0" },
@@ -121,11 +121,11 @@ fn initialize_params(folder: &Path) -> Value {
     })
 }
 
-fn uri_of(path: &Path) -> String {
+pub(crate) fn uri_of(path: &Path) -> String {
     url::Url::from_file_path(path).unwrap().to_string()
 }
 
-fn open(session: &LspFixture<'_>, uri: &str, text: &str) {
+pub(crate) fn open(session: &LspFixture<'_>, uri: &str, text: &str) {
     session.notify(
         "textDocument/didOpen",
         json!({
@@ -347,7 +347,8 @@ fn dmls_has_no_claudine_dependency() {
 
 
 /// One editor request against a document opened in an editor session.
-enum Ask {
+#[derive(Clone, Copy)]
+pub(crate) enum Ask {
     /// Completion labels just past the needle.
     Complete,
     /// Hover Markdown at the start of the needle (empty when there is none).
@@ -357,14 +358,31 @@ enum Ask {
 /// Opens each `(name, text, needle, ask)` under the Claudine package in one
 /// session, answers it, closes it, and returns the answers in order.
 /// Documents named with a `docs/` prefix are written outside the Claudine area.
-fn editor_answers(cases: &[(&str, &str, &str, Ask)]) -> Vec<Vec<String>> {
+pub(crate) fn editor_answers(cases: &[(&str, &str, &str, Ask)]) -> Vec<Vec<String>> {
+    let located: Vec<(&str, &str, usize, Ask)> = cases
+        .iter()
+        .map(|(name, text, needle, ask)| {
+            let start = text.find(needle).unwrap_or_else(|| panic!("`{needle}` in {text:?}"));
+            let offset = match ask {
+                Ask::Complete => start + needle.len(),
+                Ask::Hover => start,
+            };
+            (*name, *text, offset, *ask)
+        })
+        .collect();
+    editor_answers_at(&located)
+}
+
+/// [`editor_answers`] with each request at an explicit byte offset, for a
+/// document whose request position no unique needle names.
+pub(crate) fn editor_answers_at(cases: &[(&str, &str, usize, Ask)]) -> Vec<Vec<String>> {
     let workspace = LspWorkspace::new();
     let fixture = Fixture::new(workspace.path());
     let mut session = LspFixture::start_with_snapshot(&workspace, fixture.snapshot());
     session.initialize(initialize_params(&fixture.repo()));
     let answers = cases
         .iter()
-        .map(|(name, text, needle, ask)| {
+        .map(|&(name, text, offset, ask)| {
             let path = match name.strip_prefix("docs/") {
                 Some(outside) => {
                     let path = fixture.repo().join("docs").join(outside);
@@ -376,10 +394,9 @@ fn editor_answers(cases: &[(&str, &str, &str, Ask)]) -> Vec<Vec<String>> {
             let uri = uri_of(&path);
             open(&session, &uri, text);
             session.wait_for_diagnostics(&uri);
-            let start = text.find(needle).unwrap_or_else(|| panic!("`{needle}` in {text:?}"));
-            let (method, offset) = match ask {
-                Ask::Complete => ("textDocument/completion", start + needle.len()),
-                Ask::Hover => ("textDocument/hover", start),
+            let method = match ask {
+                Ask::Complete => "textDocument/completion",
+                Ask::Hover => "textDocument/hover",
             };
             let before = &text[..offset];
             let line = before.matches('\n').count();
@@ -405,7 +422,7 @@ fn editor_answers(cases: &[(&str, &str, &str, Ask)]) -> Vec<Vec<String>> {
     answers
 }
 
-fn has(labels: &[String], label: &str) -> bool {
+pub(crate) fn has(labels: &[String], label: &str) -> bool {
     labels.iter().any(|candidate| candidate == label)
 }
 

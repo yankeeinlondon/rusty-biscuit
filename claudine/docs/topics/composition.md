@@ -983,10 +983,11 @@ Composition documents can declare a `$schema` in their frontmatter to constrain 
 ### Claudine's Trigger Schemas in the Launch Verdict
 
 The launch verdict judges a document by its **effective schema**: Claudine's
-trigger schemas (`claudine.yaml` and `inline-compose.yaml`) plus any other
-matching trigger schema, under the document's authored `$schema`. A document
-with no `$schema` is still checked: a lifecycle stack, `loop`, `agent`,
-`model`, timeout, or linking key with the wrong shape blocks the launch.
+trigger schemas (`claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`)
+plus any other matching trigger schema, under the document's authored
+`$schema`. A document with no `$schema` is still checked: a lifecycle stack,
+`loop`, `agent`, `model`, timeout, or linking key with the wrong shape blocks
+the launch.
 
 ```yaml
 ---
@@ -1029,6 +1030,13 @@ The rules:
   A failing verdict fires `blocked` and `finalize`; `start` and the provider
   never run. A lifecycle stack the parser cannot read fails earlier still,
   before `initialize`, because the bootstrap parses every stack.
+- **A deferred operand waits for its event; a malformed one does not.** A
+  whole-value `{{ … }}` template in a generated verb's argument
+  (`ensure_file: "{{ target }}"`) passes the verdict, and its evaluated value
+  is bound to the verb's signature when the event runs. A literal mistake
+  beside it, or a template that does not parse (`"{{ 1 + }}"`), fails the
+  launch (see
+  [Deferred values and what happens at the event](schemas.md#deferred-values-and-what-happens-at-the-event)).
 - **Retired spellings report the migration.** When a document fails the
   verdict and its lifecycle uses a removed spelling, the error is the parser's
   `RemovedGrammar` with its replacement, not a bare schema mismatch.

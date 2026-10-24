@@ -6,6 +6,7 @@
 //! lifecycle stack whose action operands are typed and marked `deferred`.
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::expression::is_malformed_template;
 use darkmatter::markdown::schemas::validate::build_position_map;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PendingPolicy, PendingValueReason, SchemaPhase, ValidationOptions,
@@ -93,13 +94,14 @@ fn assert_fails_at(yaml: &str, path: &str) {
 
 /// Every entry point reports a problem at `path`, located in the source,
 /// except that `validate_with_options(Defer)` mirrors compose's pre-shell
-/// gate: a problem whose own authored value holds a template is set aside for
-/// the pass that renders it.
+/// gate: a problem whose own authored value holds a well-formed template is
+/// set aside for the pass that renders it. A malformed template cannot be
+/// settled by rendering, so it is judged as written there too.
 fn assert_fails_at_against(schema: &EffectiveSchema, yaml: &str, path: &str) {
     let authored_template = instance(yaml)
         .pointer(path)
         .and_then(Value::as_str)
-        .is_some_and(|text| text.contains("{{"));
+        .is_some_and(|text| text.contains("{{") && !is_malformed_template(text));
     for (entry, report) in reports_against(schema, yaml) {
         if authored_template && entry == "validate_with_options(Defer)" {
             assert!(

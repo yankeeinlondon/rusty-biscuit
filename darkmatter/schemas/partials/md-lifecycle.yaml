@@ -13,13 +13,14 @@
 # would add about 125 properties to every typed level of every event of the
 # baseline every document is validated against.
 #
-# Stacks are typed three conditional levels deep, as Claudine's are: a
+# Stacks are typed three conditional levels deep (host profiles such as
+# Claudine's are recursive instead): a
 # `then`/`else` body inside a level-3 conditional is accepted loosely, and the
 # lifecycle parser still checks it. `md-initialize-*` excludes shells.
 #
 # Named types are inlined, and this baseline is prepared, lowered, and
 # compiled for every document. A conditional therefore types `then` and
-# `else` with one pattern key, as Claudine's `cancelled` stack does: two
+# `else` with one pattern key: two
 # literal keys would inline each body twice per level and make the baseline
 # about twice as large. The cost is that the parser alone requires `then`,
 # and the editor does not complete `then`/`else`.

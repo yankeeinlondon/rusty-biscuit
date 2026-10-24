@@ -1,6 +1,7 @@
 //! `md schema validate` and `md schema triggers` against Claudine's shipped
 //! schema bundle (`claudine/schemas/`, `2026-10-21-claudine-schemas`
-//! criteria 1 and 5, and `2026-10-26-task-inputs-and-providers` criterion 9):
+//! criteria 1 and 5, `2026-10-26-task-inputs-and-providers` criterion 9, and
+//! `2026-10-30-claudine-recursive-schemas` criteria 4 and 8):
 //! the seven files are copied into a fixture repository's `schemas/` folder,
 //! and a representative subset of Claudine's AC5 and sequence-schema fixture
 //! corpora, which carry no `$schema:` pointer, is discovered and validated
@@ -82,6 +83,48 @@ fn assert_record(records: &BTreeMap<String, Value>, name: &str, valid: bool, exp
             "{name}: expected a problem at `{pointer}` naming `{needle}`, got {problems:?}"
         );
     }
+}
+
+/// The problem `name` reports at `pointer`.
+fn problem_at<'a>(records: &'a BTreeMap<String, Value>, name: &str, pointer: &str) -> &'a Value {
+    records[name]["problems"]
+        .as_array()
+        .expect("problems")
+        .iter()
+        .find(|problem| problem["path"] == pointer)
+        .unwrap_or_else(|| panic!("{name}: no problem at `{pointer}` in {}", records[name]))
+}
+
+/// Asserts `name` reports nothing at `pointer`: a deferred operand stays
+/// unjudged beside the sibling error it must not hide.
+fn assert_no_problem_at(records: &BTreeMap<String, Value>, name: &str, pointer: &str) {
+    let problems = records[name]["problems"].as_array().expect("problems");
+    assert!(problems.iter().all(|problem| problem["path"] != pointer), "{name}: `{pointer}` is unjudged: {problems:?}");
+}
+
+/// The 1-based document line (the opening `---` is line 1) and column of
+/// the first occurrence of `needle` in `text`.
+fn source_position(text: &str, needle: &str) -> (u64, u64) {
+    text.lines()
+        .enumerate()
+        .find_map(|(index, line)| line.find(needle).map(|column| (index as u64 + 1, column as u64 + 1)))
+        .unwrap_or_else(|| panic!("`{needle}` occurs in the fixture"))
+}
+
+/// Asserts the trigger trace lists `trigger` as matched (`true`) or not.
+fn assert_trigger(trace: &str, trigger: &str, matched: bool) {
+    let line = trace
+        .lines()
+        .find(|line| line.contains(&format!("{trigger} ")))
+        .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"));
+    assert_eq!(!line.contains("not matched") && line.contains("matched"), matched, "`{trigger}` matched = {matched}:\n{trace}");
+}
+
+/// The `md schema triggers` trace for `document`.
+fn triggers(process: &CliProcessFixture, document: &Path) -> String {
+    let output = process.command().args(["schema", "triggers"]).arg(document).output().expect("md runs");
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 #[test]
@@ -271,4 +314,158 @@ fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli()
     assert_record(&records, "group-execution", false, &[("/sequence/0/group", "\"execution\"")]);
     assert_record(&records, "root-fail-fast", false, &[("/fail_fast", "null")]);
     assert_record(&records, "sequence-mapping", false, &[("/sequence", "tasks")]);
+}
+
+/// `2026-10-30-claudine-recursive-schemas` criteria 4 and 8 through the CLI:
+/// every recursive-depth, generated-verb, and overload fixture of the shared
+/// corpus gets its agreed schema verdict, problems carry their pointer and
+/// document source position, and the trigger trace confirms `claudine.yaml`
+/// was the schema that judged them.
+#[test]
+fn recursive_lifecycle_corpus_gets_the_agreed_verdicts_and_positions() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let wrong_verb = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6-wrong-verb.md");
+    let wrong_type = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-wrong-type.md");
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("depth6", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6.md")),
+            ("depth6-wrong-verb", wrong_verb),
+            ("depth1", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth1.md")),
+            ("depth3", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth3.md")),
+            ("depth5", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5.md")),
+            ("depth4-completion", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md")),
+            ("depth5-guarded-bundle", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md")),
+            ("generated-verb-typed-value", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md")),
+            ("generated-verb-wrong-type", wrong_type),
+            ("generated-verb-convertible-text", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md")),
+            ("generated-verb-deferred", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md")),
+            (
+                "generated-verb-deferred-beside-unknown-parameter",
+                include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
+            ),
+            (
+                "generated-verb-deferred-beside-extra-argument",
+                include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"),
+            ),
+            (
+                "generated-verb-deferred-beside-bad-sibling",
+                include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"),
+            ),
+            ("generated-verb-malformed-template", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-malformed-template.md")),
+            ("optional-nonnullable-null", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md")),
+            ("ensure-file-overloads", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md")),
+            ("variadic-and-or", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md")),
+        ],
+    );
+
+    // The listing is evidence of which schema judged depth 6, never a verdict.
+    let trace = triggers(&process, &documents[0]);
+    assert_trigger(&trace, "claudine.yaml", true);
+    assert_trigger(&trace, "sequence.yaml", false);
+
+    let (code, records) = validate(&process, &documents);
+    assert_eq!(code, Some(1), "{records:?}");
+    for name in [
+        "depth6",
+        "depth1",
+        "depth3",
+        "depth5",
+        "depth4-completion",
+        "depth5-guarded-bundle",
+        "generated-verb-typed-value",
+        "generated-verb-convertible-text",
+        "generated-verb-deferred",
+        "ensure-file-overloads",
+        "variadic-and-or",
+    ] {
+        assert_record(&records, name, true, &[]);
+    }
+
+    let verb_pointer = "/success/0/then/0/then/0/then/0/then/0/then/0/then/0";
+    assert_record(&records, "depth6-wrong-verb", false, &[(verb_pointer, "sya")]);
+    let problem = problem_at(&records, "depth6-wrong-verb", verb_pointer);
+    let (line, column) = source_position(wrong_verb, "sya:");
+    assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+
+    assert_record(&records, "generated-verb-wrong-type", false, &[("/start/0/pr_list", "three")]);
+    let problem = problem_at(&records, "generated-verb-wrong-type", "/start/0/pr_list");
+    let (line, column) = source_position(wrong_type, "three");
+    assert_eq!((problem["line"].as_u64(), problem["column"].as_u64()), (Some(line), Some(column)), "{problem}");
+
+    assert_record(&records, "generated-verb-deferred-beside-unknown-parameter", false, &[("/start/0/pr_list", "limit")]);
+    assert_record(&records, "generated-verb-deferred-beside-extra-argument", false, &[("/start/0/min/2", "does not allow 3")]);
+    assert_no_problem_at(&records, "generated-verb-deferred-beside-extra-argument", "/start/0/min/0");
+    assert_record(&records, "generated-verb-deferred-beside-bad-sibling", false, &[("/start/0/min/0", "three")]);
+    assert_no_problem_at(&records, "generated-verb-deferred-beside-bad-sibling", "/start/0/min/1");
+    assert_record(&records, "generated-verb-malformed-template", false, &[("/start/0/pr_list", "{{ 1 + }}")]);
+    assert_record(&records, "optional-nonnullable-null", false, &[("/start/0/ping/1", "null"), ("/start/1/ping/timeout", "null")]);
+}
+
+/// The four depth-four container controls select `sequence.yaml` alone and
+/// validate through the CLI; a defect in the innermost container's events is
+/// reported at its own item.
+#[test]
+fn depth_four_container_controls_validate_and_their_innermost_defects_are_located() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let seq_seq = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-seq.md");
+    let group_group = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-group.md");
+    let edit = |text: &str, from: &str, to: &str| {
+        assert!(text.contains(from), "the control still holds `{from}`");
+        text.replacen(from, to, 1)
+    };
+    let misspelled_verb = edit(seq_seq, "        start:\n        - info: start", "        start:\n        - sya: start");
+    let cancelled_retry = edit(seq_seq, "        cancelled:\n        - stop", "        cancelled:\n        - retry: 3");
+    let initialize_shell = edit(group_group, "                initialize:\n                - info: initialize", "                initialize:\n                - shell: ls");
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("containers-depth4-seq-seq", seq_seq),
+            ("containers-depth4-seq-group", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-seq-group.md")),
+            ("containers-depth4-group-seq", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/containers-depth4-group-seq.md")),
+            ("containers-depth4-group-group", group_group),
+            ("seq-seq-misspelled-verb", &misspelled_verb),
+            ("seq-seq-cancelled-retry", &cancelled_retry),
+            ("group-group-initialize-shell", &initialize_shell),
+        ],
+    );
+
+    let trace = triggers(&process, &documents[0]);
+    assert_trigger(&trace, "sequence.yaml", true);
+    assert_trigger(&trace, "claudine.yaml", false);
+
+    let (code, records) = validate(&process, &documents);
+    assert_eq!(code, Some(1), "{records:?}");
+    for name in ["containers-depth4-seq-seq", "containers-depth4-seq-group", "containers-depth4-group-seq", "containers-depth4-group-group"] {
+        assert_record(&records, name, true, &[]);
+    }
+    let seq_leaf = "/sequence/0/sequence/0/sequence/0/sequence/0";
+    let group_leaf = "/sequence/0/group/tasks/0/group/tasks/0/group/tasks/0/group";
+    assert_record(&records, "seq-seq-misspelled-verb", false, &[(&format!("{seq_leaf}/start/0"), "sya")]);
+    assert_record(&records, "seq-seq-cancelled-retry", false, &[(&format!("{seq_leaf}/cancelled/0"), "retry")]);
+    assert_record(&records, "group-group-initialize-shell", false, &[(&format!("{group_leaf}/initialize/0"), "shell")]);
 }

@@ -229,7 +229,11 @@ The baseline types Darkmatter's five lifecycle events (`initialize`,
 `composed`, `failed`, `cancelled`, `finalize`) with the md profile
 (`partials/md-lifecycle.yaml`): md verbs are typed and offered, and an open
 pattern-key arm that excludes every md verb lets another host's verb (`say`,
-`retry`) pass untyped and unoffered. The neutral shape of every verb, Claudine's
+`retry`) pass untyped and unoffered. md's profile is still a deliberately
+tolerant three-level unroll (`md-stack`, `md-item-1..3`, `md-loose-body`)
+whose side-effect and function arguments are untyped (one pattern key);
+host profiles built from `partials/lifecycle.yaml` (Claudine's) are
+recursive and typed. The neutral shape of every verb, Claudine's
 included, lives in `partials/lifecycle.yaml`. Its expression-function and
 side-effect verb types (`<verb>-short`/`<verb>-long`) and their category and
 bundle keys are generated from the typed catalogs by
@@ -245,8 +249,10 @@ there is accepted unjudged while literal siblings are judged, and
 judged as text. A template is recognized only by
 `expression::is_deferred_template` (scanner + parser), never by a substring;
 `expression::is_malformed_template` names a span that fails to parse, which
-a caller setting template problems aside for later rendering (Claudine's
-launch pre-validation) judges as written. The resolver stores only cycle
+every caller setting template problems aside for later rendering judges as
+written: `EffectiveSchema::validate_with_options` (DMLS, `PendingPolicy::Defer`)
+keeps that problem, as `md schema validate` and Claudine's launch
+pre-validation do. The resolver stores only cycle
 members in `$defs` and inlines every other named type at each reference, so
 a host must write its stack families recursively (Claudine's are), never
 unrolled: Claudine's typed three-level unroll resolved to 11 MB.
@@ -656,7 +662,8 @@ completion offers all seven rules stored on the `Evergreen` arm. Never isolate
 the storing atom when linting (`suggestions_for_def` and `alternatives_for_def`
 lint the whole definition).
 DMLS validates with `PendingPolicy::Defer`, so it reports nothing for a
-`{{ … }}` value.
+`{{ … }}` value, unless the span is malformed (`{{ 1 + }}`): that problem
+stands, as it does for `md schema validate` and Claudine's launch verdict.
 
 Literal discriminants use one presentation-neutral union-arm selector shared
 by library validation and DMLS. Expression-typed values enable expression

@@ -202,6 +202,13 @@ start:
     - shell: "git status"     # valid
 ```
 
+The restriction holds at every conditional depth and in both branches, so a
+`shell` in an `else` that would never be selected is still an error, to the
+schema and to the parser alike. One way to run a shell in `initialize` is
+invisible to the schema: a `$( … )` expansion in a `set` value
+(`set: { sha: "$(git rev-parse HEAD)" }`) is plain text to the schema, and
+only the parser rejects it.
+
 `cancelled` is cleanup only, so `stop` is its one flow directive. `retry`,
 `resume`, `proxy`, `prep`, `skip`, `error`, `break`, and `defer` are schema
 errors there, at every conditional depth, on a document and on every typed
@@ -240,6 +247,50 @@ whether the referring file is in the monorepo checkout, embedded in the
 `claudine` binary, or copied into `~/schemas` without Darkmatter's files, where a relative path to
 `darkmatter/schemas/` would not exist. An unknown stem is a schema error
 naming the reference.
+
+#### Who owns what
+
+| Piece | Owner | Where |
+|---|---|---|
+| every verb's short and long shape | Darkmatter | `darkmatter/schemas/partials/lifecycle.yaml` |
+| expression-function signatures | Darkmatter | `darkmatter/schemas/partials/functions.yaml` |
+| side-effect parameter types | Darkmatter | `darkmatter/schemas/partials/mutations.yaml` |
+| the generated verb types, projected from those two catalogs | Darkmatter | the generated regions of `lifecycle.yaml`, written by `darkmatter::lifecycle::schema_projection` |
+| which verbs each event and action type admits | Claudine | `claudine/schemas/action.yaml` and `claudine/schemas/lifecycle.yaml` |
+
+Claudine's files select `<verb>-short@darkmatter:lifecycle` and
+`<verb>-long@darkmatter:lifecycle` for a single-verb item, and the short form
+alone in a bundle and in a `loop:` verb key. Every side effect must have typed
+parameters: a test fails when a side-effect descriptor has no typed entry in
+`mutations.yaml`, and the generator refuses to emit an untyped value for one.
+
+#### Changing a generated verb
+
+The side-effect and expression-function types sit between
+`# BEGIN GENERATED <region>` and `# END GENERATED <region>` lines in
+Darkmatter's `lifecycle.yaml` (regions `types`, `expression`, `bundle`, and
+`initialize-bundle`). Never edit those lines by hand. When a catalog signature
+changes, regenerate them and commit the YAML with the change:
+
+```sh
+just -f darkmatter/justfile regen-lifecycle-schema   # from the repository root
+just regen-lifecycle-schema                          # from darkmatter/
+```
+
+The recipe runs
+`cargo run -p darkmatter --example lifecycle_schema_generator -- --write`,
+which rewrites only the generated regions; without `--write` the example
+prints the projection to stdout. The drift test
+`the_generated_regions_are_byte_identical_to_a_regeneration` in
+`darkmatter/lib/tests/l1/lifecycle_schema_generation.rs` fails when the
+checked-in regions no longer match the catalogs.
+
+Claudine's files name the generated types by reference, so a changed
+signature needs no Claudine edit. A verb added to or removed from a catalog
+does: its key is listed by name in `action.yaml`'s `expression` type and
+bundles and in `lifecycle.yaml`'s `loop:` keys, and
+`generated_verb_keys_equal_the_darkmatter_catalogs` in
+`claudine/lib/tests/l1/claudine_schemas.rs` fails until they match.
 
 ### Darkmatter's event names in a Claudine document
 
@@ -357,9 +408,12 @@ A conditional requires `when` and `then`, allows `else`, and takes no sibling
 verb or `no_error`, at any depth. An `else` without `then` is a schema error.
 
 The schema has **no depth limit**. The parser allows conditionals five levels
-deep and rejects a sixth, so a six-level stack of valid actions passes the
-schema and the editor but fails before anything runs. A misspelled verb is a
-schema error at any depth, including the sixth:
+deep and rejects a sixth with `LifecycleStackInvalidShape`, naming the path of
+the sixth level, so a six-level stack of valid actions passes the schema and
+the editor but fails before anything runs. A guarded bundle (`when` beside
+verbs, such as `- { when: "fm.x", info: "hi" }`) inside a fifth-level
+conditional counts as a sixth level to the parser, though the schema accepts
+it. A misspelled verb is a schema error at any depth, including the sixth:
 
 ```yaml
 success:
@@ -471,32 +525,131 @@ before anything runs:
   (`set: { sha: "$(git rev-parse HEAD)" }`)
 - the literal operand rules of the generated verbs: a literal YAML `null`,
   list, or mapping as one operand is rejected with a hint to write a
-  whole-value `{{ … }}` template (see below)
+  whole-value `{{ … }}` template (see
+  [Generated verbs have typed arguments](#generated-verbs-have-typed-arguments))
 
 Passing the schema, in the editor or at launch, is therefore not proof that a
 lifecycle stack can execute.
 
-### Generated and planned verbs
+The reverse also holds: the parser does not type-check a literal operand, so
+`pr_list: three` passes the parser. The schema rejects it, and because the
+launch verdict runs the schema, the launch fails before anything runs.
 
-The Darkmatter side-effect verbs and expression functions are listed one key
-per name, and each value is typed from the verb's catalog signature: a
-positional list follows the parameters in order, a mapping is the long form
-named by the parameters, and a single value is the first argument. Each
-overload is a separate alternative.
+### Generated verbs have typed arguments
+
+Every Darkmatter side effect (`ensure_file`, `set_frontmatter`,
+`append_line`, …) and every expression function (`min`, `pr_list`, `ping`, …)
+is a lifecycle verb, listed one key per name. Its value is typed from the
+verb's catalog signature, so a wrong argument is reported in the editor and
+at launch rather than when the event runs.
+
+#### Argument forms
+
+A verb takes its arguments in one of three spellings:
+
+| Form | Spelling | Where |
+|---|---|---|
+| short, single value | the only argument, for an overload that takes one | anywhere |
+| short, positional list | the parameters in order | anywhere |
+| long | a closed mapping keyed by parameter name, plus an optional `no_error: boolean` | single-verb items only, not in a bundle |
+
+Each overload of a signature is a separate alternative. `ensure_file(file)`
+and `ensure_file(file, content)` therefore accept five spellings:
 
 ```yaml
 start:
-    - set_frontmatter: [notes.md, status, done]   # valid: (file, prop, value)
-    - pr_list: "3"                                 # valid: numeric text converts
-    - pr_list: three                               # invalid: a count or a query
-    - min: [1, "{{ fm.x }}"]                       # valid: the template is checked when the event runs
-    - min: [three, "{{ fm.x }}"]                   # invalid: the literal sibling is still checked
+    - ensure_file: notes.md                              # valid: (file)
+    - ensure_file: [notes.md]                            # valid: (file)
+    - ensure_file: [notes.md, "# Notes"]                 # valid: (file, content)
+    - ensure_file: { file: notes.md }                    # valid: long form
+    - ensure_file: { file: notes.md, content: "# Notes" }  # valid: long form
+    - ensure_file: { file: notes.md, body: "# Notes" }   # invalid: no `body` parameter
+    - min: ["1", 2, 3]                                   # invalid: min takes two arguments
 ```
 
+A bundle takes short forms only, as it does for every verb. The variadic `and`
+and `or` take a list of operands (or stand bare, as `- and`) and have no long
+form. The catalog function `set(key, value)` is not generated: the lifecycle
+verb `set` owns that name, takes a mapping of destinations to values, and has
+no long form and no `no_error`.
+
+#### Optional is not nullable
+
+Whether a parameter may be omitted and whether it accepts `null` are separate
+questions. Leaving out an optional parameter is always fine; writing `null`
+for it is accepted only when the parameter's type admits `null`:
+
+```yaml
+start:
+    - ping: "127.0.0.1"                                  # valid: timeout omitted
+    - ping: ["127.0.0.1", null]                          # invalid at /start/1/ping/1
+    - ping: { address: "127.0.0.1", timeout: null }      # invalid: timeout is optional, not nullable
+    - set_frontmatter: [notes.md, status, null]          # valid: value is `unknown | null`
+```
+
+This differs from a top-level Claudine property, where the schema reads an
+explicit `null` as absent (see
+[Optional inputs and open metadata](#optional-inputs-and-open-metadata)).
+
+#### Numeric text
+
+A number parameter accepts text that converts to a number, as the call would
+at run time:
+
+```yaml
+start:
+    - pr_list: 3          # valid
+    - pr_list: "3"        # valid: numeric text converts
+    - pr_list: three      # invalid at /start/2/pr_list
+    - min: ["1", 2]       # valid
+```
+
+The error names the path and the source position of the value.
+
+#### Deferred values and what happens at the event
+
 A whole-value `{{ … }}` template is accepted wherever an argument is typed,
-and its evaluated value is bound to the signature when the event runs; a
-value of the wrong type fails the event then. A template that does not parse
-(`"{{ 1 + }}"`) is judged as written.
+because its value is not known until the event runs:
+
+```yaml
+start:
+    - pr_list: "{{ fm.count }}"                  # valid
+    - min: [1, "{{ fm.x }}"]                     # valid
+    - pr_list: { count: "{{ fm.count }}" }       # valid
+```
+
+A template accepts only its own position. It never hides a mistake beside it:
+
+```yaml
+start:
+    - min: [three, "{{ fm.x }}"]                 # invalid at /start/0/min/0: the literal is still checked
+    - min: ["{{ fm.x }}", 2, 3]                  # invalid: an extra argument
+    - pr_list: { count: "{{ fm.count }}", limit: 3 }  # invalid: no `limit` parameter
+```
+
+A template that does not parse (`pr_list: "{{ 1 + }}"`) is judged as written,
+so it fails every passive check: `md schema validate`, the editor, and the
+Claudine launch verdict. `md compose`'s own gate reports it as an expression
+parse error.
+
+When the event runs, the template is evaluated and its value is bound to the
+signature before the effect runs. A value of the wrong type fails there.
+With `target: [a, b]` in the frontmatter:
+
+```yaml
+target: [a, b]
+start:
+    - ensure_file: "{{ target }}"     # schema valid; fails when start runs
+```
+
+`claudine compose` exits 1 without launching the provider and reports a
+`CompositionError` "lifecycle evaluation error" naming the event and the
+action (`start[0].ensure_file`), with a `Reason:` line naming the parameter
+(`expected string; received list`). Nothing is dispatched, and the document's
+authored value is left unchanged. `no_error: true` does not suppress a
+binding failure; it softens only a failure of the effect itself.
+
+### `break`, `prep`, and the planned `defer`
 
 `break` and `prep` are accepted by the schema and the parser alike
 (`break: "done"`, `break: { reason: done, code: 2 }`,
@@ -505,6 +658,32 @@ value of the wrong type fails the event then. A template that does not parse
 [Flow Control](flow-control/flow-control.md#break). `defer` parses but is not
 executed yet (**planned**). The schema reads `prep: null` as
 absent, so that spelling is left to the parser, which rejects it.
+
+### Where each check runs
+
+A lifecycle action passes four checks on its way to running. The first two
+see only what was authored; the last two see evaluated values:
+
+```mermaid
+flowchart TD
+    A["authored frontmatter"] --> S{"passive schema check<br/>DMLS, md schema validate, launch verdict<br/>no evaluation, no effects, no shells"}
+    S -- invalid --> SX["editor diagnostic or md schema validate error;<br/>at launch: no start, no provider"]
+    S -- valid --> P{"lifecycle parser<br/>depth, directive placement,<br/>literal operand rules, initialize $( … )"}
+    P -- invalid --> PX["preparation error;<br/>nothing runs"]
+    P -- valid --> B{"event runs:<br/>evaluate templates, bind to the signature"}
+    B -- "wrong type" --> BX["lifecycle evaluation error, exit 1;<br/>nothing dispatched; no_error does not apply"]
+    B -- bound --> E{"effect dispatch"}
+    E -- fails --> EX["the event fails,<br/>unless no_error tolerates it"]
+    E -- succeeds --> N["next action"]
+```
+
+The diagram orders the checks by what they can see, not strictly by when
+they run: at launch, Claudine parses every stack before `initialize` and
+reaches the schema verdict after it (see
+[Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict)).
+Either failure stops the launch before `start` and the provider. Validation
+and editor requests never run an action: no expression is evaluated, no
+effect is dispatched, and no shell is started.
 
 ### Optional inputs and open metadata
 
@@ -611,7 +790,15 @@ triggers:
   keys and the bare verbs such as `stop`), long-form parameters (`text` under
   `say:`), and `loop:` keys (`max`);
 - hover on a property describes its type and purpose; hovering `text` in a
-  `say` item also names the communication alternative the item matches.
+  `say` item also names the communication alternative the item matches;
+- generated verbs and their long-form parameters (`file` under
+  `ensure_file:`), at any depth in `then`/`else`. Completion leaves `shell`
+  out of `initialize` and offers `cancelled` only its restricted verbs.
+  Hover finds a parameter that only a later overload declares, such as
+  `ensure_file`'s `content`.
+
+Key completion works in block mappings only: DMLS offers no keys inside a
+YAML flow mapping such as `ensure_file: { fi }`.
 
 Each key is declared by exactly one trigger, and completion offers only the
 keys of triggers that already apply. A sequence document whose root has only

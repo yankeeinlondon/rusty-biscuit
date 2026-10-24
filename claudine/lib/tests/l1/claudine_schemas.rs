@@ -876,6 +876,7 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "depth6",
         "depth6-wrong-verb",
         "depth5-guarded-bundle",
+        "depth4-completion",
         "root-dictionary",
         "bundle-in-then",
         "loop-gate",
@@ -1035,6 +1036,16 @@ fn ac5_depths_and_stack_shapes() {
                 CLAUDINE,
                 Valid,
                 Rejects("conditionals nest at most 5 levels"),
+            ),
+            (
+                // Four conditionals in `initialize`, `start`, `cancelled`, and
+                // the loop gate, with generated long forms in the leaves: the
+                // DMLS completion/hover document.
+                "depth4-completion",
+                include_str!("../fixtures/claudine-schemas/depth4-completion.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
             ),
             ("root-dictionary", include_str!("../fixtures/claudine-schemas/root-dictionary.md"), CLAUDINE, Valid, Accepts),
             ("bundle-in-then", include_str!("../fixtures/claudine-schemas/bundle-in-then.md"), CLAUDINE, Valid, Accepts),

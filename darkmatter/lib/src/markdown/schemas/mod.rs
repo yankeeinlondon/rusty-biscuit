@@ -1345,7 +1345,8 @@ impl EffectiveSchema {
     /// or when the authored value at the problem's own path holds a
     /// `{{ ... }}` template — mirroring compose's pre-shell gate, which lets
     /// a later pass re-validate the rendered value. A problem on a literal
-    /// sibling of a template stays. Independently of the policy, templates at
+    /// sibling of a template stays, and so does one on a malformed template
+    /// (`{{ 1 + }}`), which no rendering can settle. Independently of the policy, templates at
     /// places the schema marks `deferred` are never judged. Keys in
     /// `options.excluded_keys` have their problems dropped unconditionally
     /// (caller-owned keys).
@@ -1393,7 +1394,14 @@ impl EffectiveSchema {
             if shell_pending_keys.contains(key.as_str()) {
                 return false;
             }
-            let holds = |text: &str| text.contains("{{") && crate::markdown::literal_token::holds_pending_syntax(text);
+            // A malformed `{{ … }}` span can never render into a valid value,
+            // so its problem stands, as plain validation and Claudine's launch
+            // verdict report it.
+            let holds = |text: &str| {
+                text.contains("{{")
+                    && crate::markdown::literal_token::holds_pending_syntax(text)
+                    && !crate::markdown::compose::expression::is_malformed_template(text)
+            };
             !authored_node_at(frontmatter, &problem.path)
                 .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
         });
@@ -3327,6 +3335,19 @@ mod claudine_compat_tests {
         assert!(report.valid, "template-pending value deferred: {:?}", report.problems);
         assert_eq!(report.pending.len(), 1);
         assert_eq!(report.pending[0].reason, PendingValueReason::UnresolvedTemplate);
+    }
+
+    #[test]
+    fn validate_with_options_judges_a_malformed_template_as_written() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "{{ 1 + }}" });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert!(!report.valid, "a malformed template is never deferred");
+        assert!(report.problems.iter().any(|p| p.path == "/n"), "{:?}", report.problems);
     }
 
     #[test]

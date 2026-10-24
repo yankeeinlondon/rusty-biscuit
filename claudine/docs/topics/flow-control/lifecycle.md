@@ -1650,9 +1650,10 @@ Claudine validates lifecycle frontmatter when the document is prepared, before
 any event fires. Every error names the authored path of the offending node,
 for example `failure[0].else[1].shell.command`. Claudine's
 [schemas](../schemas.md) catch many of the same mistakes earlier, in the editor
-and in the launch verdict. They type `cancelled` at every conditional depth,
-but other stacks only within three conditional levels; the parser below is
-the authority. The most common errors:
+and in the launch verdict. They type every stack at every conditional depth
+but set no depth limit, and some rules are the parser's alone (see
+[What only the parser checks](../schemas.md#what-only-the-parser-checks));
+the parser below is the authority. The most common errors:
 
 | Error | Cause |
 |-------|-------|

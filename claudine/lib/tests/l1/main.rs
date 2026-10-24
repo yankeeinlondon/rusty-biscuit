@@ -10,6 +10,7 @@ mod agent_errors_fleet;
 mod assistant_stream_width;
 mod boundary_lint;
 mod canonical_dispatch;
+mod claudine_schema_shipped_corpus;
 mod claudine_schemas;
 mod claudine_schemas_embedded;
 mod claudine_schemas_matrix;

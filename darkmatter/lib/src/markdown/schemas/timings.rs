@@ -178,7 +178,8 @@ impl ValidationTimings {
     }
 
     /// The file names of the triggers whose conditions matched, in registry
-    /// order. Empty when no registry was consulted.
+    /// order, each once even when several passes evaluated the registry.
+    /// Empty when no registry was consulted.
     #[must_use]
     pub fn matched_triggers(&self) -> &[String] {
         &self.matched_triggers
@@ -186,15 +187,17 @@ impl ValidationTimings {
 
     /// Folds `other`, another part of the same request recorded separately,
     /// into these timings: stages and totals add, the compile-cache states
-    /// combine (a miss in either is a miss), and its matched triggers follow
-    /// these.
+    /// combine (a miss in either is a miss), and its matched triggers not
+    /// already named follow these.
     pub fn absorb(&mut self, other: Self) {
         for (mine, theirs) in self.stages.iter_mut().zip(other.stages) {
             *mine += theirs;
         }
         self.total += other.total;
         self.compile_cache = self.compile_cache.combine(other.compile_cache);
-        self.matched_triggers.extend(other.matched_triggers);
+        for name in other.matched_triggers {
+            push_unique(&mut self.matched_triggers, name);
+        }
     }
 }
 
@@ -340,7 +343,13 @@ pub(crate) fn looked_up_validator() {
 
 /// Records a trigger whose conditions matched the document.
 pub(crate) fn matched_trigger(name: impl FnOnce() -> String) {
-    with_recorder(|recorder| recorder.matched_triggers.push(name()));
+    with_recorder(|recorder| push_unique(&mut recorder.matched_triggers, name()));
+}
+
+fn push_unique(names: &mut Vec<String>, name: String) {
+    if !names.contains(&name) {
+        names.push(name);
+    }
 }
 
 fn with_recorder(update: impl FnOnce(&mut Recorder)) {
@@ -406,5 +415,23 @@ mod tests {
         hit.absorb(miss);
 
         assert_eq!(hit.compile_cache(), CompileCache::Miss);
+    }
+
+    #[test]
+    fn a_trigger_matched_by_several_passes_is_named_once() {
+        let ((), mut first) = ValidationTimings::record(|| {
+            matched_trigger(|| "a.yaml".to_string());
+            matched_trigger(|| "b.yaml".to_string());
+            matched_trigger(|| "a.yaml".to_string());
+        });
+        assert_eq!(first.matched_triggers(), ["a.yaml", "b.yaml"]);
+
+        let ((), second) = ValidationTimings::record(|| {
+            matched_trigger(|| "b.yaml".to_string());
+            matched_trigger(|| "c.yaml".to_string());
+        });
+        first.absorb(second);
+
+        assert_eq!(first.matched_triggers(), ["a.yaml", "b.yaml", "c.yaml"]);
     }
 }

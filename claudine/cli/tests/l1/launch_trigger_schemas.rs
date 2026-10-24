@@ -10,8 +10,12 @@
 //! at their fresh reads, runs after `initialize`, and inline completion reuses
 //! the schema frozen at launch.
 //!
-//! Darkmatter validation coerces scalars to text, so every rejected value here
-//! is a list or mapping where the payload declares a scalar.
+//! Darkmatter validation coerces scalars to text, so a rejected scalar here is
+//! one no conversion accepts (`pr_list: three`), a malformed template, or a
+//! `null` for a non-nullable parameter; the other rejected values are lists or
+//! mappings where the payload declares a scalar. A deferred generated-verb
+//! operand passes the verdict and is bound to its parameter type when its
+//! event fires, before the action dispatches.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -120,6 +124,28 @@ const ROWS: &[Row] = &[
         frontmatter: "loop: 42\n",
         needles: &["/loop"],
     },
+    // Generated per-verb types: the lifecycle parser does not type-check a
+    // literal operand, so only the schema verdict stops these before launch.
+    Row {
+        name: "generated_verb_wrong_type",
+        frontmatter: "start:\n    - pr_list: three\n",
+        needles: &["/start/0/pr_list", "three"],
+    },
+    Row {
+        name: "generated_verb_malformed_template",
+        frontmatter: "start:\n    - pr_list: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/pr_list", "{{ 1 + }}"],
+    },
+    Row {
+        name: "generated_verb_bad_sibling_beside_deferred",
+        frontmatter: "x: 2\nstart:\n    - min: [three, \"{{ fm.x }}\"]\n",
+        needles: &["/start/0/min/0", "three"],
+    },
+    Row {
+        name: "optional_nonnullable_null",
+        frontmatter: "start:\n    - ping: [\"127.0.0.1\", null]\n",
+        needles: &["/start/0/ping/1", "null"],
+    },
 ];
 
 fn assert_row_blocks_launch(row_name: &str, subcommand: &str) {
@@ -137,6 +163,11 @@ fn assert_row_blocks_launch(row_name: &str, subcommand: &str) {
     let result = run(&fixture, subcommand, &doc, &[]);
 
     assert_schema_rejection(&result, row.needles, &format!("`{subcommand}`/`{row_name}`"));
+    assert!(
+        !result.stderr.to_lowercase().contains("dropped"),
+        "`{subcommand}`/`{row_name}` keeps the control key:\n{}",
+        result.stderr
+    );
     assert!(!marker.exists(), "`{subcommand}`/`{row_name}` must not launch the provider:\n{}", result.stderr);
 }
 
@@ -161,7 +192,16 @@ macro_rules! invalid_control_rows {
     };
 }
 
-invalid_control_rows!(misspelled_long_form_key, unknown_say_parameter, empty_agent_list, numeric_loop);
+invalid_control_rows!(
+    misspelled_long_form_key,
+    unknown_say_parameter,
+    empty_agent_list,
+    numeric_loop,
+    generated_verb_wrong_type,
+    generated_verb_malformed_template,
+    generated_verb_bad_sibling_beside_deferred,
+    optional_nonnullable_null,
+);
 
 #[test]
 fn every_table_row_generates_its_tests() {
@@ -378,6 +418,29 @@ fn compose_runs_initialize_before_the_verdict_and_never_start() {
 #[test]
 fn inline_compose_runs_initialize_before_the_verdict_and_never_start() {
     assert_initialize_precedes_the_verdict("inline-compose", "prompt: hi\n");
+}
+
+/// A wrong-typed generated literal passes the lifecycle parser, so
+/// `initialize` still runs; the verdict then blocks `start` and the provider.
+#[test]
+fn compose_runs_initialize_before_a_generated_verb_verdict() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-initialize-generated");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\n",
+            "initialize:\n    - append_line: [\"events.log\", \"initialize\"]\n",
+            "start:\n    - append_line: [\"events.log\", \"start\"]\n    - pr_list: three\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_schema_rejection(&result, &["/start/1/pr_list", "three"], "compose");
+    assert_eq!(events(&fixture), ["initialize"], "{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
 }
 
 // ---------------------------------------------------------------------------
@@ -634,4 +697,186 @@ fn a_templated_model_and_a_lifecycle_span_launch() {
         "the composed model reaches the provider"
     );
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+// ---------------------------------------------------------------------------
+// Deferred generated-verb arguments pass preflight and bind at event time
+// ---------------------------------------------------------------------------
+
+/// The entries of the fixture's working directory, to prove a failed run
+/// created nothing there. Claudine's own `.claudine-tmp` scratch directory,
+/// made by every run, is not an effect.
+fn cwd_entries(fixture: &CliProcessFixture) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(fixture.cwd())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".claudine-tmp")
+        .collect();
+    names.sort();
+    names
+}
+
+/// The rendering of an event-time binding failure: the same mapping as any
+/// other raising `start` expression (exit 1, nothing launched).
+fn assert_binding_failure(run: &Run, site: &str, needles: &[&str], what: &str) {
+    assert_eq!(run.code, Some(1), "{what} exits 1:\n{}", run.stderr);
+    assert!(run.stderr.contains("lifecycle evaluation error"), "{what}:\n{}", run.stderr);
+    assert!(run.stderr.contains(&format!("in `{site}`")), "{what} names `{site}`:\n{}", run.stderr);
+    assert!(run.stderr.contains("crashed expression"), "{what}:\n{}", run.stderr);
+    for needle in needles {
+        assert!(run.stderr.contains(needle), "{what} names `{needle}`:\n{}", run.stderr);
+    }
+    assert!(!run.stderr.contains("schema validation"), "{what} passed the launch verdict:\n{}", run.stderr);
+}
+
+const DEFERRED_SCALAR: &str = "start:\n    - ensure_file: \"{{ target }}\"\n";
+
+#[test]
+fn a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time() {
+    let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred-scalar");
+    let launches = launch_recorder::install(&fixture, "goose", "exit 0");
+    let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
+    assert!(fixture.cwd().join("notes.md").is_file(), "the effect dispatched:\n{}", result.stderr);
+    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+/// A long-form side effect and an array-form expression verb, each with a
+/// deferred operand, evaluate to values of their parameters' types.
+#[test]
+fn deferred_structured_arguments_pass_preflight_and_bind_at_event_time() {
+    let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred-structured");
+    let launches = launch_recorder::install(&fixture, "goose", "exit 0");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\ntarget: notes.md\nbody: \"# Notes\"\nx: 2\n",
+            "start:\n",
+            "    - min: [1, \"{{ fm.x }}\"]\n",
+            "    - ensure_file: { file: \"{{ target }}\", content: \"{{ body }}\" }\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
+    let written = fs::read_to_string(fixture.cwd().join("notes.md")).expect("the effect dispatched");
+    assert_eq!(written.trim_end(), "# Notes");
+    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+fn assert_wrong_evaluated_type_fails_before_dispatch(subcommand: &str, own_frontmatter: &str) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-wrong-type");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        &format!("---\n{own_frontmatter}target: [a, b]\n{DEFERRED_SCALAR}---\nBody\n"),
+    );
+    let before = cwd_entries(&fixture);
+
+    let result = run(&fixture, subcommand, &doc, &[]);
+
+    assert_binding_failure(
+        &result,
+        "start[0].ensure_file",
+        &["expected string", "received list"],
+        subcommand,
+    );
+    assert_eq!(cwd_entries(&fixture), before, "`{subcommand}` dispatched nothing:\n{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
+    let authored = fs::read_to_string(&doc).unwrap();
+    assert!(authored.contains("ensure_file: \"{{ target }}\""), "the operand is unchanged:\n{authored}");
+}
+
+#[test]
+fn compose_fails_a_wrong_evaluated_type_before_dispatch() {
+    assert_wrong_evaluated_type_fails_before_dispatch("compose", "");
+}
+
+#[test]
+fn inline_compose_fails_a_wrong_evaluated_type_before_dispatch() {
+    assert_wrong_evaluated_type_fails_before_dispatch("inline-compose", "prompt: hi\n");
+}
+
+/// An expression verb's failed conversion stops the event at that action,
+/// mapped exactly like the same call raising inside a text template.
+#[test]
+fn a_failed_expression_verb_conversion_maps_like_any_raising_start_expression() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-conversion");
+    let next = "    - append_line: [after.log, ran]\n";
+    let verb = write_doc(
+        &fixture,
+        "verb.md",
+        &format!("---\nx: three\nstart:\n    - min: [1, \"{{{{ fm.x }}}}\"]\n{next}---\nBody\n"),
+    );
+    let template = write_doc(
+        &fixture,
+        "template.md",
+        &format!("---\nx: three\nstart:\n    - info: \"{{{{ min(1, fm.x) }}}}\"\n{next}---\nBody\n"),
+    );
+
+    let by_verb = run(&fixture, "compose", &verb, &[]);
+    let by_template = run(&fixture, "compose", &template, &[]);
+
+    let reason = "(argument 2): expected number; received text \"three\"";
+    assert_binding_failure(&by_verb, "start[0].min", &[reason], "the verb");
+    assert_binding_failure(&by_template, "start[0].info", &[reason], "the template");
+    assert!(!fixture.cwd().join("after.log").exists(), "the event stopped at the failed action");
+    assert!(!marker.exists(), "neither run launches the provider");
+}
+
+/// `no_error` tolerates a dispatch failure, never a binding failure.
+#[test]
+fn no_error_does_not_suppress_a_binding_failure() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-no-error");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\ntarget: [a, b]\nstart:\n",
+            "    - ensure_file: { file: \"{{ target }}\", no_error: true }\n",
+            "    - append_line: [after.log, ran]\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_binding_failure(&result, "start[0].ensure_file", &["expected string"], "compose");
+    assert!(!fixture.cwd().join("after.log").exists(), "{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
+}
+
+/// The dry run shows the operand as authored and reports it deferred to its
+/// event; nothing is dispatched or launched.
+#[test]
+fn dry_run_shows_the_deferred_operand_as_authored() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-dry-run");
+    let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
+
+    let output = fixture
+        .command()
+        .args(["compose", "--goose", doc.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+
+    let text = normalize(&strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )));
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("ensure_file: '{{ target }}'"), "the operand is shown as authored:\n{text}");
+    assert!(text.contains("interpolated at event-time: start"), "{text}");
+    assert!(!fixture.cwd().join("notes.md").exists(), "{text}");
+    assert!(!marker.exists(), "{text}");
 }
