@@ -777,8 +777,7 @@ impl MermaidDiagram {
         term: &biscuit_terminal::terminal::Terminal,
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
-        // Diagrams are inherently block-cohesive (image escapes or fenced code
-        // fallback) — align as a block.
+        // The image escapes are block-cohesive — align as a block.
         let output = self.layout.apply_block_layout(&output, term.width());
 
         Ok(MermaidRenderResult {

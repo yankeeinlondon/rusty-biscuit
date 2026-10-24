@@ -304,6 +304,21 @@ fn a_text_failure_shows_the_source() {
     assert_eq!((route, shape(&nodes)), ("source", vec!["code:mermaid".to_string()]));
 }
 
+/// Merman draws an XY chart as text only when its y-axis states a range, so
+/// `bt bar-chart 1 2 3`'s source (no y-axis) shows as source. A Merman bump
+/// that lifts this changes the documented `bt bar-chart` output.
+#[test]
+fn an_xychart_without_a_y_range_shows_the_source() {
+    let bt_bar_chart = "%%{init: {\"xychart\": {\"showTitle\": false, \"xAxis\": {\"showLabel\": false}, \"yAxis\": {\"showLabel\": false}}}}%%\nxychart-beta\n    x-axis [1, 2, 3]\n    bar [1, 2, 3]";
+    let (route, nodes) = presented(&MermaidDiagram::new(bt_bar_chart), &no_images(80), ALLOWED);
+    assert_eq!((route, shape(&nodes)), ("source", vec!["code:mermaid".to_string()]));
+
+    let with_range = bt_bar_chart.replace("    bar", "    y-axis 0 --> 5\n    bar");
+    let (route, nodes) = presented(&MermaidDiagram::new(&with_range), &no_images(80), ALLOWED);
+    assert_eq!((route, shape(&nodes)), ("text", vec!["code:txt".to_string(), "quote".to_string()]));
+    assert!(code_value(&nodes).contains("5 ┤"), "{}", code_value(&nodes));
+}
+
 // ── Title (Text presentation) ────────────────────────────────────────────
 
 #[test]
