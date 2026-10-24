@@ -111,6 +111,16 @@ per-batch loop on macOS without measuring it.
     `~/.cache/<scratch>/{src,target}`. Docker's file sharing rejects bind
     mounts from `/Volumes/…` and `/tmp` (`/private`) with
     `mkdir …: read-only file system`.
+  - A file rewritten under the same name on a bind mount can reach the
+    container stale and truncated to the old file's length. A headless
+    Chromium `--dump-dom` of a regenerated page silently lacked its last
+    50 KB, script included. Give each container run a freshly named copy.
+  - For a Linux browser, `debian:bookworm-slim` plus
+    `apt-get install --no-install-recommends chromium fonts-dejavu-core`
+    runs `chromium --headless=new --no-sandbox --dump-dom`. Its
+    `--virtual-time-budget` dumps before pending promises (font loads)
+    settle unless a timer is pending, so keep a `setInterval` alive until
+    the page's script finishes.
   - Keep `CARGO_TARGET_DIR` on a host mount (`-v …:/t -e CARGO_TARGET_DIR=/t`),
     because the VM overlay is small. A whole-package build OOM-kills the
     linker in the default VM, so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and

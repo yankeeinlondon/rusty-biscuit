@@ -165,6 +165,18 @@ There are no other SVG string patches: quadrant fills and point radius go throug
 - **Cache key:** `"target": "html-static"` is added to the options JSON only for SVG + `HtmlStatic`; raster-safe keys are unchanged, so no `+bv<n>` bump.
 - Tests: `src/src/tests/html_static_tests.rs` (injected Inter chain for the post-process; host chain end to end; `take_rasterized_svgs()` is the `cfg(test)` record of SVGs handed to the rasterizer), plus `the_html_static_target_has_its_own_svg_key_only` in `mermaid_cache_key_tests.rs`.
 
+## Embedded font (HTML static opt-in)
+
+Full doc: `biscuit-visualized/docs/mermaid-embedded-font.md`. Code: `mermaid/embed/`.
+
+- **Opt-in:** `MermaidDiagram::with_embedded_font(true)` (default off) acts only for SVG + `HtmlStatic` (`embeds_font(format)`); otherwise byte-identical output and key. `render_with_font` → `(RenderedArtifact, Option<DiagramFont>)`; component: `with_embedded_font` + `render_to_svg_with_font`. `page_font(&[DiagramFont])` → `PageFont` (`comments()`, `css()`, `markup()`, `is_empty()`) or `FontEmbeddingError` (one warning already logged; caller emits no font).
+- **Face rule (`embed/faces.rs`, `embed/permission.rs`):** per requested `font-family` list, regular and bold, decided before layout by `FaceChooser` (`LabelMeasurer::embedding`). Embed the chain's resolved face when `fsType` permits (Installable/Editable/Preview & print; least restrictive bit wins; `0x0100` → embed whole); otherwise the whole family is bundled Inter: Restricted, `0x0200` bitmap-only, no/short `OS/2`, not `glyf` (CFF/CFF2/`fvar`), no installed face, or `MERMAID_FONT=Inter`. Fail closed.
+- **Measurement:** plain advances (`ShapeParams::layout_tables = false`, face rebuilt from the subset's tables) because the `allsorts` subset has no `GPOS`/`GSUB`/`kern`.
+- **Subset (`embed/glyphs.rs`, `embed/subset.rs`, `embed/embedding.rs`):** characters read from the final SVG via `roxmltree` + `simplecss` (usvg's cascade), split at weight 600, U+0020 added; one rule per face × weight drawn, union over the page. Budget `BUDGET_BYTES` = 60,000 (pre-base64): over → still embedded, `info` log. Any face failing → whole page `Err`.
+- **Page markup (`embed/comment.rs`):** one `<!-- mermaid font: … -->` per family (names via `comment_safe`), then `<style>`; Inter's OFL CSS comment (`INTER_COPYRIGHT`, tested against `OFL.txt`) right before its first rule, only when Inter is embedded.
+- **Cache:** options JSON `target: "html-static+embedded-font"`; `{key}.font.json` record (`FontRecord`) beside the SVG, written first; missing/unreadable record → re-render. Subset never cached.
+- Tests: `src/src/tests/embed_*_tests.rs` (`embed_render_tests.rs` is the render path end to end).
+
 ## MermaidError
 
 ```rust

@@ -54,11 +54,13 @@ let diagram = MermaidDiagram::new("pie title Distribution\n    \"A\" : 40\n    \
 | `.with_background(Background)` | What paints behind the diagram ([`Background`](../../src/src/artifact.rs)); the default is `Background::Transparent` |
 | `.with_time_budget(Duration)` | How long Merman may work on each request; the default is `MermaidDiagram::DEFAULT_TIME_BUDGET` (2 s) |
 | `.with_target(MermaidTarget)` | Who `render_to_svg`'s SVG is for ([`MermaidTarget`](../../src/src/mermaid/render.rs)); `MermaidTarget::HtmlStatic` for a static SVG in an HTML page (see [Merman rendering](../merman.md#html-static-target)). The terminal's PNG ignores it |
+| `.with_embedded_font(bool)` | With `MermaidTarget::HtmlStatic`, measure labels in a face the page can embed (default off; see [Embedded font](../mermaid-embedded-font.md)). Ignored for any other target and for the terminal's PNG |
 | `.inverted(is_dark)` | The opposite fixed palette of the color mode, on its opaque background |
 | `.resolve_dimensions(term_width, cell)` | The columns the image will occupy, measuring the diagram for `Scale` |
 | `.try_render(&Terminal)` | Fallible render returning [`MermaidRenderResult`](../../src/src/components/mermaid.rs) (`output`, `png_path`, `cache_hit`, `width_cells`) |
 | `.render(&Terminal)` | Infallible render (falls back to code block) |
 | `.render_to_svg()` | The diagram as an SVG string, for a browser |
+| `.render_to_svg_with_font()` | `render_to_svg` plus the diagram's `DiagramFont`, which is `Some` only when the embedded-font opt-in applied; pass every diagram's font to `mermaid::page_font` |
 | `.fallback_code_block()` | The source as a fenced `mermaid` code block |
 
 ### Sizing

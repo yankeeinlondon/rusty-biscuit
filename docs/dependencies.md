@@ -7,6 +7,17 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-visualized` adds, under its `image` feature (2026-10-24),
+  `allsorts` 0.17.0 (Apache-2.0; `default-features = false`, feature
+  `flate2_rust`, so no C zlib) to subset the font its Mermaid embedded-font
+  opt-in puts into HTML pages, plus `roxmltree` 0.21.1 and `simplecss` 0.2.2
+  (the versions `usvg` uses, already in the graph) and `base64` 0.22 (already
+  in the graph; formerly a development dependency there). `allsorts` brings
+  ten new crates into the lockfile: `aliasable` 0.1.3, `bitreader` 0.3.11,
+  `glyph-names` 0.2.0, `ouroboros` and `ouroboros_macro` 0.18.5,
+  `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6,
+  `proc-macro2-diagnostics` 0.10.1, `unicode-canonical-combining-class` 1.0.0,
+  and `unicode-joining-type` 1.0.0.
 - `biscuit-hash` adds an optional `json` feature (2026-10-23) that enables
   optional `serde` 1 and `serde_json` 1 for canonical (key-sorted) JSON
   rendering and hashing. Both crates were already in the workspace graph; no
@@ -1015,7 +1026,7 @@ This is a Rust workspace with the following modules:
 
 - [base64](https://github.com/marshallpierce/rust-base64) _v0.22_ [📄](https://docs.rs/base64)
 
-    _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants._
+    _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants. `biscuit-visualized` (feature `image`) encodes its embedded Mermaid font with it._
 
     _Tags: encoding, base64, data_
 
@@ -1176,6 +1187,18 @@ This is a Rust workspace with the following modules:
     _Compiled into `biscuit-visualized` (feature `image`) from `biscuit-visualized/src/assets/fonts/`, which holds each font's license text and checksums. Inter is matched only by name (`MERMAID_FONT=Inter` gives the same layout on every host); Noto Emoji is the last fallback face for emoji._
 
     _Tags: fonts, assets_
+
+- [allsorts](https://github.com/yeslogic/allsorts) _v0.17.0_ [📄](https://docs.rs/allsorts)
+
+    _Pure-Rust font parser, shaper, and subsetter by YesLogic (Apache-2.0). Used by `biscuit-visualized` (feature `image`, `default-features = false` with `flate2_rust`) to subset the face a Mermaid static SVG page embeds, keeping the `cmap`, `OS/2`, and `name` tables. See [biscuit-visualized dependencies](../biscuit-visualized/docs/dependencies.md)._
+
+    _Tags: fonts, subsetting_
+
+- [roxmltree](https://github.com/RazrFalcon/roxmltree) _v0.21.1_ and [simplecss](https://github.com/linebender/simplecss) _v0.2.2_ [📄](https://docs.rs/roxmltree)
+
+    _Read-only XML tree and a small CSS parser, both used by `usvg`. `biscuit-visualized` (feature `image`) uses them, on `usvg`'s versions, to read which characters a static SVG draws in each font family._
+
+    _Tags: xml, css, svg_
 
 - [image](https://github.com/image-rs/image) _v0.25_ [📄](https://docs.rs/image)
 

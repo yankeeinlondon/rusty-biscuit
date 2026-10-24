@@ -36,7 +36,7 @@ let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
 
 | Topic | Description |
 |-------|-------------|
-| [Mermaid Rendering](./mermaid-rendering.md) | Merman pipeline, `MermaidDiagram` API, time budget, fallback, palettes and themes, config, post-process, gitGraph `commitSpacing` |
+| [Mermaid Rendering](./mermaid-rendering.md) | Merman pipeline, `MermaidDiagram` API, time budget, fallback, palettes and themes, config, post-process, gitGraph `commitSpacing`, HTML static target and its embedded-font opt-in |
 | [Diagram Components](./diagram-components.md) | Terminal components, `TerminalDiagramRenderer` hook, GitGraph contract, `l1` tests |
 | [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
 | [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout, Mermaid cache key |
@@ -46,6 +46,7 @@ let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
 
 - `biscuit-visualized/docs/merman.md`: the Mermaid pipeline with owners, time budget, fallback, themes (fixed and terminal palettes, readable text, accents, author precedence), fonts (`MERMAID_FONT`, resolution chain, bundled Inter / Noto Emoji), the `\n` rewrite, post-process, the HTML static target, and cache identity.
 - `biscuit-visualized/docs/mermaid-gitgraph.md`: gitGraph tag spacing (`commitSpacing` written only when tags on different commits collide, to a one-em gap; an author's own value wins) and the `gitgraph_geometry()` test API.
+- `biscuit-visualized/docs/mermaid-embedded-font.md`: the HTML static embedded-font opt-in: `fsType` and the face rule (Inter fallback), subsetting and the 60 KB budget, page markup, failure fallback, cache record.
 - `biscuit-visualized/docs/dot-graph.md`: the DOT subset, cluster syntax, and the resolution-tuning case study.
 
 ## Mermaid in one paragraph

@@ -9,7 +9,7 @@ planning cross-OS evidence, and say which hosts were declared when you report.
 
 | Variable | Provides | Notes |
 |---|---|---|
-| `BUILD_LINUX` | Native Linux | Has `tmux` and `wezterm`, but no `Xvfb`, `kitty`, or `xdotool`, so X11 Level 3 tests skip there. Run those in Docker instead ([macos.md](macos.md)). Do not install packages on it. |
+| `BUILD_LINUX` | Native Linux | Has `tmux` and `wezterm`, but no `Xvfb`, `kitty`, or `xdotool`, so X11 Level 3 tests skip there. Run those in Docker instead ([macos.md](macos.md)). It has no `rsync` (copy a tree with `tar` over `ssh`) and no Chrome or Chromium, so a Linux browser reading runs in Docker too. Do not install packages on it. |
 | `BUILD_WIN` | Native Windows, with PowerShell as the remote shell | Git's stderr appears as a red `NativeCommandError`; ignore it. Redirecting a native program with `*>` wraps each stderr line in a `RemoteException` record hard-wrapped at console width, so a long line splits; read structured output from a file the program writes. `scp` to a non-system drive spells the drive in the path: `"${BUILD_WIN}":/B:/coding/…`. |
 | `BUILD_WSL` | A WSL2 Ubuntu guest | `cross-check` runs CI's archive mode here ([wsl.md](wsl.md)). For ad hoc commands, wrap them in `bash -lc`: non-login shells do not have `~/.cargo/bin` on `PATH`. |
 | `BUILD_MACOS` | A macOS host other than this one | Same flow as Linux. |

@@ -126,6 +126,34 @@ flowchart LR
       asked for either. Code that relied on sorted `Map` keys must sort them
       itself._
 
+- [allsorts](https://github.com/yeslogic/allsorts) _v0.17.0_ (feature: `image`; license Apache-2.0)
+
+    _Subsets the face the [embedded-font opt-in](./mermaid-embedded-font.md)
+    puts into an HTML page, keeping the `cmap`, `OS/2`, and `name` tables a
+    browser and the font's license need (Typst's `subsetter` drops `cmap` and
+    `OS/2`, so its output does not load as a web font). With
+    `default-features = false` and feature `flate2_rust`: the default
+    `flate2_zlib` would build the C zlib through `libz-sys`. Brings
+    `aliasable`, `bitreader`, `glyph-names`, `ouroboros` and
+    `ouroboros_macro`, `pathfinder_geometry` and `pathfinder_simd`,
+    `proc-macro2-diagnostics`, `unicode-canonical-combining-class`, and
+    `unicode-joining-type` into the lockfile._
+
+    ```toml
+    allsorts = { version = "0.17.0", default-features = false, features = ["flate2_rust"], optional = true }
+    ```
+
+- [roxmltree](https://github.com/RazrFalcon/roxmltree) _v0.21.1_ and [simplecss](https://github.com/linebender/simplecss) _v0.2.2_ (feature: `image`)
+
+    _Read a finished static SVG and apply its stylesheet, as `usvg` does, to
+    find which characters each font family draws at which weight for the
+    embedded-font opt-in. Kept on the versions `usvg` uses, so the lockfile
+    holds one copy of each._
+
+- [base64](https://github.com/marshallpierce/rust-base64) _v0.22_ (feature: `image`)
+
+    _Encodes the embedded font as a `data:font/ttf;base64,…` URL._
+
 - [biscuit-terminal](../../biscuit-terminal/lib) _v0.1.0_ (feature: `terminal`, with its `image` feature)
 
     _Terminal capabilities, `TerminalImage` for displaying pixels, and the

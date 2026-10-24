@@ -68,6 +68,7 @@ These are top-level flags (not render-specific) but affect `render` behavior:
   the page), so it stays consistent regardless of environment color detection.
 - `--line-numbers`: include code line numbers in terminal rendering
 - `--mermaid`: render mermaid diagrams as images in terminal mode when supported
+- `--feature embed-mermaid-font` (**planned**, not yet available): with HTML output whose Mermaid diagrams are static SVG, embed the font they were measured in, once per page (see [Mermaid rendering](../rendering/mermaid.md#embedded-font))
 
 ### Output Behavior
 

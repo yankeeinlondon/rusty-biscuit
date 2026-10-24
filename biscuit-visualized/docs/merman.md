@@ -685,7 +685,8 @@ actually receive. It changes when any of these change:
   process, so a font installed while a process runs is seen by the next one;
 - the request's geometry (scale, target width, row padding), background, and
   PNG encoder settings;
-- for SVG output, the [HTML static target](#html-static-target). The default
+- for SVG output, the [HTML static target](#html-static-target), and whether
+  it [embeds the font](./mermaid-embedded-font.md#caching). The default
   target adds nothing to the key, and a PNG is keyed the same under either
   target, because it is rasterized from the same SVG;
 - the title.
@@ -749,6 +750,12 @@ is rasterized from the raster-safe SVG, so it matches a default render byte
 for byte and shares its cache entry. Labels in a PNG are drawn in the face
 they were measured in, so they cannot overflow, and the raster SVG carries no
 overflow change.
+
+To remove the guess about the reader's fonts, the HTML static target can also
+carry the measured face: with `with_embedded_font(true)` the label boxes are
+measured in a face the page may embed, and `page_font` builds one `@font-face`
+block per page holding a subset of it. See
+[Embedded font for Mermaid static SVG](./mermaid-embedded-font.md).
 
 Darkmatter's static-SVG HTML output selects this target and passes the SVG
 through its own sanitizer, which admits Merman's drop shadows.
@@ -867,9 +874,6 @@ spacing](#gitgraph-tag-spacing) code adapts in that same change.
 
 ### Possible later work
 
-- **Embedding a font in HTML.** Darkmatter's static SVG could carry a subset
-  of the measured face, so every reader sees the measured layout and labels
-  never overflow.
 - **A text-art fallback.** Merman can also write diagrams as Unicode or ASCII
   art. That could replace the code-block fallback on terminals that cannot
   show images.

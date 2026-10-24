@@ -108,6 +108,7 @@ bt git-graph --example
 
 - [Merman rendering](docs/merman.md): how Mermaid diagrams are rendered, themed, cached, and tested
 - [Mermaid gitGraph tag spacing](docs/mermaid-gitgraph.md)
+- [Embedded font for Mermaid static SVG](docs/mermaid-embedded-font.md): an HTML page that carries the face its diagrams were measured in
 - [DOT graph rendering](docs/dot-graph.md)
 - Components: [MermaidDiagram](docs/components/mermaid_diagram.md), [GraphExpression](docs/components/graph_expression.md), [GitGraph](docs/components/git_graph.md)
 - [Dependencies](docs/dependencies.md)

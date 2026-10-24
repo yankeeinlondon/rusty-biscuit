@@ -16,7 +16,7 @@ prompt: |-
 
     If there are sections you feel should be added to this structure please add them. In addition to the `last_updated` frontmatter of this document, please also set the `blast_radius` property as a list of source code files which are 
     involved in the "mermaid" functionality.
-last_updated: 2026-10-23
+last_updated: 2026-10-24
 blast_radius:
   - darkmatter/lib/src/mermaid/mod.rs
   - darkmatter/lib/src/mermaid/theme.rs
@@ -28,6 +28,7 @@ blast_radius:
   - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
   - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
   - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+  - darkmatter/lib/src/markdown/render_tree/mermaid_font.rs
   - darkmatter/lib/src/layout/page.rs
   - darkmatter/cli/src/args/mod.rs
   - darkmatter/cli/src/commands/validate.rs
@@ -264,6 +265,111 @@ ZenUML, or a render over its time budget), or an SVG the sanitizer cannot
 parse, is a promotion failure: the render tree applies its strictness setting
 instead of emitting unsafe or broken markup.
 
+### Embedded font
+
+A static SVG's labels lead with the face they were measured in, but a reader
+without that face sees them in a fallback face of another width. Turn on the
+**embedded font** and the page carries the face itself, so every reader sees
+the labels at their measured widths:
+
+```rust
+let html = DarkmatterPage::new(&terminal)
+    .with_mermaid_mode(MermaidMode::Image)
+    .with_embed_mermaid_font(true)
+    .render_to_browser_document(&markdown)?;
+```
+
+`DarkmatterPage::with_embed_mermaid_font` sets the
+[`HtmlOptions::embed_mermaid_font`](../../lib/src/markdown/output/html.rs)
+field (default `false`), which `Markdown::as_html` honors too. It acts only
+with `MermaidMode::Image`; with `Off` (interactive) or `Text` the page is
+byte for byte what it is without it. It is a rendering option only: there is
+no frontmatter key for it.
+
+`biscuit-visualized` chooses the face, measures the labels in it, and builds a
+subset of it holding only the characters the page's diagrams draw; its
+[Embedded font](../../../biscuit-visualized/docs/mermaid-embedded-font.md)
+page explains the choice. In short: the face the font chain resolves is
+embedded when its `fsType` permission allows it (Installable, Editable, or
+Preview & print), and the bundled Inter (SIL Open Font License 1.1) is
+embedded instead when the face is Restricted, bitmap-only, not a TrueType
+outline face, or unreadable, or when no installed face is found.
+
+```mermaid
+flowchart LR
+    D["each static diagram"] -->|"SVG + characters drawn"| P["after the page renders:<br/>one page font"]
+    P --> C{"built, and passes<br/>the style-sheet check?"}
+    C -->|yes| M["comments + &lt;style&gt;<br/>before the first diagram"]
+    C -->|no| N["nothing; diagrams stay,<br/>warning logged"]
+```
+
+The page gets the font **once**, in the body immediately before its first
+diagram, shared by every diagram and by both light and dark themes:
+
+```html
+<!-- mermaid font: "Inter" embedded; resolved face "Arial" is Restricted (fsType 0x0002) -->
+<style>
+/* Inter: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter); SIL Open Font License 1.1 */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;src:url(data:font/ttf;base64,…) format("truetype")}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;src:url(data:font/ttf;base64,…) format("truetype")}
+</style>
+<svg …>…</svg>   (the first diagram; its labels lead with 'Inter')
+```
+
+- **One HTML comment per embedded family** names the face and why it was
+  chosen, for example `"Trebuchet MS" embedded; the face the font chain
+  resolved, fsType 0x0008 (Editable)`.
+- **One `@font-face` rule per face and weight** the page draws (400 regular,
+  700 bold), each a TrueType subset of the union of every diagram's
+  characters, as a `data:font/ttf;base64` URL. A weight no label uses is not
+  embedded.
+- **Inter's license line.** When Inter is embedded, a CSS comment with its
+  copyright and license sits immediately before its first rule. A page that
+  embeds only host faces has none.
+
+The page is written diagram by diagram before the union of their characters
+is known, so the first opt-in diagram leaves a marker comment ahead of its
+SVG, and [`mermaid_font.rs`](../../lib/src/markdown/render_tree/mermaid_font.rs)
+replaces it with the font once the page is rendered. The author cannot forge
+the marker: these pages escape raw HTML, and the sanitizer drops SVG comments.
+
+**The sanitizer's one `data:` exception.** The font's `<style>` passes the same
+[style-sheet check](../../lib/src/markdown/render_tree/svg_sanitizer.rs)
+(`style_sheet_is_safe`) that every diagram's `<style>` passes. It still
+rejects `@import` and every external `url()`, and admits a `data:` URL in one
+place only: the `src` descriptor of a top-level `@font-face` rule, as one or
+more `url(data:font/ttf;base64,…) format("truetype")` entries (quoted or not)
+whose base64 is well formed.
+
+```text
+kept:     @font-face{font-family:'Inter';src:url(data:font/ttf;base64,AAEAAA==) format("truetype")}
+dropped:  @font-face{src:url(https://example.com/f.ttf) format("truetype")}    external URL
+dropped:  @font-face{src:url(data:font/woff2;base64,AAEAAA==) format("woff2")}  not TrueType
+dropped:  .a{background:url(data:font/ttf;base64,AAEAAA==)}                    outside @font-face src
+dropped:  <rect fill="url(data:font/ttf;base64,AAEAAA==)"/>                     attributes never admit data:
+```
+
+A `<style>` that fails the check is dropped whole. Malformed CSS (an
+unterminated string, block, or `url(`, a duplicate `src`, or an `@font-face`
+body that is not a plain declaration list) fails closed.
+
+**Limits.**
+
+- **Static SVG only.** The interactive page draws with Mermaid.js and the
+  reader's fonts; the opt-in does not change it.
+- **Coverage.** Characters the chosen face does not have (CJK or emoji in a
+  Latin face, for example) are not embedded; the reader's browser draws them
+  in its own fallback face.
+- **Size.** Each weight's subset aims to stay under 60 KB before base64. A
+  larger one, or a face whose `fsType` forbids subsetting and is embedded
+  whole, is still embedded, and its size is logged.
+- **Failure.** If the font cannot be built, or its CSS fails the check, the
+  page has no embedded font and a warning is logged; the diagrams still show
+  as plain static SVG.
+- **Kerning.** The subset carries no kerning or ligature tables, so labels are
+  measured and drawn with plain glyph advances, a little wider than a kerned
+  render.
+
 # CLI Switches
 
 The following `md` CLI flags (defined under [`darkmatter/cli/src/args/`](../../cli/src/args/mod.rs) and wired up in [`render.rs`](../../cli/src/render.rs), [`artifact.rs`](../../cli/src/artifact.rs), and [`commands/validate.rs`](../../cli/src/commands/validate.rs)) affect mermaid rendering. Unless otherwise noted, they belong to the top-level `md [FILE]` render command.
@@ -275,6 +381,7 @@ The following `md` CLI flags (defined under [`darkmatter/cli/src/args/`](../../c
 | `--show`                          | All targets               | Writes the selected output to a temp file and opens it in the default app. With `--output html` this is the practical way to view rendered diagrams in a browser.                                                                                                                    |
 | `--theme <NAME>`                  | All targets               | Selects the prose `ThemePair`. It does not change diagram colors: the terminal and static-SVG palettes come from the terminal, and the interactive palette from the page's light or dark mode.                                                                                      |
 | `--code-theme <NAME>`             | All targets               | Selects the code `ThemePair` used for the code-block rendering of mermaid fences (`Off`, `Text`, and the fallback).                                                                                                                                                                |
+| `--feature embed-mermaid-font` (**planned**) | Browser (static SVG) | Will set `HtmlOptions::embed_mermaid_font` for HTML output (see [Embedded font](#embedded-font)). Not available yet: `md` has no `--feature` flag, so today the opt-in is reached only through the library. |
 | `--list-themes`                   | n/a                       | Lists available themes and exits without rendering.                                                                                                                                                                                                                                  |
 | `md validate refs <FILE> --graph mermaid` | Mermaid *source emission* | Not a renderer switch, but worth flagging: this path prints the document's transclusion graph as raw mermaid flowchart source via `ReferenceGraph::to_mermaid`. The output is unrendered text suitable for piping into another mermaid renderer. |
 
@@ -284,4 +391,4 @@ md --output html --show notes.md       # browser: interactive Mermaid.js
 md validate refs notes.md --graph mermaid > refs.mmd
 ```
 
-There is currently no dedicated CLI switch to opt into `MermaidMode::Text` directly or to force `MermaidMode::Image` for HTML output: HTML rendering pulls its mode from the library default (`MermaidMode::Off`, the interactive page) unless callers construct `HtmlOptions` or a `DarkmatterPage` themselves.
+There is currently no dedicated CLI switch to opt into `MermaidMode::Text` directly, to force `MermaidMode::Image` for HTML output, or to embed the Mermaid font: HTML rendering pulls its mode from the library default (`MermaidMode::Off`, the interactive page) unless callers construct `HtmlOptions` or a `DarkmatterPage` themselves.
