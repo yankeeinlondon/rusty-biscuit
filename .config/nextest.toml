@@ -55,11 +55,15 @@ platform = { host = "cfg(target_os = \"macos\")" }
 filter = 'package(biscuit-visualized) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
 setup = 'coretext-small-bundle'
 
-# Darkmatter's static-Mermaid page tests render over the host's fonts too
-# (about 3.5 s each without this).
+# Darkmatter's Mermaid tests render over the host's fonts too: the static-SVG
+# page tests took about 3.5 s each without this, and unit tests that render a
+# diagram from a module of another name (the SVG sanitizer, the code renderer,
+# the terminal hook) took 2.4-10 s alone and up to the 30 s timeout under load.
+# Any test naming Mermaid or Merman is selected so a new one is not missed; the
+# tier markers are left out for the same reason as above.
 [[profile.default.scripts]]
 platform = { host = "cfg(target_os = \"macos\")" }
-filter = 'package(darkmatter) & test(/^(mermaid_static_svg|mermaid_embedded_font)::/)'
+filter = 'package(darkmatter) & test(/mer(maid|man)/) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
 setup = 'coretext-small-bundle'
 
 [test-groups]

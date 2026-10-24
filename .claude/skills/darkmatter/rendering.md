@@ -125,9 +125,13 @@ Full doc: `darkmatter/docs/rendering/mermaid.md#embedded-font`.
 - `svg_sanitizer.rs::style_sheet_is_safe` (cssparser tokenizer) admits
   `data:` only as `url(data:font/ttf;base64,…) format("truetype")` in a
   top-level `@font-face` `src`; attributes keep `css_is_safe` (no `data:`).
-- Tests: `tests/l1/mermaid_embedded_font.rs` (run under the macOS
-  `coretext-small-bundle` nextest setup script), sanitizer unit tests,
+- Tests: `tests/l1/mermaid_embedded_font.rs`, sanitizer unit tests,
   `tests/browser/browser_render.rs::browser_embedded_mermaid_font_draws_every_label`.
+- On macOS, the `coretext-small-bundle` nextest setup script
+  (`.config/nextest.toml`) selects Darkmatter tests **by name**: any test
+  whose path contains `mermaid` or `merman`, apart from tier-marked ones. A
+  test that renders a diagram over host fonts must say so in its name, or it
+  pays CoreText's 1-10 s scan of `target/debug/deps` (`os` skill, `macos.md`).
 
 ## Browser contract
 
