@@ -5,7 +5,9 @@
 //! [`WorkspaceGraph`] snapshot. A change re-parses one document, compares its
 //! xxHash against the stored one, and *only* rebuilds a fresh snapshot when
 //! the content actually changed — keystrokes that don't alter bytes (or a
-//! save with no edits) are free. Each rebuilt snapshot carries an incremented
+//! save with no edits) are free. The one exception is opening a
+//! dependency: equal bytes still rebuild, because the document's role
+//! changes. Each rebuilt snapshot carries an incremented
 //! generation so superseded async work (diagnostics, indexing) can be
 //! discarded (AD-3). A rebuild whose path inputs are unchanged (a content
 //! edit) shares the previous snapshot's wiki universe and document table;
@@ -40,7 +42,8 @@ use super::substrate::{DocumentIndex, index_document};
 /// The result of applying a document change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invalidation {
-    /// The content hash was unchanged; no snapshot was rebuilt.
+    /// The content hash and the document's role were unchanged; no
+    /// snapshot was rebuilt.
     Unchanged,
     /// The document was re-indexed and a new snapshot generation published.
     Reindexed {
@@ -180,9 +183,29 @@ impl WorkspaceIndex {
     /// Re-indexes a document from fresh `source`, rebuilding the snapshot only
     /// when the content hash changed.
     pub fn set_document(&mut self, path: &Path, source: &str) -> Invalidation {
+        self.index_source(path, source, false)
+    }
+
+    /// Indexes an open buffer's text; the buffer overrides disk until
+    /// [`close_buffer`](Self::close_buffer).
+    ///
+    /// Equal text skips the rebuild unless `path` was a
+    /// [dependency](Self::is_dependency): opening it makes it an ordinary
+    /// document, which the published snapshot must reflect.
+    pub fn open_buffer(&mut self, path: &Path, source: &str) -> Invalidation {
+        let was_dependency = self.is_dependency(path);
+        self.open.insert(path.to_path_buf());
+        self.stale.remove(path);
+        self.index_source(path, source, was_dependency)
+    }
+
+    /// Stores `source`'s parse and rebuilds, skipping both when the content
+    /// hash is unchanged and `role_changed` is false.
+    fn index_source(&mut self, path: &Path, source: &str, role_changed: bool) -> Invalidation {
         let fresh = index_document(path, source);
         if let Some(existing) = self.documents.get(path)
             && existing.content_hash == fresh.content_hash
+            && !role_changed
         {
             return Invalidation::Unchanged;
         }
@@ -190,14 +213,6 @@ impl WorkspaceIndex {
         self.documents.insert(path.to_path_buf(), fresh);
         self.rebuild();
         Invalidation::Reindexed { dependents }
-    }
-
-    /// Indexes an open buffer's text; the buffer overrides disk until
-    /// [`close_buffer`](Self::close_buffer).
-    pub fn open_buffer(&mut self, path: &Path, source: &str) -> Invalidation {
-        self.open.insert(path.to_path_buf());
-        self.stale.remove(path);
-        self.set_document(path, source)
     }
 
     /// Restores the disk view of a closed buffer: a listed document becomes
@@ -1554,6 +1569,60 @@ mod tests {
         assert!(!index.is_dependency(&target));
         rebuilt(&work, table, universe, 4, 0);
         assert_roots_first(&index.snapshot());
+    }
+
+    #[test]
+    fn test_opening_a_dependency_with_equal_text_publishes_its_new_role() {
+        let (_temp, root, contexts) = disk_workspace();
+        let source_text = "# Source\n\n[t](target.md#alpha) [s](stale.md#s) [l](listed.md#l)\n";
+        let files = [
+            ("source.md", source_text),
+            ("target.md", "# Alpha\n"),
+            ("stale.md", "# S\n"),
+            ("listed.md", "# L\n"),
+        ];
+        for (name, text) in files {
+            std::fs::write(root.join(name), text).unwrap();
+        }
+        let [source, target, stale, listed_doc] = files.map(|(name, _)| root.join(name));
+        let mut index = WorkspaceIndex::new(contexts);
+        index.set_wiki_roots(vec![root.clone()]);
+        listed(&mut index, &[&source, &listed_doc]);
+        index.open_buffer(&source, source_text);
+        index.prepare_targets(&source);
+        assert!(index.is_dependency(&target) && index.is_dependency(&stale));
+        let record_is_dependency = |index: &WorkspaceIndex, path: &Path| {
+            let snapshot = index.snapshot();
+            snapshot.document(snapshot.document_id(path).unwrap()).unwrap().dependency
+        };
+
+        // Equal text, new role: one rebuild over one universe and one table.
+        let generation = index.generation();
+        let mut outcome = None;
+        let (work, table, universe) = table_work(&mut index, |index| {
+            outcome = Some(index.open_buffer(&target, "# Alpha\n"));
+        });
+        assert!(matches!(outcome, Some(Invalidation::Reindexed { .. })), "{outcome:?}");
+        assert_eq!(index.generation(), generation + 1);
+        assert!(!table && !universe);
+        assert_eq!((work.wiki_universes, work.document_tables), (1, 1), "{work:?}");
+        assert!(!index.is_dependency(&target));
+        assert!(!record_is_dependency(&index, &target));
+
+        // A stale dependency (a watched change) opened with its old text.
+        assert!(!index.unlisted_changed(&stale, false));
+        let generation = index.generation();
+        assert!(matches!(index.open_buffer(&stale, "# S\n"), Invalidation::Reindexed { .. }));
+        assert_eq!(index.generation(), generation + 1);
+        assert!(!record_is_dependency(&index, &stale));
+
+        // Controls keep the shortcut: an already-open document, and a
+        // listed parsed closed document becoming open.
+        let generation = index.generation();
+        assert_eq!(index.open_buffer(&target, "# Alpha\n"), Invalidation::Unchanged);
+        assert!(index.disk_parse(&listed_doc).is_some(), "the source's link parsed it");
+        assert_eq!(index.open_buffer(&listed_doc, "# L\n"), Invalidation::Unchanged);
+        assert_eq!(index.generation(), generation);
     }
 
     #[test]

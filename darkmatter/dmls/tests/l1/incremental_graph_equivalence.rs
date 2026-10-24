@@ -451,10 +451,13 @@ impl Harness {
     }
 
     fn open(&mut self, path: &Path, text: &str) -> Invalidation {
+        // Opening a dependency changes its role, so equal text still rebuilds.
+        let was_dependency = self.dependencies().contains(path);
         self.open.insert(path.to_path_buf());
         self.stale.remove(path);
         let fresh = index_document(path, text);
-        let unchanged = self.parsed.get(path).is_some_and(|held| held.content_hash == fresh.content_hash);
+        let unchanged =
+            !was_dependency && self.parsed.get(path).is_some_and(|held| held.content_hash == fresh.content_hash);
         if !unchanged {
             self.parsed.insert(path.to_path_buf(), fresh);
         }
@@ -684,24 +687,91 @@ fn unsaved_buffers_and_listed_membership_match_a_fresh_build() {
 
 #[test]
 fn dependencies_open_join_and_return_to_referenced_only_like_a_fresh_build() {
-    let dep_text = "# Alpha\n\n## Beta\n\n[x](source.md) [[source]]\n";
-    let repo = Repo::new(&[("source.md", "[t](dep.md#beta)\n\n::file ./dep.md\n"), ("dep.md", dep_text)]);
-    let [source, dep] = ["source.md", "dep.md"].map(|name| repo.path(name));
-    let mut h = Harness::listed(&repo, &["source.md"]);
-    h.open(&source, "[t](dep.md#beta)\n\n::file ./dep.md\n");
-    h.prepare_targets(&source, std::slice::from_ref(&dep));
+    let dep_text = "---\ntitle: Dep\n$schema: ./schema.yaml\nstyle:\n  page:\n    stylesheet: ./style.css\n---\n\
+                    # Alpha\n\n## Beta\n\n[x](source.md) [[source]] {{ title }}\n\n::file ./other.md\n";
+    let source_text = "[t](dep.md#beta) [[dep]] [[de]] [p](de)\n\n::file ./dep.md\n";
+    let repo = Repo::new(&[
+        ("source.md", source_text),
+        ("dep.md", dep_text),
+        ("other.md", "# Other\n"),
+        ("schema.yaml", "title: string\n"),
+        ("style.css", "body {}\n"),
+    ]);
+    let [source, dep, other] = ["source.md", "dep.md", "other.md"].map(|name| repo.path(name));
+    let mut h = Harness::listed(&repo, &["source.md", "other.md"]);
+    h.open(&source, source_text);
+    // The transclusion closure reaches `other.md` through the dependency.
+    h.prepare_targets(&source, &[dep.clone(), other]);
     let facts = h.check("referenced dependency parsed");
     assert!(facts.document(&dep).dependency);
+    assert_eq!(facts.wiki(&source)[0], WikiFact::Unresolved, "a dependency is no wiki candidate");
 
-    // Known quirk: opening a dependency with its disk bytes is `Unchanged`,
-    // so no rebuild runs and the snapshot still flags it as a dependency,
-    // where a fresh build over the same inputs does not.
+    let env = ProviderEnv {
+        config: ConfigState::load(vec![repo.root.clone()], None),
+        profile: ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16),
+        contexts: RepositoryContexts::new(
+            darkmatter::markdown::compose::RequestSnapshot::new(&repo.root).with_home(Some(repo.root.join("home"))),
+        ),
+        registry: ProviderRegistry::with_substrate(),
+    };
+    let wiki_completion = source_text.find("[[de]]").expect("a partial wiki link") + "[[de".len();
+    let path_completion = source_text.find("[p](de)").expect("a partial path") + "[p](de".len();
+    let mut offsets = sample_offsets(source_text);
+    offsets.extend([wiki_completion, path_completion]);
+    let symbols = |graph: &WorkspaceGraph| format!("{:?}", graph_symbol_documents(graph));
+
+    // Opening the dependency with its disk bytes changes its role: one
+    // rebuild publishes it as an ordinary document.
+    let generation = h.index.generation();
+    let (tables, universes) = tables_and_universes(&mut h, |h| {
+        assert!(matches!(h.open(&dep, dep_text), Invalidation::Reindexed { .. }));
+    });
+    assert_eq!((tables, universes), (1, 1), "one table and one universe");
+    assert_eq!(h.index.generation(), generation + 1);
+    let facts = h.check("dependency opened with its disk text");
+    let opened = facts.document(&dep);
+    assert!(!opened.dependency);
+    assert_eq!(opened.basename_bucket, Some(("dep".to_string(), vec![dep.clone()])));
+    let kinds: BTreeSet<&str> = opened.nodes.iter().map(|node| node.key.kind.as_str()).collect();
+    for kind in [
+        "Heading",
+        "Link",
+        "WikiLink",
+        "FrontmatterKey",
+        "SchemaDeclaration",
+        "FileReference",
+        "Interpolation",
+        "TransclusionTarget",
+    ] {
+        assert!(kinds.contains(kind), "{kind} missing from {kinds:?}");
+    }
+    assert_eq!(facts.wiki(&source)[0], WikiFact::Resolved(root_key(&dep)));
+    assert_eq!(facts.wiki(&dep), vec![WikiFact::Resolved(root_key(&source))]);
+
+    let live = h.index.snapshot();
+    let fresh = h.fresh();
+    let live_answers = env.answers(&live, &source, source_text, &offsets);
+    assert_eq!(live_answers, env.answers(&fresh, &source, source_text, &offsets), "provider answers");
+    let completion_at = |offset: usize| {
+        live_answers
+            .per_offset
+            .iter()
+            .find(|(at, answer)| *at == offset && answer.starts_with("completion"))
+            .map(|(_, answer)| answer.as_str())
+            .expect("a completion answer")
+    };
+    for (surface, offset) in [("wiki", wiki_completion), ("path", path_completion)] {
+        let offered = completion_at(offset);
+        assert!(offered.contains(r#"\"label\":\"dep"#), "{surface} completion omits dep: {offered}");
+    }
+    assert_eq!(symbols(&live), symbols(&fresh), "graph symbols");
+    assert!(graph_symbol_documents(&live).iter().any(|(path, _)| *path == dep), "graph symbols omit dep.md");
+
+    // An unchanged re-open keeps the snapshot.
     let generation = h.index.generation();
     assert_eq!(h.open(&dep, dep_text), Invalidation::Unchanged);
     assert_eq!(h.index.generation(), generation);
-    assert!(h.facts(&h.index.snapshot()).document(&dep).dependency);
-    assert!(!h.facts(&h.fresh()).document(&dep).dependency);
-    h.open(&dep, "# Alpha\n\n## Beta\n\n[x](source.md) [[source]] edited\n");
+    h.open(&dep, &format!("{dep_text}edited\n"));
     let facts = h.check("dependency opened with new text");
     assert!(!facts.document(&dep).dependency);
 

@@ -713,3 +713,41 @@ fn an_awaited_unlisted_creation_resolves_and_build_output_costs_nothing() {
     assert_eq!((work.parses, work.reads), (0, 0), "{work:?}");
     fixture.shutdown();
 }
+
+#[test]
+fn opening_a_loaded_ignored_target_with_its_disk_text_makes_it_a_wiki_target_at_once() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join(".gitignore"), "generated/\n").unwrap();
+    let report = workspace.path().join("generated/report.md");
+    std::fs::create_dir(report.parent().unwrap()).unwrap();
+    let report_text = "# Report\n\n[back](../guide.md)\n";
+    std::fs::write(&report, report_text).unwrap();
+    let guide = workspace.path().join("guide.md");
+    let text = "[r](generated/report.md#report)\n[[report]]\n[[rep\n";
+    let (guide_uri, report_uri) = (uri(&guide), uri(&report));
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &guide_uri, text);
+    // The anchor check loads the ignored report as a dependency, which no
+    // wiki link may match.
+    let before_open = codes(&latest(&mut fixture, &guide_uri));
+    let definition = position(&mut fixture, "textDocument/definition", &guide_uri, 1, 3);
+    assert_eq!(definition_targets(&definition), Vec::new(), "{before_open:?} {definition}");
+    let completion = position(&mut fixture, "textDocument/completion", &guide_uri, 2, 5);
+    assert!(!completion_labels(&completion).contains(&"report".to_string()), "{completion}");
+
+    // Opening it with the bytes already parsed makes it an ordinary open
+    // document: the next requests see it as a wiki target.
+    let before = work_counts();
+    open(&fixture, &report_uri, report_text);
+    latest(&mut fixture, &report_uri);
+    let work = work_since(before);
+    assert_eq!((work.wiki_universes, work.document_tables), (1, 1), "one rebuild: {work:?}");
+    let definition = position(&mut fixture, "textDocument/definition", &guide_uri, 1, 3);
+    assert_eq!(definition_targets(&definition), vec![(report_uri.clone(), 0)], "{definition}");
+    let completion = position(&mut fixture, "textDocument/completion", &guide_uri, 2, 5);
+    assert!(completion_labels(&completion).contains(&"report".to_string()), "{completion}");
+    let after_open = codes(&latest(&mut fixture, &guide_uri));
+    assert!(after_open.iter().all(|code| !code.starts_with("wiki.")), "{before_open:?} -> {after_open:?}");
+    fixture.shutdown();
+}
