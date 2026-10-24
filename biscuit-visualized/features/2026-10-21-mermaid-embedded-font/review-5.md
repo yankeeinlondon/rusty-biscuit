@@ -36,16 +36,25 @@ human_review_items:
       - Request a different page-wide selection policy or installed-Inter naming policy, with its scope recorded before implementation.
     - |-
       Evidence for the browser width ruling (iteration 3 investigation, no code changed). The four bounding-box excesses are Linux Chromium's getBBox adding glyph ink rounded outward to whole pixels. They also appear without an embedded font, and no page markup tried removes them: text-rendering, font-kerning, font smoothing, and a CSS scale all leave 0.673 px. SVG text lengths agree within 0.031 px, and advance widths agree to 0.0000 px. A Linux reader at device scale factor 4 is within 0.5 px (0.208 px). Among the tested approaches, only changing the reader device scale factor met the bounding-box tolerance.
+    - |-
+      Iteration 5 decision: the `--feature` convention (repeatable, comma-separated, case-insensitive, unknown name a usage error) was implemented on `md` ahead of the text-fallback spec, with `embed-mermaid-font` as its only name; the text fallback adds its names to the same list. Alternatives: wait for the text fallback, or narrow this feature to library and page APIs.
+    - |-
+      Iteration 5 decision (D17): AC-E1 now compares each label's advance width within 0.5 px instead of its bounding box. Fresh two-host readings agree to 0.0000 px on both pages; bounding boxes remain a diagnostic (0.67/0.97 px at scale factor 1, 0.21/0.31 px at scale factor 4). Alternatives: a 1 px bounding-box tolerance, or bounding boxes read at scale factor 4.
+    - |-
+      Iteration 5 finding: `md`'s HTML output never renders Mermaid as static SVG, so `--feature embed-mermaid-font` sets the option but changes no output today, as D3 and AC-E9 require. A CLI route to static-SVG HTML would be needed for the feature to have a visible effect from `md`.
 has_blocked_findings: true
 blocked: true
 reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: "2026-10-24T12:00:06-07:00"
 spec: 2026-10-21-mermaid-embedded-font/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: /Volumes/coding/wt/rusty-biscuit/feat-merman/biscuit-visualized/features/2026-10-21-mermaid-embedded-font/log.md
 description: "A **feature** review of `2026-10-21-mermaid-embedded-font/spec.md`"
 feature: 2026-10-21-mermaid-embedded-font/review-5.md
 previous: 2026-10-21-mermaid-embedded-font/review-4.md
+next: 2026-10-21-mermaid-embedded-font/review-6.md
 ---
 
 # Review 5: not production ready

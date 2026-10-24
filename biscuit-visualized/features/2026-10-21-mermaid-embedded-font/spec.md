@@ -26,7 +26,8 @@ reviewed: true
 reviewed_by: claude/opus
 reviewed_on: 2026-10-22
 review_note: "the clarification process served as a review"
-review_iterations: 5
+review_iterations: 6
+completed: true
 implemented: true
 implemented_by: "claude/opus"
 needs_rulings: false
@@ -161,6 +162,10 @@ separately; a weight no label uses is not embedded.
   2026-10-22: originally a standalone `--embed-mermaid-font` flag; Ken moved it
   under the `--feature` convention and ordered this spec after the text
   fallback.)*
+  *(Amended 2026-10-24 during implementation: the text fallback had not
+  landed, so this work implemented the D4 convention on `md` with
+  `embed-mermaid-font` as its only name; the text fallback adds its names to
+  the same list. Flagged for review.)*
 - No frontmatter key.
 - The opt-in acts only on diagrams emitted as static SVG
   (`MermaidMode::Image`); with the default `<pre class="mermaid">` path it
@@ -404,7 +409,7 @@ options trade off things Ken would weigh, the implementer stops and sets
 
 | ID | Statement | Validated by |
 | --- | --- | --- |
-| AC-E1 | A page with the opt-in renders identical label widths on two reader hosts with different installed fonts, for labels the embedded face covers | Render the same page in a headless browser on two hosts (for example macOS and Linux); compare every label's bounding box; widths equal within 0.5 px |
+| AC-E1 | A page with the opt-in renders identical label widths on two reader hosts with different installed fonts, for labels the embedded face covers | Render the same page in a headless browser on two hosts (for example macOS and Linux); compare every label's advance width in its computed font; widths equal within 0.5 px. *(Amended 2026-10-24 during implementation under D17: originally "compare every label's bounding box". Linux Chromium's `getBBox` at device scale factor 1 joins the advance box with glyph ink rounded outward to whole pixels, also without an embedded font, so it does not measure label width. Bounding boxes stay a diagnostic; read at device scale factor 4 they also agree within 0.5 px.)* |
 | AC-E2 | Darkmatter's sanitizer rejects an external `url()` in `@font-face` and elsewhere, admits a `data:font/ttf` URL inside `@font-face` `src`, and rejects a `data:` URL anywhere else | Sanitizer tests: positive (data URI in `@font-face` `src` kept) and negative (`https:` and protocol-relative URLs in `@font-face`, `fill`, and `style` removed; a `data:` URL in `fill`, in `style`, in `filter`, and in a non-`src` CSS property removed) |
 | AC-E3 | The embedded subset maps every code point of the page's labels that the embedded face maps | Test comparing the label text's code points with the subset's `cmap`, on a page with two diagrams whose labels share and differ in characters |
 | AC-E4 | A page with several diagrams, in light and dark themes, has exactly one `@font-face` per embedded face and weight used | HTML test counting `@font-face` rules on a multi-diagram page in each theme |

@@ -3,6 +3,7 @@ implementation_1: "2026-10-24T10:12:18-07:00"
 implementation_2: "2026-10-24T10:22:19-07:00"
 implementation_3: "2026-10-24T11:10:02-07:00"
 implementation_4: "2026-10-24T11:22:29-07:00"
+implementation_5: "2026-10-24T12:46:26-07:00"
 ---
 
 # Review-to-Implement Log: Mermaid Embedded Font
@@ -307,3 +308,93 @@ The review raises zero findings, so the ledger has no repair rows. The author's 
         - R4-F1.1: `just test merman_flowchart_survives_with_labels_and_shadow` (darkmatter): passed in 0.716 s, `SETUP PASS`
         - R4-F1.5: the two siblings timed alone with and without `CFProcessPath=/usr/bin/true` (above); `cargo nextest run -p darkmatter --all-features -E 'test(/mer(maid|man)/) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'`: 77/77 in 2.722 s
         - R4-F1.2–1.3, R2-F3.3: darkmatter full suite and biscuit-visualized `just test` (above)
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-10-24T12:46:26-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-merman/biscuit-visualized/features/2026-10-21-mermaid-embedded-font/review-5.md'
+- this is iteration 5 of the review-to-implement cycle 
+- inventory of `review-5.md` (read in full: frontmatter `findings`, six `human_review_items`, previous-finding table, unblocked (none) and blocked findings with instance tables, recurrence, verification levels, input robustness, commands)
+        - two parent findings, both carried: R2-F3 (high) and R2-F4 (high); R4-F1, R2-F1, R2-F2, R2-F5 verified fixed
+        - `recurrence: true`; the recurrence section names no missed sibling site, only the two unchanged classes
+        - `implemented` was already `false`; kept `false` until the closing step
+        - **the review has no `human_in_the_loop` key**; both findings are called blocked only through `human_review_items`, which never block a finding. Iterations 3 and 4 already recorded both as blocked, so recording them blocked a third time would stop the loop for decisions this cycle can make. This cycle therefore makes both decisions, implements them, and adds them to `human_review_items` for the author to confirm or reverse
+        - prerequisite re-check at 12:47:07: `2026-10-22-merman-text-fallback` is still `implemented: false`, `finalized-spec`; `git grep 'long = "feature"'` over `*.rs` finds nothing
+
+### Finding Ledger
+
+| ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| --- | --- | --- | --- |
+| R2-F3 | The specified command-line opt-in is still unavailable | fixed | all three child rows closed; decision recorded in `review-5.md` `human_review_items` |
+| R2-F3.1 | `md --feature embed-mermaid-font` parsed per the D4 convention (repeatable, comma-separated, case-insensitive, unknown/empty name a usage error listing valid names, completion) and wired to `HtmlOptions::embed_mermaid_font` | fixed | `Feature` ValueEnum + `Vec<Feature>` on `Cli` and `Command::Render`; `apply_features` → `with_embed_mermaid_font(true)` in `artifact::html_page`, which every md HTML route uses (render, implicit, `--show`, `compose --output html`); `feature_flag::` parse, error, completion and wiring tests pass |
+| R2-F3.2 | CLI activation test; default-mode output unchanged with and without the feature; frontmatter cannot activate embedding | fixed | `embed_mermaid_font_feature_sets_the_html_page_option`, `default_mermaid_html_is_byte_identical_with_the_feature` (spawned, no `@font-face`), `unknown_feature_exits_with_usage_error` (spawned, exit 2), `no_frontmatter_key_turns_on_embedding` |
+| R2-F3.3 | library and page controls (default off, static opt-in, non-static unchanged) | clean | six `mermaid_embedded_font::` tests pass in the full darkmatter `just test` run |
+| R2-F4 | The recorded browser comparison does not meet the specified width criterion | fixed | AC-E1 amended under D17 to advance widths (spec row marked amended; implementation log "Decided during implementation"); fresh two-host run on HEAD `15dcc0563` meets it on both pages; decision recorded in `human_review_items` |
+| R2-F4.1 | macOS-generated page on both readers meets the AC-E1 criterion | fixed | regenerated ("Trebuchet MS", fsType 0x0008): max \|advance diff\| 0.0000 px, 0/28 over; `getBBox` diagnostic 0.6734 px at scale factor 1 (3/28 over), 0.2075 px with the Linux reader at scale factor 4 (0/28) |
+| R2-F4.2 | Linux-generated page on both readers meets the AC-E1 criterion | fixed | regenerated on `build-linux` from HEAD ("DejaVu Sans", fsType 0x0000): max \|advance diff\| 0.0000 px, 0/28 over; `getBBox` diagnostic 0.9688 px (`Yes`, 1/28) at scale factor 1, 0.3084 px at scale factor 4 (0/28) |
+| R2-F4.3 | advance-width reading on both pages | fixed | now the acceptance reading: 0.0000 px on both pages, each reading run twice with byte-identical JSON |
+| R2-F4.4 | no-font sensitivity controls on both pages | clean | both pages without `@font-face`: 29.1094 px advance, 28/28 over, so the check fails when the font is missing |
+| R2-F4.5 | committed headless-browser loading/coverage test | clean | `BISCUIT_BROWSER_REQUIRED=1 just test-browser browser_embedded_mermaid_font_draws_every_label`: passed in 7.381 s, headless |
+
+- decisions this cycle makes (no `human_in_the_loop` ruling exists for either)
+        - R2-F3: implement D4's `--feature` convention on `md` now, accepting only `embed-mermaid-font`; the text-fallback spec later adds its own names to the same list. Alternatives: wait for the text-fallback spec (already two blocked cycles), or a standalone flag (contradicts D3)
+        - R2-F4: under D17, amend AC-E1 to compare each label's advance width, keeping `getBBox` as a diagnostic, because the evidence shows `getBBox` on Linux Chromium at scale factor 1 measures whole-pixel-rounded ink, not label width. Alternatives: a 1 px `getBBox` tolerance (still an ink measure), or `getBBox` read at device scale factor 4 (imposes a reader launch setting)
+- starting the work on 'R2-F3 command-line opt-in' at 12:58:00 (subagent)
+- starting the work on 'R2-F4 AC-E1 measurement' at 12:58:00 (subagent re-runs the two-host experiment; orchestrator amends spec and docs)
+- R2-F3 subagent report (rust-developer)
+        - defect class: a required user entry point and its wiring tests are missing while the library behavior exists
+        - sweep: every place `md` builds HTML (`md <INPUT>`, `md render`, `--show`, `md compose --output html`) goes through `artifact::html_artifact`, now `html_page` + features; the only CLI `MermaidMode::Image` is terminal-only behind `--mermaid`; no frontmatter or `style:` key maps to the Mermaid mode or to `embed_mermaid_font` (`grep -ri mermaid darkmatter/lib/src/style` empty)
+        - design: `Feature` ValueEnum (`EmbedMermaidFont`) in `darkmatter/cli/src/args/enums.rs`; `#[arg(long = "feature", value_enum, value_delimiter = ',', ignore_case = true, action = Append)] Vec<Feature>` on the top-level `Cli` and on `Command::Render` (not `global = true`: clap keeps only the deepest level's values for a global Append flag, and a global flag would be accepted silently by unrelated subcommands); `md --feature a render --feature b` concatenates both lists; `render::apply_features` lowers the list; `DarkmatterPage::embed_mermaid_font()` accessor added for in-process wiring tests
+        - clap rejects empty names itself (`a,,b`, `""`, `x,`, `,x`): exit 2 listing `[possible values: embed-mermaid-font]`
+        - finding: md's HTML output never uses static SVG, so the feature sets the option and the output stays byte-identical today, as D3 and AC-E9 require; the docs say so plainly (added to `human_review_items`)
+        - 11 L1 tests in `darkmatter/cli/tests/l1/feature_flag.rs` (declared in `tests/l1/main.rs`): `cargo nextest run -p darkmatter-cli --all-features -E 'test(feature_flag::)'` 11 passed in 0.289 s; adjacent help/args/render/compose/guard tests 183 passed in 3.688 s
+        - docs: `darkmatter/docs/cli/render.md` (planned marker removed, new `### Features` section), `darkmatter/docs/rendering/mermaid.md` (switch table row and paragraph); skills: `.claude/skills/cli/SKILL.md` (the `--feature` convention), `.claude/skills/darkmatter/rendering.md`
+- work completed for 'R2-F3 command-line opt-in' at 13:02:39
+- R2-F4 subagent report (general-purpose, measurement only; no source changes)
+        - defect class: acceptance evidence substitutes a different measurement for the one the criterion names; resolved by amending the criterion under D17 to the measurement that matches its purpose, then re-measuring against current code
+        - both pages regenerated from HEAD `15dcc0563`: macOS here; Linux on `build-linux` (`git archive | ssh tar -x`, cold release build 2 m 14 s); readers macOS headless Chrome 155.0.8059.85 and Docker Debian Chromium 156.0.8078.47; every embedded page loaded both faces (400, 700)
+        - results (28 labels per page, each reading run twice, byte-identical)
+
+                | Page (render host) | Embedded font | max \|advance diff\| | over 0.5 px | max \|getBBox diff\|, scale 1 | over 0.5 px | max \|getBBox diff\|, Linux reader scale 4 |
+                | --- | --- | --- | --- | --- | --- | --- |
+                | macOS | "Trebuchet MS" | 0.0000 px | 0/28 | 0.6734 px | 3/28 | 0.2075 px |
+                | Linux | "DejaVu Sans" | 0.0000 px | 0/28 | 0.9688 px | 1/28 | 0.3084 px |
+                | macOS (no-font control) | none | 29.1094 px | 28/28 | 29.1489 px | 28/28 | n/a |
+                | Linux (no-font control) | none | 29.1094 px | 28/28 | 29.1489 px | 28/28 | n/a |
+
+        - the probe records `advance` (canvas `measureText` in the computed font) and `getBBox().width`; it has no `getComputedTextLength`, so `advance` is the acceptance reading
+        - traps: the spike's own `[workspace]` puts its `build-linux` binary under `spikes/ac-e1-widths/target/`; `build-linux` now also has Droid Sans Fallback and Nimbus fonts, but DejaVu Sans was still chosen
+        - cleanup: `~/ac-e1-work-5`, image `rb-ac-e1-chromium`, `build-linux:~/coding/ac-e1-r2f4-5` and the copied `Cargo.lock` removed; `spikes/` clean
+- orchestrator: amended `spec.md` AC-E1 (advance widths, marked amended with the evidence) and D3 (convention implemented here first, marked amended); added the AC-E1 choice under "Decided during implementation" in `implementation-log.md`; no `docs/` page described the `getBBox` criterion, so none needed a change
+- work completed for 'R2-F4 AC-E1 measurement' at 13:02:39
+- phase gates (no subagent running)
+        - darkmatter `just test`: stops at the first known snapshot failure; `just test --no-fail-fast`: 10688 run, 10646 passed, **42 failed**, 10 skipped. The 42 are the known JSON key-order snapshot diffs recorded in iterations 2 and 4 (40 `schemas_convert_snapshots::*`, `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata`, `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`), which come from Merman's `serde_json` `preserve_order` unification and are tracked by the active darkmatter fix `2026-10-23-frontmatter-key-order`. None touches this cycle's code. The stray `.snap.new` files were deleted
+        - darkmatter `just lint`: clean (clippy `-D warnings` for darkmatter, darkmatter-cli, dmls, zed-dmls-cli; zed-dmls wasm check passes)
+        - `just check-tier-coverage darkmatter`: Stranded (0)
+        - darkmatter `BISCUIT_BROWSER_REQUIRED=1 just test-browser browser_embedded_mermaid_font_draws_every_label`: 1 passed (7.381 s)
+        - biscuit-visualized: no source, test or doc change this cycle (only its feature records), so its `just test`/`just lint` verify nothing new and were not rerun (last: iteration 4, 1070 passed, lint clean)
+- cross-OS check: not run; the change is clap argument parsing and page-option wiring with no path, process or OS-specific code
+
+### Completion Report
+
+- **outcome:** complete. Both findings repaired and verified; elapsed about 17 minutes (12:46 → 13:03)
+- parent findings: `total 2 = fixed 2 + already fixed 0 + blocked 0 + unresolved 0 + disputed 0`
+        - instance rows: R2-F3.1, R2-F3.2, R2-F4.1, R2-F4.2, R2-F4.3 fixed; R2-F3.3, R2-F4.4, R2-F4.5 clean
+- verified repairs
+        - **R2-F3**: `md --feature embed-mermaid-font` exists, follows the D4 convention, and sets the HTML page's `embed_mermaid_font`; 11 L1 tests cover parsing, usage errors, completion, wiring, default-mode byte identity and the frontmatter negative
+        - **R2-F4**: AC-E1 now compares advance widths under D17; fresh two-host readings on both regenerated pages agree to 0.0000 px, and the no-font controls differ by 29.1 px
+- decisions made by this cycle, for the author to confirm or reverse (added to `review-5.md` `human_review_items`, `human_review: true`)
+        - the D4 `--feature` convention was implemented on `md` ahead of the text-fallback spec, with one name
+        - AC-E1's metric changed from `getBBox` width to advance width
+        - md's HTML output never produces static SVG, so the new feature changes nothing today
+- open finding IDs: none
+- changed files
+        - R2-F3: `darkmatter/cli/src/args/{cli,command,enums,mod}.rs`, `darkmatter/cli/src/{artifact,main,render}.rs`, `darkmatter/cli/src/commands/{compose,mod,render}.rs`, `darkmatter/lib/src/layout/page.rs`, `darkmatter/cli/tests/l1/{main,feature_flag}.rs`, `darkmatter/docs/cli/render.md`, `darkmatter/docs/rendering/mermaid.md`, `.claude/skills/cli/SKILL.md`, `.claude/skills/darkmatter/rendering.md`
+        - R2-F4: `spec.md` (AC-E1 row; the D3 note is for R2-F3), `implementation-log.md` (Decided during implementation)
+        - records: this log and the `review-5.md` frontmatter
+- verification commands
+        - R2-F3.1–3.2: `cargo nextest run -p darkmatter-cli --all-features -E 'test(feature_flag::)'` 11/11 passed; `cd darkmatter && just test feature_flag` 11/11 passed
+        - R2-F3.3 and regressions: darkmatter `just test --no-fail-fast` 10646 passed, 42 known failures unrelated to this cycle (above); `just lint` clean; `just check-tier-coverage darkmatter` 0 stranded
+        - R2-F4.1–4.4: two-host spike readings (table above)
+        - R2-F4.5: darkmatter `just test-browser browser_embedded_mermaid_font_draws_every_label` passed

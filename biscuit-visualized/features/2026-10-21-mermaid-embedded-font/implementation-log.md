@@ -626,6 +626,18 @@ the test page went to `/tmp/bv-s1-out` and are not kept.
   Oracle for Phase 4: a label's measured width equals the sum of the
   subset's `hmtx` advances for its glyphs. The spec's D6 is marked amended.
   Flagged for review (third item of `decisions_for_review`).
+- **AC-E1 compares advance widths (spec D17; review cycle 5, 2026-10-24).**
+  Evidence: section 7.2 and its fresh rerun in review-to-implement
+  iteration 5 (`log.md`). Linux Chromium's `getBBox().width` at device
+  scale factor 1 is the advance box joined with glyph ink rounded outward to
+  whole pixels, with or without an embedded font, so four of 56 readings
+  exceed 0.5 px although every advance width agrees to 0.0000 px; read at
+  scale factor 4 the boxes agree within 0.31 px. The criterion's purpose
+  (identical label widths across readers) is preserved by measuring the
+  advance width, the width layout uses. Choice: AC-E1 compares advance
+  widths within 0.5 px; bounding boxes stay a diagnostic. No dependency,
+  outward action or scope added. The spec's AC-E1 row is marked amended.
+  Flagged for review (`review-5.md` `human_review_items`).
 
 ### Recon 1.1 — `biscuit-visualized` (paths under `biscuit-visualized/src/`)
 
