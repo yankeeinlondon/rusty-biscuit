@@ -12,8 +12,12 @@ source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/
 docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
 docs_created_during_phase_2: [biscuit-hash/docs/json.md]
 skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
-packages: [biscuit-hash]
-start_phase: 3
+packages: [biscuit-hash, darkmatter, dmls]
+start_phase: 4
+source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
+docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: [.claude/skills/darkmatter/frontmatter.md]
 ---
 
 # Plan: Frontmatter key order is the contract, the hash ignores it
@@ -274,7 +278,7 @@ Requires Phase 2.
 - [x] `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`
   passes with the manifest **unchanged** (`replace_heavy` back to
   `9e3319d168b8b47a`)
-- [ ] run the Darkmatter suite and compare against the Phase 1 baseline list
+- [x] run the Darkmatter suite and compare against the Phase 1 baseline list
 
 ---
 

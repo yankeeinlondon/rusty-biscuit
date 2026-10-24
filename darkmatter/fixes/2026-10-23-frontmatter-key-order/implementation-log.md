@@ -11,7 +11,7 @@ source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/
 docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
 docs_created_during_phase_2: [biscuit-hash/docs/json.md]
 skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
-packages: [biscuit-hash]
+packages: [biscuit-hash, darkmatter, dmls]
 decisions_for_review:
     - |-
         S1 found a second order-sensitive schema hash the plan does not name:
@@ -49,22 +49,28 @@ decisions_for_review:
         biscuit-visualized. The alternative was a one-off manual clippy run
         per phase. Reverting is a two-line justfile change.
 message_to_agent: |-
-    Phase 2 is done: biscuit-hash now has a `json` feature exporting
-    `canonical_json(&Value) -> String`, `xx_hash_json(&Value) -> u64` (needs
-    `xx_hash`, a default feature) and `blake3_hash_json(&Value) -> String`
-    (needs `blake3`). `canonical_json` is Darkmatter's `canonical_json_sorted`
-    ported byte-for-byte, so swapping callers keeps compose cache keys
-    identical. For Phase 3:
-    - enable biscuit-hash `json` in darkmatter/lib/Cargo.toml (it already has
-      `blake3`; default features give `xx_hash`).
-    - Phase 1's unlisted callers of `canonical_json_sorted` still apply:
-      compose/context/options.rs (~15 calls) and compose/expression/binding.rs:771.
-    - Darkmatter's four `canonical_json_*` unit tests in compose/cache/hashing.rs
-      were copied (not moved) to biscuit-hash/lib/src/json.rs; delete the
-      Darkmatter copies together with `canonical_json_sorted` and `CanonicalJson`.
-    - Darkmatter's `just test --no-fail-fast` still shows exactly the 45
-      Phase 1 baseline failures.
-    - `just lint` in biscuit-hash now runs `--all-features`.
+    Phase 3 is done. Darkmatter requests serde_json `preserve_order` itself
+    and enables biscuit-hash `json`; the non-strict frontmatter hash, TOC
+    normalized hash, both schema validator cache hashes, and every compose
+    cache key now render through `biscuit_hash::canonical_json`.
+    `canonical_json_sorted` is gone. For Phase 4:
+    - `just test --no-fail-fast` in darkmatter/ shows 44 failures: exactly the
+      Phase 1 baseline minus `benchmark_manifest_matches_recorded_identities`
+      (now passing). All 44 belong to Phase 5's review list.
+    - In this shell `cd darkmatter` (a relative path) resolves through CDPATH
+      to /Volumes/coding/personal/rusty-biscuit, the main checkout, not this
+      worktree. Always cd with absolute worktree paths.
+    - Another process shares this worktree (the dmls incremental-graph
+      feature). At 18:03 it committed the whole tree, this phase's work
+      included (commits bbde223e6 and 09d4679d0). Do not touch the dmls graph
+      files, and expect HEAD to move while you work.
+    - `docs/cli/hash.md` "Normalization Behavior" already states the new
+      non-strict/strict rules; Phase 6 adds the strict-baseline refresh
+      guidance.
+source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
+docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: [.claude/skills/darkmatter/frontmatter.md]
 ---
 
 # Implementation Log for 2026-10-23-frontmatter-key-order (6 phases)
@@ -474,3 +480,46 @@ Targeted run: `cargo nextest run -p darkmatter --lib -E 'test(/markdown::hash::/
   covered by biscuit-hash's `canonical_json_empty_containers`.
 - Updated `docs/cli/hash.md` now rather than waiting for Phase 6, because this
   phase made two of its lines wrong.
+
+### Phase gates
+
+- `darkmatter/`: `just test --no-fail-fast` (run from the worktree):
+  **10620 run, 10576 passed, 44 failed, 10 skipped** (120 s). The failing set
+  was diffed against the Phase 1 baseline list: **no new failures**; one
+  resolved (`benchmark_fixtures::benchmark_manifest_matches_recorded_identities`).
+  The other 44 are pre-existing and on Phase 5's review list (frontmatter
+  metadata test, JSON5 formatter, legacy schema-validate byte comparison, 40
+  `schemas_convert_snapshots::*`, `suggest_constraint_phase3`). The count is 9
+  above Phase 2's 10611: this phase adds 8 tests and deletes 5 (net +3); the
+  other +6 come from the concurrent dmls work on the shared tree.
+- `darkmatter/`: `just lint` clean (exit 0, worktree paths only).
+- Dependents (serial, scoped to code that reads the changed hashes; no public
+  API changed, and `preserve_order` was already unified into every workspace
+  build via merman):
+  - `cargo nextest run -p claudine --lib -E 'test(/composition::closure/) |
+    test(/composition::completion/) | test(/composition::prepare/) |
+    test(/composition::types/) | test(/linking::compatibility/)'`: 227 passed
+  - `cargo nextest run -p claudine-cli -E 'test(/wrap_inline_compose/) |
+    test(/agent_text_is_data/) | test(/commands::wrap::inline/)'`: 62 passed
+  - `cargo nextest run -p messenger -E 'test(/research/)'`: 1 passed
+- Scope check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  gave `change_class: package`, `packages: [darkmatter]`. Gates run, not
+  skipped. By then the tree held only plan/log edits, because another
+  process had already committed this phase's code (below).
+- No cross-OS run: in-memory hashing and string rendering only; no paths,
+  processes, or `cfg` code.
+
+### Environment notes
+
+- In this shell `CDPATH` includes `/Users/ken/coding/personal/rusty-biscuit`,
+  so a relative `cd darkmatter` lands in the **main checkout**. One audit grep
+  and one first `just lint` ran there by mistake. Both were redone against
+  the worktree with absolute paths, and no file outside the worktree was
+  edited. (The main checkout has an unrelated, pre-existing
+  `darkmatter/lib/Cargo.toml` edit that is not from this fix.)
+- A concurrent process working the dmls incremental-graph feature in the same
+  worktree committed the whole working tree at 18:03, this phase's code
+  included (`bbde223e6 fix(darkmatter): make semantic hashes key-order
+  insensitive`, `09d4679d0 planning(darkmatter): record Phase 3 close ...`).
+  This phase made no commits. The plan/log frontmatter and these final log
+  entries are the only uncommitted Phase 3 changes.
