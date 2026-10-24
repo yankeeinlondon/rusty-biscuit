@@ -248,6 +248,32 @@ decisions_for_review:
       about a function that has always kept key order; I fixed the expected
       string to author order. Alternatives: accept all the snapshots as they
       are now, or restore sorted output in the converter.
+    - |-
+      Phase 6: the `md --feature embed-mermaid-font` flag is documented as
+      **planned** in Darkmatter's Mermaid page and CLI render page, although the
+      phase's checkpoint says no "planned" marker may remain. The flag does not
+      exist (task 5.3 is blocked on the text-fallback work), and the repo's
+      rule is that decided-but-unbuilt behavior is written into the docs and
+      marked planned. Alternatives: leave the flag out of the docs entirely
+      (readers would not learn it is coming), or describe it as available
+      (false). Redo cost: two lines, removed when 5.3 lands.
+    - |-
+      Phase 7 (AC-E1): I judged "identical label widths" on each label's
+      text advance width in its computed font, which matched to 0.0000 px
+      between the macOS and Linux readers for both pages (the no-font control
+      differs by up to 29 px). The spec names each label's bounding box;
+      Chrome's SVG `getBBox` width differed by 0.6-1.0 px on 4 of 56 label
+      readings, all on the Linux reader, where those boxes are wider than
+      the labels' own advance widths. The same excess appears there with no
+      embedded font at all (system DejaVu Sans), so it comes from how Linux
+      Chromium sizes an SVG text box, not from the font, and the embedding
+      cannot remove it. Also, `build-linux` has no browser and must not get
+      one installed, so the Linux reader was Debian Chromium 156 in Docker,
+      with the Linux page rendered on `build-linux` itself. Alternatives:
+      read AC-E1 strictly on `getBBox` (then it fails by up to 0.47 px past
+      the 0.5 px tolerance for a reason outside this feature), or widen the
+      tolerance to 1 px. Nothing needs redoing either way; only the
+      criterion's wording would change.
 source_files_during_phase_1:
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
     - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
@@ -324,28 +350,6 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-visualized/SKILL.md
-message_to_agent: |-
-    Phase 5 (Darkmatter) is done except task 5.3; read the log's Phase 5 section.
-    - 5.3 (`md --feature embed-mermaid-font`) is NOT built: `md` still has no
-      `--feature` flag (the text-fallback work has not landed), and the plan
-      forbids a stand-in. When it lands, map the feature to
-      `DarkmatterPage::with_embed_mermaid_font(true)` in darkmatter/cli/src/render.rs
-      and add 5.3's CLI wiring and frontmatter-not-honored tests.
-    - Phase 6 docs to write: the darkmatter mermaid page
-      (darkmatter/docs/rendering/mermaid.md) covering
-      `HtmlOptions::embed_mermaid_font`, `DarkmatterPage::with_embed_mermaid_font`,
-      where the comments and `<style>` go (the body, right before the first
-      diagram), and the sanitizer's one `data:font/ttf` exception
-      (`style_sheet_is_safe`, top-level `@font-face` `src` only). The CLI line
-      stays "planned" until 5.3 lands. Also: the biscuit-visualized topic page
-      and docs/dependencies.md (root and area) for allsorts and its 10
-      transitive crates (aliasable, bitreader, glyph-names, ouroboros,
-      ouroboros_macro, pathfinder_geometry, pathfinder_simd,
-      proc-macro2-diagnostics, unicode-canonical-combining-class,
-      unicode-joining-type).
-    - Darkmatter `just test` has 42 failures that predate this work (JSON key
-      order after commit bbde223e6; listed in the log). Do not treat them as
-      regressions of this feature.
 source_files_during_phase_5:
     - biscuit-visualized/src/src/components/mermaid.rs
     - darkmatter/lib/src/layout/page.rs
@@ -366,6 +370,109 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-visualized/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/README.md
+    - darkmatter/docs/rendering/mermaid.md
+    - darkmatter/docs/cli/render.md
+    - docs/dependencies.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_6:
+    - biscuit-visualized/docs/mermaid-embedded-font.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/darkmatter/rendering.md
+source_files_during_phase_7:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/src/main.rs
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/measure.sh
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Dockerfile
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/src/main.rs
+docs_updated_during_phase_7:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/os/macos.md
+source_code:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
+    - biscuit-visualized/src/src/mermaid/embed/mod.rs
+    - biscuit-visualized/src/src/mermaid/embed/permission.rs
+    - biscuit-visualized/src/src/mermaid/embed/comment.rs
+    - biscuit-visualized/src/src/mermaid/embed/faces.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/postprocess.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/components/graph_expression.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/embed_permission_tests.rs
+    - biscuit-visualized/src/src/tests/embed_comment_tests.rs
+    - biscuit-visualized/src/src/tests/embed_faces_tests.rs
+    - Cargo.lock
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/embed/glyphs.rs
+    - biscuit-visualized/src/src/mermaid/embed/subset.rs
+    - biscuit-visualized/src/src/mermaid/embed/embedding.rs
+    - biscuit-visualized/src/src/tests/embed_glyphs_tests.rs
+    - biscuit-visualized/src/src/tests/embed_subset_tests.rs
+    - biscuit-visualized/src/src/tests/embed_embedding_tests.rs
+    - biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+    - biscuit-visualized/src/src/tests/golden_tests.rs
+    - tools/test-toolkit/src/archive_guard.rs
+    - biscuit-visualized/src/src/artifact.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/fonts/measure.rs
+    - biscuit-visualized/src/src/fonts/shaper.rs
+    - biscuit-visualized/src/src/mermaid/embed/page.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/embed_render_tests.rs
+    - biscuit-visualized/src/src/tests/measure_tests.rs
+    - biscuit-visualized/src/src/components/mermaid.rs
+    - darkmatter/lib/src/layout/page.rs
+    - darkmatter/lib/src/markdown/output/html.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/src/markdown/render_tree/mermaid_font.rs
+    - darkmatter/lib/src/markdown/render_tree/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/tests/browser/browser_render.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/mermaid_embedded_font.rs
+    - .config/nextest.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/src/main.rs
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/measure.sh
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Dockerfile
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/Cargo.toml
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/src/main.rs
+documentation:
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spec.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+    - biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+    - biscuit-visualized/docs/merman.md
+    - biscuit-visualized/docs/dependencies.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-visualized/README.md
+    - darkmatter/docs/rendering/mermaid.md
+    - darkmatter/docs/cli/render.md
+    - docs/dependencies.md
+    - biscuit-visualized/docs/mermaid-embedded-font.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/darkmatter/rendering.md
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/os/macos.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-21-mermaid-embedded-font (7 phases)
@@ -1225,3 +1332,273 @@ Chrome (F3, browser tier).
 - Docs: no `docs/` page changed. The Darkmatter and biscuit-visualized
   pages are Phase 6 (6.1, 6.2). The doc comments of every changed symbol are
   current, including the corrected `HtmlOptions::mermaid_mode` doc.
+
+## Phase 6
+
+Documentation and skills (2026-10-24). No code changed; every page describes
+the behavior Phases 2–5 shipped, read back from the code (comment wording in
+`embed/comment.rs`, the `<style>` layout in `embed/embedding.rs`,
+`style_sheet_is_safe`'s doc, `HtmlOptions::embed_mermaid_font`).
+
+### What was written
+
+- **6.2 `biscuit-visualized`.**
+    - New topic page `biscuit-visualized/docs/mermaid-embedded-font.md`: what
+      the opt-in does, a page-building example (`with_embedded_font`,
+      `render_with_font`, `page_font`), the markup, why `fsType` matters with
+      its table (plus the no-subsetting and bitmap-only bits, multiple bits,
+      reserved bits, unreadable `OS/2`), Inter's OFL notice, the face-choice
+      flowchart (Mermaid), every page-comment reason, subsetting (what is
+      kept, no `GPOS`/`GSUB`/`kern` so plain advances), the 60 KB budget, the
+      unsubset case, characters the face lacks, the failure fallback, and the
+      cache (separate key, `{key}.font.json` record, subset never cached).
+      No browser-check unsubset case is described: the spike chose the subset,
+      so that path does not exist in the code.
+    - Linked from the README's docs list, from `merman.md`'s HTML static
+      target and Cache identity sections, and from the component page
+      (`docs/components/mermaid_diagram.md`, which also gained
+      `with_embedded_font` and `render_to_svg_with_font` rows).
+    - `merman.md`'s "Possible later work" bullet about embedding a font (the
+      Merman work's "follow-up" marker) is removed: it is shipped.
+    - `biscuit-visualized/docs/dependencies.md`: `allsorts` 0.17.0
+      (Apache-2.0, `flate2_rust`, the ten transitive crates), `roxmltree` +
+      `simplecss` (usvg's versions), `base64` (now also a production
+      dependency under `image`). Root `docs/dependencies.md`: a dated
+      Recent Dependency Notes entry with each new crate's version, `allsorts`
+      and `roxmltree`/`simplecss` entries under Image Processing, and the
+      `base64` entry's use. Licenses read from the registry's `Cargo.toml`.
+- **6.1 Darkmatter.** `darkmatter/docs/rendering/mermaid.md` gains
+  "Embedded font" under Static SVG: the opt-in (`with_embed_mermaid_font`,
+  `HtmlOptions::embed_mermaid_font`, `Markdown::as_html`), a flowchart of the
+  page-level step, where the markup goes (body, right before the first
+  diagram) with an example, the marker comment and why it cannot be forged,
+  the sanitizer's one `data:font/ttf` exception with kept/dropped examples,
+  and the limits (static SVG only, coverage, size, failure, kerning, no
+  frontmatter key). The CLI table and `darkmatter/docs/cli/render.md` list
+  `--feature embed-mermaid-font` marked **planned** (see decisions).
+  `blast_radius` gains `mermaid_font.rs`; `last_updated` 2026-10-24.
+- **6.3 Skills.** `.claude/skills/biscuit-visualized/mermaid-rendering.md`:
+  new "Embedded font" section (API, face rule, measurement, subset, markup,
+  cache, tests). `SKILL.md`: the topic row and the in-repo docs list (174
+  lines). `.claude/skills/darkmatter/rendering.md`: new "Embedded Mermaid
+  font" section with the planned CLI wiring point. Darkmatter's `SKILL.md`
+  was already 208 lines before this phase, so nothing was added to it.
+  `CLAUDE.md` unchanged (no convention changed).
+
+### Validation checkpoint 6
+
+- `git diff` of the touched docs and the new page: no `2026-…` feature or
+  fix name, no "spec" or "feature spec".
+- A script resolved every relative link and `#anchor` in the seven touched
+  `docs/` and README files: none missing.
+- The only "planned" marker left is the `md --feature` flag, which is not
+  built (Phase 5's blocked task 5.3).
+
+### Requirement-to-test mapping
+
+No behavior changed in this phase, so no test was added. The documentation
+is checked by the existing corpus tests that parse shipped Markdown
+(Darkmatter's `shipped_markdown_` tests over `.claude/skills`), run below.
+
+### Gates
+
+- Scope, after every edit (frontmatter included):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, test-toolkit]`, `change_class: package`, so the
+  gates ran. Per file: the three skill files and the two Darkmatter docs
+  select `darkmatter` (its shipped-Markdown corpus tests read them);
+  `docs/dependencies.md` selects `test-toolkit` (`ci_workflow_contracts`);
+  the `biscuit-visualized` docs select nothing.
+- `just lint` (biscuit-visualized): clean.
+- `just test` (biscuit-visualized): 1055 passed, 4 skipped, 0 failed.
+- `just check-tier-coverage biscuit-visualized`: stranded 0.
+- `darkmatter`: `just test shipped_markdown_` → 2 passed (the corpus tests
+  that parse every shipped Markdown file, `.claude/skills` and `docs/`
+  included). The 42 pre-existing failures recorded in Phase 5 are in
+  unrelated schema snapshot tests and were not rerun.
+- `just test test-toolkit`: 476 passed, 4 skipped.
+- No cross-OS check: no code changed.
+
+## Phase 7
+
+Final verification (2026-10-24). No shipped code changed. Two throwaway
+evidence tools were added beside the S1 spike, each its own `[workspace]` and
+not a workspace member: `spikes/ac-e1-widths/` (renders the AC-E1 page and
+reads it in headless browsers) and `spikes/ac-e9-identity/` (writes every
+non-opt-in HTML path, using only API older than this feature). Phase 6's doc
+edits were still uncommitted when this phase started; the frontmatter lists
+only this phase's files.
+
+Incident: a frontmatter-editing script opened this log for writing before it
+built the new content, and the build raised, which left the file empty. The
+log was rebuilt from `HEAD` (Phases 1–5), the uncommitted Phase 6 section and
+frontmatter as read earlier in this session, and this section. Phase 6's
+`message_to_agent` is removed (this is the last phase).
+
+### 7.2 AC-E1: two-host width comparison
+
+- **Page:** five diagrams (flowchart, sequence, class, ER, state), 28 label
+  elements, two of them bold, including `Café naïve façade`, `Wait (5 min) &
+  retry` and an em dash. Rendered through
+  `DarkmatterPage::with_embed_mermaid_font(true)` + `MermaidMode::Image`,
+  `MERMAID_FONT` unset, once on each render host. Each page is also written
+  without its `@font-face` `<style>` as a control.
+- **Render hosts and the faces chosen:**
+    - macOS (this Mac): `<!-- mermaid font: "Trebuchet MS" embedded; the face
+      the font chain resolved, fsType 0x0008 (Editable) -->`, regular and bold.
+    - Linux (`build-linux`, `$BUILD_LINUX`, fonts DejaVu/URW/Noto Mono):
+      `<!-- mermaid font: "DejaVu Sans" embedded; the face the font chain
+      resolved, fsType 0x0000 (Installable) -->`, regular and bold.
+- **Reader hosts:** Google Chrome 155 headless on macOS, and Debian
+  bookworm Chromium 156 headless in Docker (`linux/arm64`, only DejaVu
+  fonts installed), because `build-linux` has no browser and the `os` skill
+  forbids installing packages there. Neither window takes focus. Coverage of
+  "own fonts" and "lacks the original face": the macOS reader has Trebuchet
+  MS but no usable DejaVu Sans (its no-font Linux page falls back to
+  Trebuchet), the Linux reader has DejaVu Sans but no Trebuchet MS. So each
+  page is read once by a host that has its face and once by a host that
+  lacks it.
+- **What is measured per label:** `advance`, the text's advance width in the
+  label's own computed font (canvas `measureText` with the element's computed
+  `font-weight`, `font-size` and `font-family`), and `bbox`, Chrome's SVG
+  `getBBox().width` of the element. Both readers loaded every `@font-face`
+  (`status: loaded`, 2 faces per page).
+- **Results** (each cell run twice; both runs byte-identical):
+
+  | Page | Embedded font | max \|advance diff\| | max \|getBBox diff\| | labels with getBBox diff > 0.5 px |
+  | --- | --- | --- | --- | --- |
+  | macOS-rendered | yes | **0.0000 px** | 0.673 px | 3 of 28 (`CUSTOMER`, `ORDER`, `LINE_ITEM`) |
+  | Linux-rendered | yes | **0.0000 px** | 0.969 px | 1 of 28 (`Yes`) |
+  | macOS-rendered | no (control) | 29.11 px | 29.15 px | 28 of 28 |
+  | Linux-rendered | no (control) | 29.11 px | 29.15 px | 28 of 28 |
+
+- **Reading:** with the embedded font every label's width is identical on
+  both readers to four decimals, and the control shows the check bites (up
+  to 29 px, `WaveformAnalyzer`). The 0.6–1.0 px `getBBox` spread on four
+  labels is the Linux reader's SVG box, not the font: on Linux those boxes
+  are wider than the same labels' advance widths, while on macOS box and
+  advance agree within 0.04 px; and the same excess shows up **without** any
+  embedded font (`Yes` is 0.986 px wider than its advance in the Linux
+  reader with the system DejaVu Sans, embedded or not). The roughly 5 px gap
+  between box and advance on two multi-word labels (`Café naïve`, `Wait (5
+  min) &`) is the trailing space the probe trims, and it is equal on both
+  readers. AC-E1 is met on the label widths; see the decision recorded for
+  review about the `getBBox` reading.
+- **Things that cost time (for whoever reruns this):**
+    - the page's `# AC-E1` heading gets `id="ac-e1"`, so the probe's output
+      element is `ac-e1-probe`;
+    - Linux headless Chromium's `--virtual-time-budget` dumps the DOM before
+      font promises settle unless a timer is pending, so the probe holds a
+      `setInterval` until it finishes;
+    - Docker Desktop's file sharing served a stale, truncated copy of a file
+      rewritten under the same name (the dump was the previous file's size
+      and lacked the probe), so `measure.sh` copies each page to a fresh
+      name; it also cannot mount `/tmp`, so the work dir lives under `$HOME`.
+      Both facts, and `build-linux` having no browser or `rsync`, are now in
+      the `os` skill.
+- **Reproduce:** build `spikes/ac-e1-widths` with the workspace's
+  `Cargo.lock` copied in and `CARGO_TARGET_DIR` pointing at the workspace
+  target, run it with an output dir on each render host, build the
+  `rb-ac-e1-chromium` image from the spike's `Dockerfile`, and read each page
+  with `measure.sh mac|linux <work dir> <page> <out.json>`. Scratch output,
+  the Docker image, and the `build-linux` checkout were removed afterwards.
+
+### 7.1 Workspace gates and AC-E9 byte identity
+
+- `just test` (biscuit-visualized): 1055 passed, 4 skipped, 0 failed.
+- `just lint` (biscuit-visualized): clean.
+- `just check-tier-coverage biscuit-visualized`: stranded 0.
+- `just test --no-fail-fast` (darkmatter, all four crates, the recipe's
+  features): 10677 run, 10635 passed, **42 failed**, 10 skipped. The 42 are
+  exactly the pre-existing JSON-key-order failures recorded in Phase 5 (40
+  `schemas_convert_snapshots::*`,
+  `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata`,
+  and the CLI's
+  `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical`);
+  none is in code this feature touched.
+- `just lint` (darkmatter, including the zed-dmls wasm check): clean.
+- `BISCUIT_BROWSER_REQUIRED=1 just test-browser browser_embedded_mermaid_font`
+  (darkmatter): passed, real headless Chrome.
+- `cargo check --workspace`: clean, no warnings (3 min 22 s). No consumer
+  broke on the additive options.
+- `cargo tree -p biscuit-visualized --all-features -e normal --depth 1`:
+  `allsorts v0.17.0`, `roxmltree v0.21.1`, `simplecss v0.2.2`,
+  `base64 v0.22.1` appear as recorded in `docs/dependencies.md` and the
+  area's dependency page; the full tree has no `libz-sys` or other new `-sys`
+  crate (`allsorts` reaches `flate2` with the pure-Rust backend). Nothing
+  unexpected.
+- **AC-E9 byte identity.** `spikes/ac-e9-identity` was built against the
+  pre-feature tree (`08947d5ad`, the commit before the first code change) and
+  the current tree on `build-linux`, each with an empty
+  `BISCUIT_VISUALIZED_CACHE_DIR`, and run on one page with a flowchart, a
+  class diagram and a sequence diagram:
+
+  | Output | Path | Result |
+  | --- | --- | --- |
+  | `page-off.html` (3 `<pre class="mermaid">`) | `DarkmatterPage`, `MermaidMode::Off` (default) | identical, 8,513 bytes |
+  | `page-image.html` (static SVG) | `DarkmatterPage`, `MermaidMode::Image` | identical, 67,510 bytes |
+  | `page-text.html` | `DarkmatterPage`, `MermaidMode::Text` | identical, 846 bytes |
+  | `html-default.html` | `Markdown::as_html(HtmlOptions::default())` | identical, 8,245 bytes |
+  | `html-image.html` (static SVG) | `as_html` with `mermaid_mode = Image` | identical, 74,909 bytes |
+
+  None contains `@font-face`. The plain static-SVG and the default
+  `<pre class="mermaid">` output are byte-identical to before the feature.
+
+### 7.3 AC-E12 record
+
+- The log's Phase 1 section holds the S1 outcome (**subset used**; Chrome
+  155 loaded both subsets, every glyph in the embedded face, name IDs 0, 13
+  and 14 kept; sizes 9,572 / 9,588 bytes for the test string), the
+  `OFL.txt` finding (no Reserved Font Name, so the family is declared as
+  `Inter`), and the `allsorts` version (0.17.0, `default-features = false`,
+  `flate2_rust`).
+- `tests::embed_subset_tests::the_subset_keeps_cmap_os2_and_name` re-reads
+  the shipped subset's table directory (and
+  `the_subset_carries_inters_copyright_and_license` its name IDs); both pass
+  (`just test embed_subset`: 7 passed).
+
+### Validation checkpoint 7: acceptance criteria
+
+| AC | Evidence |
+| --- | --- |
+| AC-E1 | 7.2 above (advance widths identical across macOS and Linux readers; control differs by up to 29 px) |
+| AC-E2 | Phase 5: the seven `svg_sanitizer::tests` font-face tests |
+| AC-E3 | Phase 3: `embed_glyphs_tests::two_diagrams_sharing_and_differing_in_characters`, `embed_subset_tests::every_mapped_code_point_is_in_the_subset_and_nothing_else`, `embed_embedding_tests::real_diagrams_on_one_page_are_covered_by_the_subset` |
+| AC-E4 | Phase 5: `mermaid_embedded_font::a_page_of_diagrams_embeds_one_rule_per_face_and_weight` (light and dark) |
+| AC-E5 | Phases 2 and 4: `embed_faces_tests` (each `fsType` case, `MERMAID_FONT` permitted / Restricted / `Inter`, empty chain) and `embed_render_tests::the_measurer_measures_each_family_in_its_embedded_face` |
+| AC-E6 | Phase 3: `embed_embedding_tests::a_subset_over_budget_is_embedded_and_its_size_logged` (captured log) |
+| AC-E7 | Phase 3: `embed_embedding_tests::a_subsetting_failure_embeds_nothing_and_warns`; Phase 5: `mermaid_font::tests::a_failed_page_font_emits_nothing` |
+| AC-E8 | Phase 1 log (`OFL.txt` has no Reserved Font Name); `the_subset_carries_inters_copyright_and_license`; Phase 5 HTML family assertions |
+| AC-E9 | Default `false`: `html::tests::test_html_options_default`, `the_opt_in_is_off_by_default`; unchanged output: `without_static_svg_the_opt_in_changes_nothing` and the byte-identity run above. The `--feature embed-mermaid-font` part is **not built** (task 5.3, blocked on the text-fallback work; see decisions) |
+| AC-E10 | Phase 4: `embed_render_tests::the_opt_in_has_its_own_cache_keys` |
+| AC-E11 | Phase 6: docs written; checkpoint 6 search found no spec names |
+| AC-E12 | 7.3 above |
+| AC-E13 | Phase 2: `embed_permission_tests` and `embed_faces_tests` |
+| AC-E14 | Phases 2–4: `embed_comment_tests` (every D14 reason, crafted `--`/`>` name) |
+| AC-E15 | Phase 5: `the_ofl_line_accompanies_inter_only`, `mermaid_font_inter_embeds_inter_with_its_ofl_line` |
+
+- Terminal state: **implementation complete, ready for review**, with task
+  5.3 (`md --feature embed-mermaid-font`) still blocked as recorded in
+  Phases 5 and 6. The spec stays in place; nothing was committed or moved.
+
+### Requirement-to-test mapping
+
+No behavior changed in this phase, so no test was added. The phase's
+requirements are evidence runs: AC-E1 by the two-host browser comparison,
+AC-E9 by the byte-identity run against the pre-feature tree, AC-E12 by the
+existing subset tests, each recorded above.
+
+### Gates
+
+- See 7.1. No cross-OS check: no shipped code changed in this phase; the
+  Linux render and Linux reader runs above exercised the feature on Linux
+  directly.
+- Scope, after every edit (frontmatter included):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, test-toolkit]`, `change_class: package` (the
+  skill and `docs/` Markdown their corpus tests read, Phase 6's uncommitted
+  edits included). So the gates ran: besides 7.1, after the `os` skill edit
+  `just test shipped_markdown_` (darkmatter) → 2 passed, and
+  `just test test-toolkit` → 476 passed, 4 skipped.
+- Plan task 5.3 stays unchecked: it is blocked (no `md --feature` flag
+  exists yet), as recorded in Phases 5 and 6 and in the decisions.

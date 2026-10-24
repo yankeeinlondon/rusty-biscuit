@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 6
+phase: 8
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -100,6 +100,109 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/biscuit-visualized/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+- biscuit-visualized/docs/merman.md
+- biscuit-visualized/docs/dependencies.md
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-visualized/README.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/cli/render.md
+- docs/dependencies.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_6:
+- biscuit-visualized/docs/mermaid-embedded-font.md
+skills_files_updated_during_phase_6:
+- .claude/skills/biscuit-visualized/SKILL.md
+- .claude/skills/biscuit-visualized/mermaid-rendering.md
+- .claude/skills/darkmatter/rendering.md
+source_files_during_phase_7:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/src/main.rs
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/measure.sh
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Dockerfile
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/src/main.rs
+docs_updated_during_phase_7:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/os/build-hosts.md
+- .claude/skills/os/macos.md
+source_code:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
+- biscuit-visualized/src/src/mermaid/embed/mod.rs
+- biscuit-visualized/src/src/mermaid/embed/permission.rs
+- biscuit-visualized/src/src/mermaid/embed/comment.rs
+- biscuit-visualized/src/src/mermaid/embed/faces.rs
+- biscuit-visualized/src/src/mermaid/mod.rs
+- biscuit-visualized/src/src/mermaid/postprocess.rs
+- biscuit-visualized/src/src/fonts/chain.rs
+- biscuit-visualized/src/src/components/graph_expression.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/embed_permission_tests.rs
+- biscuit-visualized/src/src/tests/embed_comment_tests.rs
+- biscuit-visualized/src/src/tests/embed_faces_tests.rs
+- Cargo.lock
+- biscuit-visualized/src/Cargo.toml
+- biscuit-visualized/src/src/mermaid/embed/glyphs.rs
+- biscuit-visualized/src/src/mermaid/embed/subset.rs
+- biscuit-visualized/src/src/mermaid/embed/embedding.rs
+- biscuit-visualized/src/src/tests/embed_glyphs_tests.rs
+- biscuit-visualized/src/src/tests/embed_subset_tests.rs
+- biscuit-visualized/src/src/tests/embed_embedding_tests.rs
+- biscuit-visualized/src/src/tests/contrast_corpus_tests.rs
+- biscuit-visualized/src/src/tests/golden_tests.rs
+- tools/test-toolkit/src/archive_guard.rs
+- biscuit-visualized/src/src/artifact.rs
+- biscuit-visualized/src/src/cache/file_cache.rs
+- biscuit-visualized/src/src/fonts/measure.rs
+- biscuit-visualized/src/src/fonts/shaper.rs
+- biscuit-visualized/src/src/mermaid/embed/page.rs
+- biscuit-visualized/src/src/mermaid/render.rs
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+- biscuit-visualized/src/src/tests/measure_tests.rs
+- biscuit-visualized/src/src/components/mermaid.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/markdown/output/html.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- darkmatter/lib/src/markdown/render_tree/mermaid_font.rs
+- darkmatter/lib/src/markdown/render_tree/mod.rs
+- darkmatter/lib/src/markdown/render_tree/svg_sanitizer.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_embedded_font.rs
+- .config/nextest.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/src/main.rs
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/measure.sh
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e1-widths/Dockerfile
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/ac-e9-identity/src/main.rs
+documentation:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spec.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+- biscuit-visualized/docs/merman.md
+- biscuit-visualized/docs/dependencies.md
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-visualized/README.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/cli/render.md
+- docs/dependencies.md
+- biscuit-visualized/docs/mermaid-embedded-font.md
+- .claude/skills/biscuit-visualized/SKILL.md
+- .claude/skills/biscuit-visualized/mermaid-rendering.md
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/os/build-hosts.md
+- .claude/skills/os/macos.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Embedded Font for Mermaid Static SVG
@@ -660,7 +763,7 @@ easier to see than to read. README files stay overviews.
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **6.1 Darkmatter docs.**
+- [x] **6.1 Darkmatter docs.**
     - Update `darkmatter/docs/rendering/mermaid.md` (or the page that now covers
       static SVG): the opt-in, `--feature embed-mermaid-font`, the
       `HtmlOptions::embed_mermaid_font` field, an end-to-end example, the page
@@ -669,7 +772,7 @@ easier to see than to read. README files stay overviews.
       only).
     - Add the `md` CLI usage line to the area's CLI doc under `docs/`; do not
       grow the README.
-- [ ] **6.2 `biscuit-visualized` docs.**
+- [x] **6.2 `biscuit-visualized` docs.**
     - A new topic page (for example `docs/mermaid-embedded-font.md`) with: why
       embed, a plain explanation of `fsType` and its table (installable, editable,
       preview & print, restricted) and why embedding redistributes a font, the
@@ -680,7 +783,7 @@ easier to see than to read. README files stay overviews.
       index and from the Mermaid page.
     - Record the `allsorts` dependency in `biscuit-visualized/docs/dependencies.md`
       and the root `docs/dependencies.md` (R-E10), with purpose, license and link.
-- [ ] **6.3 Skills.**
+- [x] **6.3 Skills.**
     - Update `.claude/skills/biscuit-visualized/` and `.claude/skills/darkmatter/`
       with the opt-in, the face rule, and where the code lives. Keep entry points
       under 200 lines, linking to the docs.
@@ -698,14 +801,14 @@ easier to see than to read. README files stay overviews.
 
 ### Wave 1 (parallel)
 
-- [ ] **7.1 Workspace gates.**
+- [x] **7.1 Workspace gates.**
     - `just test` and `just lint` in `biscuit-visualized` and `darkmatter`;
       `cargo check --workspace` proves no consumer broke on the additive option;
       `cargo tree -p biscuit-visualized` shows `allsorts` and nothing unexpected
       (R-E10's dependency record matches reality).
     - The plain static-SVG HTML and the default `<pre class="mermaid">` HTML on a
       representative page are byte-identical to the pre-change output (AC-E9).
-- [ ] **7.2 AC-E1: two-host width comparison (run once).**
+- [x] **7.2 AC-E1: two-host width comparison (run once).**
     - Render one multi-diagram page with the opt-in on the macOS host and on a
       Linux host (load the `os` skill for how to reach `build-linux`), open each
       in headless Chrome without window focus, read every label's bounding box,
@@ -714,7 +817,7 @@ easier to see than to read. README files stay overviews.
       and once with a host that lacks the original face, as AC-E1 describes.
     - Record the page, the faces chosen on each host, and the results in the
       implementation log. A Windows run is not part of AC-E1 (Rule J).
-- [ ] **7.3 AC-E12 record.**
+- [x] **7.3 AC-E12 record.**
     - Confirm the log holds the S1 outcome (subset used, or unsubset fallback
       with sizes), the `OFL.txt` Reserved-Font-Name finding, and the chosen
       `allsorts` version. Re-read the shipped subset's table directory in a test

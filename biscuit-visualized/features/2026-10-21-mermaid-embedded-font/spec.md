@@ -27,7 +27,8 @@ reviewed_by: claude/opus
 reviewed_on: 2026-10-22
 review_note: "the clarification process served as a review"
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 needs_rulings: false
 depends-on:
     - 2026-10-21-merman
