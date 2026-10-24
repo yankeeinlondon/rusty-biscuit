@@ -66,10 +66,14 @@ component from `components`.
 
 Install `TerminalDiagramRenderer` with
 `TerminalRenderOptions::with_diagram_renderer(Rc::new(TerminalDiagramRenderer))`.
-It renders exactly `MermaidDiagram::new(source).try_render(terminal)`, with the
-terminal's `fixed_width` set to `DiagramRenderRequest::available_width` (the
-fence's columns: a list item's or quote's inner width), and never
-builds a render tree, so it cannot re-promote its own fence. When and how
+At `GraphicsMode::Rich` it answers `DiagramOutcome::Rendered` with exactly
+`MermaidDiagram::new(source).try_render(terminal)`, with the terminal's
+`fixed_width` set to `DiagramRenderRequest::available_width` (the fence's
+columns: a list item's or quote's inner width). Below `Rich` (an `Automatic`
+render at `Vector`) it returns `DiagramOutcome::Declined`, so the fence stays
+code and never carries an image. A fragment it returns (`DiagramOutcome::Nodes`)
+is rendered by biscuit-terminal with promotion off, so it cannot re-promote its
+own fence. When and how
 biscuit-terminal consults it (and the strictness rules on failure) is in the
 `biscuit-terminal` skill's `diagrams.md`. Darkmatter installs it in
 `markdown/render_tree/entrypoints.rs`; consumers: `bt` (diagram commands),

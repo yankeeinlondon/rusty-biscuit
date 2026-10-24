@@ -177,6 +177,80 @@ buffer instead of building an intermediate fragment per node. Its bytes are
 identical to composing through `render_browser_document`; reach for it when a
 caller already owns a `Document` and only needs the final string.
 
+### Terminal Mermaid promotion and the diagram hook
+
+A `mermaid` code block reaches the terminal renderer as an ordinary
+`NodeKind::Code` node. Two context fields decide whether it is *promoted* to a
+diagram:
+
+- `GraphicsMode` is the fidelity **ceiling**: `Rich` (images allowed),
+  `Vector` (text and box drawing only) or `Off`.
+- `TerminalMermaidMode` is the **opt-in**. `Code`, the default, never promotes.
+
+| `TerminalMermaidMode` | Meaning | Hook offered the fence at |
+| --- | --- | --- |
+| `Code` (default) | The fence stays a code block | never |
+| `Image` | An image, or the code block | `Rich` |
+| `Automatic` | An image when graphics allow one; otherwise an eligible text drawing; otherwise the code block | `Rich` and `Vector` |
+
+The terminal renderer draws no diagrams itself. A program that wants them
+installs a `DiagramRenderer` hook (`TerminalRenderOptions::with_diagram_renderer`;
+`biscuit-visualized`'s `TerminalDiagramRenderer` is the one in this repository).
+The hook's request carries the fence source, the node's attributes, the
+capability snapshot, the available width, and the `graphics_mode` ceiling. A
+hook must not exceed that ceiling: at `Vector` it may answer with text, never
+with an image.
+
+The hook answers with one of three outcomes, or an error:
+
+```mermaid
+flowchart TD
+    F[mermaid code node] --> P{mode and ceiling allow promotion?}
+    P -- no --> C[code block, through code_renderer]
+    P -- yes --> H{hook installed?}
+    H -- no --> C
+    H -- yes --> R[DiagramRenderer]
+    R -- "Rendered(String)" --> O[printed verbatim]
+    R -- "Nodes(fragment)" --> N[fragment laid out in place]
+    R -- Declined --> C
+    R -- Err --> S{strictness}
+    S -- Strict --> X[render rejected]
+    S -- "Warn / Lossy" --> C
+```
+
+- **`Rendered`** is output the hook already formatted, such as an image escape
+  sequence.
+- **`Nodes`** is a render-tree fragment, laid out where the fence stood, at its
+  indent and width. A text drawing arrives as a `txt` code node and a source
+  fallback as a `mermaid` code node. The fragment is rendered with promotion
+  off, so its `mermaid` node prints as code instead of reaching the hook again.
+- **`Declined`** means "show the source". The fence renders as the ordinary
+  code block with **no diagnostic** under every strictness, exactly as if the
+  hook had not been called.
+- An **error** is a real failure (invalid source, a failed image route). Under
+  `Strict` it rejects the render; under `Warn` it records a lossy diagnostic
+  and falls back to the code block; under `Lossy` it falls back silently.
+
+**Highlighting is the program's choice.** Every code node, whether it was a
+fence, a declined fence, or part of a hook's fragment, goes through the
+`code_renderer` slot (`TerminalRenderOptions::with_code_renderer`, any
+`renderable::tree::CodeRenderer`). Darkmatter's code renderer highlights; with
+none installed, code nodes render unhighlighted.
+
+```rust
+use std::rc::Rc;
+use biscuit_terminal::render_tree::{render_terminal_node, TerminalRenderOptions};
+use biscuit_visualized::components::TerminalDiagramRenderer;
+use renderable::tree::{GraphicsMode, RenderNode, RenderStrictness, TerminalMermaidMode};
+
+let mut opts = TerminalRenderOptions::new(&terminal, RenderStrictness::Strict)
+    .with_diagram_renderer(Rc::new(TerminalDiagramRenderer));
+opts.context.mermaid_mode = TerminalMermaidMode::Automatic;
+opts.context.graphics_mode = GraphicsMode::Vector; // text at most
+let fence = RenderNode::code(Some("mermaid".into()), None, "flowchart LR\n  A --> B");
+let rendered = render_terminal_node(&fence, &opts)?;
+```
+
 ### Markdown spellings
 
 The Markdown renderer picks one spelling for constructs CommonMark can write

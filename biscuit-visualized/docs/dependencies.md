@@ -96,15 +96,19 @@ flowchart LR
 
     _The Mermaid parser, layout engine, and SVG renderer, modeling Mermaid.js
     12.2.0 (see [Merman rendering](./merman.md)). With
-    `default-features = false` and features `svg`, `all-diagrams`, and
-    `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off,
+    `default-features = false` and features `svg`, `ascii`, `all-diagrams`,
+    and `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off,
     because this crate rasterizes with its own `resvg` and measures text with
-    its own font chain. Brings `merman-core`, `merman-render`,
+    its own font chain. `ascii` is Merman's text target: it draws a diagram
+    with box-drawing (or plain ASCII) characters for a terminal that cannot
+    show images, and publishes which families it can draw
+    (`ascii_capabilities()`), which decides when a text drawing may replace
+    the source. Brings `merman-core`, `merman-render`, `merman-ascii`,
     `merman-theme-contract`, and `merman-unicode-linebreak` from the same
     rev._
 
     ```toml
-    merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "all-diagrams", "layout-cytoscape"], optional = true }
+    merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "ascii", "all-diagrams", "layout-cytoscape"], optional = true }
     ```
 
     - **Why a fork.** The dependency is Ken's fork of

@@ -52,6 +52,8 @@ mod postprocess_tests;
 mod raster_tests;
 #[cfg(feature = "image")]
 mod theme_tests;
+#[cfg(feature = "terminal")]
+mod text_tests;
 
 #[cfg(feature = "image")]
 use tempfile::TempDir;

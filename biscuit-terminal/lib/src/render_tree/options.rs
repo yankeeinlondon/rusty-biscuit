@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
-use renderable::tree::{CodeRenderer, GraphicsMode, NodeAttrs, RenderStrictness, TerminalMermaidMode};
+use renderable::tree::{
+    CodeRenderer, GraphicsMode, NodeAttrs, RenderNode, RenderStrictness, TerminalMermaidMode,
+};
 
 /// How an image renders when no raster form is emitted (graphics off / vector,
 /// or a failed protocol render).
@@ -112,8 +114,8 @@ pub struct TerminalRenderContext {
     /// Whether Mermaid code fences are promoted to diagrams.
     ///
     /// Orthogonal to [`graphics_mode`](Self::graphics_mode), which is the
-    /// fidelity ceiling: a Mermaid fence is promoted only when this opt-in is
-    /// [`TerminalMermaidMode::Image`] *and* the tier permits rasterization.
+    /// fidelity ceiling: a Mermaid fence is promoted only when this opt-in
+    /// and the ceiling both allow it (see [`DiagramRenderer`]).
     pub mermaid_mode: TerminalMermaidMode,
     /// Base path for resolving relative image paths at
     /// [`GraphicsMode::Rich`]. When `None`, the current working directory is
@@ -377,14 +379,24 @@ impl TerminalRenderOptions {
 /// [`TerminalRenderOptions::diagram_renderer`]; `biscuit-visualized` provides
 /// one behind its `terminal` feature.
 ///
-/// The renderer consults the hook only for a `mermaid` fence when
-/// [`TerminalRenderContext::mermaid_mode`] is [`TerminalMermaidMode::Image`]
-/// and [`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`], and
-/// before the [`CodeRenderer`] hook. An `Err` is handled by the render's
-/// [`RenderStrictness`]: `Strict` rejects the render, `Warn` records a lossy
-/// diagnostic, and both `Warn` and `Lossy` fall back to code rendering.
+/// The renderer consults the hook for a `mermaid` fence, before the
+/// [`CodeRenderer`] hook, when [`TerminalRenderContext::mermaid_mode`] and
+/// [`TerminalRenderContext::graphics_mode`] allow it:
+///
+/// | `mermaid_mode` | `Rich` | `Vector` | `Off` |
+/// | --- | --- | --- | --- |
+/// | [`Code`](TerminalMermaidMode::Code) | no | no | no |
+/// | [`Image`](TerminalMermaidMode::Image) | yes | no | no |
+/// | [`Automatic`](TerminalMermaidMode::Automatic) | yes | yes | no |
+///
+/// The hook must not exceed [`DiagramRenderRequest::graphics_mode`]: at
+/// `Vector` it may answer with text but never an image. An `Err` is handled by
+/// the render's [`RenderStrictness`]: `Strict` rejects the render, `Warn`
+/// records a lossy diagnostic, and both `Warn` and `Lossy` fall back to code
+/// rendering. [`DiagramOutcome::Declined`] renders the code block with no
+/// diagnostic under every strictness.
 pub trait DiagramRenderer {
-    /// Renders `request.source` to terminal output.
+    /// Renders `request.source` for the terminal.
     ///
     /// ## Errors
     ///
@@ -394,7 +406,24 @@ pub trait DiagramRenderer {
     fn render_terminal_diagram(
         &self,
         request: &DiagramRenderRequest<'_>,
-    ) -> Result<String, DiagramRenderError>;
+    ) -> Result<DiagramOutcome, DiagramRenderError>;
+}
+
+/// A [`DiagramRenderer`]'s successful answer.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum DiagramOutcome {
+    /// Terminal output the hook already formatted (for example an image
+    /// escape sequence), printed verbatim in place of the fence.
+    Rendered(String),
+    /// A render-tree fragment laid out in place of the fence, at the fence's
+    /// indent and available width. Code nodes in it go through the installed
+    /// [`CodeRenderer`]; a `mermaid` code node in it is never offered to the
+    /// diagram hook again.
+    Nodes(Vec<RenderNode>),
+    /// The hook chose not to draw this fence. It renders as the ordinary code
+    /// block, with no diagnostic, exactly as if the hook had not been called.
+    Declined,
 }
 
 /// What the render-tree renderer hands a [`DiagramRenderer`].
@@ -410,6 +439,8 @@ pub struct DiagramRenderRequest<'a> {
     pub terminal: &'a Terminal,
     /// The columns available at the fence's position.
     pub available_width: u32,
+    /// The render's fidelity ceiling: `Rich` or `Vector`, never `Off`.
+    pub graphics_mode: GraphicsMode,
 }
 
 /// Why a [`DiagramRenderer`] could not draw a diagram.

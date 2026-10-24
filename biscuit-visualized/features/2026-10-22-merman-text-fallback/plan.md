@@ -1,14 +1,52 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- renderable
+- biscuit-terminal
+- biscuit-visualized
+source_files_during_phase_2:
+- renderable/src/tree/mod.rs
+- biscuit-terminal/lib/src/render_tree/options.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- biscuit-terminal/lib/src/render_tree/mod.rs
+- biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+- biscuit-visualized/src/src/components/render_hook.rs
+- biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+docs_updated_during_phase_2:
+- renderable/docs/tree-rendering.md
+- biscuit-visualized/docs/components/mermaid_diagram.md
+- biscuit-terminal/README.md
+- biscuit-terminal/lib/README.md
+docs_created_during_phase_2:
+- biscuit-terminal/docs/render-tree.md
+skills_files_updated_during_phase_2:
+- .claude/skills/biscuit-terminal/diagrams.md
+- .claude/skills/biscuit-visualized/diagram-components.md
+- .claude/skills/renderable/tree.md
+source_files_during_phase_3:
+- biscuit-visualized/src/Cargo.toml
+- biscuit-visualized/src/src/mermaid/text.rs
+- biscuit-visualized/src/src/mermaid/mod.rs
+- biscuit-visualized/src/src/mermaid/render.rs
+- biscuit-visualized/src/src/fonts/chain.rs
+- biscuit-visualized/src/src/cache/file_cache.rs
+- biscuit-visualized/src/src/tests/mod.rs
+- biscuit-visualized/src/src/tests/text_tests.rs
+docs_updated_during_phase_3:
+- biscuit-visualized/docs/dependencies.md
+- docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/biscuit-visualized/SKILL.md
+- .claude/skills/biscuit-visualized/mermaid-rendering.md
 ---
 
 # Plan: Merman Text Fallback
@@ -195,14 +233,14 @@ Requires Rule A.
 
 ### Wave 1 (parallel; disjoint crates)
 
-- [ ] **2.1 Automatic variant.**
+- [x] **2.1 Automatic variant.**
     - Add `TerminalMermaidMode::Automatic` to `renderable/src/tree/mod.rs`
       with docs saying: image when graphics allow, eligible text otherwise,
       code when not eligible. `Code` stays the default.
     - Fix every exhaustive match found in task 1.3 so `cargo check --workspace`
       compiles (AC-F15). Darkmatter's mapping is done in Phase 5.
     - Update `renderable/docs/tree-rendering.md` for the variant.
-- [ ] **2.2 Hook contract.**
+- [x] **2.2 Hook contract.**
     - Per Rule A: introduce the generic outcome type and change
       `DiagramRenderer`'s return; add `graphics_mode` to
       `DiagramRenderRequest` (it is `#[non_exhaustive]`, so additive).
@@ -235,10 +273,10 @@ never discovers a terminal (spec: Ownership).
 
 ### Wave 1
 
-- [ ] **3.1 Enable ascii.** Enable Merman's `ascii` feature at the same pinned
+- [x] **3.1 Enable ascii.** Enable Merman's `ascii` feature at the same pinned
   rev as the SVG backend; no second version, no CLI shell-out, no default
   features. Update `biscuit-visualized/docs/dependencies.md`.
-- [ ] **3.2 Eligibility.**
+- [x] **3.2 Eligibility.**
     - A function that takes the parsed diagram's `diagram_type`, looks it up in
       `ascii_capabilities()`, and returns an eligibility value carrying
       coverage (`Full`/`Partial`) and whether `Auto` layout is admitted.
@@ -255,7 +293,7 @@ never discovers a terminal (spec: Ownership).
 
 ### Wave 2 (depends on Wave 1; tasks 3.3 and 3.4 are independent of each other)
 
-- [ ] **3.3 Text render operation.**
+- [x] **3.3 Text render operation.**
     - A fallible operation on the artifact `MermaidDiagram` in `mermaid/render.rs`
       taking explicit options: drawing charset (Unicode/ASCII), maximum
       columns, display-width profile, deadline, and a show-partial flag is *not*
@@ -277,26 +315,26 @@ never discovers a terminal (spec: Ownership).
     - ASCII drawing changes connectors and borders only; authored Unicode
       labels are preserved. Control characters from labels are neutralized so
       they cannot reach the terminal (AC-F14).
-- [ ] **3.4 Test seams.** Counters (test-only or injectable) for artifact
+- [x] **3.4 Test seams.** Counters (test-only or injectable) for artifact
   writes, font-chain initialization and Merman text requests, so AC-F13 is
   deterministic; an injectable failure for limit/cancellation so AC-F14 never
   sleeps.
 
 ### Validation checkpoint 3 (L1 in `biscuit-visualized`)
 
-- [ ] AC-F11: flowchart too wide canonically but fit compactly → compact;
+- [x] AC-F11: flowchart too wide canonically but fit compactly → compact;
   too wide for both → source outcome; state diagram too wide canonically →
   source outcome with exactly one request (no compact attempt). Assert the
   requested and reported layout profile.
-- [ ] AC-F2: dense class/ER diagram at a narrow width whose reported projection
+- [x] AC-F2: dense class/ER diagram at a narrow width whose reported projection
   is `StructuredText` → source outcome (assert the reported projection).
-- [ ] AC-F14: exact snapshots in both drawing charsets, authored Unicode,
+- [x] AC-F14: exact snapshots in both drawing charsets, authored Unicode,
   significant spaces, multiline labels, nested available width, label control
   characters; unsupported family, invalid source, over-wide output, injected
   limit and cancellation each yield source/error as the table specifies.
-- [ ] AC-F13 (backend half): zero artifact writes, zero font-chain inits, at
+- [x] AC-F13 (backend half): zero artifact writes, zero font-chain inits, at
   most one text request.
-- [ ] `just test`, `just lint` in `biscuit-visualized`.
+- [x] `just test`, `just lint` in `biscuit-visualized`.
 
 ## Phase 4: Policy, Presentation, Component and Hook (`biscuit-visualized`)
 

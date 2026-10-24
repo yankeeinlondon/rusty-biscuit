@@ -256,6 +256,9 @@ Entry points:
   `TerminalRenderable::render` is infallible, `TreeComponent` always renders
   non-strict and emits a visible diagnostic fallback string if rendering still
   fails — it never panics.
+- Two optional hooks let a program add what this crate does not know: a code
+  renderer (highlighting) and a diagram renderer (Mermaid fences). See
+  [docs/render-tree.md](docs/render-tree.md).
 
 ```rust
 use biscuit_terminal::components::block_quote::BlockQuote;

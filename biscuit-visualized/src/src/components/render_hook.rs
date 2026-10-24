@@ -1,7 +1,10 @@
 //! The diagram hook `biscuit-terminal`'s render-tree renderer calls for a
 //! Mermaid code fence.
 
-use biscuit_terminal::render_tree::{DiagramRenderError, DiagramRenderRequest, DiagramRenderer};
+use biscuit_terminal::render_tree::{
+    DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer,
+};
+use renderable::tree::GraphicsMode;
 
 use super::mermaid::MermaidDiagram;
 
@@ -31,7 +34,12 @@ impl DiagramRenderer for TerminalDiagramRenderer {
     fn render_terminal_diagram(
         &self,
         request: &DiagramRenderRequest<'_>,
-    ) -> Result<String, DiagramRenderError> {
+    ) -> Result<DiagramOutcome, DiagramRenderError> {
+        // This hook draws images only, so below the `Rich` ceiling it leaves
+        // the fence to the code block.
+        if request.graphics_mode != GraphicsMode::Rich {
+            return Ok(DiagramOutcome::Declined);
+        }
         // Size the diagram to the fence's columns (a list item's or quote's
         // inner width), not the whole terminal.
         let mut terminal = request.terminal.clone();
@@ -40,7 +48,7 @@ impl DiagramRenderer for TerminalDiagramRenderer {
         // so the fence cannot be promoted again.
         MermaidDiagram::new(request.source)
             .try_render(&terminal)
-            .map(|rendered| rendered.output)
+            .map(|rendered| DiagramOutcome::Rendered(rendered.output))
             .map_err(DiagramRenderError::new)
     }
 }

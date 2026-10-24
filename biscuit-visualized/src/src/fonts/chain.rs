@@ -204,12 +204,27 @@ pub(crate) struct FontChain {
 /// `MERMAID_FONT` is read once, here.
 pub(crate) fn default_chain() -> &'static Arc<FontChain> {
     static CHAIN: OnceLock<Arc<FontChain>> = OnceLock::new();
+    #[cfg(test)]
+    DEFAULT_CHAIN_REQUESTS.with(|requests| requests.set(requests.get() + 1));
     CHAIN.get_or_init(|| {
         let mut db = Database::new();
         db.load_system_fonts();
         let mermaid_font = std::env::var(MERMAID_FONT_ENV).ok();
         Arc::new(FontChain::build(db, GenericSource::Os, mermaid_font.as_deref()))
     })
+}
+
+#[cfg(test)]
+thread_local! {
+    static DEFAULT_CHAIN_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times this thread asked for [`default_chain`] since the last
+/// call, and resets the count: a path that never asks never builds the chain
+/// or loads a font through it.
+#[cfg(test)]
+pub(crate) fn take_default_chain_requests() -> usize {
+    DEFAULT_CHAIN_REQUESTS.with(|requests| requests.replace(0))
 }
 
 impl FontChain {

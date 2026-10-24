@@ -67,6 +67,9 @@ use super::gitgraph_layout::{self, TagLabels};
 use super::newline::rewrite_label_newlines;
 use super::palette::Palette;
 use super::postprocess::{html_static, postprocess};
+use super::text::{TextEligibility, text_eligibility};
+#[cfg(feature = "terminal")]
+use super::text::{self, TextOptions, TextRender, TextSource};
 
 /// The font stack the site config sets: Mermaid.js 12.2.0's themes'
 /// `themeVariables.fontFamily`. It ends in `sans-serif` (R-T9). Setting it
@@ -900,6 +903,104 @@ impl MermaidDiagram {
             .unwrap_or_else(|| "Mermaid diagram".to_string())
     }
 
+    /// The diagram's text eligibility: `Some` when its family's text drawing
+    /// may replace the source ([`text_eligibility`]), from Merman's own
+    /// preprocessing and type detection of the source, so a comment or
+    /// directive is never taken for the header. `None` also for a source
+    /// Merman cannot detect a diagram in.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::MermaidDiagram;
+    ///
+    /// let flowchart = MermaidDiagram::new("%% mindmap\nflowchart LR\n    A --> B");
+    /// assert_eq!(flowchart.text_eligibility().map(|e| e.family()), Some("flowchart"));
+    /// assert!(MermaidDiagram::new("pie\n    \"A\" : 1").text_eligibility().is_none());
+    /// ```
+    pub fn text_eligibility(&self) -> Option<TextEligibility> {
+        let source = rewrite_label_newlines(&self.instructions);
+        source_theme(&source).diagram_type.and_then(text_eligibility)
+    }
+
+    /// Draws the diagram as text for a terminal that cannot show images.
+    ///
+    /// At most one Merman request, bounded by the
+    /// [time budget](Self::with_time_budget), and none when the family is not
+    /// eligible ([`text_eligibility`](Self::text_eligibility)) or `options`
+    /// has no columns. A family that admits Merman's `auto` layout is
+    /// requested with it (canonical, then compact once when canonical is too
+    /// wide); every other family is requested canonically. The source goes
+    /// through the same rewrites and site config as [`render`](Self::render);
+    /// no SVG is drawn, no font is loaded, and no artifact is written.
+    ///
+    /// ## Returns
+    ///
+    /// [`TextRender::Drawing`] when Merman drew the diagram and every row fits
+    /// `options.max_columns()` terminal cells; otherwise
+    /// [`TextRender::Source`] with the reason. A drawing is never clipped or
+    /// wrapped to fit.
+    ///
+    /// ## Errors
+    ///
+    /// `MermaidError::RenderFailed` when the source does not parse, Merman
+    /// fails, exceeds the time budget (logged as a warning), or reaches a
+    /// resource limit. Nothing is retried.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::{MermaidDiagram, TextOptions, TextRender};
+    ///
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+    /// let TextRender::Drawing(drawing) = diagram.render_text(TextOptions::new(80))? else {
+    ///     panic!("a two-node flowchart fits 80 columns");
+    /// };
+    /// assert!(drawing.text().contains('A'));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[cfg(feature = "terminal")]
+    pub fn render_text(&self, options: TextOptions) -> Result<TextRender, MermaidError> {
+        self.render_text_with(options, merman::ascii::AsciiResourcePolicy::default())
+    }
+
+    /// [`render_text`](Self::render_text) under Merman resource limits
+    /// `resources`, so a test can reach a limit without a huge diagram.
+    #[cfg(feature = "terminal")]
+    pub(crate) fn render_text_with(
+        &self,
+        options: TextOptions,
+        resources: merman::ascii::AsciiResourcePolicy,
+    ) -> Result<TextRender, MermaidError> {
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let source_theme = source_theme(&source);
+        let Some(eligibility) = source_theme.diagram_type.and_then(text_eligibility) else {
+            return Ok(TextRender::Source(TextSource::Ineligible));
+        };
+        if options.max_columns() == 0 {
+            return Ok(TextRender::Source(TextSource::NoColumns));
+        }
+        // The text target reads no palette or fonts: only the site config
+        // (the caller's `MermaidConfig`, and the author's variables over it).
+        let prepared = Prepared {
+            site_config: self.site_config(&self.palette(), false, source_theme.author_variables.as_ref()),
+            source,
+            family: source_theme.family,
+            design: None,
+        };
+        let request = text::ascii_request(eligibility, options, resources);
+        let control = self.control();
+        record_text_request();
+        let output = self.call_merman(|| {
+            renderer(&prepared).render(merman::RenderRequest::ascii(&prepared.source, control.clone(), request))
+        })?;
+        match output {
+            RenderOutput::Ascii(Some(output)) => Ok(text::judge(&output, eligibility, options)),
+            RenderOutput::Ascii(None) => Err(MermaidError::RenderFailed("no Mermaid diagram detected".to_string())),
+            other => Err(MermaidError::RenderFailed(format!("unexpected Merman output: {other:?}"))),
+        }
+    }
+
     /// Returns a fallback code block representation of the diagram.
     ///
     /// This is useful for environments that don't support image rendering,
@@ -1049,6 +1150,10 @@ enum AuthorTheme {
 /// What the source says about its own styling, read before rendering.
 struct SourceTheme {
     family: Option<String>,
+    /// Merman's metadata id for the detected type (`flowchart`, `gitgraph`,
+    /// …), the key of its text capabilities. Unlike `family`, which is
+    /// `gitGraph` for a gitGraph.
+    diagram_type: Option<&'static str>,
     author_theme: AuthorTheme,
     /// The author's `themeVariables` when they set a color
     /// ([`AuthorTheme::Variables`]).
@@ -1066,6 +1171,7 @@ fn source_theme(source: &str) -> SourceTheme {
     let Ok(preprocessed) = merman::preprocess_diagram(source, engine.registry()) else {
         return SourceTheme {
             family: None,
+            diagram_type: None,
             author_theme: AuthorTheme::None,
             author_variables: None,
             author_config: serde_json::Value::Null,
@@ -1080,15 +1186,14 @@ fn source_theme(source: &str) -> SourceTheme {
         AuthorTheme::None
     };
     let mut config = preprocessed.config.clone();
-    let family = engine
-        .registry()
-        .detect_type(preprocessed.source.text(), &mut config)
-        .ok()
+    let detected = engine.registry().detect_type(preprocessed.source.text(), &mut config).ok();
+    let family = detected
         .and_then(merman::diagram_type_family_id)
         .map(|family| family.as_str().to_string());
+    let diagram_type = detected.and_then(merman::diagram_type_metadata_id);
     let author_variables = (author_theme == AuthorTheme::Variables).then(|| author["themeVariables"].clone());
     let author_config = author.clone();
-    SourceTheme { family, author_theme, author_variables, author_config }
+    SourceTheme { family, diagram_type, author_theme, author_variables, author_config }
 }
 
 /// Whether an author's `themeVariables` set a color anywhere (a string, or a
@@ -1242,6 +1347,24 @@ thread_local! {
 fn record_merman_call(elapsed: Duration) {
     #[cfg(test)]
     MERMAN_CALLS.with(|calls| calls.borrow_mut().push(elapsed));
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEXT_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "terminal")]
+fn record_text_request() {
+    #[cfg(test)]
+    TEXT_REQUESTS.with(|requests| requests.set(requests.get() + 1));
+}
+
+/// How many Merman text requests this thread made since the last call, and
+/// resets the count.
+#[cfg(test)]
+pub(crate) fn take_text_requests() -> usize {
+    TEXT_REQUESTS.with(|requests| requests.replace(0))
 }
 
 #[cfg(test)]

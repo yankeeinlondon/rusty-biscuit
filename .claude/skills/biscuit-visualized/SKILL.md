@@ -36,7 +36,7 @@ let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
 
 | Topic | Description |
 |-------|-------------|
-| [Mermaid Rendering](./mermaid-rendering.md) | Merman pipeline, `MermaidDiagram` API, time budget, fallback, palettes and themes, config, post-process, gitGraph `commitSpacing`, HTML static target and its embedded-font opt-in |
+| [Mermaid Rendering](./mermaid-rendering.md) | Merman pipeline, `MermaidDiagram` API, time budget, fallback, text target (`render_text`, eligibility from Merman's `ascii_capabilities()`), palettes and themes, config, post-process, gitGraph `commitSpacing`, HTML static target and its embedded-font opt-in |
 | [Diagram Components](./diagram-components.md) | Terminal components, `TerminalDiagramRenderer` hook, GitGraph contract, `l1` tests |
 | [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
 | [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout, Mermaid cache key |
@@ -124,7 +124,8 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 |------|-------------|
 | `lib.rs` | Root module exports |
 | `artifact.rs` | OutputFormat, RenderRequest, RenderedArtifact, Background |
-| `mermaid/render.rs` | `MermaidDiagram`: pipeline, Merman requests, time budget, cache key, background, `natural_size` |
+| `mermaid/render.rs` | `MermaidDiagram`: pipeline, Merman requests, time budget, cache key, background, `natural_size`, `render_text` |
+| `mermaid/text.rs` | Text target types, eligibility from `ascii_capabilities()` (no family list), fit judgment in display cells |
 | `mermaid/newline.rs` | The `\n` → `<br/>` label rewrite (four families) |
 | `mermaid/gitgraph_layout.rs` | Merman layout data → `GitGraphGeometry`; `commitSpacing` computation and directive |
 | `mermaid/gitgraph.rs` | `GitGraphGeometry` types (doc-hidden), `TAG_GAP_EM`, `default_gitgraph_commit_step()` |
@@ -142,7 +143,7 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 
 | Crate | Purpose |
 |-------|---------|
-| `merman` (git: `yankeeinlondon/merman`, rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`, branch `gitgraph-commit-spacing`) | Mermaid parse/layout/SVG; features `svg`, `all-diagrams`, `layout-cytoscape` (no `png`, `native-fonts`, ELK, `math`). The fork adds gitGraph `commitSpacing`. **Side effect:** `merman-core` enables serde_json's `preserve_order` (and `float_roundtrip`), and Cargo unifies it into every build that reaches this crate (darkmatter, sniff-cli, worktree-cli, claudine, …): `serde_json::Map` keeps insertion order instead of sorting, so code or tests that relied on sorted keys change. Merman needs it (its models iterate JSON maps in insertion order) |
+| `merman` (git: `yankeeinlondon/merman`, rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`, branch `gitgraph-commit-spacing`) | Mermaid parse/layout/SVG; features `svg`, `ascii`, `all-diagrams`, `layout-cytoscape` (no `png`, `native-fonts`, ELK, `math`). The fork adds gitGraph `commitSpacing`. **Side effect:** `merman-core` enables serde_json's `preserve_order` (and `float_roundtrip`), and Cargo unifies it into every build that reaches this crate (darkmatter, sniff-cli, worktree-cli, claudine, …): `serde_json::Map` keeps insertion order instead of sorting, so code or tests that relied on sorted keys change. Merman needs it (its models iterate JSON maps in insertion order) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
 | `resvg` v0.47 | SVG-to-PNG rasterization |
 | `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); rustybuzz and ttf-parser stay on usvg's versions |

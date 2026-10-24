@@ -152,3 +152,19 @@ fn invalid_mermaid_source_falls_back_to_code_under_warn() {
     assert_eq!(rendered.diagnostics.len(), 1, "{:?}", rendered.diagnostics);
     assert_eq!(rendered.diagnostics[0].kind, DiagnosticKind::Lossy);
 }
+
+/// The request's ceiling binds the real hook: on an image-capable terminal, a
+/// `Vector` render never carries an image upload.
+#[test]
+fn hook_never_draws_an_image_below_the_rich_ceiling() {
+    let term = Terminal::new_optimistic(80);
+    let mut opts = promoting(&term, RenderStrictness::Strict);
+    opts.context.mermaid_mode = TerminalMermaidMode::Automatic;
+    opts.context.graphics_mode = GraphicsMode::Vector;
+
+    let rendered = render_terminal_node(&mermaid_fence(SOURCE), &opts)
+        .expect("a Vector render never fails on an image route");
+
+    assert!(!rendered.output.contains("\x1b_G"), "no Kitty upload at Vector: {:?}", rendered.output);
+    assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}

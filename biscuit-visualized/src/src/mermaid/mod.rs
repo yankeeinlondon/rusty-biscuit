@@ -11,6 +11,7 @@ pub(crate) mod newline;
 pub mod palette;
 pub(crate) mod postprocess;
 pub mod render;
+pub mod text;
 
 pub use color::Rgb;
 pub use config::{MermaidConfig, MermaidTheme, QuadrantTheme};
@@ -20,3 +21,7 @@ pub use error::MermaidError;
 pub use gitgraph::{default_gitgraph_commit_step, Bounds, CommitGeometry, GitGraphGeometry, TagGeometry};
 pub use palette::{Palette, TerminalColors};
 pub use render::{MermaidDiagram, MermaidTarget, NaturalSize};
+pub use text::{
+    TextCharset, TextCoverage, TextDrawing, TextEligibility, TextLayout, TextOptions, TextProjection, TextRender,
+    TextReport, TextSource, text_eligibility,
+};

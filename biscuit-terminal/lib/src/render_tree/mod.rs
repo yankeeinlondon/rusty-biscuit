@@ -40,7 +40,7 @@ pub(crate) mod style;
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;
 pub use options::{
-    DiagramRenderError, DiagramRenderRequest, DiagramRenderer, ImagePlaceholder,
+    DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer, ImagePlaceholder,
     TerminalRenderContext, TerminalRenderOptions,
 };
 pub use projection::{ProjectionResult, TreeProjectionContext};

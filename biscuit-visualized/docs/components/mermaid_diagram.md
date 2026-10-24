@@ -306,9 +306,12 @@ if let Err(MermaidRenderError::NoImageSupport) = diagram.try_render(&term) {
 `biscuit-terminal`'s render-tree renderer draws no diagrams on its own: a
 `mermaid` code fence stays a code block unless the caller installs
 [`TerminalDiagramRenderer`](../../src/src/components/render_hook.rs), this crate's diagram hook, on the render options.
-With the hook installed, a fence is drawn only when the render asks for it
-(`TerminalMermaidMode::Image` at `GraphicsMode::Rich`), and the hook is
-consulted before any code-block hook.
+With the hook installed, a fence is offered to it only when the render asks
+for it (`TerminalMermaidMode::Image` at `GraphicsMode::Rich`, or
+`TerminalMermaidMode::Automatic` at `Rich` or `Vector`), and the hook is
+consulted before any code-block hook. The hook draws images only at `Rich`; at
+`Vector` it declines and the fence renders as an ordinary code block, with no
+diagnostic.
 
 ```rust
 use std::rc::Rc;

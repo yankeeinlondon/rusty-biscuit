@@ -56,6 +56,16 @@ let code_block = diagram.fallback_code_block();
 
 Render failures (all `MermaidError::RenderFailed`): parse error, unknown diagram type, ZenUML (detected by `header_keyword` == `zenuml`; Merman would draw it, Mermaid.js core does not support it), a math label (`$$…$$`: Merman refuses the diagram because `math` is not compiled in), and an exceeded time budget.
 
+## Text target (`mermaid/text.rs`)
+
+Merman's `ascii` feature draws a diagram as text for a terminal that cannot show images; the policy and presentation around it live in the terminal components.
+
+- **Eligibility** (`text_eligibility(diagram_type)`, `MermaidDiagram::text_eligibility()`): read from `merman::ascii::ascii_capabilities()`, never a family-name list. Eligible = row's `primary_projection` is `Diagrammatic`; coverage `Full`/`Partial` (no value → `Partial`; an unknown enum value → not eligible); `admits_auto_layout()` when the row lists `Auto`. The row key is `merman::diagram_type_metadata_id(detected)` (`flowchart`, `er`, `state`, `gitgraph`), not `diagram_type_family_id` (`gitGraph`); `SourceTheme::diagram_type` carries it. At rev `6e6b1e6`: class, er, flowchart, sequence, state, swimlane, xychart (all partial; flowchart, sequence, swimlane admit `Auto`).
+- **Render** (`render_text(TextOptions) -> Result<TextRender, MermaidError>`, `terminal` feature only, because fit is measured with biscuit-terminal's `visible_width`): zero requests when ineligible or `max_columns == 0`, otherwise exactly one `RenderRequest::ascii` through the same `Renderer`/site config and `\n` rewrite as SVG (no palette, design, font chain, or cache). Requests plain output, the standard (non-CJK) width profile, `Auto` or `Canonical` per eligibility, `max_width = max_columns` with `OverflowPolicy::Allow` (overflow is reported, not an error). Time budget as SVG.
+- **Judgment** (`text::judge`): output `normalize_terminal_text`-ed, width = widest row in cells. `Source(NotDiagrammatic)` unless the reported projection is `Diagrammatic`; `Source(Empty)` for blank text; `Source(TooWide)` when `overflowed` or wider than the columns; else `Drawing` (text, coverage, `TextReport` with requested/reported layout). Errors (parse, Merman, time budget, resource limit) stay `Err`.
+- **Merman facts**: `Auto` on a family without it is an `InvalidOption` error (never requested). A drawable family returns `StructuredText` only under `OverflowPolicy::Fallback`. Unroutable class/ER output is boxes plus a `relations:` list, still reported `Diagrammatic`. Label control characters are already escaped by Merman (`\u{1B}` printed literally).
+- **Tests** (`src/tests/text_tests.rs`): the eligibility table snapshot (R-F2; a rev bump shows here), one-edit cells on a copied `AsciiCapability`/`AsciiOutput` (both have public fields), exact drawings, cancellation via `with_time_budget(Duration::ZERO)` (no sleep), a limit via `render_text_with(…, AsciiResourcePolicy::default().with_limit(MaxOutputBytes, 16))`. `cfg(test)` thread-local counters: `take_text_requests()`, `fonts::chain::take_default_chain_requests()`, `cache::file_cache::take_stored_files()`.
+
 ## Themes and palettes
 
 `mermaid::Palette` (`mermaid/palette.rs`, backend-neutral; `Rgb` in `mermaid/color.rs`): background, text, surface, surface_alt, border, line, 6 accents (ANSI order red, green, yellow, blue, magenta, cyan), tints (accent over background, ≤22%, weaker until text reaches 4.5:1), `chart_tints()` (≤60%, pie), `text_on(fill)`. Constructors all run the contrast passes (text 4.5:1 on background and every tint/surface; accents/border/line 3:1; no large-text exception):
@@ -207,4 +217,5 @@ pub enum MermaidError {
 | `mermaid/design.rs` | Per-family `ThemeDesignV1`, support filter, site-palette rule, gitGraph label variables |
 | `mermaid/accents.rs` | Flowchart / class / sequence accent edits |
 | `mermaid/contrast.rs` | Text contrast pass, CSS color parser |
+| `mermaid/text.rs` | Text target: eligibility from `ascii_capabilities()`, `TextOptions`/`TextRender`/`TextSource`, the Merman request options, the fit judgment |
 | `mermaid/error.rs` | `MermaidError` |

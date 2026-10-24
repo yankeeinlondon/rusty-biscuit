@@ -11,20 +11,30 @@ a `biscuit-visualized` dependency to the library; that restores a cycle.
 
 The render-tree renderer draws a `mermaid` fence only through a
 caller-installed `DiagramRenderer` (`render_tree::{DiagramRenderer,
-DiagramRenderRequest, DiagramRenderError}`) on
+DiagramRenderRequest, DiagramOutcome, DiagramRenderError}`) on
 `TerminalRenderOptions::diagram_renderer` / `with_diagram_renderer`:
 
-- consulted only at `GraphicsMode::Rich` with `TerminalMermaidMode::Image`,
-  and **before** the `CodeRenderer` hook
+- consulted **before** the `CodeRenderer` hook, with `TerminalMermaidMode::Image`
+  at `GraphicsMode::Rich`, and with `TerminalMermaidMode::Automatic` at `Rich`
+  or `Vector`; never at `Off`, never in `Code` mode
+- the request carries the source, node attrs (layout is `attrs.layout`), the
+  `force_graphics`-applied terminal, `available_width`, and `graphics_mode`
+  (the ceiling: a hook never answers with an image at `Vector`); it is
+  `#[non_exhaustive]`, so only this crate constructs it
+- `Ok(DiagramOutcome::Rendered(s))`: `s` printed verbatim (an image)
+- `Ok(DiagramOutcome::Nodes(fragment))`: laid out in place at the fence's
+  width (`render_diagram_fragment`), code nodes through the `CodeRenderer`;
+  rendered with `mermaid_mode = Code` so a `mermaid` source node in the
+  fragment cannot re-enter the hook (that would recurse forever)
+- `Ok(DiagramOutcome::Declined)`: the ordinary code block, **no diagnostic**
+  under Strict, Warn and Lossy
 - no hook installed: the fence renders exactly as `TerminalMermaidMode::Code`
   would, with no diagnostic (a `tracing::debug!` notes the missing hook)
 - hook `Err`: `Strict` returns `RenderError::LossyRejected` ("Mermaid promotion
   failed: …"); `Warn` records a lossy diagnostic and falls back to code;
   `Lossy` falls back silently
-- the request carries the source, node attrs (layout is `attrs.layout`), the
-  `force_graphics`-applied terminal, and `available_width`; it is
-  `#[non_exhaustive]`, so only this crate constructs it
 - cloned child options keep the hook (`Rc`), so nested fences reach it
+- user-facing page: `biscuit-terminal/docs/render-tree.md`
 
 `biscuit_visualized::components::TerminalDiagramRenderer` is the real hook;
 darkmatter installs it. It sizes the diagram to `available_width` (the

@@ -7,23 +7,75 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - renderable
+    - biscuit-terminal
+    - biscuit-visualized
 decisions_for_review:
     - |-
       Swimlane is eligible for text fallback. The spec listed six eligible families (flowchart, sequence, state, class, ER, XY chart), taken from Merman's support-matrix document. Merman's own metadata (`ascii_capabilities()`) at the delivered revision lists a seventh, swimlane: diagrammatic, partial, and admitting the auto layout. The document folds it into the flowchart row. Because D1 says eligibility comes from the metadata and never from a hand-kept list, swimlane is eligible. I amended D1 and AC-F3 under D10, so the eligibility snapshot will list seven families. Alternative: exclude swimlane explicitly. That needs a family-name exclusion list, which D1 forbids. If the reviewer wants swimlane excluded, Phase 3 gains one exclusion and its snapshot loses one row.
     - |-
       Rulings A–H, which the plan left for the author, were made by the implementer, adopting each recommendation (no human was in the loop). A: the diagram hook returns a three-way outcome (drawn output, render-tree nodes, declined). B: darkmatter's Mermaid mode gains an automatic variant, which `md --mermaid` uses; the library's image mode keeps meaning image-only. C: the three fallback feature names and the "most restrictive wins" fold live in biscuit-visualized behind its `clap` feature; `md` adds them, plus `no-mermaid-rendering`, to the `--feature` enum it already has. D: clap already rejects empty and unknown names with the valid names listed (proved by a throwaway program), so no custom parser is needed. E: automatic mode chooses text at full graphics when the terminal reports no image protocol. F: drawing uses Unicode when the terminal's existing "supports Unicode" flag is set, and ASCII otherwise. G: `bt git-graph` accepts the flags with no visible effect. H: no extra measurement. Reversing A changes Phase 2's trait signature and its test doubles. Reversing B or C changes only Phase 5's CLI wiring.
+    - |-
+      Until Phase 4, biscuit-visualized's diagram hook declines below full graphics. The trait change forced an edit to the one real hook. The plan put that hook's automatic behavior in Phase 4, but it now receives the graphics ceiling, and left unchanged it would draw an image when only text is allowed. So for now it returns "declined" (show the source as a code block, no warning) whenever the ceiling is below full graphics. Alternatives: keep drawing images regardless (breaks the ceiling rule), or build the text route now (that is Phase 3-4 work). Phase 4 replaces the decline with the text route. Nothing else needs redoing if the reviewer prefers another interim.
+    - |-
+      A diagram hook's fragment is rendered with Mermaid promotion turned off. The spec says the hook may return a source fallback as a `mermaid` code node. Rendered normally in automatic mode, that node would be handed back to the hook, which would return it again, forever. The renderer therefore lays the fragment out with promotion off, so its `mermaid` node prints as code. Alternative: let hooks return a different language tag for the source, which would lose Mermaid highlighting (D8/D9 require `mermaid`). If the reviewer wants another guard, only `render_diagram_fragment` in biscuit-terminal's renderer changes.
+    - |-
+      A new biscuit-terminal docs page, `biscuit-terminal/docs/render-tree.md`, documents the code-renderer and diagram hooks. The plan asked to update "the biscuit-terminal render-tree topic page", but none existed; only a README section did, and READMEs are overviews in this repo. Alternative: put the content in the README, which goes against that rule. If declined, the page's content would move into the renderable doc, which already has the conceptual version.
+    - |-
+      The text render is available only with the crate's `terminal` feature. The spec requires the fit check to use biscuit-terminal's display-width measurement, and biscuit-terminal is a dependency only under `terminal`. The eligibility lookup needs no terminal and stays under `image`. Alternatives: measure with the `unicode-width` crate directly (the same rule biscuit-terminal uses, but a second copy of it), or make `image` depend on biscuit-terminal (a much wider build for every image-only user). Every caller of the text render (the terminal component, the Markdown hook) already has `terminal`. If the reviewer wants the text render under `image`, only the `#[cfg]` on `render_text`, `judge` and `ascii_request` and the width function change.
+    - |-
+      The text render takes no display-width profile; it always asks Merman for its standard (non-CJK) widths. The plan listed a display-width profile among the options, but biscuit-terminal, which measures fit, has no CJK width mode, so a CJK request would be measured differently from how it was laid out. The time budget is also not a text option: the diagram's existing `with_time_budget` applies to text requests, as the spec's "the prerequisite's configurable deadline" says. Alternative: add both options; a CJK option would need a CJK measurement in biscuit-terminal first.
+    - |-
+      Over-wide output is requested with Merman's "allow overflow" policy, so Merman reports the overflow and the render shows the source. The spec's AC-F2 expects a dense class or ER diagram to come back as a `relations:` report (`StructuredText`). At the delivered rev Merman returns that report for a drawable family only under its other policy, "fall back on overflow", which this code does not use. So in practice an over-wide class diagram is reported as too wide, not as a report; both show the source. The projection guard (D1) is kept and tested against Merman's real report, produced by a test with the fallback policy. Alternative: request the fallback policy. That adds a Merman error ("fallback unavailable") that would have to be mapped to "show the source", and gains nothing visible.
+    - |-
+      Class and ER diagrams that Merman cannot route are drawn as stacked boxes followed by a `relations:` list, and Merman still reports the result as a drawing (`Diagrammatic`). Following D1 (Merman's metadata and reported projection decide, nothing else), these are shown as text. A simple ER chain (A to B to C) is drawn with real connectors. If the reviewer finds the boxes-plus-list output not a faithful-enough drawing, excluding it would mean inspecting the output text, which D1 forbids; the cleaner fix would be upstream in Merman's reported projection.
+    - |-
+      The `\n` to `<br/>` label rewrite that the SVG path applies to class, ER, mindmap and requirement labels also applies to text (the spec: same label normalization). In Merman's class text a rewritten label prints as `one<br>two`; without the rewrite it prints `one\ntwo`. Neither draws two rows, so the rewrite was kept for parity. Changing it means skipping the rewrite in `render_text` only.
 message_to_agent: |-
-    Phase 1 changed no shipped code. Rulings A-H are all adopted as the plan recommended. The "## Phase 1" section of this log has the exact Merman ascii API names, file:line sites and the AC-F15 audit list.
+    Phase 3 landed the text backend; read "## Phase 3" in this log for details.
 
-    Facts that change later phases:
-    (1) Seven families are eligible, not six. Swimlane is Diagrammatic, Partial, with Auto layout in Merman's metadata. D1 and AC-F3 are amended, so the R-F2 snapshot must list seven.
-    (2) Map a source to its capability row like this: registry().detect_type (already done in mermaid/render.rs `source_theme`), then `merman::diagram_type_metadata_id`, then an exact match on `AsciiCapability::diagram_type`. Do not use `diagram_type_family_id`; it returns `gitGraph` where the row says `gitgraph`.
-    (3) Requesting Auto layout for a family that does not list it returns `RenderError::Ascii(InvalidOption)`. Requesting an unsupported family returns `UnsupportedDiagram`. Over-width output with the default `OverflowPolicy::Allow` comes back Ok with `overflowed=true` and `outcome=WideAllowed`. So decide eligibility before any request, and read `overflowed` as well as measuring rows.
-    (4) There is no exhaustive `match` on `TerminalMermaidMode` anywhere. The only branch is the `== TerminalMermaidMode::Image` test at biscuit-terminal/lib/src/render_tree/render.rs:1742. Adding `Automatic` will compile without touching it, so it needs a test. The three darkmatter matches in entrypoints.rs (296, 604, 723) do break the build, but they match darkmatter's own MermaidMode, which Phase 5 changes.
-    (5) `md` already has `--feature` and a `Feature` ValueEnum (EmbedMermaidFont) on both `md <INPUT>` and `md render`. They come from uncommitted 2026-10-21-mermaid-embedded-font work that is still in this worktree. Extend that enum; do not add a second flag.
-    (6) Every bt Mermaid subcommand uses the fallible `try_render`. On NoImageSupport it prints a raw fence through `handle_mermaid_error`, and that is the path the text fallback replaces.
-    (7) The working tree holds unrelated uncommitted darkmatter, skill and embedded-font spec files. They are not this plan's work, and they make affected_scope report darkmatter/darkmatter-cli/test-toolkit.
+    Facts for Phase 4:
+    (1) API (all `biscuit_visualized::mermaid`): `MermaidDiagram::render_text(TextOptions) -> Result<TextRender, MermaidError>` and `MermaidDiagram::text_eligibility() -> Option<TextEligibility>`. `render_text` exists only with the `terminal` feature. `TextOptions::new(max_columns).with_charset(TextCharset::{Unicode, Ascii})`. `TextRender::Drawing(TextDrawing)` (`text()`, `into_text()`, `coverage() -> TextCoverage::{Full, Partial}`, `report()`) or `TextRender::Source(TextSource)` with `Ineligible`, `NoColumns`, `NotDiagrammatic(report)`, `TooWide(report)`, `Empty(report)` (`#[non_exhaustive]`). `Err` = parse error, Merman failure, time budget (already logged as a warning) or resource limit. Phase 4's infallible component maps every `Source` and every `Err` to the `mermaid` code node; the hook returns `Declined` for `Source` and `Err` for `Err`.
+    (2) Policy belongs in Phase 4: "no partial" means `drawing.coverage() == Partial` -> source; "never" means skip `render_text` entirely (zero requests). The D3 policy is not in the backend.
+    (3) The text never contains control characters other than `\n`. Rows may end in significant spaces; do not trim them. A trailing `\n` may be present; trim only trailing newlines.
+    (4) Counters (crate-internal, `#[cfg(test)]`, thread-local, reset on read): `crate::mermaid::render::take_text_requests()`, `crate::fonts::chain::take_default_chain_requests()`, `crate::cache::file_cache::take_stored_files()`. They are visible only to the crate's own unit tests (`src/src/tests/`), not to the `tests/l1` binary, so put the AC-F13 component-level tests in `src/src/tests/` (the `components` module is compiled there under `--all-features`).
+    (5) Image availability must be decided before calling `render_text`, and no image work may run on the text route (the counters prove it).
+source_files_during_phase_2:
+    - renderable/src/tree/mod.rs
+    - biscuit-terminal/lib/src/render_tree/options.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/render_tree/mod.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+    - biscuit-visualized/src/src/components/render_hook.rs
+    - biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs
+docs_updated_during_phase_2:
+    - renderable/docs/tree-rendering.md
+    - biscuit-visualized/docs/components/mermaid_diagram.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/lib/README.md
+docs_created_during_phase_2:
+    - biscuit-terminal/docs/render-tree.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-terminal/diagrams.md
+    - .claude/skills/biscuit-visualized/diagram-components.md
+    - .claude/skills/renderable/tree.md
+source_files_during_phase_3:
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/text.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/fonts/chain.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/text_tests.rs
+docs_updated_during_phase_3:
+    - biscuit-visualized/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
 ---
 
 # Implementation Log for 2026-10-22-merman-text-fallback (7 phases)
@@ -356,3 +408,226 @@ the plan's checkpoints. The facts above fix their exact inputs:
 - There are no dependent-package tests, because no package source changed.
   There is no cross-OS check, because Phase 1 has no OS-specific code.
 - The biscuit-visualized skill is unchanged; Phase 1 changed no architecture.
+
+## Phase 2
+
+Generic contracts only: `renderable` gains the automatic mode and
+`biscuit-terminal`'s diagram hook gains the ceiling, the declined outcome and
+node output. No Mermaid-specific type was added to `biscuit-terminal`.
+
+### Task 2.1: `TerminalMermaidMode::Automatic`
+
+- Added `Automatic` to `renderable/src/tree/mod.rs` with the D5 meaning; `Code`
+  stays the default.
+- AC-F15: `cargo check --workspace --all-targets` is clean. As Phase 1 found,
+  there is no exhaustive `match` on the enum; the only consumer is the
+  promotion test in `render.rs`, now a `matches!` on `(mode, ceiling)`, pinned
+  by tests (below). Darkmatter's own `MermaidMode` is untouched (Phase 5).
+
+### Task 2.2: hook contract
+
+- `options.rs`: `DiagramRenderer::render_terminal_diagram` returns
+  `Result<DiagramOutcome, DiagramRenderError>`; `DiagramOutcome`
+  (`#[non_exhaustive]`, `Clone`, `PartialEq`) is `Rendered(String)`,
+  `Nodes(Vec<RenderNode>)`, `Declined`. `DiagramRenderRequest` gains
+  `graphics_mode: GraphicsMode`. Re-exported from `render_tree`.
+- `render.rs` `render_code_node`: the hook is consulted for `Image` at `Rich`
+  and for `Automatic` at `Rich`/`Vector`, never at `Off`. `Rendered` prints
+  verbatim; `Declined` falls through to the code renderer/plain code block with
+  no diagnostic; `Err` keeps today's strictness handling.
+- `Nodes` goes through a new `render_diagram_fragment`, which renders the
+  fragment with `render_blocks` at the fence's context (so indent and width are
+  the fence's) and **with `mermaid_mode = Code`**. Without that, a `mermaid`
+  source-fallback node in the fragment would be offered to the hook again and
+  recurse forever in Automatic mode.
+- Test doubles updated: `FailingDiagrams` (`render.rs`) and `RecordingDiagrams`
+  (`lib/tests/l1/render_tree_diagram_hook.rs`).
+- The one real implementor, `biscuit-visualized`'s `TerminalDiagramRenderer`,
+  had to change for the build. It wraps its image in `Rendered` and returns
+  `Declined` when `graphics_mode != Rich`, so it never draws an image above
+  the ceiling until Phase 4 adds the text route (see `decisions_for_review`).
+
+### Docs
+
+- `renderable/docs/tree-rendering.md`: new "Terminal Mermaid promotion and the
+  diagram hook" section (modes table, ceiling in the request, the four answers
+  with a Mermaid flow, code nodes through `code_renderer`, example).
+- New `biscuit-terminal/docs/render-tree.md`: the two render-tree hooks, what
+  each receives, what the renderer does with each answer; linked from
+  `biscuit-terminal/README.md` and `biscuit-terminal/lib/README.md`.
+  biscuit-terminal had no render-tree topic page, so the plan's "biscuit-terminal
+  render-tree topic page" was created.
+- `biscuit-visualized/docs/components/mermaid_diagram.md`: when the hook is
+  offered a fence now includes Automatic; at `Vector` it declines.
+- Skills: `biscuit-terminal/diagrams.md` (hook contract),
+  `biscuit-visualized/diagram-components.md` (real hook behavior),
+  `renderable/tree.md` (new "Terminal Mermaid modes" section). **Drift fixed:**
+  `renderable/tree.md`'s `CodeRenderer` signature showed `width: u32` and no
+  `meta`; the code takes `meta` and a `TerminalCodeContext`. The skill was
+  corrected to the code, and a stale note about a planned widening removed.
+
+### Requirement-to-test mapping
+
+Boundary: the generic renderer ↔ a caller's hook, across the crate boundary
+(F2, L1, explicit `Terminal` capabilities, no real terminal).
+
+| Behavior (checkpoint row) | Test (`biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs` unless noted) |
+| --- | --- |
+| Image mode unchanged | existing `diagram_hook_is_consulted_before_the_code_hook` (now also asserts `graphics_mode: Rich` in the request), `diagram_hook_failure_follows_the_render_strictness`, `diagram_hook_receives_the_forced_terminal_snapshot`, `nested_mermaid_fence_reaches_the_diagram_hook_at_its_narrowed_width`; `render.rs` `mermaid_promotion_failure_rejects_under_strict` |
+| Not consulted: Code at Rich/Vector, Image at Off/Vector, Automatic at Off, other/no language | `diagram_hook_is_not_consulted_unless_promotion_is_requested` (8 cases, 4 new) |
+| Automatic at Rich and Vector, ceiling carried | `automatic_mode_offers_the_fence_at_rich_and_vector_with_the_ceiling` |
+| Automatic at Off → code, no hook call | `automatic_mode_at_graphics_off_renders_the_code_block_without_the_hook` |
+| No hook in Automatic → ordinary code, even Strict | `automatic_mode_without_a_diagram_hook_renders_the_code_block` |
+| `Declined` silent under Strict/Warn/Lossy (Automatic Rich/Vector, Image Rich) | `declined_renders_the_code_block_silently_under_every_strictness` (9 cells), `declined_fence_still_reaches_the_code_hook` |
+| `Err` rejected/recorded/silent in Automatic | `automatic_mode_hook_failure_follows_the_render_strictness` |
+| `Nodes` through installed code renderer, no re-entry of the hook | `nodes_outcome_lays_out_its_code_nodes_through_the_code_hook` |
+| `Nodes` without a code renderer → plain code blocks | `nodes_outcome_without_a_code_hook_renders_plain_code_blocks` |
+| `Nodes` at the fence's indent and width | `nodes_outcome_in_a_list_item_is_laid_out_at_the_items_indent_and_width` |
+| Real hook never emits an image at `Vector` | `biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs` `hook_never_draws_an_image_below_the_rich_ceiling` |
+
+The Input Robustness Matrix does not apply (no parser or config reader).
+
+### Gates
+
+- Skip check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [biscuit-terminal, biscuit-visualized, renderable, test-toolkit,
+  biscuit-terminal-cli, darkmatter, tree-hugger-cli]`, `change_class: package`.
+  Gates run.
+- `cargo check --workspace --all-targets`: clean.
+- `renderable`: `just lint` clean; `just test` 684 passed.
+- `biscuit-terminal`: `just lint` clean (after replacing a `match` with
+  `matches!`); `just test` 3890 passed, 55 skipped. Targeted rerun after the
+  lint fix: 18/18.
+- `biscuit-visualized`: `just lint` clean; `just test` 1071 passed, 4 skipped.
+- `just check-tier-coverage` for all three areas: 0 stranded.
+- Dependents: darkmatter (installs the hook), filtered to
+  `-E 'test(/mermaid|diagram/)'` with `--all-features`: 89 passed. sniff-cli
+  and worktree-cli use the components, not the hook; they compile
+  (workspace check) and were not run.
+- No cross-OS check: no path, `cfg`, or OS-specific code changed.
+- No failures, no load-sensitive reruns.
+
+## Phase 3
+
+The text backend in `biscuit-visualized`: Merman's `ascii` feature, eligibility
+from Merman's metadata, one bounded text request, and the fit judgment. Policy,
+presentation, the component and the hook are Phase 4.
+
+Starting state: Phase 2's changes were still uncommitted in the working tree,
+so the skip check below also covers them. Phase 3's own files are the ones
+listed in `source_files_during_phase_3`.
+
+### Task 3.1: enable `ascii`
+
+- Added `"ascii"` to the existing `merman` dependency's features (same pinned
+  rev, `default-features = false`). `Cargo.lock` did not change:
+  `merman-ascii` at the same rev was already locked.
+- `biscuit-visualized/docs/dependencies.md` and the root `docs/dependencies.md`
+  name the feature and what it is for.
+
+### Task 3.2: eligibility (`src/src/mermaid/text.rs`)
+
+- `text_eligibility(diagram_type) -> Option<TextEligibility>` looks up the row
+  in `ascii_capabilities()`; `eligibility_of(row)` decides: `Diagrammatic`
+  primary projection only; coverage `Full`/`Partial`, missing → `Partial`,
+  unknown value → not eligible; `admits_auto_layout()` from the row's layout
+  profiles. No family names appear in the path.
+- `MermaidDiagram::text_eligibility()` uses Merman's preprocess + `detect_type`
+  (already run by `source_theme`, whose `SourceTheme` now also records
+  the metadata id as `diagram_type`), so a `%% mindmap` comment is not read as the header.
+
+### Tasks 3.3 and 3.4: text render and test seams
+
+- `MermaidDiagram::render_text(TextOptions) -> Result<TextRender, MermaidError>`
+  (`terminal` feature; see `decisions_for_review`). Ineligible or zero columns
+  → `Source` with no request. Otherwise one `RenderRequest::ascii` through the
+  same `Renderer` and site config as SVG, after the same `\n` rewrite; plain
+  output, standard width profile, `Auto` when the family admits it else
+  `Canonical`, `max_width` = the columns with overflow allowed; the diagram's
+  time budget applies, and a cancellation logs the same warning as SVG
+  (shared `call_merman`). No palette, design, font chain or cache is touched.
+- `text::judge` neutralizes control characters
+  (`merman::ascii::normalize_terminal_text`; Merman had already escaped them),
+  measures the widest row with `biscuit_terminal::utils::block_constraint::visible_width`,
+  and returns `Drawing` or `Source(NotDiagrammatic | Empty | TooWide)` with a
+  `TextReport` (requested and reported layout, projection, width, overflow).
+- Seams (`#[cfg(test)]`, thread-local, reset on read): `take_text_requests()`
+  (render.rs), `take_default_chain_requests()` (fonts/chain.rs, counts every
+  `default_chain()` call), `take_stored_files()` (cache/file_cache.rs, every
+  artifact or sidecar write). Limit injection: crate-internal
+  `render_text_with(options, AsciiResourcePolicy)`; cancellation: a zero time
+  budget, past its deadline at Merman's first checkpoint. Nothing sleeps.
+
+### Merman behavior observed at `6e6b1e6` (inputs for Phase 4)
+
+- Spec flowchart: 50 cells canonical; `CHAIN_FLOWCHART` (5 boxes): 66
+  canonical, 58 compact. State example: 12 cells, canonical only.
+- A drawable family returns `StructuredText` only under
+  `OverflowPolicy::Fallback`; under `Allow` it reports `overflowed`.
+- Unroutable class/ER output: boxes plus a `relations:` list, reported
+  `Diagrammatic` (see `decisions_for_review`).
+- Mermaid collapses runs of spaces in a label (`"a   b"` draws `a b`); padding
+  and trailing spaces in rows are kept.
+- A class label with `\n` prints `one<br>two` after the shared rewrite.
+- The XY chart example (`bar [1, 5, 9]`) is 260 cells wide: XY charts will
+  usually show the source on an ordinary terminal.
+
+### Requirement-to-test mapping
+
+Boundary: biscuit-visualized ↔ Merman's `ascii` target, in process (F2, L1;
+`src/src/tests/text_tests.rs`, compiled under `--all-features`). Nested
+position and code-block padding are Phase 4 (the backend takes the final
+column count).
+
+| Requirement | Test |
+| --- | --- |
+| R-F2 snapshot of the derived table | `eligibility_table_at_the_pinned_rev` |
+| AC-F3 exactly seven eligible, public lookup | `seven_families_are_eligible_at_the_pinned_rev` |
+| D1 field rules (control + one edit per cell: no coverage, full, StructuredText, None, no Auto) | `eligibility_is_decided_by_projection_coverage_and_layouts` |
+| Missing row / registry id is not a row id | `a_family_without_a_capability_row_is_not_eligible` |
+| Parsed header, not a scan; mindmap, pie, gitGraph, garbage, empty | `diagram_eligibility_follows_merman_detection` |
+| AC-F14 exact Unicode drawing (spec figure, byte-identical) | `spec_flowchart_draws_in_unicode` |
+| AC-F14 ASCII drawing | `spec_flowchart_draws_in_ascii` |
+| AC-F14 authored Unicode in both charsets | `authored_unicode_labels_survive_both_charsets` |
+| AC-F14 significant spaces | `state_diagram_keeps_its_significant_spaces` |
+| AC-F14 multiline labels | `multiline_label_draws_on_separate_rows` |
+| AC-F14 label control characters | `label_control_characters_never_reach_the_terminal` |
+| Fit boundary (50 fits, 49 does not) | `a_drawing_fits_exactly_its_own_width` |
+| Fit in display cells, by this crate's check | `wide_characters_are_measured_in_cells` |
+| AC-F11 compact when canonical too wide; one request | `flowchart_too_wide_canonically_draws_compactly` |
+| AC-F11 too wide for both → source | `flowchart_too_wide_for_both_layouts_shows_source` |
+| AC-F11 state too wide → source, canonical, one request | `state_diagram_too_wide_canonically_shows_source_after_one_request` |
+| Zero columns → source, no request | `zero_columns_show_source_without_a_request` |
+| AC-F2 dense class at narrow width → source | `dense_class_diagram_at_a_narrow_width_shows_source` |
+| AC-F2 real `StructuredText` result → source, projection asserted | `structured_text_result_of_a_diagrammatic_family_shows_source` |
+| Empty output → source (control + edit) | `empty_output_shows_source` |
+| AC-F1/AC-F14 unsupported family → source, no request | `ineligible_families_show_source_without_a_request` |
+| AC-F14 invalid source → error, one request | `invalid_source_is_an_error_after_one_request` |
+| AC-F14 cancellation → error, warning, no retry | `exceeded_time_budget_is_an_error_with_a_warning_and_no_retry` |
+| AC-F14 resource limit → error, no retry | `reached_resource_limit_is_an_error_and_no_retry` |
+| AC-F13 / R-F10 backend half | `text_render_writes_no_artifact_and_asks_for_no_font_chain` |
+| Counters are load-bearing (control) | `the_work_counters_count_image_work` |
+
+Doctests on `TextEligibility`, `TextOptions`, `MermaidDiagram::text_eligibility`
+and `MermaidDiagram::render_text` pass (`cargo test --doc -- text`).
+
+The Input Robustness Matrix does not apply: no file format or configuration
+reader was added (Merman's capability table is compiled data).
+
+### Gates
+
+- `just lint` (biscuit-visualized): clean. `cargo clippy --features image`
+  (without `terminal`): clean.
+- `just test` (biscuit-visualized): 1097 passed, 4 skipped, 0 failed (12.9 s).
+  New: 26 tests, all under 0.2 s.
+- `just check-tier-coverage biscuit-visualized`: 0 stranded.
+- Skip check (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [biscuit-terminal, biscuit-visualized, renderable, test-toolkit,
+  biscuit-terminal-cli, darkmatter, tree-hugger-cli]`, `change_class: package`
+  (includes Phase 2's uncommitted files). Gates run.
+- Dependents: `cargo check --workspace --all-targets` clean; darkmatter
+  `-E 'test(/mermaid|diagram/)'` with `--all-features`: 89 passed.
+  biscuit-terminal-cli, sniff-cli and worktree-cli use only the unchanged
+  component API; they compile (workspace check).
+- No cross-OS check: no path, `cfg(target_os)`, or OS-specific code was added.
+- No failures and no load-sensitive reruns.
