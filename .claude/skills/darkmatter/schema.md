@@ -257,8 +257,36 @@ members in `$defs` and inlines every other named type at each reference, so
 a host must write its stack families recursively (Claudine's are), never
 unrolled: Claudine's typed three-level unroll resolved to 11 MB.
 The passive operand check is `lifecycle::validate_operands` (runtime
-registration, `select_overload_with`); `lib/tests/l1/lifecycle_generated_operands.rs`
-holds the binder/schema parity table. `lib/tests/l1/lifecycle_schema_parity.rs`
+registration, `select_overload_with`), and schema validation runs it: every
+generated arm but `null` and `template-operand` carries `operands(<verb>-short|-long)`
+(`Constraint::Operands`, `x-darkmatter-operands`, kept on the typed node), and
+`EffectiveSchema::validate_instance` (the body every `validate*` path reaches)
+walks the authored instance beside the JSON Schema (`schemas/bound_operands.rs`),
+reads each marked value as the parser does (`lifecycle::action_call`), and binds
+it (`validate_action_operands_with`: effect registration, else the expression
+registration with test functions first), deferring a `{{ }}` operand only when
+its `stored` counterpart is not a literal token: a token's decoded text is
+data and is type-checked (`abs` refuses a token holding `{{ fm.count }}`).
+A caller that decodes before validating loses that origin, so hand Darkmatter
+the stored instance: `validate_with_options`, or `EffectiveSchema::validate_stored`
+(optional `SchemaPhase`), which Claudine's launch verdict uses. An accepted call's operands join
+`NestedTemplates` as settled paths (excused like templates, not in
+`ValidationReport::deferred`); a rejected one is a positioned problem. Every
+operand string (nested ones too) holding a span that fails to parse is a
+`malformed template` problem at that string (`BoundOperands::report_malformed`,
+message from `lifecycle::action_value_to_expr`), never settled, replacing any
+problem at or below it, whatever the type accepts; it scans the `stored`
+instance (literal tokens still encoded) so a decoded token stays data. The
+hand-written verb types in `partials/lifecycle.yaml` (communication, `shell`,
+the directives but `stop`/`skip`, `set`) carry the same marker; for them
+`lifecycle::template_operands` names exactly the strings the parser reads as
+templates (every `with:` and `set` value nested, not a `$( … )` `set` value,
+`no_error`, or `break.code`) and the walk only scans those, never binds. So
+`number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
+type to fix a schema/binder disagreement. Bind from the authored value, not
+the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`
+holds the parity table, whose `short`/`arm-<i>` probes strip the marker to
+judge the projected structure alone. `lib/tests/l1/lifecycle_schema_parity.rs`
 derives events, action types, the open arm's exclusions, and the bare-verb
 `suggest` list from the md registry and parser. The inlined stacks cost about
 70–90 ms per debug validation; the regex memo in `convert.rs` and the import
@@ -437,7 +465,14 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `file_match::file_match_groups` is public for consumers such as Claudine.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
-- `min-keys` and `max-keys` constrain dictionaries.
+- `min-keys` and `max-keys` constrain dictionaries; `uncounted-keys(a, b)`
+  leaves named keys out of that count (lowered to one `allOf` `if`/`then`
+  per combination present, plus `x-darkmatter-uncounted-keys`, which
+  `json_shape` reads into `ObjectShape::uncounted` so the core models the
+  count instead of asserting it). The lifecycle categories use it for
+  `when`/`no_error` beside one verb. An `anyOf` arm that is itself a failed
+  union at the same path (a `$ref` to a recursive union) is flattened by
+  `validate::union_branch_errors`, so drill-down still reaches the verb.
 - Examples are documentation artifacts validated at schema-load time and
   emitted through `x-darkmatter-example`.
 
@@ -751,7 +786,7 @@ For grammar or schema changes, cover:
   it) or `trigger_source()`. Embedded triggers add no dependency edges.
   Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
   input matrix for block YAML and JSON syntax).
-- Large host payloads (Claudine's resolves to about 0.7 MB, its recursive
+- Large host payloads (Claudine's resolves to about 1.4 MB, its recursive
   families stored once in `$defs`) are kept affordable by
   process-wide memos, each holding its inputs alive and keyed by `Arc`
   identity (plus value equality for small authored schemas): embedded

@@ -327,6 +327,35 @@ Every type accepts:
   Raw JSON Schema can mark a node
   the same way by writing `x-darkmatter-deferred: true` on it.
 
+- `operands(<verb>-short)` / `operands(<verb>-long)` — the value is the short
+  or long spelling of the Darkmatter lifecycle verb `<verb>` (an expression
+  function or side effect). Schema validation reads it as the lifecycle
+  parser does (`null`, a positional list, one scalar, or a mapping whose keys
+  select one overload) and binds it through the verb's runtime registration,
+  whose verdict replaces the type's for those operands: a call the
+  registration binds passes even where the type rejects an operand, and one it
+  refuses is a positioned problem even where the type accepts it. `{{ … }}`
+  operands stay deferred and nothing is evaluated, but a `{{ … }}` span that
+  does not parse, anywhere in an operand, is a positioned syntax problem at
+  that string even where the type accepts the text
+  (`ensure_file: "out/{{ 1 + }}.md"`); it replaces any type problem at the same place, and a stored
+  literal token is data, never scanned. A stored literal token is never
+  deferred either: the text it holds is bound like any literal, so `abs`
+  refuses a token holding `{{ fm.count }}` as it refuses `three`. An unknown
+  key, an extra operand, or a bad `no_error` beside the operands is still
+  judged by the type. It emits the `x-darkmatter-operands: <verb>-short` annotation on the
+  node it marks (never on an optional property's `null` wrapper). The
+  lifecycle schema generator writes it on the generated verb types; see
+  [the two lifecycle partials](#the-two-lifecycle-partials). The verbs the
+  lifecycle parser owns itself (`say` and the other communication verbs,
+  `shell`, the directives, `set`) carry it on their hand-written types too.
+  They have no registration to bind, so the marker only checks the strings
+  the parser reads as templates: `say: "{{ 1 + }}"`,
+  `proxy: { target: next.md, with: { n: "{{ 1 + }}" } }`, and
+  `set: { n: "{{ 1 + }}" }` are positioned syntax problems, while a `set`
+  value written as a whole-value `$( … )` command, `no_error`, and
+  `break.code` are not read as templates.
+
 `required` and `eager` are independent axes: `required` decides whether the
 property must be present, `eager` decides when a supplied value is validated.
 Phase-aware validation derives both recursively from the resolved
@@ -1725,12 +1754,47 @@ $schema:
 
 The block and the postfix are one scope. Key bounds from a `$constraints` block, from the object's postfix, and from a use site that reuses the object as a named type merge under the [merge rules](#merging-use-site-constraints): the stricter bound wins, and a minimum above the maximum is an error whichever spelling declared it.
 
+#### Keys the count leaves out (`uncounted-keys`)
+
+`uncounted-keys(a, b)` names keys that `min-keys` and `max-keys` do not count.
+Use it when an object holds exactly one entry of one kind with optional
+companion keys beside it. A lifecycle action, for example, is one verb, with
+`when` and `no_error` allowed beside it:
+
+```yaml
+$schema:
+    action:
+        info: string
+        stop: null
+        when: string
+        no_error: boolean
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+            uncounted-keys: [when, no_error]
+```
+
+| `action` value | Valid? | Why |
+|---|---|---|
+| `{ info: hi }` | yes | one counted key |
+| `{ info: hi, when: x, no_error: true }` | yes | `when` and `no_error` are not counted |
+| `{ when: x }` | no | no counted key: below `min-keys(1)` |
+| `{ info: hi, stop: null, when: x }` | no | two counted keys: above `max-keys(1)` |
+
+The postfix spelling is `{ … }(min-keys(1); max-keys(1); uncounted-keys(when, no_error))`.
+It needs `min-keys` or `max-keys` on the same object and names one to eight
+distinct keys. JSON Schema counts every key, so it lowers to an `allOf` with one
+`if`/`then` condition for each combination of the named keys present, each
+raising both bounds by the number present, plus an `x-darkmatter-uncounted-keys`
+annotation (`{ keys, min, max }`) from which Darkmatter's conversion engine
+reads the same count directly.
+
 What else a block may hold depends on where it sits:
 
 | Block on | Accepted keys | Anything else |
 |---|---|---|
-| an object-typed property | `min-keys`, `max-keys`, `required`, `generated` | schema error ("`$constraints` key `…` is not valid on an inline object") |
-| the root schema, or one arm of a root union | `min-keys`, `max-keys` | schema error ("… is not valid on the root object") |
+| an object-typed property | `min-keys`, `max-keys`, `uncounted-keys`, `required`, `generated` | schema error ("`$constraints` key `…` is not valid on an inline object") |
+| the root schema, or one arm of a root union | `min-keys`, `max-keys`, `uncounted-keys` | schema error ("… is not valid on the root object") |
 
 On a property's object, `required: true` and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
 
@@ -2519,13 +2583,16 @@ error at `/composed`.
 
 | Partial | Holds | Use it for |
 |---|---|---|
-| `lifecycle` | `<verb>-short` and `<verb>-long` for every verb the lifecycle parser knows, including the verbs only a host provides (`say`, `notify`, `retry`, `proxy`, `prep`, `break`, …) and the side-effect and expression-function verbs generated from Darkmatter's typed catalogs; `interpolation` and `count`; the categories `communicate`, `flow`, `shell`, and `expression`, each exactly one verb in short or long form; `bundle`, and `initialize-bundle`, which has no `shell` | building a host's own action types |
+| `lifecycle` | `<verb>-short` and `<verb>-long` for every verb the lifecycle parser knows, including the verbs only a host provides (`say`, `notify`, `retry`, `proxy`, `prep`, `break`, …) and the side-effect and expression-function verbs generated from Darkmatter's typed catalogs; `interpolation` and `count`; the categories `communicate`, `flow`, `shell`, and `expression`, each a single-action dictionary: exactly one verb in short or long form, with `when` and `no_error` beside it left out of the count (`uncounted-keys`); `bundle`, and `initialize-bundle`, which has no `shell` | building a host's own action types |
 | `md-lifecycle` | md's profile: `md-stack`, `md-initialize-stack`, and the item, conditional, and bundle types they are built from | typing a key with exactly md's actions |
 
 Both are types-only: neither ever applies to a document by itself. Every verb
 in `lifecycle` has a short form and a closed long form, except `set` (a
 mapping of destinations to values) and the variadic `and` and `or`, which have
-a short form only. A bundle takes short forms only.
+a short form only. A bundle of several verbs takes short forms only; a
+mapping that holds one verb is typed by its category and takes either form,
+wherever a stack accepts a dictionary (a whole event, a `then`/`else` body,
+a list item). md's stacks accept a single action that way too.
 
 The side-effect and expression-function verbs are typed from their catalog
 signatures: `partials/functions.yaml` for expression functions and
@@ -2543,6 +2610,20 @@ start:
     - ensure_file: { file: notes.md, content: "# Notes" }  # long form
     - min: [1, "{{ fm.x }}"]                               # the template is deferred
     - min: [three, 2]                                      # schema error at /start/4/min/0
+```
+
+The types are a projection of the signature, so each generated arm also
+carries [`operands(...)`](#universal-constraints), and validation binds the
+value through the verb's runtime registration. Its verdict decides the
+literal operands, including the rules no type spells: `number` and `round`
+recover a subject that is not a number through their fallback, `length`
+refuses a boolean, and a call two overloads accept only after conversion is
+ambiguous:
+
+```yaml
+start:
+    - number: [pear, 7]     # valid: the fallback supplies 7
+    - length: [true]        # schema error at /start/1/length/0: length does not accept a boolean
 ```
 
 The catalog function `set(key, value)` is not generated, because the
@@ -3481,7 +3562,7 @@ the built-in baseline; each configured instance shares the cached JSON Schema.
 
 ### Span-Aware Validation and Normalization
 
-`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{ 1 + }}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
+`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{ 1 + }}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. That text is never deferred as a template, at a place marked `deferred` or in a lifecycle verb's operand. `EffectiveSchema::validate_stored(stored, positions, phase)` judges a stored instance the same way, unphased or at a `SchemaPhase`, for a caller that does not want the pending rules. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
 
 ### Subtype Relation (`is_subtype`)
 

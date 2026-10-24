@@ -329,21 +329,40 @@ checks the baseline against the `md` host the same way.
 
 ### Single actions, long forms, and bundles
 
-A **single-verb item** takes the verb's short form or its long form. Long forms
-are closed objects, so a misspelled parameter is an error:
+A **single action** is a mapping that holds one verb: a list item, a whole
+event written as a dictionary, a `then`/`else` body written as a dictionary,
+or a loop's one loose verb. It takes the verb's short form or its long form,
+with `no_error` beside it, and `when` beside it in a list item. Long forms are
+closed objects, so a misspelled parameter is an error:
 
 ```yaml
 start:
     - say: "starting"                           # short form
     - say: { text: "starting", no_error: true } # long form
+    - when: "fm.draft"
+      say: { text: "draft run" }                # long form beside `when`
     - say: { txet: "starting" }                 # invalid: `say` has no `txet`
     - inf0: "starting"                          # invalid: not a verb
+finalize:
+    ensure_file: { file: notes.md }             # a whole event, one long form
+    no_error: true
+loop:
+    until: "{{ true }}"
+    ensure_file: { file: review.txt }           # the loop's one loose verb
 ```
+
+The schema types a single action with the action categories (`communicate`,
+`flow`, `shell`, `expression`), each of which holds one verb; their
+`uncounted-keys` constraint leaves `when` and `no_error` out of that one-key
+count. The schema does not check where `when` may sit beside an action: a
+`when` in a whole event or body dictionary passes the schema, and the
+lifecycle parser refuses it. A conditional is different, see below.
 
 A **dictionary bundle** puts several verbs in one mapping, optionally guarded
 by `when` and softened by `no_error`. A bundle takes **short forms only**; it
 is its own type (`bundle`, or `initialize-bundle` without `shell`) because
-SimplifiedSchema cannot merge the action types into one object.
+SimplifiedSchema cannot merge the action types into one object. A loop's
+loose verbs are a bundle too when there are several of them.
 
 ```yaml
 success:
@@ -352,6 +371,10 @@ success:
       shell: "git push"                 # valid: a guarded bundle
     - info: "pushed"
       say: { text: "pushed" }           # invalid: a long form inside a bundle
+loop:
+    until: "{{ true }}"
+    ensure_file: { file: review.txt }
+    info: "reviewed"                    # invalid: a long form beside another loose verb
 ```
 
 A whole event can also be one bundle (a root dictionary), and a bare
@@ -375,6 +398,19 @@ start:
       then:
           - info: "draft run"
       info: "always"            # invalid: then/else beside a sibling verb
+```
+
+A conditional is a list item only. A whole event, or a `then`/`else` body,
+written as a dictionary holds actions, never a condition, so the schema
+refuses a `then` there:
+
+```yaml
+start:
+    when: "fm.ready"            # invalid: a conditional must be a list item
+    then: [stop]
+success:
+    - when: "fm.ready"          # valid
+      then: [stop]
 ```
 
 ### How deep the schema checks
@@ -508,6 +544,31 @@ A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
 Markdown, so no schema judges it; the task parser checks it when the
 sequence is prepared.
 
+### Malformed templates in any action
+
+Every string the lifecycle parser reads as a template is checked for syntax
+by the schema too, at its own path and source position, whatever the type
+accepts there: a communication verb's text, a directive's strings (`error`,
+`proxy`, `retry`, `resume`, `defer`, `break`, `prep`), a `shell` command, a
+`set` value, and every value of a `with:` overlay, as well as a generated
+verb's arguments (see
+[Deferred values](#deferred-values-and-what-happens-at-the-event)):
+
+```yaml
+start:
+    - say: "{{ 1 + }}"                           # invalid at /start/0/say: malformed template
+    - error: { reason: "failed {{ 1 + }}" }      # invalid at /start/1/error/reason
+    - proxy: { target: next.md, with: { round: "{{ 1 + }}" } }  # invalid at /start/2/proxy/with/round
+    - set: { round: "{{ fm.round + 1 }}" }       # valid
+    - info: "{{ unclosed"                        # valid: an unclosed `{{` is text
+```
+
+The schema reads exactly what the parser reads, so a `set` value written as a
+whole-value `$( … )` command is not checked as a template, nor is `no_error`
+or `break.code`. A `when` condition is already parsed as an expression. A
+malformed template fails `md schema validate`, the editor, and the launch
+verdict alike, because no rendering can repair it.
+
 ### What only the parser checks
 
 The schema cannot express these rules; the lifecycle parser enforces them
@@ -516,8 +577,9 @@ before anything runs:
 - a directive (`stop`, `retry`, `proxy`, …) placed last in its list, and at
   most one directive per bundle
 - `skip` only in `initialize`
-- no `when` on a root dictionary or at the `loop:` root, and `gate:` never
-  beside loose loop verbs
+- no `when` beside the actions of a root or body dictionary, or at the
+  `loop:` root, and `gate:` never beside loose loop verbs (a conditional's
+  `then` in such a dictionary is a schema error too)
 - the five-level conditional nesting limit, in every event, including a
   guarded bundle (`when` beside verbs, such as `- { when: "fm.x", stop: null }`)
   placed inside a fifth-level `when`, which the parser counts as a sixth level
@@ -606,6 +668,28 @@ start:
 
 The error names the path and the source position of the value.
 
+#### The verb's own rules decide
+
+The value types are only a projection of the signature. Every check above
+then binds the arguments through the same registration the call uses when
+the event runs, and that verdict decides the literal arguments, including
+the rules a type cannot spell:
+
+```yaml
+start:
+    - number: [pear, 7]                  # valid: the fallback 7 replaces text that is not a number
+    - round: { x: pear, fallback: 2.7 }  # valid: the same recovery in long form
+    - number: pear                       # invalid: no fallback, and "pear" is not a number
+    - length: [true]                     # invalid at /start/3/length/0: length does not accept a boolean
+    - length: [hi]                       # valid
+```
+
+The binder also chooses between overloads as the call does: a call two
+overloads accept only after converting its value is ambiguous and is reported,
+though each overload's type accepts it. Templates stay deferred, and an
+unknown parameter, an extra argument, or a bad `no_error` beside a bound
+argument is still reported. A bundle still takes short forms only.
+
 #### Deferred values and what happens at the event
 
 A whole-value `{{ … }}` template is accepted wherever an argument is typed,
@@ -627,8 +711,30 @@ start:
     - pr_list: { count: "{{ fm.count }}", limit: 3 }  # invalid: no `limit` parameter
 ```
 
-A template that does not parse (`pr_list: "{{ 1 + }}"`) is judged as written,
-so it fails every passive check: `md schema validate`, the editor, and the
+A `{{ … }}` span that does not parse is never deferred. It is a syntax error
+at the argument's path and source position, whatever the parameter's type
+accepts, whether it is the whole value or part of the text:
+
+```yaml
+start:
+    - ensure_file: "{{ 1 + }}"                   # invalid at /start/0/ensure_file: malformed template
+    - trim: { text: "hello {{ 1 + }}" }          # invalid at /start/1/trim/text
+    - pr_list: "{{ 1 + }}"                       # invalid at /start/2/pr_list: the syntax, not the type
+    - ensure_file: "{{ unclosed"                 # valid: an unclosed `{{` is text
+```
+
+A stored literal token (`{{!data:v1:…}}`, the form a lifecycle effect writes
+data in) is data, not a template, even when the text it holds looks like one.
+Its text is checked as the argument, at launch, in DMLS, and in
+`md schema validate` alike:
+
+```yaml
+start:
+    - abs: "{{!data:v1:e3sgZm0uY291bnQgfX0}}"    # invalid at /start/0/abs: the text `{{ fm.count }}` is not a number
+    - trim: "{{!data:v1:e3sgZm0uY291bnQgfX0}}"   # valid: the text is a string
+```
+
+It fails every passive check: `md schema validate`, the editor, and the
 Claudine launch verdict. `md compose`'s own gate reports it as an expression
 parse error.
 

@@ -1380,7 +1380,9 @@ A `loop:` block spells its lifecycle concerns in one of two ways, never both:
 
 - **Loose verb keys** beside the iteration controls. They are read as one
   [dictionary bundle](#dictionary-bundles-and-canonical-order): canonical
-  order, each verb at most once, one directive last, no `when`.
+  order, each verb at most once, one directive last, no `when`. A single loose
+  verb may take its long form (`ensure_file: { file: review.txt }`), as a
+  verb alone in any dictionary may.
 
   ```yaml
   loop:

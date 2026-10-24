@@ -250,6 +250,12 @@ back in.
 To assert the exact child argv or the composed prompt (providers read it on
 stdin), install a recording stub provider with `common::launch_recorder`
 (`install`/`launches`/`prompts`, Unix-only) rather than writing another one.
+A test that only asks whether, or how often, the provider launched must stay
+portable: copy `bin_exe!("claudine-fake-goose")` to `goose{EXE_SUFFIX}` in the
+fixture `bin` and set `PROVIDER_MARKER` (one line per launch; gate the module
+`#[cfg(feature = "test-fixtures")]`, as `launch_trigger_schemas.rs` does), and
+prove effects with a portable action (`ensure_file`, `append_line`), not a
+shell `touch`.
 A test whose subject *is* the running child — a signal, a deadline, a streaming
 read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
 (or `command_builder()…build_std()`), which is the same policy on a
@@ -403,7 +409,9 @@ reference to `bundle`/`expression`/`loop` costs its full size; never unroll
 a family by hand again (the typed unroll measured 11 MB). The schema encodes
 no conditional-depth limit: depth 6 is schema-valid and parser-invalid.
 `claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_two_megabytes`
-pins the payload (about 0.66 MB `claudine.yaml`, 0.70 MB `sequence.yaml`)
+pins the payload (about 1.39 MB `claudine.yaml`, 1.61 MB `sequence.yaml`,
+1.83 MB for both; little headroom, so a new `entry` reference needs a resolver
+change to share acyclic types)
 and asserts the families by `DefKey`, never by `$defs` key; criterion-10
 container cells are `lib/tests/l1/container_schema_recursion.rs` over the
 `tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
@@ -517,10 +525,29 @@ mistake beside a template therefore fails launch, and so does a malformed
 template (`expression::is_malformed_template`), which no rendering can
 settle. Claudine's `action.yaml` categories, bundles, and `loop` keys select
 Darkmatter's generated per-verb forms (`<verb>-short`/`-long@darkmatter:lifecycle`;
-bundles and loop keys short only); `claudine_schemas.rs::generated_verb_keys_equal_the_darkmatter_catalogs`
+a bundle of several verbs, and `loop-bundle`, short only; a category, and
+`loop-single`, short or long). A category is a single-action dictionary
+(`uncounted-keys: [when, no_error]` keeps `when`/`no_error` out of its
+one-verb count), so each family's `entry` (category | bundle) types root,
+`then`/`else`, and list-item dictionaries alike; only `item` adds the
+conditional, so a root/body dictionary holding `then` is a schema error
+(every cycle runs stack → `item[]` → conditional → `then`/`else`, and the
+acyclic `entry` is inlined at both references). `loop` is
+`loop-bundle | loop-single`; the schema leaves `when` beside a root/body
+dictionary's actions to the parser, as a bundle's `when` always was. `claudine_schemas.rs::single_action_*`
+judge every family × position by schema and parser; `claudine_schemas.rs::generated_verb_keys_equal_the_darkmatter_catalogs`
 pins each reference against `LifecycleSchemaProjection::shipped()`, and the
 parser itself does not type-check literal operands (a wrong-typed literal is
-S-reject, P-accept, R-reject). Side-effect operands are bound to their typed
+S-reject, P-accept, R-reject). Schema validation binds each generated verb
+value through the verb's runtime registration (Darkmatter's `operands(...)`
+marker), so `number: [pear, 7]` passes and `length: [true]` fails at launch,
+in DMLS, and in `md schema validate` alike; a generated verb's operand holding
+a `{{ … }}` span that fails to parse (`ensure_file: "{{ 1 + }}"`) is a
+positioned `malformed template` problem there too, even for a text parameter.
+The hand-written verb types carry the same marker, so every string the parser
+reads as a template (`say` text, directive strings, `shell`, `set` values but
+a `$( … )` one, `with:` values) reports a malformed span the same way
+(`lifecycle::template_operands`). Side-effect operands are bound to their typed
 signatures at event time, before the effect engine runs; a binding failure
 is an evaluation failure that `no_error` does not suppress. Optional and
 nullable are independent: an omitted optional operand is fine, an explicit
