@@ -38,6 +38,19 @@ frontmatter hash, the schema validator cache key, and every compose cache key.
 Array order stays significant in all of them. Strict frontmatter hashes follow
 author order at every depth.
 
+Two traps keep that order intact:
+
+- **Remove with `shift_remove`.** Under `preserve_order`, `serde_json::Map::remove`
+  (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
+  removed key's slot. Any removal from frontmatter or effective state uses
+  `shift_remove`.
+- **Never round-trip through `HashMap`.** `EffectiveState::data()`,
+  `EffectiveStateBuilder::with_frontmatter`, `EffectiveState::new`, and the
+  frontmatter shell APIs (`ResolvedShellValue::resolve`,
+  `execute_resolved_shell_values`, `execute_shell_values_with`) all take or
+  return `serde_json::Map`. A `HashMap` is fine only for key lookup that never
+  reaches output (`presentation_values`, caches, memo tables).
+
 ## Merge Strategies
 
 Parsing one YAML frontmatter document rejects duplicate keys at every mapping
@@ -67,6 +80,18 @@ md.fm_set_defaults(json!({"draft": false}))?;
 | `ErrorOnConflict` | Fail if keys exist in both |
 | `PreferExternal` | Incoming values win on conflict |
 | `PreferDocument` | Existing document values win |
+
+Every merge keeps the **receiving document's** key order: its keys keep their
+positions (an overwritten key never moves), and incoming-only keys are
+appended in incoming order. `merge_with`/`set_defaults` are shallow, so an
+incoming object replaces the existing one whole with its own order. The
+compose pipeline's recursive merge,
+`effective_state::deep_merge(base, overlay, ConflictWinner)`, takes the
+receiving document as `base` and picks the value-winning side with
+`ConflictWinner`; never swap the arguments to get document precedence (that
+reorders the result). This applies to external state (document first),
+transclusion inheritance (child first, parent keys appended), and `set`
+overrides (child first).
 
 ## Typed Extraction
 
