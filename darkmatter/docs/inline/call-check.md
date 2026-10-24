@@ -216,6 +216,18 @@ Only syntax the composition would evaluate:
 | body `{{ … }}` (directive targets included) | body interpolation is enabled | fenced and indented code (unless `interpolate_code_blocks`), `{{{ … }}}` |
 | `::block when="…"` conditions | page blocks are enabled | |
 | `::file` / `::code` `when=…` conditions | a transclusion stage is enabled | |
+| lifecycle `when:` predicates and action operands, in every branch | the host runs a lifecycle (`md compose`, Claudine) | an ignored verb's operand |
+
+A lifecycle stack is checked before its first event runs, each expression
+typed with the globals its event declares (`err` only where a failure is
+handled). The rejection names the lifecycle path and gives the same verdict
+the call would get in the body:
+
+```text
+lifecycle `composed[0].when` calls a function with an argument that can never
+bind (doc.md): min: argument 1 (`a`) is boolean, expected number (category 5:
+no value of that type can bind)
+```
 
 A frontmatter-only composition (`ComposeOptions::only_frontmatter_surface`)
 checks the frontmatter and leaves the body, invalid calls included, untouched.
@@ -226,38 +238,65 @@ parent's composition (it is never replaced by a "could not transclude"
 notice). Text a child or an expression inserts is data, never the parent's
 syntax, so it is not checked again.
 
+## Where argument types come from
+
+The check types an argument from the schema's declarations, never from the
+document's values:
+
+| Argument | Its type |
+|---|---|
+| a literal (`5`, `'a'`, `[1, 2]`) | that value, bound as the call would bind it |
+| a declared property (`size`, `fm.size`) | its declared type, plus `null` when it is optional |
+| a path into a typed object (`meta.count`) | the member's declared type, plus `null` when it, or any object on the path, is optional |
+| a constant index (`list[0]`, `pair[1]`) | the item's type, plus `null` unless a tuple position guarantees it |
+| `ctx.*`, `env`, `err`, `timing` | the shape `darkmatter.yaml` declares |
+| a host global (Claudine's `loop.count`, `seq.index`) | the shape the host's catalog declares; nothing when the event declares the global unavailable |
+| a call (`length(count)`) | the function's declared `returns` type; for overloads, the union over every overload the argument count can select |
+| `x \|\| y` | `x`'s type without `null`, joined with `y`'s |
+| `c ? a : b` | the two branch types joined, each under the guard |
+
+```markdown
+---
+$schema:
+  count: string
+  maybe: number
+---
+{{ min(length(count), 5) }}  <- category 1: `length` returns a number
+{{ min(maybe || 0, 5) }}     <- category 1: `|| 0` removes null
+```
+
+Every layer of the effective schema contributes, after resolution and
+merging: the document's `$schema`, matching trigger schemas, and the
+baseline. A raw JSON Schema layer is read conservatively: its literal
+`properties` (through `anyOf`, `oneOf`, and `allOf`) are typed by `type`,
+`const`, `enum`, and `items`; anything else, a `$ref` included, is unknown.
+
+In a root union, each arm contributes the property's type with that arm's
+optionality; an arm that does not declare the property contributes
+`unknown`, which makes the whole type unknown:
+
+```yaml
+$schema:
+  - { spec: file(required), plan: file(required), area: string }
+  - { review: file(required), plan: file(required), area: string }
+# plan -> file, area -> string | null, spec and review -> unknown
+```
+
+Joined types are normalized one way everywhere: `unknown` absorbs every
+other type, duplicates collapse, and the order of arms and keys never
+changes the result (`string | number` and `number | string` are one type).
+
 ## What the check cannot see
 
-The check knows only what the schema declares. Where that runs out, an
-argument is category 4 (type not known), and the call is judged when it runs:
+Where the declarations run out, an argument is category 4 (type not known),
+and the call is judged when it runs:
 
-- **Declared types, never values.** The check reads the schema, not the
-  frontmatter. `maybe: number` is optional, so `maybe` is `number | null` even
-  when the frontmatter sets `maybe: 3`: a caller, a setter, or interpolation
-  can still replace that value before the call runs.
-- **Top-level properties only.** `size` and `fm.size` are typed; a path below
-  a property (`meta.count`), bare `fm`, a computed key (`fm[key]`), `ctx`,
-  `env`, host globals, call results, and operators (`maybe || 0`) are
-  unknown.
-- **SimplifiedSchema only.** When `$schema` is a raw JSON Schema, every
-  variable is unknown. In a root union, a property is typed only when every
-  arm that declares it declares it the same way (each inline arm has its own
-  named types, so a recursive type that two arms each declare counts as two
-  different types); when any arm is a raw JSON
-  Schema, every variable is unknown. This document composes to `ok`, because
-  `raw.json` hides the type of `flag`:
-
-  ```markdown
-  ---
-  $schema: ./raw.json
-  flag: true
-  ---
-  {{ true ? 'ok' : min(flag, 5) }}
-  ```
-
-  ```json
-  { "type": "object", "properties": { "flag": { "type": "boolean" } } }
-  ```
+- **Declared types, never values.** `maybe: number` is optional, so `maybe`
+  is `number | null` even when the frontmatter sets `maybe: 3`: a caller, a
+  setter, or interpolation can still replace that value before the call runs.
+- **No declaration.** An undeclared property, a computed key (`fm[key]`,
+  `list[i]`), bare `fm`, an open `object`, a pattern key, or a raw `$ref`.
+- **Other operators.** `size + 1`, comparisons, and negation are unknown.
 
 Some syntax is not checked before evaluation at all, because it does not
 exist yet or is not evaluated on that surface. A bad call there still fails

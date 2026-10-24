@@ -36,8 +36,24 @@ and DMLS both read it.
   `MarkdownError::rejected_call()`.
 - DMLS maps categories to `dm.expression.incompatible_call` (5) and
   `dm.expression.uncertain_call` (3; also 2 and 4 under `[expressions] strict`).
-- Build the site over `DeclaredTypes::new(schema)` without static frontmatter:
-  a set value is runtime data.
+- Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
+  layer: document, triggers, the merged JSON's `RawDeclarations`, layered
+  definitions) without static frontmatter: a set value is runtime data.
+  `DeclaredTypes::new(simplified)` is the document layer alone (tests,
+  callers with no `EffectiveSchema`). Host globals are typed by the host
+  catalog (`with_global_catalog`; `EventRegistry::register_global_catalog`
+  carries it for `lifecycle_declared_types`).
+- Argument types come from `call_check::expression_type`: a call is the union
+  of its candidate overloads' `declared_returns`; `x || y` is `x` minus null
+  joined with `y` under `x`'s false side; `c ? a : b` joins the narrowed
+  branches; other operators are unknown. All joins go through
+  `Shape::union` (unknown absorbs, canonical order: messages print
+  `number | string`, never authored order).
+- Lifecycle surfaces are call-checked by
+  `darkmatter::lifecycle::reject_incompatible_calls` (md: CLI before the run;
+  Claudine: `prepare.rs` after the launch schema), error
+  `LifecycleError::LifecycleCallRejected` (`rejected_call()`), Claudine twin
+  `CompositionError::LifecycleCallRejected`.
 - An all-literal call is classified by the real `bind_call`, which runs no
   handler.
 - An `as_sent` source (`numberlike`, `boolish`) is two representations, the
@@ -47,10 +63,15 @@ and DMLS both read it.
   false category 1.
 - New authored-expression surfaces must be added to both consumers.
   `dmls/tests/l1/call_check_agreement.rs` pins their agreement on one corpus.
-- Projection limits are intended, not gaps to patch locally: paths below a
-  top-level property, raw JSON Schema, and root unions with a raw arm or
-  disagreeing arms are `unknown`; `replace` insertions, `::shell` `{{ }}`
-  with body interpolation off, and unparsable expressions are not prechecked.
+- Projection limits are intended, not gaps to patch locally: a root-union
+  arm that does not declare a property makes it `unknown`; a raw `$ref`,
+  open objects, pattern keys, and dynamic keys are `unknown`; `replace`
+  insertions, `::shell` `{{ }}` with body interpolation off, and unparsable
+  expressions are not prechecked.
+- `SiteScope` boxes its `EffectiveSchema`: stage-dispatch frames are
+  re-entered per nested-composition level, and a debug-build
+  `self_composition_reaches_the_depth_limit` overflows a 2 MiB test thread
+  if they grow.
   User docs: `darkmatter/docs/inline/call-check.md`.
 
 **Function binding** (`expression/call_binding/`). Every call binds through

@@ -563,7 +563,15 @@ Darkmatter's design-time call check rejects any composed prompt (compose,
 inline-compose, sequence task) whose authored call is proven wrong, before
 any expression or shell runs, including dead branches. Claudine adds no rule:
 the rejection is Darkmatter's `MarkdownError` carrying
-`ExpressionError::CallCheck` (`rejected_call()`). A shipped prompt or fixture
+`ExpressionError::CallCheck` (`rejected_call()`). Lifecycle `when:`
+predicates and action operands get the same verdict from
+`darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
+right after the launch schema resolves (`lifecycle::reject_incompatible_calls`,
+error twin `CompositionError::LifecycleCallRejected`). Expressions are typed
+by every schema layer (`DeclaredTypes::for_schema`), and Claudine's globals
+by its host catalog, which `claudine_registry()` registers
+(`register_global_catalog`); sequence preflight sites add
+`with_global_catalog(claudine_globals())`. A shipped prompt or fixture
 that trips it holds a real bug, so fix the call; never work around the check.
 The function catalog (`darkmatter/schemas/partials/functions.yaml`, read
 through `expression_function_catalog()`) and the argument categories are
