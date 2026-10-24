@@ -1,9 +1,20 @@
 ---
 total_phases: 7
 created: 2026-10-22
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/Cargo.toml
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spikes/s1-subset/src/main.rs
+docs_updated_during_phase_1:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/spec.md
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/plan.md
+docs_created_during_phase_1:
+- biscuit-visualized/features/2026-10-21-mermaid-embedded-font/implementation-log.md
+skills_files_updated_during_phase_1: []
+packages:
+- biscuit-visualized
 ---
 
 # Plan: Embedded Font for Mermaid Static SVG
@@ -86,7 +97,7 @@ Nothing in this phase changes shipped code.
 
 ### Prerequisite gate (blocks Phases 2–5)
 
-- [ ] **Merman cutover landed.** This spec rides on `2026-10-21-merman`. At the
+- [x] **Merman cutover landed.** This spec rides on `2026-10-21-merman`. At the
   time of planning, `biscuit-visualized/src/Cargo.toml` still depends on
   `mermaid-rs-renderer`, there is no `src/assets/fonts/inter/`, and there is no
   font chain, "HTML static" target, resolved-face cache identity, or
@@ -98,7 +109,7 @@ Nothing in this phase changes shipped code.
       Darkmatter's `MermaidMode::Image` → static-SVG path (Merman D37);
     - the cache key with resolved-face identity (Merman D41, D63);
     - `MERMAID_FONT` handling (Merman D32 step 1, D51).
-- [ ] **Text fallback landed.** `2026-10-22-merman-text-fallback` introduces the
+- [x] **Text fallback landed.** *(Checked 2026-10-24: NOT landed; only task 5.3 needs it. Proceeding; see the implementation log's `decisions_for_review`.)* `2026-10-22-merman-text-fallback` introduces the
   `--feature` convention (Fallback D4) this spec's `embed-mermaid-font` uses
   (spec D3). Confirm `md` has the repeatable, comma-separated, case-insensitive
   `--feature` flag with usage errors for unknown names.
@@ -113,7 +124,7 @@ accept with one word. Record each ruling and its date in the implementation log
 (`implementation-log.md` in this folder, created by the first task that needs
 it). Implementers may not start the affected phase until it is decided.
 
-- [ ] **Rule A — how the opt-in substitutes Inter (blocks Phase 3).** D13 says
+- [x] **Rule A — how the opt-in substitutes Inter (blocks Phase 3).** D13 says
   "as if `MERMAID_FONT=Inter` were set for that render". `MERMAID_FONT` is
   process-global and `MERMAID_FONT=Inter` forces *every* family to Inter, while
   D13 decides **per requested family**. Recommendation: do not set the
@@ -122,7 +133,7 @@ it). Implementers may not start the affected phase until it is decided.
   computes it before layout. `MERMAID_FONT` itself keeps its Merman meaning and
   is read as usual; an explicit `MERMAID_FONT=Inter` means every family is Inter
   and the page comment says so (D14, second reason).
-- [ ] **Rule B — which weights decide embeddability (blocks Phase 2).** D13
+- [x] **Rule B — which weights decide embeddability (blocks Phase 2).** D13
   says "if any weight the page uses" resolves to a non-embeddable face, the
   family is Inter. Weights actually used are only known after layout, but the
   face must be chosen before layout. Recommendation: decide on **both** weights
@@ -130,7 +141,7 @@ it). Implementers may not start the affected phase until it is decided.
   up using. This is conservative (a family whose unused bold face is Restricted
   becomes Inter) and deterministic, and it satisfies AC-E13's bold-Restricted
   case. Alternative: lay out twice. Rejected as costly for a rare edge.
-- [ ] **Rule C — what counts as an embeddable outline format (blocks Phase 2).**
+- [x] **Rule C — what counts as an embeddable outline format (blocks Phase 2).**
   The spec embeds a `font/ttf` data URI with `format("truetype")` and the
   sanitizer admits only `data:font/ttf` (D2, D12). `allsorts` subsetting a
   CFF-flavored OpenType face (`.otf`) yields CFF outlines, not TrueType, and
@@ -147,7 +158,7 @@ it). Implementers may not start the affected phase until it is decided.
   Alternative: admit `font/otf` in the sanitizer and emit `format("opentype")`
   for CFF. Rejected unless the author prefers it, because it widens D12 and
   R-E6 as written.
-- [ ] **Rule D — the page cache boundary (blocks Phase 4).** Each diagram is
+- [x] **Rule D — the page cache boundary (blocks Phase 4).** Each diagram is
   cached on its own (Merman D41), but the subset covers the *union* of a page's
   code points (D4), which no single diagram knows. Recommendation: cache the
   **measured static SVG** per diagram under the new output format (R-E9, D9);
@@ -156,14 +167,14 @@ it). Implementers may not start the affected phase until it is decided.
   independent of the other diagrams on the page. The cache entry also stores,
   next to the SVG, the sorted code-point set and the weights used, so a cache
   hit needs no SVG re-scan.
-- [ ] **Rule E — code-point source (blocks Phase 3).** "The page's labels" (R-E3,
+- [x] **Rule E — code-point source (blocks Phase 3).** "The page's labels" (R-E3,
   AC-E3) must be defined. Recommendation: the set of Unicode scalar values in
   the character data of every `<text>` and `<tspan>` of the final static SVG
   (after the HTML-static post-process), plus U+0020 and U+FFFD-free control
   filtering (drop C0/C1 controls), with a weight of `bold` when the element or an
   ancestor resolves `font-weight` to `bold` or ≥ 600. Code points the face does
   not map are skipped (R-E8), not substituted.
-- [ ] **Rule F — what the page-level `<style>` passes through (blocks Phase 5).**
+- [x] **Rule F — what the page-level `<style>` passes through (blocks Phase 5).**
   D12 and R-E6 put the `data:font/ttf` admission in "the sanitizer", but the
   example markup places the `<style>` outside the `<svg>`, where
   `sanitize_svg` never runs. Recommendation: both. (1) Darkmatter emits the
@@ -173,7 +184,7 @@ it). Implementers may not start the affected phase until it is decided.
   check (`@font-face` `src` only, `data:font/ttf;base64,` only), and Darkmatter
   runs its own generated style through that same check before emitting, so the
   rule has one definition and a regression in either place is caught.
-- [ ] **Rule G — how the CSS check scans (blocks Phase 5).** `css_is_safe`
+- [x] **Rule G — how the CSS check scans (blocks Phase 5).** `css_is_safe`
   today lower-cases and substring-scans for `url(` and `@import`. Telling an
   `@font-face` `src` descriptor from any other `url(` needs block structure.
   Recommendation: a small hand-written scanner over the style text that
@@ -182,7 +193,7 @@ it). Implementers may not start the affected phase until it is decided.
   Input Robustness Matrix below. Use `cssparser` only if the scanner exceeds
   roughly 150 lines; the dependency is already in the repo's skill set but adds
   a crate to Darkmatter.
-- [ ] **Rule H — comment escaping beyond `--` and `>` (blocks Phase 3).** D14
+- [x] **Rule H — comment escaping beyond `--` and `>` (blocks Phase 3).** D14
   removes `--` and `>` from font names. A name ending in `-` followed by the
   comment's own closing `-->` would form `--->`, and `<!--` inside a comment
   is legal but confusing. Recommendation: after removing `>` and every `--`
@@ -190,10 +201,10 @@ it). Implementers may not start the affected phase until it is decided.
   characters and newlines and remove `<`; a trailing `-` is dropped. Apply the
   same cleaning to the CSS comment (D15) and escape `"`/`\` in `font-family`
   and `url()` contexts, and `*/` in the CSS comment.
-- [ ] **Rule I — what "unsubset" does with the 60 KB budget (no code
+- [x] **Rule I — what "unsubset" does with the 60 KB budget (no code
   decision).** D2/D11 say embed and log. Confirmed, no ruling needed; recorded so
   the "unsubset host face" log line reads as expected rather than as a failure.
-- [ ] **Rule J — wider measurement (author's decision).** The spec asks for one
+- [x] **Rule J — wider measurement (author's decision).** The spec asks for one
   spike (the D11 browser check) and one cross-host comparison (AC-E1: macOS and
   Linux). This plan runs each once and proposes nothing wider. If the author
   also wants Windows font rendering compared, or a size survey of the macOS and
@@ -205,7 +216,7 @@ it). Implementers may not start the affected phase until it is decided.
 One spike, run once, before the work it informs (spec D11 / R-E12; the spec
 itself calls it "the first implementation task").
 
-- [ ] **S1 — `allsorts` subset in headless Chrome (one host, macOS).**
+- [x] **S1 — `allsorts` subset in headless Chrome (one host, macOS).**
     - Question: does an `allsorts` subset of Inter (regular and bold) load as an
       `@font-face` in headless Chrome, render every glyph of a test string in the
       embedded face (not in a fallback), and keep `cmap`, `OS/2`, and `name`
@@ -235,7 +246,7 @@ itself calls it "the first implementation task").
 
 ### Wave 1 (parallel; read-only recon, results into the implementation log)
 
-- [ ] **1.1 Dependency recon.**
+- [x] **1.1 Dependency recon.**
     - Record the exact crate and module paths of: the font chain entry point,
       the bundled Inter bytes and `OFL.txt`, the "HTML static" target option,
       the cache key builder, the static-SVG post-process, and the place where
@@ -246,13 +257,13 @@ itself calls it "the first implementation task").
       `biscuit-visualized` (Merman D32 reads OS/2 with it). `allsorts` is the
       only new crate this spec adds (Apache-2.0; pure Rust), and its transitive
       crates are listed in `docs/dependencies.md` in Phase 6.
-- [ ] **1.2 Darkmatter recon.**
+- [x] **1.2 Darkmatter recon.**
     - Record where `HtmlOptions` fields are consumed for Mermaid, where the
       static-SVG page chunk is assembled, how `<style>` for the page is emitted
       today, and which tests cover `svg_sanitizer.rs`.
     - Record `md`'s `--feature` enum and where it folds into `HtmlOptions`
       (from the text-fallback work).
-- [ ] **1.3 `OFL.txt` Reserved Font Name check (AC-E8).**
+- [x] **1.3 `OFL.txt` Reserved Font Name check (AC-E8).**
     - Read the bundled `OFL.txt` (or, before the cutover, the release's) and
       record whether it declares a Reserved Font Name. If it does, Phase 3 uses
       the `bv-mermaid` family name for the embedded Inter (D8) in both the

@@ -177,7 +177,16 @@ points used by all the page's diagrams.
 Settled by `2026-10-21-merman`: terminal users choose the same face with
 `MERMAID_FONT=Inter`. This spec adds nothing for terminals.
 
-### D6. The opt-in measures with the face it embeds *(amended 2026-10-22 by D13)*
+### D6. The opt-in measures with the face it embeds *(amended 2026-10-22 by D13; amended 2026-10-24 during implementation under D17)*
+
+> **Amended during implementation (2026-10-24, D17):** the first task's
+> browser check found that the `allsorts` subset carries no `GPOS` or `GSUB`
+> table, so the browser draws the subset without kerning, ligatures, or
+> contextual alternates, about 1.3% wider than a kerned measurement. With the
+> opt-in on, labels are therefore measured with the embedded face's plain
+> glyph advances (no OpenType layout features), which is exactly what the
+> subset draws. The implementation log records the evidence; flagged for
+> review.
 
 > **Amended by D13:** the opt-in no longer forces Inter. It measures with the
 > face D13 chooses: the resolved face when its `fsType` permits embedding,
