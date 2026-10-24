@@ -11,7 +11,7 @@ source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/
 docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
 docs_created_during_phase_2: [biscuit-hash/docs/json.md]
 skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
-packages: [biscuit-hash, darkmatter, dmls]
+packages: [biscuit-hash, darkmatter, dmls, claudine]
 decisions_for_review:
     - |-
         S1 found a second order-sensitive schema hash the plan does not name:
@@ -48,29 +48,60 @@ decisions_for_review:
         `--all-features`, matching its `test` recipe and the precedent in
         biscuit-visualized. The alternative was a one-off manual clippy run
         per phase. Reverting is a two-line justfile change.
+    - |-
+        Phase 4 went wider than the plan's list of HashMap-to-ordered-map
+        changes. The plan named EffectiveState and its builder. The audit also
+        found bare `fm` during frontmatter interpolation reading a HashMap
+        (`FrontmatterSeedState`), fed by three public frontmatter shell APIs
+        (`ResolvedShellValue::resolve`, `execute_resolved_shell_values`,
+        `execute_shell_values_with`), so those take an ordered map too, and
+        Claudine's sequence preflight loader followed. The alternative was to
+        keep those signatures and convert inside, which leaves bare `fm` in a
+        frontmatter template in random order. Reverting means restoring
+        `HashMap` on those signatures and their Claudine callers.
+    - |-
+        The plan's list of merge argument reversals missed one:
+        `prepare_frontmatter_for_compose` (compose/util.rs) merged external
+        state into the document's own frontmatter with external state as the
+        order base. It decides a transcluded child's key order, so I fixed it
+        the same way (document is the base, document values still win). No
+        reasonable alternative keeps the spec's "receiving document first"
+        rule; leaving it would make child output parent-first.
+    - |-
+        Bare `fm` used to re-append the document's own `ctx` at the end of the
+        object. It now keeps `ctx` at its authored position. The alternative
+        (always last) is simpler to describe but contradicts author order.
+        Reverting is a few lines in `EffectiveState::get_fm`.
 message_to_agent: |-
-    Phase 3 is done. Darkmatter requests serde_json `preserve_order` itself
-    and enables biscuit-hash `json`; the non-strict frontmatter hash, TOC
-    normalized hash, both schema validator cache hashes, and every compose
-    cache key now render through `biscuit_hash::canonical_json`.
-    `canonical_json_sorted` is gone. For Phase 4:
-    - `just test --no-fail-fast` in darkmatter/ shows 44 failures: exactly the
-      Phase 1 baseline minus `benchmark_manifest_matches_recorded_identities`
-      (now passing). All 44 belong to Phase 5's review list.
-    - In this shell `cd darkmatter` (a relative path) resolves through CDPATH
-      to /Volumes/coding/personal/rusty-biscuit, the main checkout, not this
-      worktree. Always cd with absolute worktree paths.
-    - Another process shares this worktree (the dmls incremental-graph
-      feature). At 18:03 it committed the whole tree, this phase's work
-      included (commits bbde223e6 and 09d4679d0). Do not touch the dmls graph
-      files, and expect HEAD to move while you work.
-    - `docs/cli/hash.md` "Normalization Behavior" already states the new
-      non-strict/strict rules; Phase 6 adds the strict-baseline refresh
-      guidance.
+    Phase 4 is done; its code was committed mid-phase by the concurrent
+    process (d15577cd6). For Phase 5:
+    - `just test --no-fail-fast` in darkmatter/ shows 43 failures: the Phase 1
+      baseline minus `benchmark_manifest_matches_recorded_identities` (Phase 3)
+      and the frontmatter metadata test (Phase 4 rewrote it as
+      `parsed_frontmatter_mapping_order_metadata_agrees_with_value_order`).
+      All 43 are on your review list.
+    - Likely cause for `schemas_convert_snapshots::*`: under serde_json
+      `preserve_order`, `Map::remove` is a SWAP remove (the last key jumps
+      into the removed slot). `schemas/simplified/convert.rs` (~288-571,
+      1521) and `schemas/resolve.rs` (`strip_schema_uri`, `required`) call
+      `.remove(...)` on JSON Schema objects. Construction order there is not
+      author order until those become `shift_remove`; check that before
+      accepting any snapshot.
+    - Compose state is now ordered end to end (`EffectiveState::data()` is a
+      `serde_json::Map`), and bare `{{ fm }}` renders document order:
+      receiving document's keys first, then external/inherited keys.
+    - Claudine CLI tests need `--features test-fixtures` (the claudine `test`
+      recipe passes it); without it, fixture-binary tests fail spuriously.
+    - `just test` does not run doctests; run `cargo test -p darkmatter --doc`
+      after an API change.
 source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
 docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: [.claude/skills/darkmatter/frontmatter.md]
+source_files_during_phase_4: [claudine/lib/src/composition/interpolation_conformance.rs, claudine/lib/src/composition/lifecycle/context/tests.rs, claudine/lib/src/composition/lifecycle/executor.rs, claudine/lib/src/composition/lifecycle/prewarm/classify.rs, claudine/lib/src/composition/preflight.rs, claudine/lib/src/composition/sequence/preflight/mod.rs, claudine/lib/src/composition/sequence/preflight/providers.rs, claudine/lib/src/composition/sequence/preflight/providers/tests.rs, claudine/lib/src/composition/sequence/preflight/reapproval.rs, claudine/lib/src/composition/sequence/task/tests.rs, darkmatter/lib/benches/phase6_interpolation.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/conditions.rs, darkmatter/lib/src/markdown/compose/context/checked.rs, darkmatter/lib/src/markdown/compose/context/effective_state.rs, darkmatter/lib/src/markdown/compose/context/merge.rs, darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs, darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs, darkmatter/lib/src/markdown/compose/inline/replacement.rs, darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs, darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs, darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs, darkmatter/lib/src/markdown/compose/page_blocks/engine.rs, darkmatter/lib/src/markdown/compose/preflight/collect.rs, darkmatter/lib/src/markdown/compose/replacement.rs, darkmatter/lib/src/markdown/compose/subtree.rs, darkmatter/lib/src/markdown/compose/tests/frontmatter.rs, darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs, darkmatter/lib/src/markdown/compose/transclusion/engine.rs, darkmatter/lib/src/markdown/compose/util.rs, darkmatter/lib/src/markdown/frontmatter.rs, darkmatter/lib/src/markdown/mapping_orders.rs, darkmatter/lib/src/markdown/reference/graph.rs, darkmatter/lib/src/markdown/schemas/clean.rs, darkmatter/lib/tests/l1/binding_contract.rs, darkmatter/lib/tests/l1/compose_expression_failure_contract.rs, darkmatter/lib/tests/l1/frontmatter_merge_order.rs, darkmatter/lib/tests/l1/main.rs, darkmatter/lib/tests/l1/shell_result_values.rs]
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: [.claude/skills/darkmatter/frontmatter.md]
 ---
 
 # Implementation Log for 2026-10-23-frontmatter-key-order (6 phases)
@@ -523,3 +554,128 @@ Targeted run: `cargo nextest run -p darkmatter --lib -E 'test(/markdown::hash::/
   insensitive`, `09d4679d0 planning(darkmatter): record Phase 3 close ...`).
   This phase made no commits. The plan/log frontmatter and these final log
   entries are the only uncommitted Phase 3 changes.
+
+## Phase 4
+
+Merge order: the receiving document fixes key order in every merge, and the
+compose state carries ordered maps end to end. Darkmatter and Claudine compile
+and pass against the new API.
+
+### What landed
+
+- **Recursive merge precedence (N7).** `deep_merge(base, overlay, ConflictWinner)`
+  in `compose/context/effective_state.rs`. `base` always fixes key order at
+  every depth; `ConflictWinner::{Base, Overlay}` only picks which side's value
+  survives a non-object conflict. The null rule is unchanged: a `null` on the
+  winning side yields to the other side. `deep_merge_override` (literal null,
+  used by `set` overrides) already had the child as base and is untouched.
+  Argument reversals removed:
+  - `EffectiveStateBuilder::build` `PreferDocument` (was `deep_merge(external, fm)`)
+  - `EffectiveState::new` (same reversal)
+  - **not in the plan:** `compose/util.rs` `prepare_frontmatter_for_compose`,
+    which writes external state into the document's own frontmatter in place
+    (`deep_merge(external, &current)`). This is the merge that orders a
+    transcluded child's frontmatter, so it was the main order defect.
+  - `merge_replace_maps` and the `ctx` merge in `context/merge.rs` already had
+    the right base; they only switched to the new signature.
+- **Ordered maps (N8).** `EffectiveState::data()`, its field,
+  `EffectiveState::new`, `EffectiveStateBuilder::with_frontmatter`, and
+  `markdown_child_options`' `parent_data` are `serde_json::Map`. The same
+  treatment, beyond the plan, for the other order-observable path found in the
+  audit: `FrontmatterSeedState` (bare `fm` during frontmatter interpolation)
+  and the three public frontmatter shell APIs that feed it
+  (`ResolvedShellValue::resolve`, `execute_resolved_shell_values`,
+  `execute_shell_values_with`). `fm_namespace::resolve_fm_namespace_in_map`
+  became identical to `resolve_fm_namespace_in_object` and was deleted.
+- **Bare `fm`** (`EffectiveState::get_fm`, `FmPath::Whole`) swaps the
+  document's own `ctx` in at its authored position instead of re-appending it
+  at the end.
+- **Swap-remove trap.** Under `preserve_order`, `serde_json::Map::remove` is a
+  swap remove: the last key jumps into the removed slot. Switched to
+  `shift_remove` in `markdown_child_options` (`prologue`/`epilogue`/`ctx`),
+  preflight `collect.rs` (`$schema`), and `schemas/clean.rs` `parse_instance`
+  (`$schema`). `md frontmatter rm` already used `shift_remove`.
+- **Shallow merges** (`Frontmatter::merge_with`, `set_defaults`) were already
+  correct on the `IndexMap`; tests now pin the contract and the docs state it.
+- **Doc drift fixed:** `EffectiveState::new` said "Uses `PreferExternal`" but
+  the code made frontmatter win; the code is right and the doc now says so.
+  `MappingOrders` and `mapping_key_order` docs claimed ordinary JSON maps keep
+  canonical order; they now say parsed values agree with the index.
+- **Claudine** (N8): 10 files. Every site that built a `HashMap` from an
+  ordered map now passes the `Map` directly. Beyond the plan's six sites, the
+  sequence preflight loader's `step_frontmatter` (`Arc<Map>`), the
+  reapproval basis, and the provider-hint `classify_reads`/`Evaluator` chain
+  switched to `Map`, because they feed `with_frontmatter` and
+  `ResolvedShellValue::resolve`.
+
+### Unordered-map audit
+
+- `rg 'HashMap<String, (serde_json::)?Value>'` over darkmatter lib/cli/dmls
+  source (non-test): the remaining sites are lookup-only and never reach
+  output: `presentation_values` (EffectiveState, schema validation,
+  evaluator), the `ctx`/binding/`current` caches and memo tables, and
+  frontmatter interpolation's per-key `authored_values`/`original_values`/
+  `authored_templates` (always walked in `templated_keys` Vec order).
+- `.remove(` on order-observable maps: fixed as above. Left for Phase 5, not
+  frontmatter: `schemas/simplified/convert.rs` (lines ~288-571, 1521) and
+  `schemas/resolve.rs` `strip_schema_uri` and `required` removal swap-remove
+  keys out of JSON Schema objects; those feed the `schemas_convert_snapshots`
+  outputs on Phase 5's review list. `context/options.rs:1173` removes then
+  reinserts on purpose (the last layer's position wins).
+- Checkpoint grep for `into_iter().collect()` on frontmatter objects: none
+  left on an order-observable path.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) | Rung / tier |
+|---|---|---|
+| Shallow: base positions, incoming appended in order, overwritten key never moves (`{z,a}`+`{a,b}` → `z,a,b`, both values) | `frontmatter::tests::merge_with_never_moves_an_overwritten_key_and_appends_incoming_keys`, `merge_with_appends_incoming_only_keys_in_incoming_order` | F1 / L1 unit |
+| Shallow: `ErrorOnConflict` still errors | `merge_with_error_on_conflict_still_errors_on_an_ordered_map` | F1 / L1 |
+| Shallow: nested object replaced whole in incoming order | `merge_with_replaces_a_nested_object_whole_in_incoming_order` (base parsed from YAML) | F1 / L1 |
+| `set_defaults` | `set_defaults_keeps_existing_positions_and_appends_missing_keys_in_order` | F1 / L1 |
+| Metadata agrees with value order | `frontmatter::tests::parsed_frontmatter_mapping_order_metadata_agrees_with_value_order` (replaces the baseline-failing `parsed_frontmatter_retains_nested_mapping_order_as_metadata`, which asserted sorted order) | F1 / L1 |
+| Recursive: base fixes order at every depth for both winners; null rule | `effective_state::tests::deep_merge_base_fixes_order_at_every_depth_whichever_side_wins` | F1 / L1 |
+| Value precedence unchanged (scalar, null either side, arrays as leaves, object/scalar, root null) | `deep_merge_base_winner_matches_swapped_overlay_values` (11 cases vs the old swapped call) | F1 / L1 |
+| Document/external merge, every strategy | `builder_keeps_document_order_under_every_strategy`, `effective_state_new_keeps_document_order_and_document_values` | F1 / L1 |
+| Bare `fm` order, authored `ctx` in place, runtime `ctx` not leaked | `bare_fm_renders_document_order_with_authored_ctx_in_place` | F1 / L1 |
+| `set` / `set.NAME` overrides, literal null | `apply_set_overrides_keeps_child_order_and_appends_new_keys` | F1 / L1 |
+| `replace` precedence | `merge_replace_maps_keeps_base_order_and_overlay_values` | F1 / L1 |
+| End to end, real compose pipeline: external state; transclusion inheritance (`prologue` not inherited); directive `set.NAME` | `l1 frontmatter_merge_order::*` (3 tests, 4 runs each so a random order cannot pass by chance; asserts composed frontmatter keys, nested keys, winning values, and the rendered `{{ fm }}` text) | F2 / L1 integration |
+
+All three end-to-end tests were confirmed to **fail** with the old
+`util.rs` argument order restored and pass with the fix. The
+`builder_keeps_document_order_under_every_strategy` case fails on the old
+`PreferDocument` reversal by construction.
+
+### Phase gates
+
+- `just lint` (darkmatter): clean.
+- `just test --no-fail-fast` (darkmatter): **10643 run, 10600 passed, 43
+  failed, 10 skipped**. The 43 are exactly the Phase 3 list (44) minus the
+  metadata test fixed here; all are on Phase 5's review list (JSON5
+  formatter, legacy schema-validate byte comparison, 40
+  `schemas_convert_snapshots::*`, `suggest_constraint_phase3`).
+- `cargo test -p darkmatter --doc`: 203 passed (`just test` does not run
+  doctests; one stale `HashMap` doc example in `replacement.rs` was caught
+  and fixed this way).
+- `just check-tier-coverage darkmatter`: nothing stranded.
+- `cargo check -p claudine -p claudine-cli --tests`: clean.
+- Claudine targeted tests (dependents of the changed API):
+  `cargo nextest run -p claudine --lib -E 'test(/composition::(interpolation_conformance|lifecycle::context|lifecycle::executor|lifecycle::prewarm|preflight|sequence::preflight|sequence::task)/)'`
+  → 682 passed. `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(/loop_control|task_run|sequence|codex_app_server|document_environment_routes/)'`
+  → 1310 passed. (A first run without `--features test-fixtures` showed 5
+  failures from missing fixture binaries; the claudine `test` recipe always
+  passes that feature, and with it all pass.)
+- Gate-skip calculator over the uncommitted tree:
+  `packages: [darkmatter, test-toolkit]`, `change_class: package`. Gates run,
+  not skipped.
+- No cross-OS run: in-memory map ordering only; no paths, processes, or `cfg`.
+
+### Environment notes
+
+- The concurrent process committed this phase's code mid-phase at 20:15
+  (`d15577cd6 fix(darkmatter): preserve authored frontmatter key order`,
+  `183a542da planning(darkmatter): record Phase 4 close ...`). This phase made
+  no commits. Uncommitted Phase 4 changes at the end: the `replacement.rs`
+  doctest fix, the darkmatter skill edit, and the plan/log frontmatter and
+  log entries.

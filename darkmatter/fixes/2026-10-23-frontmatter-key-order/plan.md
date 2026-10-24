@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-23
-phase: 1
+phase: 5
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -12,12 +12,15 @@ source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/
 docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
 docs_created_during_phase_2: [biscuit-hash/docs/json.md]
 skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
-packages: [biscuit-hash, darkmatter, dmls]
-start_phase: 4
+packages: [biscuit-hash, darkmatter, dmls, claudine]
 source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
 docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: [.claude/skills/darkmatter/frontmatter.md]
+source_files_during_phase_4: [claudine/lib/src/composition/interpolation_conformance.rs, claudine/lib/src/composition/lifecycle/context/tests.rs, claudine/lib/src/composition/lifecycle/executor.rs, claudine/lib/src/composition/lifecycle/prewarm/classify.rs, claudine/lib/src/composition/preflight.rs, claudine/lib/src/composition/sequence/preflight/mod.rs, claudine/lib/src/composition/sequence/preflight/providers.rs, claudine/lib/src/composition/sequence/preflight/providers/tests.rs, claudine/lib/src/composition/sequence/preflight/reapproval.rs, claudine/lib/src/composition/sequence/task/tests.rs, darkmatter/lib/benches/phase6_interpolation.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/conditions.rs, darkmatter/lib/src/markdown/compose/context/checked.rs, darkmatter/lib/src/markdown/compose/context/effective_state.rs, darkmatter/lib/src/markdown/compose/context/merge.rs, darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs, darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs, darkmatter/lib/src/markdown/compose/inline/replacement.rs, darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs, darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs, darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs, darkmatter/lib/src/markdown/compose/page_blocks/engine.rs, darkmatter/lib/src/markdown/compose/preflight/collect.rs, darkmatter/lib/src/markdown/compose/replacement.rs, darkmatter/lib/src/markdown/compose/subtree.rs, darkmatter/lib/src/markdown/compose/tests/frontmatter.rs, darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs, darkmatter/lib/src/markdown/compose/transclusion/engine.rs, darkmatter/lib/src/markdown/compose/util.rs, darkmatter/lib/src/markdown/frontmatter.rs, darkmatter/lib/src/markdown/mapping_orders.rs, darkmatter/lib/src/markdown/reference/graph.rs, darkmatter/lib/src/markdown/schemas/clean.rs, darkmatter/lib/tests/l1/binding_contract.rs, darkmatter/lib/tests/l1/compose_expression_failure_contract.rs, darkmatter/lib/tests/l1/frontmatter_merge_order.rs, darkmatter/lib/tests/l1/main.rs, darkmatter/lib/tests/l1/shell_result_values.rs]
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: [.claude/skills/darkmatter/frontmatter.md]
 ---
 
 # Plan: Frontmatter key order is the contract, the hash ignores it
