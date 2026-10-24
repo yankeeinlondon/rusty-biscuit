@@ -9,6 +9,7 @@
 //! the multi-edge-kind graph outright rather than overlaying a second index on
 //! a two-edge-kind model.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ use super::node::{
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
 use crate::context::{ContextFailure, ReferenceTarget, plan_reference, resolve_reference};
+use crate::wiki::universe::counted_portability_key;
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc, WikiUniverse};
 
 /// Stable index of a document inside a [`WorkspaceGraph`] snapshot.
@@ -105,10 +107,13 @@ pub struct WorkspaceGraph {
 /// The wiki universe a snapshot resolved against, and how its slots map to
 /// the snapshot's documents.
 ///
-/// Invariant: every document has a slot. A document missing from the
-/// supplied universe is appended to it at build time (a dependency as a slot
-/// no target matches), so a universe derived from the documents themselves
-/// resolves exactly as the graph did before the universe was external.
+/// Invariant: every document has a slot. The live index supplies a universe
+/// that already holds a slot for every document, its dependencies included
+/// as slots no target matches, so its build never copies the universe. A
+/// document missing from a supplied universe is appended to it at build time
+/// (a dependency as an unmatchable slot), so a universe derived from the
+/// documents themselves resolves exactly as the graph did before the universe
+/// was external.
 #[derive(Debug, Clone)]
 struct WikiSlots {
     universe: Arc<WikiUniverse>,
@@ -118,16 +123,9 @@ struct WikiSlots {
 }
 
 /// The product of the node/edge assembly pass, handed to
-/// [`WorkspaceGraph::finalize`].
-///
-/// Exists so the bench harness can time graph construction ([`assemble`]) and
-/// reverse-index construction ([`finalize`]) as the separate R-6 stages the
-/// design's stage list calls for, without duplicating the build logic —
-/// production runs both back to back through [`build_with_roots`].
-///
-/// [`assemble`]: WorkspaceGraph::assemble
-/// [`finalize`]: WorkspaceGraph::finalize
-/// [`build_with_roots`]: WorkspaceGraph::build_with_roots
+/// [`WorkspaceGraph::finalize`]: every document, node, and resolved edge,
+/// before the lookups over them (reverse index, basename keys, portability
+/// collisions) exist. Every builder runs the two passes back to back.
 pub(crate) struct GraphAssembly {
     documents: Vec<DocumentRecord>,
     by_path: HashMap<PathBuf, DocumentId>,
@@ -205,14 +203,10 @@ impl WorkspaceGraph {
     }
 
     /// Node/edge assembly pass: mints every node and resolves every edge,
-    /// deferring reverse-index and key-index construction to [`finalize`].
-    ///
-    /// Split from [`finalize`] purely so the bench harness can time the two
-    /// as separate R-6 stages (`graph_build` vs `reverse_index`);
-    /// [`build_with_roots`] runs them back to back.
+    /// deferring the reverse index, basename keys, and portability
+    /// collisions to [`finalize`], which only reads what this pass produced.
     ///
     /// [`finalize`]: WorkspaceGraph::finalize
-    /// [`build_with_roots`]: WorkspaceGraph::build_with_roots
     pub(crate) fn assemble(
         indices: &BTreeMap<PathBuf, DocumentIndex>,
         generation: u64,
@@ -244,6 +238,7 @@ impl WorkspaceGraph {
             )
             .collect();
         entries.sort_by(|left, right| left.0.cmp(right.0));
+        crate::work_counters::record_document_table();
         let mut nodes: Vec<Node> = Vec::new();
         let mut documents: Vec<DocumentRecord> = Vec::new();
         let mut by_path: HashMap<PathBuf, DocumentId> = HashMap::new();
@@ -275,16 +270,20 @@ impl WorkspaceGraph {
             let doc_id = DocumentId(position as u32);
             by_path.insert(path.clone(), doc_id);
             let dependency = index.is_some() && dependencies.contains(path);
-            let WikiDoc { canonical, workspace_id } = WikiDoc::for_path(path, universe.wiki_roots());
-            let slot = match universe.slot(path) {
-                Some(slot) => slot,
+            // A candidate's slot already holds its canonical facts. A
+            // dependency's slot is unmatchable, so its record takes the real
+            // facts of its path, as does a document whose supplied slot is
+            // unmatchable (a request graph over a live dependency).
+            let existing = universe.slot(path);
+            let (slot, WikiDoc { canonical, workspace_id }) = match existing {
+                Some(slot) if !dependency && !universe.docs()[slot].is_unmatchable() => {
+                    (slot, universe.docs()[slot].clone())
+                }
+                Some(slot) => (slot, WikiDoc::for_path(path, universe.wiki_roots())),
                 None => {
-                    let doc = if dependency {
-                        WikiDoc::unmatchable()
-                    } else {
-                        WikiDoc { canonical: canonical.clone(), workspace_id }
-                    };
-                    Arc::make_mut(&mut universe).push(path.clone(), doc)
+                    let facts = WikiDoc::for_path(path, universe.wiki_roots());
+                    let doc = if dependency { WikiDoc::unmatchable() } else { facts.clone() };
+                    (Arc::make_mut(&mut universe).push(path.clone(), doc), facts)
                 }
             };
             document_slots.push(slot);
@@ -559,11 +558,8 @@ impl WorkspaceGraph {
     }
 
     /// Reverse-index / key-index construction pass: builds the lookups over the
-    /// assembled nodes and edges and freezes the immutable snapshot.
-    ///
-    /// See [`assemble`] for why the two passes are separate.
-    ///
-    /// [`assemble`]: WorkspaceGraph::assemble
+    /// assembled documents, nodes, and edges and freezes the immutable
+    /// snapshot.
     pub(crate) fn finalize(assembly: GraphAssembly) -> Self {
         let GraphAssembly {
             documents,
@@ -583,7 +579,7 @@ impl WorkspaceGraph {
                 .filter(|(_, record)| !record.dependency)
                 .map(|(position, record)| (DocumentId(position as u32), record.path.as_path())),
         );
-        let portability = portability_collisions(&documents);
+        let portability = portability_collisions(&documents, &wiki);
 
         Self {
             documents,
@@ -1234,13 +1230,20 @@ fn resolve_in_document(
 
 /// Groups documents whose canonical logical paths collide under case-fold/NFC
 /// normalization, mapping each colliding document to its twins.
-fn portability_collisions(documents: &[DocumentRecord]) -> HashMap<DocumentId, Vec<DocumentId>> {
-    let mut by_key: HashMap<String, Vec<DocumentId>> = HashMap::new();
+///
+/// Only the graph's non-dependency documents are grouped, never every
+/// universe slot: a request graph holds fewer documents than its universe.
+/// Each key is the one cached in the document's slot, unless that slot is
+/// unmatchable and the record's real canonical path is keyed instead.
+fn portability_collisions(documents: &[DocumentRecord], wiki: &WikiSlots) -> HashMap<DocumentId, Vec<DocumentId>> {
+    let mut by_key: HashMap<Cow<'_, str>, Vec<DocumentId>> = HashMap::new();
     for (position, record) in documents.iter().enumerate().filter(|(_, record)| !record.dependency) {
-        by_key
-            .entry(wiki::portability_key(&record.canonical))
-            .or_default()
-            .push(DocumentId(position as u32));
+        let slot = wiki.document_slots[position];
+        let key = match wiki.universe.portability_key(slot) {
+            Some(key) if !wiki.universe.docs()[slot].is_unmatchable() => Cow::Borrowed(key),
+            _ => Cow::Owned(counted_portability_key(&record.canonical)),
+        };
+        by_key.entry(key).or_default().push(DocumentId(position as u32));
     }
     let mut collisions = HashMap::new();
     for members in by_key.into_values() {
@@ -1699,5 +1702,49 @@ mod tests {
         let slot = g.wiki_slot(extra).unwrap();
         assert_eq!(g.slot_document(slot), Some(extra));
         assert_eq!(g.wiki_universe().path(slot), Some(abs("/w/extra.md").as_path()));
+    }
+
+    #[test]
+    fn test_collisions_group_only_graph_documents_by_their_cached_slot_keys() {
+        use crate::work_counters::work_counts;
+
+        // The universe holds a case-only collision pair and a second pair
+        // with only one member in the graph.
+        let universe = WikiUniverse::new(
+            [abs("/w/Note.md"), abs("/w/note.md"), abs("/w/Solo.md"), abs("/w/solo.md")],
+            &[abs("/w")],
+        );
+        let docs = indices(&[("/w/Note.md", "# N\n"), ("/w/note.md", "# n\n"), ("/w/solo.md", "# s\n")]);
+        let before = work_counts();
+        let g = WorkspaceGraph::build_with_roots(&docs, 1, universe, &workspace_contexts());
+        let work = work_counts().since(before);
+        // Every document's canonical path and key come from its slot.
+        assert_eq!((work.wiki_path_facts, work.wiki_portability_keys, work.wiki_universes), (0, 0, 0));
+        assert_eq!(work.document_tables, 1);
+
+        let [upper, lower, solo] = ["/w/Note.md", "/w/note.md", "/w/solo.md"].map(|path| g.document_id(&abs(path)).unwrap());
+        assert_eq!(g.portability_twins(upper), &[lower]);
+        assert_eq!(g.portability_twins(lower), &[upper]);
+        // `Solo.md` is a universe slot but not a graph document.
+        assert!(g.portability_twins(solo).is_empty());
+        let record = g.document(upper).unwrap();
+        assert_eq!((record.canonical.clone(), record.workspace_id), (vec!["Note".to_string()], 0));
+    }
+
+    #[test]
+    fn test_a_document_on_an_unmatchable_supplied_slot_keeps_its_real_facts() {
+        // A request graph over a live dependency: the supplied universe holds
+        // the dependency's unmatchable slot, while the request graph treats it
+        // as an ordinary document.
+        let mut universe = WikiUniverse::new([abs("/w/Note.md")], &[abs("/w")]);
+        universe.push(abs("/w/note.md"), WikiDoc::unmatchable());
+        let docs = indices(&[("/w/Note.md", "# N\n"), ("/w/note.md", "# n\n")]);
+        let g = WorkspaceGraph::build_with_roots(&docs, 1, universe, &workspace_contexts());
+        let [upper, lower] = ["/w/Note.md", "/w/note.md"].map(|path| g.document_id(&abs(path)).unwrap());
+        let record = g.document(lower).unwrap();
+        assert_eq!((record.canonical.clone(), record.workspace_id), (vec!["note".to_string()], 0));
+        assert_eq!(g.wiki_slot(lower), Some(1), "the supplied slot is kept");
+        assert!(g.wiki_universe().docs()[1].is_unmatchable());
+        assert_eq!(g.portability_twins(upper), &[lower]);
     }
 }

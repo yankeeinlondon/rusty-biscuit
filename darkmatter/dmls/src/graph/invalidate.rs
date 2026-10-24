@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::arena::{DocumentContexts, Listing, WorkspaceGraph, is_markdown_path};
-use crate::wiki::WikiUniverse;
+use crate::wiki::{WikiDoc, WikiUniverse};
 use super::edge::{EdgeKind, EdgeTarget};
 use super::node::{LinkTarget, NodeId, WikiResolution};
 use super::substrate::{DocumentIndex, index_document};
@@ -48,6 +48,28 @@ pub enum Invalidation {
         /// `file(...)` value). Their diagnostics should be refreshed.
         dependents: Vec<PathBuf>,
     },
+}
+
+/// Everything a live snapshot's wiki universe is derived from. Two rebuilds
+/// with equal inputs build equal universes, so the second reuses the first's.
+#[derive(Debug, PartialEq, Eq)]
+struct WikiUniverseInputs {
+    /// The wiki candidates, sorted and unique: the file list plus every
+    /// parsed document that is not a dependency (open buffers outside the
+    /// list).
+    candidates: Vec<PathBuf>,
+    /// The parsed dependencies, sorted; disjoint from `candidates`.
+    dependencies: Vec<PathBuf>,
+    /// In configured order: the first root containing a path owns it.
+    wiki_roots: Vec<PathBuf>,
+}
+
+/// The universe the last rebuild resolved against, and what it was built
+/// from.
+#[derive(Debug)]
+struct CachedWikiUniverse {
+    inputs: WikiUniverseInputs,
+    universe: Arc<WikiUniverse>,
 }
 
 /// The mutable workspace index: parse products plus the live snapshot.
@@ -76,6 +98,9 @@ pub struct WorkspaceIndex {
     /// Each document's file-resolution context, which every rebuild resolves
     /// path references through.
     contexts: Arc<dyn DocumentContexts>,
+    /// The last rebuild's wiki universe, reused while its inputs are
+    /// unchanged (a content-only edit).
+    wiki_cache: Option<CachedWikiUniverse>,
     generation: u64,
     /// `Some` between [`begin_batch`](Self::begin_batch) and
     /// [`end_batch`](Self::end_batch): whether a rebuild was asked for.
@@ -107,6 +132,7 @@ impl WorkspaceIndex {
             snapshot,
             wiki_roots: Vec::new(),
             contexts,
+            wiki_cache: None,
             generation: 0,
             batch: None,
         }
@@ -597,18 +623,7 @@ impl WorkspaceIndex {
         }
         self.generation += 1;
         let dependencies: BTreeSet<PathBuf> = self.dependencies().cloned().collect();
-        // The universe is this index's own wiki candidates: the file list
-        // plus every other document that is not a referenced dependency
-        // (open buffers outside the list). It is exactly the set the graph
-        // derived for itself before the universe became a parameter, so
-        // open-document diagnostics are unchanged.
-        let universe = WikiUniverse::new(
-            self.listed
-                .iter()
-                .chain(self.documents.keys().filter(|path| !dependencies.contains(*path)))
-                .cloned(),
-            &self.wiki_roots,
-        );
+        let universe = self.wiki_universe(&dependencies);
         self.snapshot = Arc::new(WorkspaceGraph::build_listed(
             &self.documents,
             &self.listed,
@@ -618,6 +633,45 @@ impl WorkspaceIndex {
             universe,
             self.contexts.as_ref(),
         ));
+    }
+
+    /// The wiki universe for a rebuild with `dependencies`: the cached one
+    /// when its inputs are unchanged, else one built from them and cached.
+    ///
+    /// The universe is this index's own wiki candidates: the file list plus
+    /// every other document that is not a referenced dependency (open
+    /// buffers outside the list). Each dependency then gets an unmatchable
+    /// slot, so the graph build finds every document's slot and never copies
+    /// a universe an older snapshot still shares.
+    fn wiki_universe(&mut self, dependencies: &BTreeSet<PathBuf>) -> Arc<WikiUniverse> {
+        let mut candidates: Vec<PathBuf> = self
+            .listed
+            .iter()
+            .chain(self.documents.keys().filter(|path| !dependencies.contains(*path)))
+            .cloned()
+            .collect();
+        candidates.sort();
+        candidates.dedup();
+        let inputs = WikiUniverseInputs {
+            candidates,
+            dependencies: dependencies.iter().cloned().collect(),
+            wiki_roots: self.wiki_roots.clone(),
+        };
+        if let Some(cached) = &self.wiki_cache
+            && cached.inputs == inputs
+        {
+            return Arc::clone(&cached.universe);
+        }
+        let mut universe = WikiUniverse::new(inputs.candidates.iter().cloned(), &inputs.wiki_roots);
+        for dependency in &inputs.dependencies {
+            universe.push(dependency.clone(), WikiDoc::unmatchable());
+        }
+        let universe = Arc::new(universe);
+        self.wiki_cache = Some(CachedWikiUniverse {
+            inputs,
+            universe: Arc::clone(&universe),
+        });
+        universe
     }
 }
 
@@ -1124,5 +1178,169 @@ mod tests {
         index.set_document(&b, "# B\n");
         let outcome = index.set_document(&b, "# B changed\n");
         assert_eq!(outcome, Invalidation::Reindexed { dependents: vec![a] });
+    }
+
+    /// Universe work done by `change`, and whether the snapshot after it
+    /// shares the universe of the snapshot before.
+    fn universe_work(
+        index: &mut WorkspaceIndex,
+        change: impl FnOnce(&mut WorkspaceIndex),
+    ) -> (crate::work_counters::WorkCounts, bool) {
+        let old = index.snapshot();
+        let before = crate::work_counters::work_counts();
+        change(index);
+        let work = crate::work_counters::work_counts().since(before);
+        (work, Arc::ptr_eq(&old.shared_wiki_universe(), &index.snapshot().shared_wiki_universe()))
+    }
+
+    #[test]
+    fn test_a_content_edit_reuses_the_universe_a_retained_snapshot_shares() {
+        let (_temp, root, contexts) = disk_workspace();
+        let source_text = "# Source\n\n[a](target.md#beta)\n\n::file ./target.md\n";
+        let files = [
+            ("source.md", source_text),
+            ("target.md", "# Alpha\n\n## Beta\n"),
+            ("a.md", "# A\n"),
+            ("b.md", "# B\n"),
+        ];
+        for (name, text) in files {
+            std::fs::write(root.join(name), text).unwrap();
+        }
+        let [source, target, a, b] = files.map(|(name, _)| root.join(name));
+        let mut index = WorkspaceIndex::new(contexts);
+        index.set_wiki_roots(vec![root.clone()]);
+        listed(&mut index, &[&source, &a, &b]);
+        index.open_buffer(&source, source_text);
+        index.prepare_targets(&source);
+        assert!(index.is_dependency(&target));
+
+        // The dependency's slot was prepopulated after the sorted candidates,
+        // unmatchable, with every slot array aligned.
+        let old = index.snapshot();
+        let universe = old.wiki_universe();
+        assert_eq!(universe.len(), 4);
+        assert_eq!(universe.slot(&target), Some(3));
+        assert!(universe.docs()[3].is_unmatchable());
+        assert_eq!(universe.portability_key(3), Some(""));
+        assert!((0..3).all(|slot| universe.portability_key(slot).is_some_and(|key| !key.is_empty())));
+        assert_eq!(universe.portability_key(4), None);
+        let target_record = old.document(old.document_id(&target).unwrap()).unwrap();
+        assert_eq!(target_record.canonical, vec!["target".to_string()], "a dependency keeps its real facts");
+
+        // A content-only edit, with the old snapshot still held.
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.open_buffer(&source, "# Source edited\n\n[a](target.md#beta)\n\n::file ./target.md\n");
+        });
+        assert!(shared, "the retained snapshot's universe is reused, never copied");
+        assert_eq!((work.wiki_universes, work.wiki_portability_keys), (0, 0), "{work:?}");
+        assert_eq!(work.wiki_path_facts, 1, "only the dependency's real facts: {work:?}");
+        assert_eq!(heading_titles(&index, &source), vec!["Source edited".to_string()]);
+        let source_doc = old.document_id(&source).unwrap();
+        assert_eq!(
+            old.headings(source_doc).next().unwrap().1.as_heading().unwrap().title,
+            "Source",
+            "an old reader keeps its answers"
+        );
+
+        // The dependency joining the list makes it a candidate: one new
+        // universe in which its slot is matchable.
+        let (work, shared) = universe_work(&mut index, |index| {
+            listed(index, &[&source, &target, &a, &b]);
+        });
+        assert!(!shared);
+        assert_eq!((work.wiki_universes, work.wiki_path_facts, work.wiki_portability_keys), (1, 4, 4), "{work:?}");
+        let snapshot = index.snapshot();
+        let slot = snapshot.wiki_universe().slot(&target).unwrap();
+        assert!(!snapshot.wiki_universe().docs()[slot].is_unmatchable());
+        assert_eq!(snapshot.wiki_universe().len(), 4);
+    }
+
+    #[test]
+    fn test_each_universe_input_change_builds_one_universe_and_nothing_else_does() {
+        let mut index = WorkspaceIndex::new(Arc::new(workspace_contexts()));
+        let [a, b, note, open] = ["/w/a.md", "/w/b.md", "/w/notes/n.md", "/w/open.md"].map(abs);
+        let paths = |paths: &[&PathBuf]| paths.iter().map(|path| (*path).clone()).collect::<BTreeSet<_>>();
+        index.install_listing(paths(&[&a, &note]), BTreeSet::new(), true);
+
+        // The same list again, or the same list in another listing state,
+        // rebuilds over the cached universe.
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.install_listing(paths(&[&a, &note]), BTreeSet::new(), true);
+        });
+        assert!(shared && work.wiki_universes == 0, "{work:?}");
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.install_listing(paths(&[&a, &note]), BTreeSet::new(), false);
+        });
+        assert!(shared && work.wiki_universes == 0, "{work:?}");
+        assert_eq!(index.snapshot().listing(), Listing::Ready { complete: false });
+
+        // A listed insertion: one universe over both candidates.
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.install_listing(paths(&[&a, &b, &note]), BTreeSet::new(), true);
+        });
+        assert!(!shared);
+        assert_eq!((work.wiki_universes, work.wiki_path_facts, work.wiki_portability_keys), (1, 3, 3), "{work:?}");
+
+        // An open buffer outside the list is a candidate while it is open.
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.open_buffer(&open, "# Open\n");
+        });
+        assert!(!shared && work.wiki_universes == 1, "{work:?}");
+        let snapshot = index.snapshot();
+        let slot = snapshot.wiki_universe().slot(&open).expect("an open-unlisted candidate");
+        assert!(!snapshot.wiki_universe().docs()[slot].is_unmatchable());
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.open_buffer(&open, "# Open edited\n");
+        });
+        assert!(shared, "a content edit reuses the universe");
+        assert_eq!((work.wiki_universes, work.wiki_path_facts, work.wiki_portability_keys), (0, 0, 0), "{work:?}");
+        let (work, shared) = universe_work(&mut index, |index| index.close_buffer(&open));
+        assert!(!shared && work.wiki_universes == 1, "{work:?}");
+        assert_eq!(index.snapshot().wiki_universe().slot(&open), None);
+
+        // Roots are compared in order: the first containing root owns a path.
+        index.set_wiki_roots(vec![abs("/w"), abs("/w/notes")]);
+        let owner = |index: &WorkspaceIndex| {
+            let snapshot = index.snapshot();
+            let slot = snapshot.wiki_universe().slot(&note).unwrap();
+            snapshot.wiki_universe().docs()[slot].workspace_id
+        };
+        assert_eq!(owner(&index), 0);
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.set_wiki_roots(vec![abs("/w"), abs("/w/notes")]);
+        });
+        assert!(shared && work.wiki_universes == 0, "equal roots reuse: {work:?}");
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.set_wiki_roots(vec![abs("/w/notes"), abs("/w")]);
+        });
+        assert!(!shared && work.wiki_universes == 1, "{work:?}");
+        assert_eq!(owner(&index), 0, "now /w/notes, the first root");
+        let snapshot = index.snapshot();
+        let slot = snapshot.wiki_universe().slot(&note).unwrap();
+        assert_eq!(snapshot.wiki_universe().docs()[slot].canonical, vec!["n".to_string()]);
+    }
+
+    /// Frontmatter keys are content: a renamed key never leaves a variable
+    /// resolving to the old one.
+    #[test]
+    fn test_a_renamed_frontmatter_key_re_resolves_its_variable_uses() {
+        let mut index = WorkspaceIndex::new(Arc::new(workspace_contexts()));
+        let a = abs("/w/a.md");
+        let variable_target = |index: &WorkspaceIndex| {
+            let snapshot = index.snapshot();
+            let doc = snapshot.document_id(&a).unwrap();
+            let (use_node, _) = snapshot.variable_uses(doc).next().expect("a variable use");
+            let edge = snapshot.outgoing(use_node, EdgeKind::UsesVariable).next().unwrap();
+            edge.target.node().map(|key| snapshot.node(key).unwrap().as_frontmatter_key().unwrap().key.clone())
+        };
+        index.set_document(&a, "---\ntitle: Hello\n---\n\n{{ title }}\n");
+        assert_eq!(variable_target(&index), Some("title".to_string()));
+        let (work, shared) = universe_work(&mut index, |index| {
+            index.set_document(&a, "---\nheading: Hello\n---\n\n{{ title }}\n");
+        });
+        assert!(shared && work.wiki_universes == 0, "{work:?}");
+        assert_eq!(variable_target(&index), None, "the renamed key no longer answers `title`");
+        index.set_document(&a, "---\nheading: Hello\n---\n\n{{ heading }}\n");
+        assert_eq!(variable_target(&index), Some("heading".to_string()));
     }
 }
