@@ -51,9 +51,7 @@ pub fn run_render(
         OutputFormat::Auto => {
             if stdout_is_tty {
                 let term = Terminal::new();
-                render_terminal_output(
-                    &md, input, cli, term,
-                )?;
+                render_terminal_output(&md, input, cli, term, features)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }

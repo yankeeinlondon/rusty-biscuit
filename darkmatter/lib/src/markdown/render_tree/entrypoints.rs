@@ -255,8 +255,10 @@ pub(crate) struct BrowserPageRender {
 ///
 /// 1. **Interactive Mermaid is the default.** A bare `mermaid` fence lowers to
 ///    the interactive `<pre class="mermaid">` container (requesting
-///    [`PageFeature::MermaidDiagram`]); [`MermaidMode::Image`] stays an explicit
-///    static-SVG opt-in and [`MermaidMode::Text`] an explicit code opt-in. The
+///    [`PageFeature::MermaidDiagram`]); [`MermaidMode::Image`] (and
+///    [`MermaidMode::Automatic`], its terminal-only refinement) stays an
+///    explicit static-SVG opt-in and [`MermaidMode::Text`] an explicit code
+///    opt-in. The
 ///    supplied `graphics_mode` still caps the result — [`GraphicsMode::Off`]
 ///    renders code and [`GraphicsMode::Vector`] caps Interactive to static SVG —
 ///    so a caller who disables graphics keeps the side-effect-free code form.
@@ -295,7 +297,8 @@ pub(crate) fn render_tree_html_page_body(
     // Image / Text choices keep their static-SVG / code opt-in shapes.
     browser_opts.mermaid_mode = match options.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Interactive,
-        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+        crate::markdown::output::terminal::MermaidMode::Image
+        | crate::markdown::output::terminal::MermaidMode::Automatic => BrowserMermaidMode::StaticSvg,
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
     };
     browser_opts.graphics_mode = graphics_mode;
@@ -589,7 +592,8 @@ pub fn render_tree_markdown_dialect(
 /// tree browser path honors the same Mermaid opt-in contract as the legacy
 /// renderer.
 ///
-/// Legacy `MermaidMode::Image` maps to [`BrowserMermaidMode::StaticSvg`]: the
+/// Legacy `MermaidMode::Image` (like `MermaidMode::Automatic`, whose text
+/// drawing is terminal-only) maps to [`BrowserMermaidMode::StaticSvg`]: the
 /// spec's promoted browser form is a pre-rendered static `<svg>`. The
 /// client-side mermaid.js path ([`BrowserMermaidMode::Interactive`]) is an
 /// orthogonal, default-off browser opt-in and is not reachable from the legacy
@@ -604,7 +608,8 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> (BrowserRenderOption
     let mermaid_mode = match opts.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Code,
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
-        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+        crate::markdown::output::terminal::MermaidMode::Image
+        | crate::markdown::output::terminal::MermaidMode::Automatic => BrowserMermaidMode::StaticSvg,
     };
 
     let stylesheet = opts.include_styles.then(|| code_block_stylesheet(opts));
@@ -717,11 +722,13 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     };
 
     // Map the legacy Mermaid opt-in onto the terminal Mermaid promotion mode.
-    // `GraphicsMode` is only the ceiling: a fence is promoted to a raster image
-    // solely when the caller opted in via `MermaidMode::Image`. `Off` / `Text`
+    // `GraphicsMode` is only the ceiling: a fence is promoted solely when the
+    // caller opted in via `MermaidMode::Image` (raster image) or
+    // `MermaidMode::Automatic` (image, else text drawing). `Off` / `Text`
     // keep Mermaid as code, preserving the public default.
     let mermaid_mode = match opts.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Image => TerminalMermaidMode::Image,
+        crate::markdown::output::terminal::MermaidMode::Automatic => TerminalMermaidMode::Automatic,
         crate::markdown::output::terminal::MermaidMode::Off
         | crate::markdown::output::terminal::MermaidMode::Text => TerminalMermaidMode::Code,
     };
@@ -784,7 +791,9 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
             opts.code_block_mode,
         ))),
         // Consulted only when `mermaid_mode` above promotes a fence.
-        diagram_renderer: Some(Rc::new(TerminalDiagramRenderer)),
+        diagram_renderer: Some(Rc::new(
+            TerminalDiagramRenderer::default().with_fallback_policy(opts.mermaid_fallback_policy),
+        )),
     }
 }
 
@@ -997,7 +1006,9 @@ mod tests {
 
         let as_code = render_tree_terminal(&md, &options(MermaidMode::Text)).expect("render");
         assert!(!as_code.output.contains("\x1b_G"), "{:?}", as_code.output);
-        assert!(as_code.output.contains("A --> B"), "{:?}", as_code.output);
+        // The Mermaid syntax colors `A`, `-->`, and `B` separately.
+        let as_code_text = crate::testing::strip_ansi_codes(&as_code.output);
+        assert!(as_code_text.contains("A --> B"), "{:?}", as_code.output);
     }
 
     #[test]

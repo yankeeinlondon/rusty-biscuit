@@ -49,8 +49,8 @@ pub struct Cli {
     #[arg(long)]
     pub save: bool,
 
-    /// Render mermaid diagrams to terminal as images.
-    /// Falls back to code blocks if terminal doesn't support images.
+    /// Render mermaid diagrams to terminal as images, or as text drawings
+    /// where the terminal shows no images; other diagrams stay code blocks.
     #[arg(long)]
     pub mermaid: bool,
 

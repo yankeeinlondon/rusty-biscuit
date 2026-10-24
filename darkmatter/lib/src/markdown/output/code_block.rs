@@ -56,9 +56,10 @@ pub(crate) fn render_terminal_code_block(
     target_width: Option<u16>,
     override_bg: Option<Color>,
 ) -> Result<String, MarkdownError> {
+    let syntax_set = highlighter.syntax_set_for(language);
     let syntax = language
-        .resolve(highlighter.syntax_set())
-        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
+        .resolve(syntax_set)
+        .unwrap_or_else(|_| syntax_set.find_syntax_plain_text());
     let theme = highlighter.theme();
 
     // Use override background when provided (e.g. from page/component style),
@@ -125,7 +126,7 @@ pub(crate) fn render_terminal_code_block(
 
         // Highlight the line and get styled ranges
         let ranges = hl
-            .highlight_line(line, highlighter.syntax_set())
+            .highlight_line(line, syntax_set)
             .map_err(|e| MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
 
         // Convert styled ranges to ANSI escape codes, but filter out newlines
@@ -231,9 +232,10 @@ pub(crate) fn render_html_code_block(
     let show_line_numbers = meta.line_numbering || options.include_line_numbers;
 
     // Resolve syntax through the same LanguageGrammar path as the terminal renderer.
+    let syntax_set = highlighter.syntax_set_for(language);
     let syntax = language
-        .resolve(highlighter.syntax_set())
-        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
+        .resolve(syntax_set)
+        .unwrap_or_else(|_| syntax_set.find_syntax_plain_text());
 
     // Start code block container
     output.push_str(r#"<div class="code-block">"#);
@@ -262,7 +264,7 @@ pub(crate) fn render_html_code_block(
 
             // Highlight the line
             let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
+                .highlight_line(line, syntax_set)
                 .map_err(|e| {
                     crate::markdown::MarkdownError::ThemeLoad(format!(
                         "Syntax highlighting failed: {}",
@@ -300,7 +302,7 @@ pub(crate) fn render_html_code_block(
 
         for line in LinesWithEndings::from(code) {
             let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
+                .highlight_line(line, syntax_set)
                 .map_err(|e| {
                     crate::markdown::MarkdownError::ThemeLoad(format!(
                         "Syntax highlighting failed: {}",
@@ -408,6 +410,7 @@ mod tests {
             dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),

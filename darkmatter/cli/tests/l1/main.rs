@@ -32,6 +32,7 @@ mod compose_base_schema;
 mod compose_basic;
 mod entry_point_parity;
 mod feature_flag;
+mod mermaid_features;
 mod compose_context_probes;
 mod compose_dasherized_identifiers;
 mod compose_diagnostic_identity;

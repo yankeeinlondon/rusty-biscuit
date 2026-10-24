@@ -539,6 +539,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             dim_mode: DimMode::Auto,
             max_width: None,
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Auto,
             hr_defaults: None,
             code_block_mode: self.code_block_mode,

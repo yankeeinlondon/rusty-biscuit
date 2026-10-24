@@ -1,10 +1,9 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 40
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"string\")"
 ---
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -18,5 +17,5 @@ expression: "convert_atom(\"string\")"
       ]
     }
   },
-  "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

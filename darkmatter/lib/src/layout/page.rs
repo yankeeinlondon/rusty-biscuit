@@ -735,9 +735,19 @@ impl DarkmatterPage {
         self
     }
 
+    /// Pass through to [`TerminalOptions::mermaid_fallback_policy`].
+    #[must_use]
+    pub fn with_mermaid_fallback_policy(
+        mut self,
+        policy: biscuit_visualized::components::MermaidFallbackPolicy,
+    ) -> Self {
+        self.options.mermaid_fallback_policy = policy;
+        self
+    }
+
     /// Embeds the font the static Mermaid diagrams were measured with in the
     /// browser page; see [`HtmlOptions::embed_mermaid_font`]. Acts only with
-    /// [`MermaidMode::Image`].
+    /// [`MermaidMode::Image`] or [`MermaidMode::Automatic`].
     #[must_use]
     pub fn with_embed_mermaid_font(mut self, embed: bool) -> Self {
         self.embed_mermaid_font = embed;

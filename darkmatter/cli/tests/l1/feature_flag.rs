@@ -4,8 +4,8 @@
 
 use crate::common;
 
-use clap::Parser;
 use clap::error::ErrorKind;
+use clap::{Parser, ValueEnum};
 use common::{CliProcessFixture, md_file};
 use darkmatter::markdown::Markdown;
 use darkmatter_cli::args::{Command, Feature};
@@ -21,6 +21,57 @@ fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
 
 fn features(args: &[&str]) -> Vec<Feature> {
     parse(args).expect("valid --feature arguments").features
+}
+
+/// Every name `md --feature` accepts, in declaration order.
+const FEATURE_NAMES: [&str; 5] = [
+    "embed-mermaid-font",
+    "no-mermaid-fallbacks",
+    "no-mermaid-partial-fallbacks",
+    "no-mermaid-partial-warning",
+    "no-mermaid-rendering",
+];
+
+#[test]
+fn feature_names_are_the_declared_set() {
+    let names: Vec<String> = Feature::value_variants()
+        .iter()
+        .map(|feature| feature.to_possible_value().unwrap().get_name().to_string())
+        .collect();
+    assert_eq!(names, FEATURE_NAMES);
+}
+
+#[test]
+fn mermaid_feature_names_parse_comma_separated_repeated_and_in_any_case() {
+    let comma = features(&[
+        "--feature",
+        "no-mermaid-fallbacks,NO-MERMAID-PARTIAL-WARNING",
+        "--feature",
+        "No-Mermaid-Partial-Fallbacks,no-mermaid-rendering",
+        "doc.md",
+    ]);
+    let repeated = features(&[
+        "--feature",
+        "no-mermaid-fallbacks",
+        "--feature",
+        "no-mermaid-partial-warning",
+        "--feature",
+        "no-mermaid-partial-fallbacks",
+        "--feature",
+        "no-mermaid-rendering",
+        "doc.md",
+    ]);
+
+    assert_eq!(comma, repeated);
+    assert_eq!(
+        comma,
+        [
+            Feature::NoMermaidFallbacks,
+            Feature::NoMermaidPartialWarning,
+            Feature::NoMermaidPartialFallbacks,
+            Feature::NoMermaidRendering,
+        ]
+    );
 }
 
 #[test]
@@ -74,7 +125,9 @@ fn unknown_name_is_a_usage_error_listing_valid_names() {
     assert_eq!(error.exit_code(), 2);
     let message = error.to_string();
     assert!(message.contains("'nope'"), "{message}");
-    assert!(message.contains("embed-mermaid-font"), "{message}");
+    for name in FEATURE_NAMES {
+        assert!(message.contains(name), "{name}: {message}");
+    }
 }
 
 #[test]
@@ -86,7 +139,9 @@ fn empty_name_is_a_usage_error_listing_valid_names() {
 
         assert_eq!(error.exit_code(), 2, "{value:?}");
         let message = error.to_string();
-        assert!(message.contains("embed-mermaid-font"), "{value:?}: {message}");
+        for name in FEATURE_NAMES {
+            assert!(message.contains(name), "{value:?} {name}: {message}");
+        }
     }
 }
 
@@ -105,7 +160,7 @@ fn completion_offers_feature_names() {
             .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
             .collect();
 
-        assert_eq!(values, ["embed-mermaid-font"]);
+        assert_eq!(values, FEATURE_NAMES);
     }
 }
 
@@ -171,5 +226,7 @@ fn unknown_feature_exits_with_usage_error() {
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("embed-mermaid-font"), "{stderr}");
+    for name in FEATURE_NAMES {
+        assert!(stderr.contains(name), "{name}: {stderr}");
+    }
 }

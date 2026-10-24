@@ -504,8 +504,10 @@ fn explicit_text_mermaid_mode_renders_code_not_interactive() {
         !html.contains("data-darkmatter-features") && !html.contains("<script"),
         "explicit code mode requests no interactive feature, got: {html}"
     );
+    // The Mermaid syntax wraps `graph` and `TD` in separate colored spans.
+    let text = regex::Regex::new("<[^>]+>").unwrap().replace_all(&html, "");
     assert!(
-        html.contains("graph TD"),
+        text.contains("graph TD"),
         "the diagram source survives as code, got: {html}"
     );
 }

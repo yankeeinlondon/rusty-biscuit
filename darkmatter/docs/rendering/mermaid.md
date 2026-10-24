@@ -55,20 +55,25 @@ what a fence becomes:
 
 | Variant         | Terminal                                                      | Browser (Darkmatter page path)                                    |
 |-----------------|---------------------------------------------------------------|-------------------------------------------------------------------|
-| `Off` (default) | Regular code fence with syntax highlighting.                  | **Interactive** `<pre class="mermaid">` + injected ESM bootstrap. |
+| `Off` (default) | Regular code fence with [Mermaid syntax highlighting](#syntax-highlighting). | **Interactive** `<pre class="mermaid">` + injected ESM bootstrap. |
 | `Image`         | Inline diagram image, drawn in-process by Merman (opt-in).    | Rendered static `<svg>` (an explicit static opt-in).              |
+| `Automatic`     | An image where the terminal shows pixels; otherwise a [text drawing](#text-drawings-automatic-mode) when the diagram has one and it fits; otherwise the code fence. `md --mermaid` uses this mode. | The same static `<svg>` as `Image`.                               |
 | `Text`          | The same code fence as `Off`.                                 | `<pre><code class="language-mermaid">` code block.                |
 
 ```mermaid
 flowchart TD
     F["mermaid fence"] --> T{"Target?"}
-    T -->|terminal| TM{"MermaidMode::Image<br/>and images allowed?"}
+    T -->|terminal| TM{"MermaidMode::Image or Automatic,<br/>and images allowed?"}
     TM -->|no| C1["code block"]
-    TM -->|yes| D["biscuit-visualized draws it<br/>(terminal palette, PNG)"]
+    TM -->|yes| P{"terminal shows pixels,<br/>or Image mode?"}
+    P -->|yes| D["biscuit-visualized draws it<br/>(terminal palette, PNG)"]
+    P -->|"no (Automatic)"| X{"text drawing allowed,<br/>eligible, and fits?"}
+    X -->|yes| TX["txt code block,<br/>then the partial note"]
+    X -->|no| C1
     D -->|render fails| C1
     T -->|"browser (page path)"| BM{"MermaidMode?"}
     BM -->|Off| I["interactive: Mermaid.js in the browser"]
-    BM -->|Image| S["static SVG: Merman,<br/>HTML static target, sanitized"]
+    BM -->|"Image / Automatic"| S["static SVG: Merman,<br/>HTML static target, sanitized"]
     BM -->|Text| C2["code block"]
 ```
 
@@ -92,7 +97,7 @@ host document) and `DarkmatterPage::render_to_browser_document` (a complete
 CLI uses for HTML output; see [`artifact.rs`](../../cli/src/artifact.rs)). Both remap
 `MermaidMode` onto `renderable`'s `BrowserMermaidMode` in
 [`render_tree/entrypoints.rs`](../../lib/src/markdown/render_tree/entrypoints.rs):
-`Off → Interactive`, `Image → StaticSvg`, `Text → Code`. The low-level
+`Off → Interactive`, `Image`/`Automatic → StaticSvg`, `Text → Code`. The low-level
 `renderable` browser renderer keeps `BrowserMermaidMode::Code` as its own
 default, and `Markdown::as_html` maps `Off → Code` (it does not opt into the
 interactive default), so only the Darkmatter page browser path is interactive
@@ -118,10 +123,13 @@ for a `mermaid` fence; biscuit-terminal draws no diagrams itself, so without
 that hook every fence would stay code. A fence becomes an image only when
 both hold:
 
-- the caller opted in with `MermaidMode::Image` (`Off` and `Text` keep the
-  fence as a syntax-highlighted code block);
+- the caller opted in with `MermaidMode::Image` or `MermaidMode::Automatic`
+  (`Off` and `Text` keep the fence as a syntax-highlighted code block);
 - images are allowed: `TerminalOptions::image_mode` is not `Never` (the `md`
   CLI sets it from `TERMINAL_IMAGES`; `TERMINAL_IMAGES=0` turns images off).
+
+`Automatic` draws the image only where the terminal can show pixels; anywhere
+else it tries a text drawing, described below.
 
 The hook sizes the diagram to the columns the fence occupies (a list item's
 or a quote's inner width, not the whole terminal) and draws it with the
@@ -130,7 +138,7 @@ the terminal's own background, text, and ANSI colors where it reports them,
 otherwise the fixed palette for its light or dark mode.
 
 ```sh
-md --mermaid README.md                     # fences drawn as images
+md --mermaid README.md                     # images, or text drawings without them
 TERMINAL_IMAGES=0 md --mermaid README.md   # images off: fences stay code
 ```
 
@@ -140,6 +148,75 @@ does not parse, or
 the fence is rendered as its code block instead and the render records a
 "Mermaid rasterization failed, falling back to code block" diagnostic. Under
 strict rendering the failure is an error instead.
+
+### Text drawings (automatic mode)
+
+On a terminal that shows no images, `MermaidMode::Automatic` draws a diagram
+as text when Merman can: the drawing is a `txt` code block, followed by a
+short note when the drawing may miss details the image would show. A diagram
+Merman draws only as structured text (a pie chart, for example), or a drawing
+wider than the fence's columns, keeps its `mermaid` code block, with no
+diagnostic in any strictness mode. A real failure (the source does not parse,
+or Merman fails) is still a diagnostic, as above.
+
+````text
+```txt
+┌───────┐     ┌──────┐
+│ Alpha ├────►│ Beta │
+└───────┘     └──────┘
+```
+
+▐   Note: this textual representation is provided because the current
+▐   terminal settings do not allow for a graphical image to be used. …
+````
+
+The page's **fallback policy** decides whether the text may replace the code
+block and whether the note is shown. Set it with
+[`DarkmatterPage::with_mermaid_fallback_policy`](../../lib/src/layout/page.rs)
+(or the `TerminalOptions::mermaid_fallback_policy` field), using
+biscuit-visualized's `MermaidFallbackPolicy`:
+
+```rust
+use biscuit_visualized::components::{MermaidFallbackPolicy, TextFallback};
+
+let page = DarkmatterPage::new(&terminal)
+    .with_mermaid_mode(MermaidMode::Automatic)
+    .with_mermaid_fallback_policy(
+        MermaidFallbackPolicy::default()
+            .with_text_fallback(TextFallback::Never) // always the code block
+            .with_show_partial_note(false),
+    );
+```
+
+A setting left unset is decided at render time: with the text fallback unset,
+`MERMAID_FALLBACK=code-block` (any case) means never text, and any other value
+or none means text is allowed. The note is shown unless the policy hides it;
+the variable never changes it. A setting the caller sets wins over the
+variable. The `md` CLI sets these from
+[`--feature`](../cli/render.md#features).
+
+## Syntax highlighting
+
+A `mermaid` or `mmd` code block is highlighted with a vendored Mermaid syntax
+in terminal and HTML output, wherever Darkmatter renders a code block: `Off`
+and `Text` fences, automatic mode's code blocks, and `md --feature
+no-mermaid-rendering`. Every diagram's header keyword (`gantt`, `pie`,
+`flowchart`, ...), `%%` comments, and `%%{init: ...}%%` directives are
+highlighted; flowcharts and sequence diagrams also get their nodes,
+participants, arrows, and labels.
+
+```mermaid
+%%{init: {'theme': 'forest'}}%%
+sequenceDiagram
+    %% the header, this comment, and the directive above are highlighted
+    Alice->>Bob: Hello
+```
+
+The syntax is a flattened copy of
+[SublimeText/Mermaid](https://github.com/SublimeText/Mermaid) (MIT) kept in
+`lib/assets/syntaxes/mermaid/`; its `SOURCE.md` lists what differs from
+upstream (no embedded JavaScript, HTML, YAML, or CSS highlighting inside a
+diagram). See [dependencies](../dependencies.md#vendored-mermaid-syntax).
 
 ## Rendering to the Browser
 
@@ -282,7 +359,8 @@ let html = DarkmatterPage::new(&terminal)
 `DarkmatterPage::with_embed_mermaid_font` sets the
 [`HtmlOptions::embed_mermaid_font`](../../lib/src/markdown/output/html.rs)
 field (default `false`), which `Markdown::as_html` honors too. It acts only
-with `MermaidMode::Image`; with `Off` (interactive) or `Text` the page is
+with `MermaidMode::Image` or `Automatic`, the modes that emit static SVG; with
+`Off` (interactive) or `Text` the page is
 byte for byte what it is without it. It is a rendering option only: there is
 no frontmatter key for it.
 
