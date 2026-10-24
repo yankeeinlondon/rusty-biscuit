@@ -494,3 +494,52 @@ implementation_4: "2026-10-23T22:04:48-07:00"
         - `just lint` (schematic): exit 0
         - `just test` was not rerun: no source changed since review-4's run on this tree (3,156 passed, 23 skipped; fresh-output 17/17)
         - cross-OS check: not applicable, because no code changed
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-10-24T15:10:37-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-20-type-constraints/review-5.md'
+- this is iteration 5 of the review-to-implement cycle 
+- the review's `implemented` flag was confirmed `false` before repairs began
+- the blocker recorded in iterations 4 and 5 is removed by the author's 2026-10-24 ruling (spec, "Unchecked-composition opt-in", commit `a891d01fd`): an explicit, API-level opt-in turns covered composition rules into disclosed warnings; without it they are generation errors. Both findings are therefore unblocked this cycle
+
+### Finding Ledger
+
+| ID       | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| -------- | --------------------------------------------------------- | ----------- | -------------------------------- |
+| R1-F3    | Unenforceable request rules do not consistently block generation | pending | |
+| R1-F3.1  | Component-root `anyOf` rule → error at JSON body and multipart JSON field without the opt-in; disclosed warning with it | pending | |
+| R1-F3.2  | Component-root `oneOf` rule → same as R1-F3.1 | pending | |
+| R1-F3.3  | Positional `items`/`prefixItems` stay errors even with the opt-in (control) | pending | |
+| R1-F3.4  | Nested unions, multi-member `allOf`, `not`, map-value union → error without opt-in, warning with it | pending | |
+| R1-F3.5  | Supported traversal (item object, nullable alternative, one-member `allOf`) still checked (control) | pending | |
+| R1-F3.6  | Consumers: public validator, shipped `validate --api openai`, catalog expectations, output gate | pending | |
+| R1-F3.7  | Import disclosure (control) | pending | |
+| R1-F3.8  | Other unsupported keywords stay errors even with the opt-in (control) | pending | |
+| R1-F3.9  | Opt-in metadata: absent by default, fluent `RestApi` builder, serialized, bundle and emitted-definition round trip | pending | |
+| R1-F3.10 | Opt-in warnings name API, endpoint, path, keyword, composition; generated rustdoc discloses unenforced rules | pending | |
+| R1-F3.11 | Opt-in never relaxes unresolved references or definition errors (malformed/contradictory) | pending | |
+| R1-F3.12 | OpenAI overlay `openai_pagination.rs` sets the opt-in; import never overwrites it; client regenerates | pending | |
+| R3-F1    | Rebuilding free-form compositions loses generation errors | pending | |
+| R3-F1.1  | Free-form field root `Item.mixed_value`: four generic shapes kept | pending | |
+| R3-F1.2  | Nested property `mixed_value.inner` | pending | |
+| R3-F1.3  | Free-form items `mixed_value.items` | pending | |
+| R3-F1.4  | Free-form map values `mixed_map.additionalProperties` | pending | |
+| R3-F1.5  | Map-valued model field `mixed_attributes.additionalProperties` | pending | |
+| R3-F1.6  | Inline object array items `mixed_entries.items` | pending | |
+| R3-F1.7  | Flattened extra values `MixedExtras.additionalProperties` | pending | |
+| R3-F1.8  | Ordinary-reference controls at all seven positions | pending | |
+| R3-F1.9  | Downstream: rebuilt API reports the same errors (no opt-in) / warnings (opt-in) as direct import | pending | |
+| R3-F1.10 | Direct planner, JSON body and multipart controls | pending | |
+| R3-F1.A  | Supported wrappers rebuilt at all seven positions | pending | |
+| R3-F1.B  | Generic `anyOf`, `oneOf`, multi-member `allOf`, `not` retained when rebuilding | pending | |
+| R3-F1.C  | Baseline repository-input literal inside its test | pending | |
+
+### Progress
+
+- starting the work on 'R1-F3: Unenforceable request rules do not consistently block generation' at 15:12:26
+        - defect class: whether an unenforceable composition rule fails generation depends on where the composition sits (component root versus anywhere else) rather than on an explicit, stored author choice
+        - ordering: R1-F3 lands first because R3-F1's retention adds composition rules to the OpenAI catalog, which only stays generable once the opt-in exists
+        - builder name chosen (the plan did not fix one): `RestApiBuilder::accept_unchecked_compositions()`, stored as `RestApi::unchecked_compositions: bool` (omitted when false)
+        - delegated to a foreground subagent; it appends its own sub-bullets below
