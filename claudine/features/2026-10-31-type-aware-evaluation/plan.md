@@ -135,6 +135,16 @@ These rules bind every later phase.
       the document's table only); guard narrowing classifies a `Ref` arm by
       its definition body; a raw `$ref` projects `unknown`. Waves 1, 2, 3,
       and 5 below were updated to match.
+    - *Reconciliation with the implemented recursive Claudine schemas
+      (2026-10-24, `2026-10-30-claudine-recursive-schemas`).* Lifecycle verbs
+      for expression functions are now generated, typed schema definitions
+      projected from `functions.yaml`, not a hand-maintained name list.
+      Wave 8's `is_file_type` step now regenerates them with
+      `just -f darkmatter/justfile regen-lifecycle-schema` and adds Claudine's
+      per-verb references, instead of hand-editing verb lists. *Why:* a new
+      catalog function left out of the generated regions fails the
+      generation drift test and the Claudine verb-key parity test.
+      *Downsides:* none; the outcome is unchanged.
 
 ### Input Robustness Matrix
 
@@ -427,10 +437,21 @@ task waits for Wave 5.
     `darkmatter/schemas/partials/functions.yaml` as
     `is_file_type(value: unknown | null): boolean` with `category(Filesystem)`
     and inline examples. Declaration, handler, and true-implies
-    "suitable for `file`" fact registered together. Add `is_file_type` to the
-    expression-function verb lists in `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml`
-    and `claudine/schemas/{action,lifecycle}.yaml`, which the lifecycle parity
-    tests derive from the function catalog. True for file values and
+    "suitable for `file`" fact registered together. Make it a lifecycle verb:
+    run `just -f darkmatter/justfile regen-lifecycle-schema`, which writes its
+    typed `is_file_type-short`/`-long` and its `expression`/`bundle`/
+    `initialize-bundle` keys into the generated regions of
+    `darkmatter/schemas/partials/lifecycle.yaml` (never edit those regions by
+    hand; `darkmatter/lib/tests/l1/lifecycle_schema_generation.rs` fails on
+    drift). Add the name by hand to the two name patterns in
+    `md-lifecycle.yaml` and add its `is_file_type-short@darkmatter:lifecycle`
+    (and `-long`) references to the `expression` category and both bundles in
+    `claudine/schemas/action.yaml` and to the loop keys in
+    `claudine/schemas/lifecycle.yaml`, which
+    `claudine/lib/tests/l1/claudine_schemas.rs::generated_verb_keys_equal_the_darkmatter_catalogs`
+    pins against the projection; the embedded payload test
+    (`embedded_trigger_payloads_resolve_within_two_megabytes`) must still
+    pass. True for file values and
     structurally valid strings (`42`, `hello world` true as strings; numeric
     `42` false); never mutates, resolves, or accesses anything. No
     `is_file` alias.
