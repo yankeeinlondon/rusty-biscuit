@@ -309,6 +309,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     format,
                     quiet,
                     no_schema_triggers,
+                    cli.verbose,
                     request,
                 )?;
             }

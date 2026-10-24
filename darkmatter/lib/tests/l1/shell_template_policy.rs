@@ -167,7 +167,7 @@ fn numeric_and_union_declarations_disclose_a_string_hole_and_keep_their_validato
     for (name, validated_as) in [("count", "number(min(1))"), ("either", "[alphanumeric, number]")] {
         let hole = project_hole(name, projection.as_ref(), &[]);
         assert_eq!(hole.approval, ApprovalType::BroadString, "{name}");
-        assert!(matches!(hole.validator, HoleValidator::Declared(_)), "{name}");
+        assert!(matches!(hole.validator, HoleValidator::Declared { .. }), "{name}");
         assert_eq!(hole.display_type(), format!("string (validated as {validated_as})"));
     }
     let shape = typed_shape("seq {{ count }}", projection.as_ref());

@@ -14,6 +14,15 @@
 //!   An optional property also admits `null`, and an optional scalar `file`
 //!   also admits `""`, exactly as the lowering's wrappers do.
 //!
+//! A recursive named type becomes a reusable [`ShapeRef`] to its bare
+//! shape, translated once, so declared conversions apply at every depth the
+//! engine walks: a [`TypeExpr::Ref`] through the [`DefinitionTable`] the
+//! `*_with_definitions` entry points take, and a named type the
+//! [`TypeResolver`] supplies when it refers back to itself below a value
+//! descent (a property, an item, a tuple slot, a dictionary value). A
+//! reference loop that never descends still fails with
+//! [`TranslateError::TooDeep`].
+//!
 //! Refinement formats (`date`, `datetime`, `time`, `url`, `email`, `file`,
 //! `expression`, `shell`, `type-definition`, `schema`) become passive
 //! [`Assertion`]s judged by the same format validators JSON Schema
@@ -21,14 +30,14 @@
 //! never looks for the file, even for `file(eager)`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use serde_json::{Value, json};
 
 use crate::markdown::coercion::{
     Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
-    ObjectShape, PatternScope, PatternSlot, PropertySlot, Shape, TextPattern, TextShape, TupleShape, TupleSlot,
-    accepts_exactly,
+    ObjectShape, PatternScope, PatternSlot, PropertySlot, RefSlot, Shape, ShapeRef, TextPattern, TextShape,
+    TupleShape, TupleSlot, accepts_exactly,
 };
 use crate::markdown::numeric::json_number;
 use crate::markdown::schemas::format::{
@@ -37,13 +46,19 @@ use crate::markdown::schemas::format::{
     DARKMATTER_URL_SCHEME_KEYWORD,
 };
 use crate::markdown::schemas::simplified::{
-    AlphanumericOptions, Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, TupleType, TypeExpr,
+    AlphanumericOptions, Constraint, DefKey, DefinitionOuter, DefinitionTable, PatternKey, PropertyAtom, PropertyDef,
+    SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TupleType, TypeExpr,
 };
 
-/// How many named-type references deep translation follows before failing;
-/// it also stops a recursive named type.
+/// How many named-type references deep translation follows before failing.
+/// A recursive named type counts once per path, since its uses below a value
+/// descent are reusable references; one that never descends (an alias loop,
+/// a union arm naming its own type) reaches this limit.
 pub const MAX_REFERENCE_DEPTH: usize = 32;
+
+/// The table the entry points without `_with_definitions` translate against:
+/// every [`TypeExpr::Ref`] is then a missing definition.
+static NO_DEFINITIONS: LazyLock<DefinitionTable> = LazyLock::new(DefinitionTable::default);
 
 /// Supplies the definition of a named type (`Name` / `Name@reference`).
 ///
@@ -92,6 +107,9 @@ pub enum TranslateError {
     /// defect the JSON Schema lowering also rejects.
     #[error("{}: {message}", at(path))]
     Invalid { path: String, message: String },
+    /// A chain of named types deeper than [`MAX_REFERENCE_DEPTH`], or a
+    /// named type that refers back to itself without descending into a child
+    /// value.
     #[error("{}: named types nest deeper than {limit} references", at(path))]
     TooDeep { path: String, limit: usize },
 }
@@ -120,7 +138,22 @@ fn at(path: &str) -> &str {
 /// A [`TranslateError`] for an unresolved reference, a `function` type, or a
 /// constraint the JSON Schema lowering also rejects.
 pub fn shape_from_property_def(def: &PropertyDef, resolver: &dyn TypeResolver) -> Result<Shape, TranslateError> {
-    Translator::new(resolver).bare_def("", def)
+    shape_from_property_def_with_definitions(def, resolver, &NO_DEFINITIONS)
+}
+
+/// [`shape_from_property_def`] for a definition whose [`TypeExpr::Ref`]s
+/// point into `definitions`.
+///
+/// ## Errors
+///
+/// As [`shape_from_property_def`], plus [`TranslateError::Invalid`] for a
+/// reference whose definition `definitions` does not hold.
+pub fn shape_from_property_def_with_definitions(
+    def: &PropertyDef,
+    resolver: &dyn TypeResolver,
+    definitions: &DefinitionTable,
+) -> Result<Shape, TranslateError> {
+    Translator::new(resolver, definitions).bare_def("", def)
 }
 
 /// A property's shape and whether the object requires it, with the
@@ -139,7 +172,21 @@ pub struct PropertyShape {
 ///
 /// As [`shape_from_property_def`].
 pub fn property_shape_from_def(def: &PropertyDef, resolver: &dyn TypeResolver) -> Result<PropertyShape, TranslateError> {
-    let (shape, required) = Translator::new(resolver).property("", def)?;
+    property_shape_from_def_with_definitions(def, resolver, &NO_DEFINITIONS)
+}
+
+/// [`property_shape_from_def`] for a definition whose [`TypeExpr::Ref`]s
+/// point into `definitions`.
+///
+/// ## Errors
+///
+/// As [`shape_from_property_def_with_definitions`].
+pub fn property_shape_from_def_with_definitions(
+    def: &PropertyDef,
+    resolver: &dyn TypeResolver,
+    definitions: &DefinitionTable,
+) -> Result<PropertyShape, TranslateError> {
+    let (shape, required) = Translator::new(resolver, definitions).property("", def)?;
     Ok(PropertyShape { shape, required })
 }
 
@@ -156,7 +203,23 @@ pub fn shape_from_simplified_schema(
     schema: &SimplifiedSchema,
     resolver: &dyn TypeResolver,
 ) -> Result<Shape, TranslateError> {
-    let mut translator = Translator::new(resolver);
+    shape_from_simplified_schema_with_definitions(schema, resolver, &NO_DEFINITIONS)
+}
+
+/// [`shape_from_simplified_schema`] for a resolved schema whose
+/// [`TypeExpr::Ref`]s point into `definitions` (`ResolvedSchema::definitions`,
+/// `EffectiveSchema::definitions`).
+///
+/// ## Errors
+///
+/// As [`shape_from_simplified_schema`], plus [`TranslateError::Invalid`] for
+/// a reference whose definition `definitions` does not hold.
+pub fn shape_from_simplified_schema_with_definitions(
+    schema: &SimplifiedSchema,
+    resolver: &dyn TypeResolver,
+    definitions: &DefinitionTable,
+) -> Result<Shape, TranslateError> {
+    let mut translator = Translator::new(resolver, definitions);
     match schema {
         SimplifiedSchema::Single(shape) => translator.root_object(shape),
         SimplifiedSchema::Union(arms) => {
@@ -191,23 +254,194 @@ fn is_annotation(constraint: &Constraint) -> bool {
     )
 }
 
+/// A named type, as the reusable references of one translation key it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum NamedKey {
+    /// `name@reference`, supplied by the [`TypeResolver`].
+    Imported(String, String),
+    /// A cyclic definition in the [`DefinitionTable`].
+    Definition(DefKey),
+}
+
+/// A named type being translated on the current path.
+struct Frame {
+    key: NamedKey,
+    /// [`Translator::descent`] when the type was entered.
+    descent: usize,
+    /// Set while the type's reusable bare shape is being built; `None` for a
+    /// use inlined in place.
+    slot: Option<RefSlot>,
+}
+
+/// A bare reference to a named type with no value constraints.
+enum Inlined {
+    /// The definition, with the use's markers, to translate in place.
+    Definition(NamedKey, PropertyDef),
+    /// A use below a value descent inside the type's own translation: a
+    /// reusable reference, and the definition for the use's presence rules.
+    Recursive(Shape, PropertyDef),
+}
+
 struct Translator<'r> {
     resolver: &'r dyn TypeResolver,
+    definitions: &'r DefinitionTable,
     depth: usize,
+    /// Value descents on the current path; see [`Frame::descent`].
+    descent: usize,
+    frames: Vec<Frame>,
+    /// Finished reusable shapes, shared by every later use.
+    finished: HashMap<NamedKey, ShapeRef>,
 }
 
 impl<'r> Translator<'r> {
-    fn new(resolver: &'r dyn TypeResolver) -> Self {
-        Self { resolver, depth: 0 }
+    fn new(resolver: &'r dyn TypeResolver, definitions: &'r DefinitionTable) -> Self {
+        Self {
+            resolver,
+            definitions,
+            depth: 0,
+            descent: 0,
+            frames: Vec::new(),
+            finished: HashMap::new(),
+        }
+    }
+
+    /// Runs `translate` on a child value: a property, an item, a tuple slot,
+    /// or a dictionary value.
+    fn descend<T>(&mut self, translate: impl FnOnce(&mut Self) -> T) -> T {
+        self.descent += 1;
+        let result = translate(self);
+        self.descent -= 1;
+        result
+    }
+
+    /// Runs `translate` on the definition of `key`, inlined in place.
+    fn within<T>(&mut self, key: NamedKey, translate: impl FnOnce(&mut Self) -> T) -> T {
+        self.frames.push(Frame {
+            key,
+            descent: self.descent,
+            slot: None,
+        });
+        self.depth += 1;
+        let result = translate(self);
+        self.depth -= 1;
+        self.frames.pop();
+        result
+    }
+
+    /// Whether a use of `key` here closes a cycle through a value descent.
+    fn recurses(&self, key: &NamedKey) -> bool {
+        self.frames
+            .iter()
+            .rev()
+            .find(|frame| frame.key == *key)
+            .is_some_and(|frame| self.descent > frame.descent)
+    }
+
+    /// The reusable reference to `key`'s bare shape: a back reference inside
+    /// its own body, the finished shape after it, else built now from
+    /// `definition`.
+    fn reusable(&mut self, path: &str, key: NamedKey, definition: &PropertyDef) -> Result<Shape, TranslateError> {
+        if let Some(slot) = self.frames.iter().rev().find_map(|frame| frame.slot.as_ref().filter(|_| frame.key == key)) {
+            return Ok(Shape::Ref(slot.back_reference()));
+        }
+        if let Some(finished) = self.finished.get(&key) {
+            return Ok(Shape::Ref(finished.clone()));
+        }
+        if self.depth >= MAX_REFERENCE_DEPTH {
+            return Err(TranslateError::TooDeep {
+                path: path.to_string(),
+                limit: MAX_REFERENCE_DEPTH,
+            });
+        }
+        let name = match &key {
+            NamedKey::Imported(name, _) => name.clone(),
+            NamedKey::Definition(key) => key.name.clone(),
+        };
+        self.frames.push(Frame {
+            key: key.clone(),
+            descent: self.descent,
+            slot: Some(RefSlot::new(name)),
+        });
+        self.depth += 1;
+        let body = self.bare_def(path, definition);
+        self.depth -= 1;
+        let slot = self.frames.pop().and_then(|frame| frame.slot).expect("the frame pushed above");
+        let finished = slot.finish(body?);
+        self.finished.insert(key, finished.clone());
+        Ok(Shape::Ref(finished))
+    }
+
+    /// A use of the cyclic definition `key`: its reusable shape, with the
+    /// use's value constraints checked beside it, as the lowering writes
+    /// them as `$ref` siblings.
+    fn definition_reference(&mut self, path: &str, key: &DefKey, constraints: &[Constraint]) -> Result<Shape, TranslateError> {
+        let Some(definition) = self.definitions.get(key) else {
+            return Err(invalid(path, format!("the recursive named type `{}` has no definition", key.name)));
+        };
+        let body = definition.body.clone();
+        let shape = self.reusable(path, NamedKey::Definition(key.clone()), &body)?;
+        let value_constraints: Vec<&Constraint> =
+            constraints.iter().filter(|constraint| !is_annotation(constraint)).collect();
+        if value_constraints.is_empty() {
+            return Ok(shape);
+        }
+        let mut fragment = serde_json::Map::new();
+        let allowed = match self.definitions.outer(key) {
+            Some(DefinitionOuter::Array) => {
+                let owned: Vec<Constraint> = value_constraints.iter().map(|constraint| (*constraint).clone()).collect();
+                if let Shape::Array(bounds) = array(path, Shape::Any, &owned)? {
+                    if let Some(min) = bounds.min_items {
+                        fragment.insert("minItems".into(), json!(min));
+                    }
+                    if let Some(max) = bounds.max_items {
+                        fragment.insert("maxItems".into(), json!(max));
+                    }
+                    if bounds.unique_items {
+                        fragment.insert("uniqueItems".into(), json!(true));
+                    }
+                }
+                true
+            }
+            Some(DefinitionOuter::Object) => {
+                let mut bounds = ObjectShape::opaque();
+                object_arity(path, &mut bounds, value_constraints.iter().copied())?;
+                if let Some(min) = bounds.min_properties {
+                    fragment.insert("minProperties".into(), json!(min));
+                }
+                if let Some(max) = bounds.max_properties {
+                    fragment.insert("maxProperties".into(), json!(max));
+                }
+                value_constraints
+                    .iter()
+                    .all(|constraint| matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_)))
+            }
+            _ => false,
+        };
+        if !allowed {
+            let constraint = value_constraints[0];
+            return Err(invalid(
+                path,
+                format!(
+                    "constraint `{}` is not valid on a reference to the recursive named type `{}`",
+                    constraint.keyword(),
+                    key.name
+                ),
+            ));
+        }
+        let description = value_constraints
+            .iter()
+            .map(|constraint| constraint.keyword())
+            .collect::<Vec<_>>()
+            .join("; ");
+        Ok(shape.assert(format_assertion(&description, Value::Object(fragment))?))
     }
 
     /// The lowering's `pattern_value_schema`.
     fn bare_def(&mut self, path: &str, def: &PropertyDef) -> Result<Shape, TranslateError> {
-        if let Some(resolved) = self.inline_reference(path, def)? {
-            self.depth += 1;
-            let shape = self.bare_def(path, &resolved);
-            self.depth -= 1;
-            return shape;
+        match self.inline_reference(path, def)? {
+            Some(Inlined::Definition(key, resolved)) => return self.within(key, |this| this.bare_def(path, &resolved)),
+            Some(Inlined::Recursive(shape, _)) => return Ok(shape),
+            None => {}
         }
         match def {
             PropertyDef::Single(atom) => Ok(self.atom(path, atom, false)?.0),
@@ -224,11 +458,21 @@ impl<'r> Translator<'r> {
     /// The lowering's `property_def_to_schema`: the shape and whether the
     /// enclosing object lists the property as required.
     fn property(&mut self, path: &str, def: &PropertyDef) -> Result<(Shape, bool), TranslateError> {
-        if let Some(resolved) = self.inline_reference(path, def)? {
-            self.depth += 1;
-            let property = self.property(path, &resolved);
-            self.depth -= 1;
-            return property;
+        match self.inline_reference(path, def)? {
+            Some(Inlined::Definition(key, resolved)) => return self.within(key, |this| this.property(path, &resolved)),
+            Some(Inlined::Recursive(shape, target)) => {
+                // The presence rules the inlined target would get: a type
+                // that admits null is never required, an optional use also
+                // admits null.
+                return Ok(if target.admits_null() {
+                    (shape, false)
+                } else if def.is_required() {
+                    (shape, !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
+                } else {
+                    (Shape::Union(vec![Shape::Null, shape]), false)
+                });
+            }
+            None => {}
         }
         match def {
             PropertyDef::Single(atom) => match atom.union_arms() {
@@ -241,8 +485,9 @@ impl<'r> Translator<'r> {
 
     /// A bare reference with no value constraints names its target's whole
     /// definition, as the resolver inlines it: the reference's presence and
-    /// documentation markers move onto every option.
-    fn inline_reference(&mut self, path: &str, def: &PropertyDef) -> Result<Option<PropertyDef>, TranslateError> {
+    /// documentation markers move onto every option. A use that closes a
+    /// cycle through a value descent is a reusable reference instead.
+    fn inline_reference(&mut self, path: &str, def: &PropertyDef) -> Result<Option<Inlined>, TranslateError> {
         let PropertyDef::Single(atom) = def else {
             return Ok(None);
         };
@@ -251,6 +496,12 @@ impl<'r> Translator<'r> {
         };
         if atom.is_array || !atom.constraints.iter().all(is_annotation) {
             return Ok(None);
+        }
+        let key = NamedKey::Imported(name.clone(), reference.clone());
+        if self.recurses(&key) {
+            let target = self.resolve(path, name, reference)?;
+            let shape = self.reusable(path, key, &target)?;
+            return Ok(Some(Inlined::Recursive(shape, target)));
         }
         let mut target = self.resolve(path, name, reference)?;
         let markers = atom.constraints.clone();
@@ -265,7 +516,7 @@ impl<'r> Translator<'r> {
             PropertyDef::Single(option) => mark(option),
             PropertyDef::Union(options) => options.iter_mut().for_each(mark),
         }
-        Ok(Some(target))
+        Ok(Some(Inlined::Definition(key, target)))
     }
 
     fn resolve(&self, path: &str, name: &str, reference: &str) -> Result<PropertyDef, TranslateError> {
@@ -345,9 +596,35 @@ impl<'r> Translator<'r> {
             .filter(|constraint| !matches!(constraint, Constraint::Category(_)))
             .cloned()
             .collect();
-        let inner = match &atom.ty {
-            TypeExpr::Primitive(ty) => primitive(path, *ty, &value_constraints)?,
-            TypeExpr::InlineObject(shape) => self.inline_object(path, shape, &value_constraints)?,
+        let inner = if atom.is_array {
+            self.descend(|this| this.atom_type(path, atom, &value_constraints, allow_optional_empty_file, required))?
+        } else {
+            self.atom_type(path, atom, &value_constraints, allow_optional_empty_file, required)?
+        };
+        let optional_empty_file = allow_optional_empty_file && is_scalar_file(atom) && !required;
+        let shape = if atom.is_array {
+            array(path, inner, &atom.array_constraints)?
+        } else if optional_empty_file {
+            Shape::Union(vec![Shape::Literal(json!("")), inner])
+        } else {
+            inner
+        };
+        Ok((shape, required))
+    }
+
+    /// The shape of the atom's type itself, before any list wrapper: the
+    /// item shape of `T[]`.
+    fn atom_type(
+        &mut self,
+        path: &str,
+        atom: &PropertyAtom,
+        value_constraints: &[Constraint],
+        allow_optional_empty_file: bool,
+        required: bool,
+    ) -> Result<Shape, TranslateError> {
+        Ok(match &atom.ty {
+            TypeExpr::Primitive(ty) => primitive(path, *ty, value_constraints)?,
+            TypeExpr::InlineObject(shape) => self.inline_object(path, shape, value_constraints)?,
             TypeExpr::Tuple(tuple) => self.tuple(path, tuple)?,
             TypeExpr::Function(_) => {
                 return Err(TranslateError::FunctionValue { path: path.to_string() });
@@ -370,25 +647,8 @@ impl<'r> Translator<'r> {
                 Shape::Union(options)
             }
             TypeExpr::Imported { name, reference } => self.reference(path, atom, name, reference)?,
-            // The grammar translator resolves authored references itself; a
-            // resolver-produced reference to a cyclic definition carries no
-            // table here.
-            TypeExpr::Ref(key) => {
-                return Err(invalid(
-                    path,
-                    format!("the recursive named type `{}` cannot be translated", key.name),
-                ));
-            }
-        };
-        let optional_empty_file = allow_optional_empty_file && is_scalar_file(atom) && !required;
-        let shape = if atom.is_array {
-            array(path, inner, &atom.array_constraints)?
-        } else if optional_empty_file {
-            Shape::Union(vec![Shape::Literal(json!("")), inner])
-        } else {
-            inner
-        };
-        Ok((shape, required))
+            TypeExpr::Ref(key) => self.definition_reference(path, key, value_constraints)?,
+        })
     }
 
     /// A reference that carries value constraints or `[]`: the target's bare
@@ -404,23 +664,32 @@ impl<'r> Translator<'r> {
         let target = self.resolve(path, name, reference)?;
         let constraints: Vec<Constraint> =
             atom.constraints.iter().filter(|constraint| !is_annotation(constraint)).cloned().collect();
-        self.depth += 1;
-        let shape = if constraints.is_empty() {
-            self.bare_def(path, &target)
-        } else {
-            match target {
-                PropertyDef::Single(mut target) if !target.is_array && target.union_arms().is_none() => {
-                    target.constraints.extend(constraints);
-                    self.atom(path, &target, false).map(|(shape, _)| shape)
-                }
-                _ => Err(invalid(
-                    path,
-                    format!("constraints on `{name}@{reference}` apply only to a single, non-list named type"),
-                )),
+        let key = NamedKey::Imported(name.to_string(), reference.to_string());
+        if self.recurses(&key) {
+            if constraints.is_empty() {
+                return self.reusable(path, key, &target);
             }
-        };
-        self.depth -= 1;
-        shape
+            return Err(invalid(
+                path,
+                format!("constraints on `{name}@{reference}` cannot apply to a use inside its own definition"),
+            ));
+        }
+        self.within(key, |this| {
+            if constraints.is_empty() {
+                this.bare_def(path, &target)
+            } else {
+                match target {
+                    PropertyDef::Single(mut target) if !target.is_array && target.union_arms().is_none() => {
+                        target.constraints.extend(constraints);
+                        this.atom(path, &target, false).map(|(shape, _)| shape)
+                    }
+                    _ => Err(invalid(
+                        path,
+                        format!("constraints on `{name}@{reference}` apply only to a single, non-list named type"),
+                    )),
+                }
+            }
+        })
     }
 
     /// The lowering's `inline_object_fragment`: closed unless it declares a
@@ -477,7 +746,7 @@ impl<'r> Translator<'r> {
         let mut properties = Vec::with_capacity(shape.properties.len());
         for (name, def) in &shape.properties {
             let child = child_key(path, name);
-            let (property, required) = self.property(&child, def)?;
+            let (property, required) = self.descend(|this| this.property(&child, def))?;
             properties.push(PropertySlot {
                 name: name.clone(),
                 shape: property,
@@ -487,7 +756,7 @@ impl<'r> Translator<'r> {
         let mut catch_all = None;
         let mut patterns = Vec::new();
         for pattern_key in &shape.pattern_keys {
-            let value = self.bare_def(path, &pattern_key.def)?;
+            let value = self.descend(|this| this.bare_def(path, &pattern_key.def))?;
             let matcher = match &pattern_key.key {
                 PatternKey::CatchAll => {
                     catch_all = Some(value);
@@ -520,7 +789,7 @@ impl<'r> Translator<'r> {
         let mut prefix = Vec::with_capacity(tuple.elements.len());
         for (index, element) in tuple.elements.iter().enumerate() {
             prefix.push(TupleSlot {
-                shape: self.bare_def(&format!("{path}[{index}]"), &element.def)?,
+                shape: self.descend(|this| this.bare_def(&format!("{path}[{index}]"), &element.def))?,
                 optional: element.optional,
             });
         }
@@ -529,7 +798,7 @@ impl<'r> Translator<'r> {
                 let mut item = spread.as_ref().clone();
                 item.is_array = false;
                 item.array_constraints.clear();
-                Some(Box::new(self.atom(&format!("{path}[...]"), &item, false)?.0))
+                Some(Box::new(self.descend(|this| this.atom(&format!("{path}[...]"), &item, false))?.0))
             }
             None => None,
         };

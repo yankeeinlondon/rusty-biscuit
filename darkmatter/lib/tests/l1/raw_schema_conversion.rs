@@ -174,20 +174,22 @@ fn cyclic_local_reference() {
         schema.outcome("tree:\n  value: \"1\"\n  children:\n    - value: \"2\"\n      children: []\n"),
         Some(json!({ "tree": { "value": 1, "children": [{ "value": 2, "children": [] }] } }))
     );
-    // Below the expansion bound the value is validation-only: never
-    // converted, never unconstrained.
-    let mut deep_number = String::from("tree:\n");
-    let mut deep_text = String::from("tree:\n");
-    let mut indent = String::from("  ");
-    for _ in 0..8 {
-        deep_number.push_str(&format!("{indent}value: 1\n{indent}children:\n{indent}  -\n"));
-        deep_text.push_str(&format!("{indent}value: 1\n{indent}children:\n{indent}  -\n"));
-        indent.push_str("    ");
-    }
-    deep_number.push_str(&format!("{indent}value: 2\n"));
-    deep_text.push_str(&format!("{indent}value: \"2\"\n"));
-    assert!(schema.outcome(&deep_number).is_some());
-    assert_eq!(schema.outcome(&deep_text), None);
+    // The reference is followed at every depth: a deep value converts, and
+    // one with no conversion is still rejected, never unconstrained.
+    let deep = |leaf: &str| {
+        let mut text = String::from("tree:\n");
+        let mut indent = String::from("  ");
+        for _ in 0..8 {
+            text.push_str(&format!("{indent}value: 1\n{indent}children:\n{indent}  -\n"));
+            indent.push_str("    ");
+        }
+        text.push_str(&format!("{indent}value: {leaf}\n"));
+        text
+    };
+    let deep_number = schema.outcome(&deep("2"));
+    assert!(deep_number.is_some());
+    assert_eq!(schema.outcome(&deep("\"2\"")), deep_number);
+    assert_eq!(schema.outcome(&deep("pear")), None);
 }
 
 #[test]

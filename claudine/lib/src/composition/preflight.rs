@@ -203,8 +203,7 @@ pub fn resolve_graph_shell_approvals(
         lifecycle_options.deferred_shell_roots = roots;
         let source = super::ResolvedCompositionSource { original_ref: document.path.display().to_string(),
             resolved_path: document.path.clone(), original_text: document.markdown.as_string(), markdown: document.markdown.clone() };
-        let schema = super::schema::load_authored_schema(&source, None, options.resolution_context(), &Default::default())?
-            .and_then(|schema| schema.simplified);
+        let schema = super::schema::load_authored_schema(&source, None, options.resolution_context(), &Default::default())?;
         let enclosing = if effective.get("loop").is_some_and(serde_json::Value::is_object) { EnclosingLoop::Pending } else { EnclosingLoop::Outside };
         resolve_lifecycle_shell_commands_in_sequence(
             &mut lifecycle, &effective, options.context(), &document.path,
@@ -525,7 +524,7 @@ pub fn resolve_lifecycle_shell_commands(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
     enclosing_loop: EnclosingLoop<'_>,
-    owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+    owner_schema: Option<&darkmatter::markdown::schemas::EffectiveSchema>,
 ) -> Result<(), CompositionError> {
     resolve_lifecycle_shell_commands_in_sequence(lifecycle, effective_frontmatter, context, source_path,
         file_resolution_context, file_ref_fallback_dir, enclosing_loop, owner_schema, None)
@@ -543,7 +542,7 @@ pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
     enclosing_loop: EnclosingLoop<'_>,
-    owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+    owner_schema: Option<&darkmatter::markdown::schemas::EffectiveSchema>,
     options: Option<&super::PrepareOptions>,
 ) -> Result<(), CompositionError> {
     let sites = LifecycleShellSites {

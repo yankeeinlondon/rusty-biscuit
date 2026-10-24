@@ -30,10 +30,12 @@
 //! The loader is strict. Every required global must be declared exactly once
 //! with a non-null, non-empty, resolvable definition of the required kind; an
 //! undeclared name, a duplicate key, or trailing YAML is a [`CatalogError`]
-//! naming the field.
+//! naming the field. A global typed by a recursive named type is of the
+//! object kinds when the type's body is an object; it keeps the type as a
+//! named reference into [`GlobalDeclaration::definitions`].
 
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
 use serde_yaml_ng::{Mapping, Value as YamlValue};
@@ -42,7 +44,7 @@ use thiserror::Error;
 use super::embedded::{self, EmbeddedDocument};
 use super::errors::SchemaError;
 use super::resolve::{self, describe_yaml};
-use super::{PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr};
+use super::{DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr};
 
 /// Virtual path of Darkmatter's global catalog.
 pub const DARKMATTER_CATALOG_PATH: &str = "darkmatter/schemas/darkmatter.yaml";
@@ -124,10 +126,15 @@ pub struct CatalogError {
 }
 
 /// One global's resolved declaration.
+///
+/// A global typed by a recursive named type keeps its definition as a named
+/// reference ([`TypeExpr::Ref`]) into [`Self::definitions`]; its description,
+/// like every whole-type description, names the type instead of expanding it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalDeclaration {
     name: String,
     definition: PropertyDef,
+    definitions: Arc<DefinitionTable>,
 }
 
 #[allow(missing_docs)]
@@ -136,9 +143,16 @@ impl GlobalDeclaration {
         &self.name
     }
 
-    /// The resolved definition, every import expanded.
+    /// The resolved definition, every acyclic import expanded; a recursive
+    /// type stays a reference into [`Self::definitions`].
     pub fn definition(&self) -> &PropertyDef {
         &self.definition
+    }
+
+    /// The recursive definitions [`Self::definition`]'s references point
+    /// into; empty for an acyclic global.
+    pub fn definitions(&self) -> &DefinitionTable {
+        &self.definitions
     }
 
     /// The catalog's `-> description` of the global.
@@ -149,13 +163,12 @@ impl GlobalDeclaration {
         }
     }
 
-    /// The global's member shape; `None` for an open `object`.
+    /// The global's member shape; `None` for an open `object`. A global
+    /// typed by a recursive object type yields that type's body, whose
+    /// members still name the type rather than expanding it.
     pub fn shape(&self) -> Option<&SchemaShape> {
-        match &self.definition {
-            PropertyDef::Single(atom) if !atom.is_array => match &atom.ty {
-                TypeExpr::InlineObject(shape) => Some(shape),
-                _ => None,
-            },
+        match &resolved_atom(&self.definition, &self.definitions)?.ty {
+            TypeExpr::InlineObject(shape) => Some(shape),
             _ => None,
         }
     }
@@ -344,8 +357,9 @@ impl GlobalCatalog {
         for requirement in requirements {
             let field = format!("$schema.{}", requirement.name);
             let value = required(declarations, requirement.name).map_err(|reason| fail(&field, reason))?;
-            let definition = resolve_declaration(catalog, requirement.name, value, source).map_err(|reason| fail(&field, reason))?;
-            check_kind(requirement, &definition).map_err(|reason| fail(&field, reason))?;
+            let (definition, definitions) =
+                resolve_declaration(catalog, requirement.name, value, source).map_err(|reason| fail(&field, reason))?;
+            check_kind(requirement, &definition, &definitions).map_err(|reason| fail(&field, reason))?;
             if let Some(other) = requirement.same_as {
                 let same = globals
                     .get(other)
@@ -356,7 +370,7 @@ impl GlobalCatalog {
             }
             globals.insert(
                 requirement.name.to_string(),
-                GlobalDeclaration { name: requirement.name.to_string(), definition },
+                GlobalDeclaration { name: requirement.name.to_string(), definition, definitions },
             );
         }
         Ok(Self { description, globals })
@@ -465,13 +479,14 @@ fn required<'v>(map: &'v Mapping, key: &str) -> Result<&'v YamlValue, CatalogErr
 }
 
 /// Parses and resolves one declaration on its own, so a failure names its
-/// global.
+/// global. The definition's recursive references point into the returned
+/// table.
 fn resolve_declaration(
     catalog: &str,
     name: &str,
     value: &YamlValue,
     source: &Source<'_>,
-) -> Result<PropertyDef, CatalogErrorReason> {
+) -> Result<(PropertyDef, Arc<DefinitionTable>), CatalogErrorReason> {
     match value {
         YamlValue::String(text) if text.trim().is_empty() => return Err(CatalogErrorReason::Empty),
         YamlValue::Mapping(map) if map.is_empty() => return Err(CatalogErrorReason::Empty),
@@ -490,16 +505,51 @@ fn resolve_declaration(
         Some(SimplifiedSchema::Single(mut shape)) => shape
             .properties
             .shift_remove(name)
+            .map(|definition| (definition, resolved.definitions))
             .ok_or(CatalogErrorReason::Missing),
         _ => Err(CatalogErrorReason::WrongType { expected: "a single definition", found: "a union" }),
     }
 }
 
-fn check_kind(requirement: &GlobalRequirement, definition: &PropertyDef) -> Result<(), CatalogErrorReason> {
-    let atom = match definition {
-        PropertyDef::Single(atom) if !atom.is_array => atom,
-        PropertyDef::Single(_) => return Err(CatalogErrorReason::WrongType { expected: "an object", found: "an array" }),
-        PropertyDef::Union(_) => return Err(CatalogErrorReason::WrongType { expected: "an object", found: "a union" }),
+/// The single non-array atom `definition` is, looking through a reference to
+/// a recursive type to that type's body; `None` for a union or an array.
+///
+/// Alias chains between definitions are acyclic (admission rejects a cycle
+/// that never descends into a value), and the walk stops after as many steps
+/// as the table has entries in any case.
+fn resolved_atom<'a>(definition: &'a PropertyDef, definitions: &'a DefinitionTable) -> Option<&'a PropertyAtom> {
+    let mut current = definition;
+    for _ in 0..=definitions.len() {
+        let PropertyDef::Single(atom) = current else {
+            return None;
+        };
+        if atom.is_array {
+            return None;
+        }
+        match &atom.ty {
+            TypeExpr::Ref(key) => current = &definitions.get(key)?.body,
+            _ => return Some(atom),
+        }
+    }
+    None
+}
+
+fn check_kind(
+    requirement: &GlobalRequirement,
+    definition: &PropertyDef,
+    definitions: &DefinitionTable,
+) -> Result<(), CatalogErrorReason> {
+    let Some(atom) = resolved_atom(definition, definitions) else {
+        let found = match definition {
+            PropertyDef::Single(atom) if atom.is_array => "an array",
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::Ref(key), .. })
+                if definitions.outer(key) == Some(DefinitionOuter::Array) =>
+            {
+                "an array"
+            }
+            _ => "a union",
+        };
+        return Err(CatalogErrorReason::WrongType { expected: "an object", found });
     };
     match (&atom.ty, requirement.kind) {
         (TypeExpr::InlineObject(shape), _) if shape.properties.is_empty() && shape.pattern_keys.is_empty() => {

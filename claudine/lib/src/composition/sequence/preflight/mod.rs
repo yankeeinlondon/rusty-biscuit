@@ -594,7 +594,7 @@ struct Loader<'a> {
     step_derived: HashSet<String>,
     /// The sequence source's simplified schema, which types the placeholders
     /// of tasks it authors. Loaded on first use.
-    source_schema: Option<Option<darkmatter::markdown::schemas::SimplifiedSchema>>,
+    source_schema: Option<Option<darkmatter::markdown::schemas::EffectiveSchema>>,
     /// The invocation's caller values, above the document and below the
     /// step's reserved overlay. A nested preparation also carries the runtime
     /// writes so far, which a referenced sequence document reads above its
@@ -1603,7 +1603,11 @@ impl<'a> Loader<'a> {
         // the guard selected the task before the command runs.
         let roots = sequence_deferred_roots();
         let schema = self.owner_schema(origin);
-        let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        let mut declared = DeclaredTypes::new(schema.as_ref().and_then(|schema| schema.simplified.as_ref()))
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        if let Some(schema) = &schema {
+            declared = declared.with_definitions(schema.definitions());
+        }
         let types = site_types(&declared, scope.guard);
         let parsed = parsed.map(|mut template| {
             template.project_types(&types);
@@ -1951,11 +1955,11 @@ impl<'a> Loader<'a> {
         )
     }
 
-    /// The simplified schema of the document that authored a task, which
-    /// types its placeholders. Only the sequence source declares one; a
+    /// The effective schema of the document that authored a task, whose
+    /// authored projection and recursive definitions type its placeholders. Only the sequence source declares one; a
     /// `kind: task`/`kind: group` data file has none, so its placeholders fall
     /// back to `string`.
-    fn owner_schema(&mut self, origin: &Path) -> Option<darkmatter::markdown::schemas::SimplifiedSchema> {
+    fn owner_schema(&mut self, origin: &Path) -> Option<darkmatter::markdown::schemas::EffectiveSchema> {
         if canonical(origin) != self.source_path {
             return None;
         }
@@ -1969,8 +1973,7 @@ impl<'a> Loader<'a> {
                 &darkmatter::markdown::compose::CallerInputRecords::default(),
             )
             .ok()
-            .flatten()
-            .and_then(|effective| effective.simplified);
+            .flatten();
             self.source_schema = Some(loaded);
         }
         self.source_schema.clone().flatten()
@@ -2004,7 +2007,11 @@ impl<'a> Loader<'a> {
         guard: Option<&TaskGuard>,
     ) -> PreparedWith {
         let schema = guard.and_then(|_| self.owner_schema(origin));
-        let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        let mut declared = DeclaredTypes::new(schema.as_ref().and_then(|schema| schema.simplified.as_ref()))
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        if let Some(schema) = &schema {
+            declared = declared.with_definitions(schema.definitions());
+        }
         let types = site_types(&declared, guard);
         let mut deferred: Vec<String> =
             derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)

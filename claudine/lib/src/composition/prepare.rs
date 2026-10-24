@@ -1221,7 +1221,6 @@ fn effective_surface(
             )
             .ok()
             .flatten()
-            .and_then(|effective| effective.simplified)
         })
         .flatten();
     let mut lifecycle_options = options.clone();

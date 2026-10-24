@@ -98,7 +98,8 @@ pub use call_binding::{
 };
 pub use call_check::{
     ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding, CallProblem, PreparedCallCheck, check_call,
-    check_expression_calls, check_prepared_calls, classify_argument,
+    check_call_with_definitions, check_expression_calls, check_prepared_calls, classify_argument,
+    classify_argument_with_definitions,
 };
 pub use catalog::{
     CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,

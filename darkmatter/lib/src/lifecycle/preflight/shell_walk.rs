@@ -18,7 +18,7 @@ use crate::markdown::compose::{
     ComposeContext, ContextBuildError, EffectiveState, EffectiveStateBuilder, ResolvedShellValue, ShellCommandOrigin,
     ShellExpansionError, authored_shell_template,
 };
-use crate::markdown::schemas::SimplifiedSchema;
+use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::{MarkdownError, SourceRef};
 
 use super::{PreflightError, ShellAuditBindings, unavailable_root};
@@ -82,7 +82,7 @@ pub struct LifecycleShellSites<'a> {
     pub context: &'a ComposeContext,
     pub source_path: &'a Path,
     pub registry: &'a EventRegistry,
-    pub owner_schema: Option<&'a SimplifiedSchema>,
+    pub owner_schema: Option<&'a EffectiveSchema>,
     pub bindings: &'a dyn ShellAuditBindings,
     pub options: Option<ShellWalkOptions<'a>>,
 }

@@ -128,14 +128,14 @@ fn nested_shape_consumes_array_index_against_item_type() {
     // type, whose first inline-object arm is `communicate`; a bare key
     // descends the `bundle` arm.
     let root = claudine_root();
-    let item = nested_shape(&root, &[Key("initialize"), Index(0)]).expect("list item shape");
+    let item = nested_shape(&root, &[Key("initialize"), Index(0)], &NoDefinitions).expect("list item shape");
     for key in ["say", "notify", "info"] {
         assert!(item.properties.contains_key(key), "{key} on the list item");
     }
     assert!(!item.properties.contains_key("no_error"), "the item is not the bundle arm");
-    let bundle = nested_shape(&root, &[Key("failure")]).expect("bundle shape");
+    let bundle = nested_shape(&root, &[Key("failure")], &NoDefinitions).expect("bundle shape");
     assert!(is_expression_def(bundle.properties.get("when").expect("failure.when")));
-    let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")])
+    let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")], &NoDefinitions)
         .expect("loop.gate[3].say resolves");
     assert!(!is_expression_def(nested));
 }
@@ -150,26 +150,26 @@ fn nested_shape_fails_closed_on_mismatched_segments() {
     )
     .unwrap();
     let root = resolved_root(&path);
-    assert!(def_at_path(&root, &[Key("steps"), Index(0), Key("when")]).is_some());
+    assert!(def_at_path(&root, &[Key("steps"), Index(0), Key("when")], &NoDefinitions).is_some());
     // A key where the array item is required (`steps` is list-only).
-    assert!(nested_shape(&root, &[Key("steps")]).is_none());
-    assert!(def_at_path(&root, &[Key("steps"), Key("when")]).is_none());
+    assert!(nested_shape(&root, &[Key("steps")], &NoDefinitions).is_none());
+    assert!(def_at_path(&root, &[Key("steps"), Key("when")], &NoDefinitions).is_none());
     // An index under a non-array property.
-    assert!(nested_shape(&root, &[Key("opts"), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Key("opts"), Index(0)], &NoDefinitions).is_none());
     // A leading index, and a nested index SimplifiedSchema cannot declare.
-    assert!(nested_shape(&root, &[Index(0)]).is_none());
-    assert!(nested_shape(&root, &[Key("steps"), Index(0), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Index(0)], &NoDefinitions).is_none());
+    assert!(nested_shape(&root, &[Key("steps"), Index(0), Index(0)], &NoDefinitions).is_none());
     // A key literally named `0` is not an index.
-    assert!(nested_shape(&root, &[Key("steps"), Key("0")]).is_none());
+    assert!(nested_shape(&root, &[Key("steps"), Key("0")], &NoDefinitions).is_none());
 }
 
 #[test]
 fn union_arms_are_chosen_by_array_crossing() {
     // `exit_expressions` is a rule array or a `{ mode, rules }` layer.
     let root = claudine_root();
-    let layer = nested_shape(&root, &[Key("exit_expressions")]).expect("non-array layer arm");
+    let layer = nested_shape(&root, &[Key("exit_expressions")], &NoDefinitions).expect("non-array layer arm");
     assert!(layer.properties.contains_key("mode"));
-    let rule = nested_shape(&root, &[Key("exit_expressions"), Index(0)]).expect("array rule arm");
+    let rule = nested_shape(&root, &[Key("exit_expressions"), Index(0)], &NoDefinitions).expect("array rule arm");
     assert!(rule.properties.contains_key("pattern"));
     assert!(!rule.properties.contains_key("mode"));
 }

@@ -164,7 +164,7 @@ fn lower_reachable_definitions(
         let definition = defs.get(key).ok_or_else(|| missing_definition(path, key))?;
         let body = match &definition.body {
             PropertyDef::Single(atom) => atom_fragment_without_null_wrap(path, atom, false, defs)?.0,
-            PropertyDef::Union(arms) => json!({ "anyOf": union_arm_fragments(path, arms, false, defs)?.0 }),
+            PropertyDef::Union(arms) => any_of_value(union_arm_fragments(path, arms, false, defs)?.0),
         };
         let order = defs
             .iter()
@@ -455,12 +455,9 @@ fn union_property_to_schema(
         // Lift the null arm into the existing anyOf array so the output
         // stays a single-level `anyOf: [null, arm1, arm2, ...]` rather than
         // nesting the whole union under a second anyOf wrapper.
-        let mut arms = union_schema
-            .remove("anyOf")
-            .expect("union schema has anyOf")
-            .as_array()
-            .expect("anyOf is an array")
-            .clone();
+        let Some(Value::Array(mut arms)) = union_schema.remove("anyOf") else {
+            unreachable!("the union schema's anyOf is an array")
+        };
         arms.insert(0, json!({ "type": "null" }));
         union_schema.insert("anyOf".into(), Value::Array(arms));
         Value::Object(union_schema)
@@ -519,7 +516,18 @@ fn union_arm_fragments(
 /// Wraps a finished typed fragment so an optional property also accepts
 /// JSON `null` as a sentinel for "absent".
 fn wrap_optional_null(inner: Value) -> Value {
-    json!({ "anyOf": [ { "type": "null" }, inner ] })
+    any_of_value(vec![json!({ "type": "null" }), inner])
+}
+
+/// `{ "anyOf": arms }`, moving `arms` in.
+///
+/// Never `json!({ "anyOf": arms })`: the macro passes an interpolated value
+/// through `serde_json::to_value`, which re-serializes the whole subtree, and
+/// these fragments nest, so a deep schema paid that copy once per level.
+fn any_of_value(arms: Vec<Value>) -> Value {
+    let mut map = Map::new();
+    map.insert("anyOf".into(), Value::Array(arms));
+    Value::Object(map)
 }
 
 fn atom_to_schema(
@@ -573,11 +581,9 @@ fn atom_to_schema(
     let mut schema = if is_optional_scalar_file {
         // The bare fragment is already `[{ "const": "" }, file-typed]`.
         // Prepend the null arm to keep a flat, single-level anyOf.
-        let mut arms = fragment
-            .get("anyOf")
-            .and_then(|a| a.as_array())
-            .expect("optional file fragment has anyOf")
-            .clone();
+        let Some(Value::Array(mut arms)) = fragment.as_object_mut().and_then(|map| map.remove("anyOf")) else {
+            unreachable!("the optional file fragment's anyOf is an array")
+        };
         arms.insert(0, json!({ "type": "null" }));
         let mut m = Map::new();
         m.insert("anyOf".into(), Value::Array(arms));
@@ -717,7 +723,7 @@ fn atom_fragment_without_null_wrap(
                     None => default_val = Some(value),
                 }
             }
-            json!({ "anyOf": any_of })
+            any_of_value(any_of)
         }
         TypeExpr::Ref(key) => reference_fragment(name, key, &value_constraints, defs)?,
         // An imported type must be inline-expanded by the resolver before
@@ -756,7 +762,7 @@ fn atom_fragment_without_null_wrap(
         apply_array_constraints(name, &mut arr, &atom.array_constraints)?;
         Value::Object(arr)
     } else if optional_empty_file {
-        json!({ "anyOf": [ { "const": "" }, inner ] })
+        any_of_value(vec![json!({ "const": "" }), inner])
     } else {
         inner
     };
@@ -1034,7 +1040,7 @@ fn pattern_value_schema(
             for atom in arms {
                 any_of.push(atom_fragment_without_null_wrap(context, atom, false, defs)?.0);
             }
-            Ok(json!({ "anyOf": any_of }))
+            Ok(any_of_value(any_of))
         }
     }
 }
@@ -1089,6 +1095,18 @@ fn wrap_literal_exclusion(core: &str, literal_names: &[&str]) -> String {
     }
 }
 
+/// The emitted patterns [`validate_emitted_pattern`] has seen compile.
+static COMPILED_PATTERNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// Empties this module's process-wide caches (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    if let Some(compiled) = COMPILED_PATTERNS.get() {
+        compiled.lock().expect("compiled pattern set poisoned").clear();
+    }
+}
+
 /// Verifies an emitted pattern compiles under the same regex engine schema
 /// validation uses: `fancy-regex` when the pattern carries a lookaround
 /// (Feature C literal precedence), otherwise the linear `regex` engine.
@@ -1101,9 +1119,7 @@ fn validate_emitted_pattern(
     key: &PatternKey,
     emitted: &str,
 ) -> Result<(), SchemaError> {
-    static COMPILED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-        std::sync::OnceLock::new();
-    let compiled = COMPILED.get_or_init(Default::default);
+    let compiled = COMPILED_PATTERNS.get_or_init(Default::default);
     if compiled.lock().expect("compiled pattern set poisoned").contains(emitted) {
         return Ok(());
     }

@@ -309,9 +309,12 @@ harness = false
 # spells the other packages' files it allowlists, so a changed count runs it.
 # The serialized-code-neighbors suite includes renderable's neighboring-code
 # fixture matrix by `#[path]` and spells it with `include_str!`.
+# The frozen recursive-schema fixture suite embeds the lifecycle-grammar spike's
+# generator with `include_str!` and runs it.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
+    "claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py",
     "darkmatter/cli/tests/common/context_guard.rs",
     "darkmatter/cli/tests/common/path_lookup_guard.rs",
     "darkmatter/cli/tests/common/source_scan.rs",

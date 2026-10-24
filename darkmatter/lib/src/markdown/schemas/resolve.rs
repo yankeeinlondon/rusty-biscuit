@@ -1415,6 +1415,11 @@ struct ImportEngine<'a> {
     source: NamespaceSource<'a>,
     /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
+    /// The file each `(reference, base_dir)` selected, so a site repeating a
+    /// reference replays its probes into `searched` without resolving it
+    /// again. Only successful selections are kept, and the roots and context
+    /// they depend on are fixed for the engine's lifetime.
+    selected_files: HashMap<(String, PathBuf), SelectedFile>,
     /// Parsed embedded namespaces keyed by virtual path.
     embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
     /// Parsed shipped partials keyed by virtual path, apart from
@@ -1467,6 +1472,7 @@ impl<'a> ImportEngine<'a> {
             searched: BTreeSet::new(),
             source,
             namespace_cache: HashMap::new(),
+            selected_files: HashMap::new(),
             embedded_cache: HashMap::new(),
             shipped_cache: HashMap::new(),
             expanded_cache: HashMap::new(),
@@ -1476,6 +1482,14 @@ impl<'a> ImportEngine<'a> {
             pending: VecDeque::new(),
         }
     }
+}
+
+/// The schema file one import reference selected.
+struct SelectedFile {
+    path: PathBuf,
+    canonical: PathBuf,
+    /// The locations the selection probed.
+    probed: Vec<PathBuf>,
 }
 
 struct CachedNamespace {
@@ -1966,7 +1980,7 @@ impl ImportEngine<'_> {
             source: current.key.source_id(),
             path: path.clone(),
         };
-        let Some(def) = target.named_types.get(&reference.name).cloned() else {
+        let Some(def) = target.named_types.get(&reference.name) else {
             // A missing named type is a resolution error, not a grammar error:
             // the reference parsed fine, its namespace simply does not define it.
             return Err(SchemaError::UnknownNamedType {
@@ -1997,7 +2011,8 @@ impl ImportEngine<'_> {
                 });
             }
             self.stack.push(frame.clone());
-            let base = match def {
+            // Cloned only here: a cached expansion never reads the body.
+            let base = match def.clone() {
                 PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
                 PropertyDef::Union(arms) => {
                     self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
@@ -2104,15 +2119,28 @@ impl ImportEngine<'_> {
             })?;
             return self.shipped_namespace(document.path);
         }
-        let path = match &self.source {
+        let (path, canonical) = match &self.source {
             NamespaceSource::Files { schema_roots, context } => {
-                named_type_file_path(
-                    reference,
-                    &current.base_dir,
-                    schema_roots,
-                    context,
-                    &mut self.searched,
-                )?
+                let site = (reference.to_string(), current.base_dir.clone());
+                if let Some(selected) = self.selected_files.get(&site) {
+                    self.searched.extend(selected.probed.iter().cloned());
+                    (selected.path.clone(), selected.canonical.clone())
+                } else {
+                    let mut probed = BTreeSet::new();
+                    let selected = named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed);
+                    self.searched.extend(probed.iter().cloned());
+                    let path = selected?;
+                    let canonical = canonical_path(&path);
+                    self.selected_files.insert(
+                        site,
+                        SelectedFile {
+                            path: path.clone(),
+                            canonical: canonical.clone(),
+                            probed: probed.into_iter().collect(),
+                        },
+                    );
+                    (path, canonical)
+                }
             }
             NamespaceSource::Embedded { documents, bundle } => {
                 let (documents, bundle) = (*documents, *bundle);
@@ -2123,7 +2151,6 @@ impl ImportEngine<'_> {
             }
         };
 
-        let canonical = canonical_path(&path);
         self.dependencies.insert(canonical.clone());
         // Reuse an already-loaded namespace for this file: multiple import sites
         // targeting the same file (`A@types.yaml`, `B@types.yaml`, …) otherwise
@@ -2135,7 +2162,7 @@ impl ImportEngine<'_> {
                 named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = Arc::new(load_named_types(&path)?);
+        let named_types = load_named_types(&path)?;
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -2206,8 +2233,7 @@ impl ImportEngine<'_> {
         let named_types = match self.shipped_cache.get(path) {
             Some(cached) => Arc::clone(cached),
             None => {
-                let document = embedded::find(embedded::SHIPPED, path).expect("the caller found the shipped document");
-                let named_types = Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+                let named_types = shipped_named_types(path)?;
                 self.shipped_cache.insert(path.to_string(), Arc::clone(&named_types));
                 named_types
             }
@@ -2226,6 +2252,36 @@ impl ImportEngine<'_> {
         parts.push(repeat);
         parts.join(" -> ")
     }
+}
+
+/// The parsed named types of each shipped partial, shared by every
+/// expansion in the process: a shipped document is compiled in, so its parse
+/// never changes. Failures are not kept.
+static SHIPPED_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<&'static str, Arc<NamedTypes>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// A schema document's top-level named types, unexpanded.
+type NamedTypes = IndexMap<String, PropertyDef>;
+
+/// Empties the process-wide named-type parse memos (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    SHIPPED_NAMED_TYPES.lock().expect("shipped partial memo poisoned").clear();
+    FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").clear();
+}
+
+/// The named types of the shipped partial registered at `path`.
+fn shipped_named_types(path: &str) -> Result<Arc<NamedTypes>, SchemaError> {
+    let document = embedded::find(embedded::SHIPPED, path).expect("the caller found the shipped document");
+    if let Some(cached) = SHIPPED_NAMED_TYPES.lock().expect("shipped partial memo poisoned").get(document.path) {
+        return Ok(Arc::clone(cached));
+    }
+    let named_types = Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+    SHIPPED_NAMED_TYPES
+        .lock()
+        .expect("shipped partial memo poisoned")
+        .insert(document.path, Arc::clone(&named_types));
+    Ok(named_types)
 }
 
 /// The file an explicit named-type reference (`Name@reference`) selects,
@@ -2383,7 +2439,7 @@ fn canonical_path(path: &Path) -> PathBuf {
 /// SimplifiedSchema mapping (raw JSON Schema or a root union) —
 /// imports are only defined among a file's named types, so a raw JSON Schema
 /// has none to offer.
-fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
         source,
@@ -2391,8 +2447,33 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
-    named_types_from_text(text, path)
+    let key = (path.to_path_buf(), biscuit_hash::xx_hash_bytes(&bytes));
+    if let Some(cached) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(&key) {
+        return Ok(Arc::clone(cached));
+    }
+    let named_types = Arc::new(named_types_from_text(text, path)?);
+    let mut memo = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned");
+    if memo.len() >= FILE_NAMED_TYPES_CAPACITY {
+        memo.clear();
+    }
+    memo.insert(key, Arc::clone(&named_types));
+    Ok(named_types)
 }
+
+/// How many parsed schema files [`FILE_NAMED_TYPES`] holds before it starts
+/// over.
+const FILE_NAMED_TYPES_CAPACITY: usize = 256;
+
+/// The parsed named types of each schema file an import read, keyed by the
+/// path it was read from and a hash of the bytes read, so every payload and
+/// document importing one file revision parses it once. The file is read on
+/// every use: an edit or deletion is seen at once, and a failed read or parse
+/// is never served from here.
+static FILE_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<FileRevision, Arc<NamedTypes>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// A file path and the hash of the bytes read from it.
+type FileRevision = (PathBuf, u64);
 
 /// The named types a schema document's text declares; `path` identifies the
 /// document in errors.

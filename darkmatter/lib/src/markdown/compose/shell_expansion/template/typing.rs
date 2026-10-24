@@ -14,14 +14,15 @@
 
 use crate::markdown::compose::expression::scope::{Declaration, VariableClass};
 use crate::markdown::compose::expression::{Expr, GuardOrigin, TypeScope, parse};
-use crate::markdown::schemas::completion::alternative_accepts;
+use crate::markdown::schemas::completion::alternative_accepts_in;
+use crate::markdown::schemas::simplified::query::{reachable_definitions, resolved_alternatives};
 use crate::markdown::schemas::simplified::serialize_property_atom;
 use crate::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
-    flattened_alternatives, is_string_like,
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, is_string_like,
 };
 use serde_json::Value;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 /// A placeholder's type: what an approval matches and what a value must pass.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,13 +43,16 @@ pub struct HoleRefinement {
     pub definition: PropertyDef,
     /// The guards that narrowed the declaration.
     pub guards: Vec<GuardOrigin>,
+    /// The recursive definitions `definition` reaches, so a remaining
+    /// recursive alternative is judged by its body after the scope is gone.
+    pub definitions: DefinitionTable,
 }
 
 impl HoleRefinement {
     /// Whether `value` is one of the remaining alternatives, constraints
     /// included. Never coerces.
     pub fn accepts(&self, value: &Value) -> bool {
-        definition_accepts(&self.definition, value)
+        definition_accepts(&self.definition, &self.definitions, value)
     }
 
     /// The narrowed type as written in a schema.
@@ -86,8 +90,13 @@ pub struct StringLikeType {
 pub enum HoleValidator {
     /// Any present scalar: string, number, or boolean.
     FallbackScalar,
-    /// The property's resolved declaration, constraints included.
-    Declared(Box<PropertyDef>),
+    /// The property's resolved declaration, constraints included, with the
+    /// recursive definitions it reaches: a validator is checked at fill time,
+    /// after the scope that typed it is gone, so it owns them.
+    Declared {
+        definition: Box<PropertyDef>,
+        definitions: Arc<DefinitionTable>,
+    },
 }
 
 /// Why a hole has the type it has.
@@ -225,7 +234,7 @@ impl HoleType {
         }
         let validated = match (&self.refinement, &self.validator) {
             (Some(refinement), _) => &refinement.definition,
-            (None, HoleValidator::Declared(def)) => def.as_ref(),
+            (None, HoleValidator::Declared { definition, .. }) => definition.as_ref(),
             (None, HoleValidator::FallbackScalar) => return approval,
         };
         if is_plain_string(validated) {
@@ -240,20 +249,41 @@ impl HoleValidator {
     /// Whether `value` passes this validator. Never coerces: a number fails an
     /// `alphanumeric` declaration. Ordinary constraints (`min`, `pattern`, …)
     /// are enforced. Null, arrays, and objects never pass the fallback.
+    /// A declaration passes a value one of its non-array alternatives accepts,
+    /// a recursive alternative judged by its definition's body.
     pub fn accepts(&self, value: &Value) -> bool {
         match self {
             Self::FallbackScalar => matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_)),
-            Self::Declared(def) => definition_accepts(def, value),
+            Self::Declared { definition, definitions } => definition_accepts(definition, definitions, value),
         }
     }
 }
 
-/// Whether a non-array alternative of `def` accepts `value`.
-fn definition_accepts(def: &PropertyDef, value: &Value) -> bool {
-    flattened_alternatives(def)
+/// Whether a non-array alternative of `def` accepts `value`, a reference
+/// replaced by its body's alternatives. A reference `definitions` lacks
+/// accepts nothing.
+fn definition_accepts(def: &PropertyDef, definitions: &DefinitionTable, value: &Value) -> bool {
+    resolved_alternatives(def, definitions)
         .into_iter()
         .filter(|alternative| !alternative.is_array)
-        .any(|alternative| alternative_accepts(alternative.atom, value))
+        .any(|alternative| alternative_accepts_in(alternative.atom, value, definitions))
+}
+
+/// The definitions `def` reaches in `definitions`, transitively, so a
+/// validator can own them. An alternative reaching a missing definition
+/// contributes nothing and so accepts nothing.
+fn reached_definitions(def: &PropertyDef, definitions: &DefinitionTable) -> DefinitionTable {
+    let atoms = match def {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms.as_slice(),
+    };
+    let mut reached = DefinitionTable::default();
+    for table in atoms.iter().filter_map(|atom| reachable_definitions(atom, definitions)) {
+        for (key, definition) in table.iter() {
+            reached.insert(key.clone(), definition.body.clone(), definition.origin.clone());
+        }
+    }
+    reached
 }
 
 /// Types the placeholder expression `expression` at a site whose types are
@@ -275,6 +305,7 @@ pub fn project_hole(expression: &str, scope: &TypeScope<'_>) -> HoleType {
     {
         hole.approval = ApprovalType::for_declaration(&definition);
         hole.refinement = Some(Box::new(HoleRefinement {
+            definitions: reached_definitions(&definition, scope.declared().definitions()),
             definition,
             guards: narrowed.refinements().to_vec(),
         }));
@@ -300,7 +331,10 @@ fn declared_hole(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
     match declared.declaration(name) {
         Declaration::Found(def) => HoleType {
             approval: ApprovalType::for_declaration(def),
-            validator: HoleValidator::Declared(Box::new(def.clone())),
+            validator: HoleValidator::Declared {
+                definition: Box::new(def.clone()),
+                definitions: Arc::new(reached_definitions(def, declared.definitions())),
+            },
             provenance: TypeProvenance::BareProperty { name: name.to_string() },
             refinement: None,
         },

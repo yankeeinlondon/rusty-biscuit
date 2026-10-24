@@ -72,11 +72,13 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 // One effective-schema validation drives both the generic schema
                 // problems and the expression pass, which reads it to decide
                 // whether a union as a whole rejects a malformed-expression value.
-                let report = bundle.effective.validate_with_options(
-                    &bundle.frontmatter_json,
-                    &PositionMap::new(),
-                    &ValidationOptions::default(),
-                );
+                let report = crate::validation_timing::part(|| {
+                    bundle.effective.validate_with_options(
+                        &bundle.frontmatter_json,
+                        &PositionMap::new(),
+                        &ValidationOptions::default(),
+                    )
+                });
                 // Likewise one expression-value set per publication: it decodes
                 // every Expression-typed value, and both passes read it.
                 let expression_values =

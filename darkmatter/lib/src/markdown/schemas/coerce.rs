@@ -38,7 +38,7 @@ use super::validate::{self, ValidatorCache, error_top_level_key};
 use super::ValidationProblem;
 use crate::markdown::coercion::{
     Additional, BindOptions, Bound, ConversionError, Defer, FailureReason, ObjectShape, PathSegment, PatternSlot,
-    PropertySlot, Shape, TupleShape, TupleSlot, ValueFailure, bind_with,
+    PropertySlot, RefSlot, Shape, ShapeRef, TupleShape, TupleSlot, ValueFailure, bind_with,
 };
 
 /// Process-wide cache of the structural validators conversion compiles to
@@ -50,6 +50,13 @@ static CONVERSION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(Vali
 const PLAN_CACHE_CAPACITY: usize = 64;
 
 static PLAN_CACHE: LazyLock<Mutex<HashMap<u64, Arc<ConversionPlan>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Empties this module's process-wide caches (see
+/// [`super::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    CONVERSION_VALIDATOR_CACHE.clear();
+    PLAN_CACHE.lock().expect("conversion plan cache poisoned").clear();
+}
 
 /// What conversion derives from one schema: its translated shape, that shape
 /// with nothing required, and its structural validator. A schema's content
@@ -97,9 +104,16 @@ impl ConversionPlan {
         self.relaxed.get_or_init(|| relax_presence(self.shape(schema)))
     }
 
+    /// The schema's structural validator. Validation compiles the same one
+    /// into the shared cache for a schema that judges no file value, so it is
+    /// reused from there rather than built a second time.
     fn validator(&self, schema: &Value) -> Option<&Validator> {
         self.validator
-            .get_or_init(|| CONVERSION_VALIDATOR_CACHE.structural_validator_hashed(schema, self.key).ok())
+            .get_or_init(|| {
+                super::SHARED_VALIDATOR_CACHE
+                    .cached_structural(self.key)
+                    .or_else(|| CONVERSION_VALIDATOR_CACHE.structural_validator_hashed(schema, self.key).ok())
+            })
             .as_deref()
     }
 }
@@ -385,12 +399,19 @@ fn failing_paths(failures: &[ValueFailure]) -> Vec<Vec<PathSegment>> {
 }
 
 /// A copy of `shape` in which nothing is required, so a missing value does
-/// not keep its siblings from converting.
+/// not keep its siblings from converting. Recursive targets are copied
+/// too, with their back references pointing at the copies.
 fn relax_presence(shape: &Shape) -> Shape {
+    relax(shape, &mut Vec::new())
+}
+
+/// [`relax_presence`]; `targets` pairs each reference target being copied
+/// with its copy.
+fn relax(shape: &Shape, targets: &mut Vec<(ShapeRef, RefSlot)>) -> Shape {
     match shape {
         Shape::Array(array) => {
             let mut array = array.clone();
-            array.items = Box::new(relax_presence(&array.items));
+            array.items = Box::new(relax(&array.items, targets));
             Shape::Array(array)
         }
         Shape::Tuple(tuple) => Shape::Tuple(TupleShape {
@@ -398,11 +419,11 @@ fn relax_presence(shape: &Shape) -> Shape {
                 .prefix
                 .iter()
                 .map(|slot| TupleSlot {
-                    shape: relax_presence(&slot.shape),
+                    shape: relax(&slot.shape, targets),
                     optional: true,
                 })
                 .collect(),
-            rest: tuple.rest.as_ref().map(|rest| Box::new(relax_presence(rest))),
+            rest: tuple.rest.as_ref().map(|rest| Box::new(relax(rest, targets))),
         }),
         Shape::Object(object) => Shape::Object(ObjectShape {
             properties: object
@@ -410,7 +431,7 @@ fn relax_presence(shape: &Shape) -> Shape {
                 .iter()
                 .map(|property| PropertySlot {
                     name: property.name.clone(),
-                    shape: relax_presence(&property.shape),
+                    shape: relax(&property.shape, targets),
                     required: false,
                 })
                 .collect(),
@@ -419,19 +440,32 @@ fn relax_presence(shape: &Shape) -> Shape {
                 .iter()
                 .map(|pattern| PatternSlot {
                     matcher: pattern.matcher.clone(),
-                    shape: relax_presence(&pattern.shape),
+                    shape: relax(&pattern.shape, targets),
                 })
                 .collect(),
             pattern_scope: object.pattern_scope,
             additional: match &object.additional {
-                Additional::Shape(inner) => Additional::Shape(Box::new(relax_presence(inner))),
+                Additional::Shape(inner) => Additional::Shape(Box::new(relax(inner, targets))),
                 other => other.clone(),
             },
             min_properties: object.min_properties,
             max_properties: object.max_properties,
         }),
-        Shape::Union(options) => Shape::Union(options.iter().map(relax_presence).collect()),
-        Shape::Assert(inner, assertion) => Shape::Assert(Box::new(relax_presence(inner)), assertion.clone()),
+        Shape::Union(options) => Shape::Union(options.iter().map(|option| relax(option, targets)).collect()),
+        Shape::Assert(inner, assertion) => Shape::Assert(Box::new(relax(inner, targets)), assertion.clone()),
+        Shape::Ref(reference) if reference.is_owner() => match reference.target() {
+            Some(target) => {
+                targets.push((reference.clone(), RefSlot::new(reference.name())));
+                let body = relax(&target, targets);
+                let (_, copy) = targets.pop().expect("the target pushed above");
+                Shape::Ref(copy.finish(body))
+            }
+            None => shape.clone(),
+        },
+        Shape::Ref(reference) => match targets.iter().rev().find(|(original, _)| original.same_target(reference)) {
+            Some((_, copy)) => Shape::Ref(copy.back_reference()),
+            None => shape.clone(),
+        },
         other => other.clone(),
     }
 }
@@ -532,6 +566,26 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_nested_missing_property_keeps_its_holder_as_written() {
+        // The nested missing property shares its name with a top-level key,
+        // so attributing it by name would wrongly let `outer` commit.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "outer": {
+                    "type": "object",
+                    "properties": { "label": { "type": "string" }, "n": { "type": "number" } },
+                    "required": ["n"]
+                },
+                "n": { "type": "number" }
+            }
+        });
+        let instance = json!({ "outer": { "label": 7 }, "n": "3" });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert_eq!(outcome.value, json!({ "outer": { "label": 7 }, "n": 3 }));
+    }
 
     fn implement_like_union() -> Value {
         json!({

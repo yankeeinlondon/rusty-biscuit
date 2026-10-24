@@ -237,7 +237,7 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     let shape = crate::providers::frontmatter::known_shape(ctx);
     let new_text: String = keys
         .iter()
-        .map(|key| match literal_scaffold(&shape, key) {
+        .map(|key| match literal_scaffold(&shape, key, crate::providers::frontmatter::definitions(ctx)) {
             Some(value) => format!("\n{key}: {value}"),
             None => format!("\n{key}: "),
         })
@@ -271,10 +271,15 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
 
 /// The YAML value text to seed a missing required top-level `key` with when the
 /// schema types it as a single `literal(x)`, else `None` (an empty scaffold).
-fn literal_scaffold(shape: &darkmatter::markdown::schemas::SchemaShape, key: &str) -> Option<String> {
+fn literal_scaffold(
+    shape: &darkmatter::markdown::schemas::SchemaShape,
+    key: &str,
+    definitions: &dyn darkmatter::markdown::schemas::completion::DefinitionLookup,
+) -> Option<String> {
     let def = crate::providers::frontmatter::def_at_path(
         shape,
         &[crate::overlay::FmPathSegment::Key(key)],
+        definitions,
     )?;
     let value = crate::providers::frontmatter::sole_literal_value(def)?;
     Some(crate::providers::frontmatter::yaml_scalar_literal(value))
@@ -570,10 +575,10 @@ mod tests {
             .properties
             .insert("title".into(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)));
 
-        assert_eq!(literal_scaffold(&shape, "kind").as_deref(), Some("created"));
-        assert_eq!(literal_scaffold(&shape, "tag").as_deref(), Some("'2'"));
+        assert_eq!(literal_scaffold(&shape, "kind", &crate::overlay::schema::NoDefinitions).as_deref(), Some("created"));
+        assert_eq!(literal_scaffold(&shape, "tag", &crate::overlay::schema::NoDefinitions).as_deref(), Some("'2'"));
         // A non-literal required key still gets an empty scaffold (None here).
-        assert!(literal_scaffold(&shape, "title").is_none());
+        assert!(literal_scaffold(&shape, "title", &crate::overlay::schema::NoDefinitions).is_none());
     }
 
     #[test]

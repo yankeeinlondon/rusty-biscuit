@@ -169,7 +169,9 @@ pub enum FailureReason {
     /// No union option accepts the value; each option and why it failed.
     NoOptionAccepts { options: Vec<OptionFailure> },
     AssertionFailed { description: String },
-    /// The value nests deeper than the engine walks.
+    /// The value nests deeper than the engine walks (`max_depth`), or a
+    /// defective shape follows references in a loop without reaching a
+    /// deeper value.
     ResourceLimit { max_depth: usize },
 }
 

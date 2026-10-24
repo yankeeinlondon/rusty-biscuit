@@ -227,7 +227,7 @@ impl Markdown {
                 self,
                 &provenance,
                 &options,
-                effective.as_ref().and_then(|effective| effective.simplified.as_ref()),
+                effective.as_ref(),
             )
             .map_err(|failure| match failure {
                 super::call_precheck::PrecheckFailure::Frontmatter(failure) => attribute_frontmatter_failure(
@@ -393,7 +393,7 @@ impl Markdown {
                     .values()
                     .any(|value| value.as_str().is_some_and(|text| text.contains("$(")))
                     .then(|| frontmatter_shell_expansion::FrontmatterTemplates {
-                        schema: prepared_schemas.effective_for(self).and_then(|effective| effective.simplified),
+                        effective: prepared_schemas.effective_for(self),
                         ctx: shell_expansion::site::authored_context(self, None),
                     });
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(

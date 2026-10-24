@@ -32,7 +32,7 @@ use super::page_blocks::{BodyGuards, PageBlockError, PageBlockRegion};
 use super::value_origin::{FrontmatterProvenance, ValuePathSegment};
 use super::{ComposeOperation, transclusion};
 use crate::markdown::Markdown;
-use crate::markdown::schemas::SimplifiedSchema;
+use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use serde_json::Value;
 
@@ -46,7 +46,8 @@ pub(crate) enum PrecheckFailure {
 }
 
 /// Checks every executable authored call of `markdown` on the surface
-/// `options` composes, against `schema`'s declared types.
+/// `options` composes, against `schema`'s declared types; a recursive-typed
+/// property resolves in `schema`'s definition table.
 ///
 /// ## Errors
 ///
@@ -56,9 +57,12 @@ pub(crate) fn check_document(
     markdown: &Markdown,
     provenance: &FrontmatterProvenance,
     options: &super::ComposeRequest,
-    schema: Option<&SimplifiedSchema>,
+    schema: Option<&EffectiveSchema>,
 ) -> Result<(), PrecheckFailure> {
-    let declared = DeclaredTypes::new(schema);
+    let mut declared = DeclaredTypes::new(schema.and_then(|schema| schema.simplified.as_ref()));
+    if let Some(schema) = schema {
+        declared = declared.with_definitions(schema.definitions());
+    }
     let site = TypeScope::unguarded(&declared);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
         check_frontmatter(markdown, provenance, &options.exclude_keys, &site).map_err(PrecheckFailure::Frontmatter)?;

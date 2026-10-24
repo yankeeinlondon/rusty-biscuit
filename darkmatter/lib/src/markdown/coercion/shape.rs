@@ -6,7 +6,8 @@
 //! decides what happens to a value.
 
 use std::fmt;
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock, Weak};
 
 use serde_json::Value;
 
@@ -39,6 +40,133 @@ pub enum Shape {
     /// The inner shape plus a passive check on the final value. An assertion
     /// never converts; it only rejects.
     Assert(Box<Shape>, Assertion),
+    /// A use of a reusable target shape: how a recursive type refers to
+    /// itself, so a value converts at any depth the engine walks.
+    Ref(ShapeRef),
+}
+
+/// A use of a reusable target shape, built through a [`RefSlot`].
+///
+/// A recursive type is a cycle, which a tree of owned shapes cannot hold.
+/// The use that first reaches a target owns it; every use inside the
+/// target's own body refers back to it weakly, so dropping the shape that
+/// holds the owning use frees the whole cycle. A back reference therefore
+/// resolves only while an owning use is alive: a fragment cloned out of a
+/// recursive body and kept after its root is dropped matches no value.
+///
+/// Translators only close a cycle through a value descent (a property, an
+/// item, a tuple slot, a dictionary value), so walking a reference always
+/// reaches a deeper value before it can reach the same reference again; the
+/// engine still bounds consecutive reference hops as a backstop.
+#[derive(Clone)]
+pub struct ShapeRef {
+    name: Arc<str>,
+    link: Link,
+}
+
+#[derive(Clone)]
+enum Link {
+    Owner(Arc<OnceLock<Shape>>),
+    Back(Weak<OnceLock<Shape>>),
+}
+
+impl ShapeRef {
+    /// The target's name, used as its expected-type text: a recursive
+    /// target is described by name, never expanded.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The target shape; `None` when no owning use is alive.
+    pub fn target(&self) -> Option<RefTarget> {
+        let cell = match &self.link {
+            Link::Owner(cell) => cell.clone(),
+            Link::Back(cell) => cell.upgrade()?,
+        };
+        cell.get().is_some().then_some(RefTarget(cell))
+    }
+
+    /// Whether both uses name the same target.
+    pub fn same_target(&self, other: &Self) -> bool {
+        std::ptr::eq(self.cell_ptr(), other.cell_ptr())
+    }
+
+    /// Whether this use owns its target rather than referring back to it.
+    pub fn is_owner(&self) -> bool {
+        matches!(self.link, Link::Owner(_))
+    }
+
+    fn cell_ptr(&self) -> *const OnceLock<Shape> {
+        match &self.link {
+            Link::Owner(cell) => Arc::as_ptr(cell),
+            Link::Back(cell) => cell.as_ptr(),
+        }
+    }
+}
+
+impl fmt::Debug for ShapeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The target may contain this reference; printing it would not end.
+        f.debug_struct("ShapeRef")
+            .field("name", &self.name)
+            .field("owner", &self.is_owner())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A resolved [`ShapeRef`] target, kept alive while it is borrowed.
+pub struct RefTarget(Arc<OnceLock<Shape>>);
+
+impl Deref for RefTarget {
+    type Target = Shape;
+
+    fn deref(&self) -> &Shape {
+        // `ShapeRef::target` returns a target only once its cell is set, and
+        // a `OnceLock` is never unset.
+        self.0.get().expect("a resolved reference target is set")
+    }
+}
+
+/// A reusable target under construction.
+///
+/// Create the slot before translating the target's body, hand out
+/// [`Self::back_reference`]s for uses inside that body, then
+/// [`Self::finish`] it with the body to get the owning use.
+pub struct RefSlot {
+    name: Arc<str>,
+    cell: Arc<OnceLock<Shape>>,
+}
+
+impl RefSlot {
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        Self {
+            name: name.into(),
+            cell: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// A weak use of the target, for a use inside the target's own body.
+    pub fn back_reference(&self) -> ShapeRef {
+        ShapeRef {
+            name: self.name.clone(),
+            link: Link::Back(Arc::downgrade(&self.cell)),
+        }
+    }
+
+    /// Whether any back reference was handed out, i.e. the body recurses.
+    pub fn is_referenced(&self) -> bool {
+        Arc::weak_count(&self.cell) > 0
+    }
+
+    /// Sets the target's body and returns the owning use.
+    pub fn finish(self, body: Shape) -> ShapeRef {
+        // A fresh slot's cell is set exactly once, here.
+        let _ = self.cell.set(body);
+        ShapeRef {
+            name: self.name,
+            link: Link::Owner(self.cell),
+        }
+    }
 }
 
 /// A `number`, `integer`, or `numberlike` target.
@@ -331,6 +459,7 @@ impl Shape {
             Self::Null => true,
             Self::Union(options) => options.iter().any(Self::admits_null_explicitly),
             Self::Assert(inner, _) => inner.admits_null_explicitly(),
+            Self::Ref(reference) => reference.target().is_some_and(|target| target.admits_null_explicitly()),
             _ => false,
         }
     }
@@ -443,6 +572,7 @@ impl fmt::Display for Shape {
                 fmt_grouped(inner, f)?;
                 write!(f, " & {}", assertion.description)
             }
+            Self::Ref(reference) => f.write_str(reference.name()),
         }
     }
 }
@@ -575,4 +705,72 @@ pub(crate) fn compact(value: &Value) -> String {
         return crate::markdown::numeric::format_number(float);
     }
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::markdown::coercion::{FailureReason, bind};
+
+    /// `{ n: number, next: <self> }`, owned by the returned shape.
+    fn linked_list() -> Shape {
+        let slot = RefSlot::new("node");
+        let body = Shape::Object(ObjectShape {
+            properties: vec![
+                PropertySlot {
+                    name: "n".into(),
+                    shape: Shape::number(),
+                    required: true,
+                },
+                PropertySlot {
+                    name: "next".into(),
+                    shape: Shape::Ref(slot.back_reference()),
+                    required: false,
+                },
+            ],
+            ..ObjectShape::opaque()
+        });
+        Shape::Ref(slot.finish(body))
+    }
+
+    #[test]
+    fn a_reference_converts_at_every_level_it_reaches() {
+        let value = (0..20).fold(json!({ "n": "0" }), |next, _| json!({ "n": "1", "next": next }));
+        let expected = (0..20).fold(json!({ "n": 0 }), |next, _| json!({ "n": 1, "next": next }));
+        assert_eq!(bind(&linked_list(), &value).expect("binds").value(), &expected);
+    }
+
+    #[test]
+    fn dropping_the_owning_shape_frees_the_cycle() {
+        let shape = linked_list();
+        let Shape::Ref(owner) = &shape else { unreachable!() };
+        let back = match &*owner.target().expect("set") {
+            Shape::Object(object) => object.properties[1].shape.clone(),
+            other => panic!("{other:?}"),
+        };
+        let Shape::Ref(back) = back else { unreachable!() };
+        assert!(back.target().is_some() && back.same_target(owner));
+        drop(shape);
+        assert!(back.target().is_none(), "a back reference never keeps its target alive");
+    }
+
+    #[test]
+    fn a_reference_loop_without_a_descent_stops_at_the_resource_limit() {
+        let slot = RefSlot::new("loop");
+        let body = Shape::Union(vec![Shape::Ref(slot.back_reference())]);
+        let shape = Shape::Ref(slot.finish(body));
+        let error = bind(&shape, &json!(1)).expect_err("a defective shape never binds");
+        let text = format!("{error}");
+        fn has_limit(failures: &[crate::markdown::coercion::ValueFailure]) -> bool {
+            failures.iter().any(|failure| match &failure.reason {
+                FailureReason::ResourceLimit { .. } => true,
+                FailureReason::NoOptionAccepts { options } => options.iter().any(|option| has_limit(&option.failures)),
+                _ => false,
+            })
+        }
+        assert!(has_limit(&error.failures), "{text}");
+        assert_eq!(shape.describe(), "loop");
+    }
 }

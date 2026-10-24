@@ -397,8 +397,8 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 }
 
 /// Runs `analyze` with the type scope of a site in this document: the
-/// declared layer of its authored schema (`EffectiveSchema.simplified`) and
-/// static frontmatter, narrowed, for a body `offset`, by every `::block when`
+/// declared layer of its authored schema (`EffectiveSchema.simplified`, with
+/// the recursive definitions it reaches) and static frontmatter, narrowed, for a body `offset`, by every `::block when`
 /// enclosing it ([`BodyGuards`]). These are the inputs composition and
 /// `analyze_directive_targets` build the same site's scope from. A
 /// frontmatter site (`None`) is unguarded: a lifecycle or task `when` is not
@@ -414,7 +414,10 @@ pub(crate) fn with_site_scope<R>(
     let static_frontmatter = bundle
         .map(|bundle| &bundle.frontmatter_json)
         .unwrap_or(&empty_frontmatter);
-    let declared = DeclaredTypes::new(schema).with_static_frontmatter(static_frontmatter);
+    let mut declared = DeclaredTypes::new(schema).with_static_frontmatter(static_frontmatter);
+    if let Some(bundle) = bundle {
+        declared = declared.with_definitions(bundle.effective.definitions());
+    }
     let unguarded = TypeScope::unguarded(&declared);
     let site = match offset {
         Some(offset) => BodyGuards::scan(ctx.text).scope_at(unguarded, offset),
@@ -500,8 +503,9 @@ fn interpolation_hover_markdown(
 /// heading-less details avoid repeating the property name.
 fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = frontmatter::known_shape(ctx);
-    let def = frontmatter::def_at_path(&shape, &[crate::overlay::FmPathSegment::Key(name)])?;
-    frontmatter::schema_hover_details(def)
+    let definitions = frontmatter::definitions(ctx);
+    let def = frontmatter::def_at_path(&shape, &[crate::overlay::FmPathSegment::Key(name)], definitions)?;
+    frontmatter::schema_hover_details(def, definitions)
 }
 
 /// Hover on a frontmatter `$(...)` value: a suffix under the cursor describes

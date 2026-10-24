@@ -19,11 +19,16 @@
 //! so a test can show that none ran on the server's dispatch thread, and
 //! [`peak_concurrent_registry_scans`] is the most scans ever in progress at
 //! once, so a test can show that no two overlapped.
+//!
+//! [`record_definition_lookups`] starts recording the name of every recursive
+//! definition an editor walk opens, read back with [`definition_lookups`], so
+//! a test can show that completion and hover open only the definitions on the
+//! cursor's path. Nothing is recorded until a test asks.
 
 use std::io;
 use std::path::Path;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
 static READS: AtomicUsize = AtomicUsize::new(0);
@@ -35,6 +40,8 @@ static REGISTRY_SCANS: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS_PEAK: AtomicUsize = AtomicUsize::new(0);
+static RECORDING_DEFINITION_LOOKUPS: AtomicBool = AtomicBool::new(false);
+static DEFINITION_LOOKUPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// A snapshot of the process's work counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -136,6 +143,30 @@ pub fn peak_concurrent_registry_scans() -> usize {
 /// Every thread a trigger-registry scan has run on, in first-scan order.
 pub fn registry_scan_threads() -> Vec<ThreadId> {
     REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// Clears the definition-lookup record and starts recording every lookup,
+/// on any thread, until [`definition_lookups`] is read.
+pub fn record_definition_lookups() {
+    DEFINITION_LOOKUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+    RECORDING_DEFINITION_LOOKUPS.store(true, Ordering::SeqCst);
+}
+
+/// Stops recording and returns the name of each definition looked up since
+/// [`record_definition_lookups`], in lookup order.
+pub fn definition_lookups() -> Vec<String> {
+    RECORDING_DEFINITION_LOOKUPS.store(false, Ordering::SeqCst);
+    std::mem::take(&mut *DEFINITION_LOOKUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
+/// Records one recursive-definition lookup while a test is recording.
+pub(crate) fn note_definition_lookup(key: &darkmatter::markdown::schemas::DefKey) {
+    if RECORDING_DEFINITION_LOOKUPS.load(Ordering::Relaxed) {
+        DEFINITION_LOOKUPS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(key.name.clone());
+    }
 }
 
 #[cfg(test)]

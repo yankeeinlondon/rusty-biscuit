@@ -46,6 +46,7 @@ pub use error::{
 pub use registration::{EvaluationMode, FunctionRegistration, NumericRecovery, RegistrationBuilder, RegistrationError};
 pub use signature::{CompiledParameter, CompiledSignature};
 pub use translate::{
-    NoNamedTypes, PropertyShape, TranslateError, TypeResolver, property_shape_from_def, shape_from_property_def,
-    shape_from_simplified_schema,
+    NoNamedTypes, PropertyShape, TranslateError, TypeResolver, property_shape_from_def,
+    property_shape_from_def_with_definitions, shape_from_property_def, shape_from_property_def_with_definitions,
+    shape_from_simplified_schema, shape_from_simplified_schema_with_definitions,
 };

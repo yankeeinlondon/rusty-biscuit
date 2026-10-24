@@ -88,7 +88,7 @@ impl Markdown {
                         guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
                         scope: shell_expansion::site::SiteScope::new(
                             options,
-                            schemas.effective_for(self).and_then(|effective| effective.simplified),
+                            schemas.effective_for(self),
                         ),
                         evaluator: &evaluator,
                         ctx: shell_expansion::site::authored_context(self, Some(authored.text())),

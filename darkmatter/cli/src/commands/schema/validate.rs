@@ -8,14 +8,17 @@ use crate::request::MdRequest;
 use darkmatter::markdown::errors::resolution_failure_name;
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemKind,
+    ValidationTimings,
 };
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Environment variable naming a custom baseline schema, read from the
 /// captured request. Used when neither `--schema` nor `--no-baseline-schema`
@@ -54,6 +57,10 @@ enum FileOutcome {
 ///   per-document `$schema` reference)
 /// - `3` — at least one file could not be opened or its frontmatter could
 ///   not be parsed
+///
+/// At `verbose >= 2` each validated document's stage timings follow its
+/// outcome on stderr; stdout and the exit code are unaffected.
+#[allow(clippy::too_many_arguments)]
 pub fn run_validate(
     inputs: &[String],
     schema: Option<&Path>,
@@ -61,6 +68,7 @@ pub fn run_validate(
     format: SchemaValidateFormat,
     quiet: bool,
     no_schema_triggers: bool,
+    verbose: u8,
     request: &MdRequest,
 ) -> Result<()> {
     let terminal = Terminal::default();
@@ -93,12 +101,12 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let (outcome, document) = match open_argument(file, request) {
+        let (outcome, timings, document) = match open_argument(file, request) {
             Ok(opened) => {
-                let outcome = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
-                (outcome, Some(opened.into_path()))
+                let (outcome, timings) = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
+                (outcome, timings, Some(opened.into_path()))
             }
-            Err(err) => (FileOutcome::Unopened(err), None),
+            Err(err) => (FileOutcome::Unopened(err), None, None),
         };
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
@@ -113,6 +121,11 @@ pub fn run_validate(
             FileOutcome::Validated { .. } => {}
         }
         emit_outcome(file, document.as_deref(), &outcome, format, quiet, &terminal);
+        if verbose > 1
+            && let Some(timings) = &timings
+        {
+            emit_timings(file, timings, &terminal);
+        }
     }
 
     if any_parse_error {
@@ -190,20 +203,23 @@ enum Baseline {
 
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
+///
+/// The timings cover trigger discovery and the final validation, and are
+/// `None` when the file failed before discovery.
 fn validate_one(
     api: &DarkmatterSchemas,
     opened: &OpenedArgument,
     assignments: &[Assignment],
     no_schema_triggers: bool,
     request: &MdRequest,
-) -> FileOutcome {
+) -> (FileOutcome, Option<ValidationTimings>) {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
     let discovery_path = biscuit_file::canonicalize_simplified(opened.path())
         .unwrap_or_else(|_| opened.path().to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
-        Err(err) => return FileOutcome::ParseError(err.to_string()),
+        Err(err) => return (FileOutcome::ParseError(err.to_string()), None),
     };
 
     // The document's context resolves its schema `file` values and bounds
@@ -211,17 +227,17 @@ fn validate_one(
     // than the file's parse error (exit 3).
     let document_context = match request.document_context(Some(opened.reference()), &discovery_path) {
         Ok(context) => context,
-        Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
+        Err(err) => return (FileOutcome::ParseError(format!("{err:#}")), None),
     };
     let in_repository = document_context.repository_root().is_some();
     let api = api.clone().with_file_resolution_context(document_context);
-    let api = if in_repository && !no_schema_triggers {
-        match api.with_trigger_discovery() {
-            Ok(api) => api,
-            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+    let (api, mut timings) = if in_repository && !no_schema_triggers {
+        match ValidationTimings::record(|| api.with_trigger_discovery()) {
+            (Ok(api), discovery) => (api, discovery),
+            (Err(err), discovery) => return (FileOutcome::SchemaError(Box::new(err)), Some(discovery)),
         }
     } else {
-        api
+        (api, ValidationTimings::default())
     };
 
     if !assignments.is_empty() {
@@ -230,7 +246,7 @@ fn validate_one(
         // below because assignments may change trigger activation.
         let effective = match api.effective_for(&md) {
             Ok(effective) => effective,
-            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+            Err(err) => return (FileOutcome::SchemaError(Box::new(err)), Some(timings)),
         };
         assignment::apply_all(
             md.frontmatter_mut().as_map_mut(),
@@ -242,21 +258,50 @@ fn validate_one(
     let schema_label = schema_label_from(&md);
     // Resolve again after assignments: assignments may change which trigger
     // arms match, so the pre-assignment schema is only valid for coercion.
-    let no_schema = match api.effective_for(&md) {
-        Ok(effective) => effective.is_none(),
-        Err(err) => return FileOutcome::SchemaError(Box::new(err)),
-    };
-
-    match api.validate(&md) {
-        Ok(report) => FileOutcome::Validated {
+    // Validation runs first so its timings, not this lookup, pay any compile
+    // miss; both resolve the same schema and fail with the same error.
+    let (validated, validation) = api.validate_timed(&md);
+    timings.absorb(validation);
+    let outcome = validated.and_then(|report| {
+        let no_schema = api.effective_for(&md)?.is_none();
+        Ok(FileOutcome::Validated {
             report_valid: report.valid,
             problems: report.problems,
             advisories: report.advisories,
             schema_label,
             no_schema,
-        },
-        Err(err) => FileOutcome::SchemaError(Box::new(err)),
-    }
+        })
+    });
+    (outcome.unwrap_or_else(|err| FileOutcome::SchemaError(Box::new(err))), Some(timings))
+}
+
+/// Prints one document's validation stage timings to stderr.
+fn emit_timings(file: &Path, timings: &ValidationTimings, terminal: &Terminal) {
+    let triggers = match timings.matched_triggers() {
+        [] => "none".to_string(),
+        names => escape_prose(&names.join(", ")),
+    };
+    let summary = format!(
+        "<b>Validation timings</b> for {}\\\nmatched triggers: {triggers}\\\ncompile cache: <b>{}</b>",
+        escape_prose(&file.display().to_string()),
+        timings.compile_cache().name(),
+    );
+    eprintln!("{}", Prose::new(summary).render(terminal));
+
+    let mut rows: Vec<Vec<TableCellContent>> = timings
+        .stages()
+        .map(|(stage, elapsed)| vec![stage.name().into(), milliseconds(elapsed).into()])
+        .collect();
+    rows.push(vec!["unassigned".into(), milliseconds(timings.unassigned()).into()]);
+    rows.push(vec!["total".into(), milliseconds(timings.total()).into()]);
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("stage"), TableColumn::new("time")])
+        .with_data(rows);
+    eprintln!("{}", table.render(terminal));
+}
+
+fn milliseconds(elapsed: Duration) -> String {
+    format!("{:.2} ms", elapsed.as_secs_f64() * 1000.0)
 }
 
 /// Splits positional inputs into file paths and parsed assignments. Returns

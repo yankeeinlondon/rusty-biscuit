@@ -180,15 +180,21 @@ impl LifecycleShellTemplate {
     }
 }
 
-/// The declared layer a lifecycle shell site of a document whose schema is
-/// `schema` is typed against: the schema, with the registry's
+/// The declared layer a lifecycle shell site of a document whose effective
+/// schema is `schema` is typed against: its authored projection and the
+/// recursive definitions that projection reaches, with the registry's
 /// [host globals](EventRegistry::host_globals) as host roots. A placeholder
 /// reading one is typed `string`.
 pub fn lifecycle_declared_types<'a>(
-    schema: Option<&'a crate::markdown::schemas::SimplifiedSchema>,
+    schema: Option<&'a crate::markdown::schemas::EffectiveSchema>,
     registry: &'a EventRegistry,
 ) -> DeclaredTypes<'a> {
-    DeclaredTypes::new(schema).with_host_globals(registry.host_globals())
+    let declared = DeclaredTypes::new(schema.and_then(|schema| schema.simplified.as_ref()))
+        .with_host_globals(registry.host_globals());
+    match schema {
+        Some(schema) => declared.with_definitions(schema.definitions()),
+        None => declared,
+    }
 }
 
 /// The authored command `raw` as a template typed in `scope`, the type scope

@@ -268,6 +268,7 @@ pub(crate) fn resolve_trigger_payload(
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
+    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
@@ -284,6 +285,12 @@ pub(crate) fn resolve_trigger_payload(
         return Ok(ResolvedPayload::matcher_only());
     };
     file_payload_memo::resolve(source, payload, schema_roots, context)
+}
+
+/// Empties the process-wide trigger payload memo (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    file_payload_memo::clear();
 }
 
 /// [`resolve_trigger_payload`] for a schema-root file, uncached.
@@ -411,6 +418,10 @@ mod file_payload_memo {
 
     /// Least recently used first.
     static ENTRIES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+
+    pub(super) fn clear() {
+        ENTRIES.lock().expect("trigger payload memo poisoned").clear();
+    }
 
     pub(super) fn resolve(
         source: &Path,
@@ -708,6 +719,7 @@ fn resolve_embedded_payload(
     bundle: EmbeddedSchemaBundle,
     name: &str,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
+    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
     let Some(payload) = trigger.envelope.payload.as_ref() else {

@@ -293,10 +293,23 @@ impl<'a> NamedTypeScope<'a> {
         })
     }
 
-    /// The reference name of `site` in the file that wrote it.
+    /// The reference name of `site` in the source that wrote it: a schema
+    /// file, or this document's own inline `$schema` (which the resolver
+    /// cannot locate, so its buffer's projection does).
     fn site_location(&self, site: &SchemaReferenceSite) -> Option<Location> {
         let SchemaSourceId::File(path) = &site.source else {
-            return None;
+            if site.source != self.this {
+                return None;
+            }
+            let span = self
+                .declaration
+                .as_ref()?
+                .source_map
+                .spans(&site.path, SchemaSpanKind::ImportName)
+                .first()?
+                .clone();
+            let range = self.ctx.source_map.byte_range_to_lsp(span)?;
+            return Some(Location::new(self.ctx.uri.clone(), range));
         };
         let file = self.file(path)?;
         let span = file

@@ -37,6 +37,7 @@ use biscuit_file::{
 };
 use serde_json::Value;
 
+use super::scope::SchemaScope;
 use super::{
     DarkmatterSchemas, EffectiveSchema, SchemaError, SimplifiedSchema, ValidationProblem,
     ValidationProblemCode, ValidationReport, validate,
@@ -478,34 +479,99 @@ fn is_string_required_mismatch(
 /// and reports whether that node requires the JSON `string` type — solely.
 /// Nullable wrappers (`anyOf: [null, T]`) are unwrapped; a union with two or
 /// more non-null arms is never "solely string", and descent stops at one: a
-/// path below a `U[]` item union (`items: {anyOf: [arm…]}`) finds no
-/// `properties` on the wrapper and is never string-required. No arm is
-/// selected here, so cleanup cannot quote inside a union item.
+/// path below a `U[]` item union (`items: {anyOf: [arm…]}`) is never
+/// string-required. No arm is selected here, so cleanup cannot quote inside a
+/// union item.
+///
+/// Local `$ref`s are followed (see [`schemas_at`]); every schema a reference
+/// chain reaches constrains the node, so all of them must agree on `string`
+/// and none may be a genuine union. A missing target or a ref-only loop
+/// proves nothing and is never string-required.
 fn schema_requires_string(effective: &EffectiveSchema, problem: &ValidationProblem) -> bool {
-    let mut node = match problem.arm_index {
-        Some(index) => effective
-            .json_schema
+    schemas_at(&effective.json_schema, problem).is_some_and(|nodes| solely_string(&nodes))
+}
+
+/// At least one of `nodes` declares `type: string` and none declares any
+/// other `type` (a type list included).
+fn solely_string(nodes: &[&Value]) -> bool {
+    nodes.iter().any(|node| node.get("type").and_then(Value::as_str) == Some("string"))
+        && nodes
+            .iter()
+            .all(|node| node.get("type").is_none_or(|kind| kind.as_str() == Some("string")))
+}
+
+/// Every schema that applies at `problem`'s instance location, with nullable
+/// wrappers unwrapped and local `$ref` chains followed against the effective
+/// root, or `None` when the walk cannot prove which schemas apply.
+///
+/// `None` covers a path the schema does not declare, a genuine union (two or
+/// more non-null `anyOf` arms) at or above the location, and a reference the
+/// root cannot resolve. A missing target is a schema error, never an
+/// unconstrained schema, so it authorizes no cleanup.
+///
+/// The walk follows one instance path, so each instance location is visited
+/// once; a recursive definition is re-entered at each deeper location rather
+/// than skipped. Within one location, [`expand_applicable`] guards repeated
+/// schemas, which is the `(schema location, instance location)` guard.
+fn schemas_at<'a>(root: &'a Value, problem: &ValidationProblem) -> Option<Vec<&'a Value>> {
+    schemas_along(root, problem.arm_index, problem.instance_path.segments())
+}
+
+fn schemas_along<'a>(root: &'a Value, arm_index: Option<usize>, segments: &[String]) -> Option<Vec<&'a Value>> {
+    let scope = SchemaScope::new(root);
+    let start = match arm_index {
+        Some(index) => root
             .get("anyOf")
             .and_then(Value::as_array)
             .and_then(|arms| arms.get(index))
-            .unwrap_or(&effective.json_schema),
-        None => &effective.json_schema,
+            .unwrap_or(root),
+        None => root,
     };
-    for segment in problem.instance_path.segments() {
-        node = validate::unwrap_nullable_arm(node);
-        let next = if segment.bytes().all(|byte| byte.is_ascii_digit()) {
-            node.get("items")
-        } else {
-            node.get("properties").and_then(|props| props.get(segment))
-        };
-        let Some(next) = next else { return false };
-        node = next;
+    let mut nodes = expand_applicable(&scope, start)?;
+    for segment in segments {
+        let numeric = segment.bytes().all(|byte| byte.is_ascii_digit());
+        let mut next: Vec<&Value> = Vec::new();
+        for node in &nodes {
+            let child = if numeric {
+                node.get("items")
+            } else {
+                node.get("properties").and_then(|props| props.get(segment))
+            };
+            if let Some(child) = child {
+                next.extend(expand_applicable(&scope, child)?);
+            }
+        }
+        if next.is_empty() {
+            return None;
+        }
+        nodes = next;
     }
-    let node = validate::unwrap_nullable_arm(node);
-    if node.get("anyOf").is_some() {
-        return false;
+    Some(nodes)
+}
+
+/// `schema` and every schema it reaches through nullable unwrapping and local
+/// reference hops, each of which constrains the same instance; `None` for a
+/// genuine union or an unresolvable reference.
+///
+/// A reference's sibling keywords are kept beside its target. A cycle of
+/// nullable references (`a: a | null`) stops at the first repeated schema,
+/// since revisiting it at the same instance location adds no constraint.
+fn expand_applicable<'a>(scope: &SchemaScope<'a>, schema: &'a Value) -> Option<Vec<&'a Value>> {
+    let mut applicable: Vec<&'a Value> = Vec::new();
+    let mut pending = vec![schema];
+    while let Some(node) = pending.pop() {
+        let unwrapped = validate::unwrap_nullable_arm(node);
+        if applicable.iter().any(|seen| std::ptr::eq(*seen, unwrapped)) {
+            continue;
+        }
+        if unwrapped.get("anyOf").is_some() {
+            return None;
+        }
+        let hops = scope.chain(unwrapped, "").ok()?;
+        applicable.push(unwrapped);
+        pending.extend(hops.into_iter().skip(1));
     }
-    node.get("type").and_then(Value::as_str) == Some("string")
+    Some(applicable)
 }
 
 /// Navigates the JSON instance along decoded pointer segments.
@@ -621,8 +687,10 @@ fn unknown_key_diagnostic(
 /// at, using the same Damerau distance and thresholds as biscuit-file's
 /// similar-key lint.
 ///
-/// A union (property or `U[]` item) declares no `properties` on its `anyOf`
-/// wrapper, so no suggestion is drawn from any one arm.
+/// Declared keys are drawn from every schema [`schemas_at`] finds at that
+/// object, so a key declared by a `$ref` target is suggested. A union
+/// (property or `U[]` item) or an unresolvable reference yields no
+/// suggestion, so none is drawn from any one arm.
 fn nearest_declared_key(
     effective: &EffectiveSchema,
     problem: &ValidationProblem,
@@ -631,31 +699,11 @@ fn nearest_declared_key(
     if offending.is_empty() {
         return None;
     }
-    let mut node = match problem.arm_index {
-        Some(index) => effective
-            .json_schema
-            .get("anyOf")
-            .and_then(Value::as_array)
-            .and_then(|arms| arms.get(index))
-            .unwrap_or(&effective.json_schema),
-        None => &effective.json_schema,
-    };
-    for segment in problem.instance_path.segments() {
-        node = validate::unwrap_nullable_arm(node);
-        node = if segment.bytes().all(|byte| byte.is_ascii_digit()) {
-            node.get("items")
-        } else {
-            node.get("properties").and_then(|props| props.get(segment))
-        }?;
-    }
-    let node = validate::unwrap_nullable_arm(node);
-    let declared: Vec<&str> = node
-        .get("properties")
-        .and_then(Value::as_object)
-        .map(|props| props.keys().map(String::as_str).collect())
-        .unwrap_or_default();
-    declared
-        .into_iter()
+    let nodes = schemas_at(&effective.json_schema, problem)?;
+    nodes
+        .iter()
+        .filter_map(|node| node.get("properties").and_then(Value::as_object))
+        .flat_map(|props| props.keys().map(String::as_str))
         .filter(|candidate| near_key_match(candidate, offending))
         .min_by_key(|candidate| edit_distance(candidate, offending))
         .map(str::to_string)
@@ -750,4 +798,78 @@ fn sort_diagnostics(diagnostics: &mut [YamlDiagnostic]) {
             second.code.as_str(),
         ))
     });
+}
+
+#[cfg(test)]
+mod walk_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn path(segments: &[&str]) -> Vec<String> {
+        segments.iter().map(ToString::to_string).collect()
+    }
+
+    fn string_required(root: &Value, segments: &[&str]) -> bool {
+        schemas_along(root, None, &path(segments)).is_some_and(|nodes| solely_string(&nodes))
+    }
+
+    #[test]
+    fn a_missing_reference_target_authorizes_nothing() {
+        let root = json!({
+            "type": "object",
+            "properties": {"node": {"$ref": "#/$defs/absent"}},
+        });
+
+        assert!(schemas_along(&root, None, &path(&["node"])).is_none());
+        assert!(schemas_along(&root, None, &path(&["node", "value"])).is_none());
+    }
+
+    #[test]
+    fn a_ref_only_loop_authorizes_nothing() {
+        let root = json!({
+            "properties": {"node": {"$ref": "#/$defs/a"}},
+            "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}},
+        });
+
+        assert!(schemas_along(&root, None, &path(&["node"])).is_none());
+    }
+
+    #[test]
+    fn every_hop_of_a_reference_chain_constrains_the_node() {
+        let root = json!({
+            "properties": {
+                "agreeing": {"$ref": "#/$defs/text", "minLength": 1},
+                "conflicting": {"$ref": "#/$defs/text", "type": "number"},
+            },
+            "$defs": {"text": {"type": "string"}},
+        });
+
+        assert!(string_required(&root, &["agreeing"]));
+        assert!(!string_required(&root, &["conflicting"]));
+    }
+
+    #[test]
+    fn a_union_reached_through_a_reference_stops_the_walk() {
+        let root = json!({
+            "properties": {"node": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/either"}]}},
+            "$defs": {"either": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"x": {}}}]}},
+        });
+
+        assert!(schemas_along(&root, None, &path(&["node"])).is_none());
+        assert!(schemas_along(&root, None, &path(&["node", "x"])).is_none());
+    }
+
+    #[test]
+    fn a_nullable_reference_cycle_terminates_with_its_body() {
+        let root = json!({
+            "properties": {"node": {"$ref": "#/$defs/a"}},
+            "$defs": {
+                "a": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/b"}]},
+                "b": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/a"}]},
+            },
+        });
+
+        assert!(schemas_along(&root, None, &path(&["node"])).is_some());
+    }
 }

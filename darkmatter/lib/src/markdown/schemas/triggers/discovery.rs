@@ -285,6 +285,22 @@ impl TriggerRegistry {
 /// document that does not claim `kind: schema-trigger`.
 type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
 
+/// `(bundle name, document name, document text)`.
+type EmbeddedKey = (&'static str, String, &'static str);
+/// The `(virtual path, text)` of each bundle document a payload read.
+type EmbeddedReads = Vec<(PathBuf, &'static str)>;
+type EmbeddedMemo = std::sync::Mutex<HashMap<EmbeddedKey, Vec<(EmbeddedReads, EmbeddedTriggerLoad)>>>;
+/// [`load_embedded_trigger`]'s memo.
+static EMBEDDED_LOADED: std::sync::OnceLock<EmbeddedMemo> = std::sync::OnceLock::new();
+
+/// Empties the embedded trigger memo (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    if let Some(memo) = EMBEDDED_LOADED.get() {
+        memo.lock().expect("embedded trigger memo poisoned").clear();
+    }
+}
+
 /// Parses bundle document `name` and resolves its payload inside `bundle`.
 ///
 /// Memoized for the process: a bundle's texts are `'static` and its payloads
@@ -301,16 +317,11 @@ fn load_embedded_trigger(
     name: &str,
     text: &'static str,
 ) -> Result<EmbeddedTriggerLoad, SchemaError> {
-    type Key = (&'static str, String, &'static str);
-    /// The `(virtual path, text)` of each bundle document a payload read.
-    type Reads = Vec<(PathBuf, &'static str)>;
-    type Memo = std::sync::Mutex<HashMap<Key, Vec<(Reads, EmbeddedTriggerLoad)>>>;
-    static LOADED: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
-    let memo = LOADED.get_or_init(Default::default);
+    let memo = EMBEDDED_LOADED.get_or_init(Default::default);
     let current_text = |path: &Path| {
         bundle.files().iter().find(|(file, _)| Path::new(&bundle.virtual_path(file)) == path).map(|(_, text)| *text)
     };
-    let key: Key = (bundle.name(), name.to_string(), text);
+    let key: EmbeddedKey = (bundle.name(), name.to_string(), text);
     if let Some(entries) = memo.lock().expect("embedded trigger memo poisoned").get(&key)
         && let Some((_, hit)) = entries
             .iter()
@@ -337,7 +348,7 @@ fn load_embedded_trigger(
             };
             let (payload, read_paths) =
                 super::assemble::resolve_embedded_trigger_payload(&trigger).map_err(load_error)?;
-            let reads: Reads = read_paths
+            let reads: EmbeddedReads = read_paths
                 .into_iter()
                 .filter_map(|path| current_text(&path).map(|read| (path, read)))
                 .collect();
@@ -565,6 +576,7 @@ pub fn scan_with_source(
     bundles: &[EmbeddedSchemaBundle],
     source: &mut dyn SchemaRootSource,
 ) -> Result<TriggerRegistry, SchemaError> {
+    let _discover = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Discover);
     let roots = SchemaRoots::for_document(context)?;
 
     // Apply filename shadowing: the first root wins by filename.

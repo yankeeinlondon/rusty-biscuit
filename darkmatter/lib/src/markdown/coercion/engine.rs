@@ -50,7 +50,14 @@ pub(super) struct Path<'p> {
     parent: Option<&'p Path<'p>>,
     segment: Option<Segment<'p>>,
     pub(super) depth: usize,
+    /// References followed at this value since its last step down.
+    hops: usize,
 }
+
+/// How many references in a row the engine follows at one value before it
+/// stops with [`FailureReason::ResourceLimit`]. Translators close every
+/// cycle through a value descent, so only a defective shape reaches it.
+const MAX_REFERENCE_HOPS: usize = 64;
 
 impl<'p> Path<'p> {
     pub(super) fn root() -> Self {
@@ -58,7 +65,20 @@ impl<'p> Path<'p> {
             parent: None,
             segment: None,
             depth: 0,
+            hops: 0,
         }
+    }
+
+    /// The same value, one reference further.
+    fn hop(self) -> Self {
+        Self {
+            hops: self.hops + 1,
+            ..self
+        }
+    }
+
+    fn exhausted(&self, max_depth: usize) -> bool {
+        self.depth > max_depth || self.hops > MAX_REFERENCE_HOPS
     }
 
     pub(super) fn child<'c>(&'c self, segment: Segment<'c>) -> Path<'c> {
@@ -66,6 +86,7 @@ impl<'p> Path<'p> {
             parent: Some(self),
             segment: Some(segment),
             depth: self.depth + 1,
+            hops: 0,
         }
     }
 
@@ -96,7 +117,7 @@ pub(super) struct Engine<'o> {
 impl Engine<'_> {
     /// Whether `value` matches `shape` unchanged. Allocates no error.
     pub(super) fn exact(&self, shape: &Shape, value: &Value, path: Path<'_>) -> bool {
-        if path.depth > self.max_depth {
+        if path.exhausted(self.max_depth) {
             return false;
         }
         if self.deferred(value, path) {
@@ -158,13 +179,14 @@ impl Engine<'_> {
             },
             Shape::Union(options) => options.iter().any(|option| self.exact(option, value, path)),
             Shape::Assert(inner, assertion) => self.exact(inner, value, path) && assertion.holds(value),
+            Shape::Ref(reference) => reference.target().is_some_and(|target| self.exact(&target, value, path.hop())),
         }
     }
 
     /// Binds `value` to `shape`: kept, converted once and checked, or every
     /// failing path.
     pub(super) fn walk(&self, shape: &Shape, value: &Value, path: Path<'_>) -> Result<Step, Failures> {
-        if path.depth > self.max_depth {
+        if path.exhausted(self.max_depth) {
             return Err(fail(
                 shape,
                 value,
@@ -210,6 +232,10 @@ impl Engine<'_> {
                     Err(fail(shape, value, path, converted, FailureReason::AssertionFailed { description }))
                 }
             }
+            Shape::Ref(reference) => match reference.target() {
+                Some(target) => self.walk(&target, value, path.hop()),
+                None => Err(fail(shape, value, path, None, FailureReason::NoConversion)),
+            },
         }
     }
 

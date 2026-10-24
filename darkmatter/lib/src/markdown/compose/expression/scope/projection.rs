@@ -7,7 +7,7 @@ use crate::markdown::compose::context::context_variable_descriptors;
 use crate::markdown::compose::expression::binding::{Availability, BindingView, NULL_ROOT};
 use crate::markdown::compose::expression::fm_namespace::literal_index_key;
 use crate::markdown::compose::expression::{Expr, FmPath, fm_namespace_path, reserved_root_descriptors};
-use crate::markdown::schemas::{PropertyDef, SchemaArm, SimplifiedSchema};
+use crate::markdown::schemas::{DefinitionTable, PropertyDef, SchemaArm, SimplifiedSchema};
 
 /// The declarations one owner's sites share: its schema projection, its
 /// static frontmatter, and the host roots its expressions may read.
@@ -18,6 +18,7 @@ use crate::markdown::schemas::{PropertyDef, SchemaArm, SimplifiedSchema};
 #[derive(Debug, Clone, Copy)]
 pub struct DeclaredTypes<'s> {
     schema: Option<&'s SimplifiedSchema>,
+    definitions: Option<&'s DefinitionTable>,
     frontmatter: Option<&'s Map<String, Value>>,
     host_roots: HostRoots<'s>,
 }
@@ -152,9 +153,25 @@ impl<'s> DeclaredTypes<'s> {
     pub const fn new(schema: Option<&'s SimplifiedSchema>) -> Self {
         Self {
             schema,
+            definitions: None,
             frontmatter: None,
             host_roots: HostRoots::None,
         }
+    }
+
+    /// Adds the table the projection's recursive references point into
+    /// (`EffectiveSchema::definitions`). Without it a recursive-typed
+    /// property keeps its named reference, but the call check cannot see
+    /// through it, so every call it reaches is category 4.
+    pub fn with_definitions(mut self, definitions: &'s DefinitionTable) -> Self {
+        self.definitions = Some(definitions);
+        self
+    }
+
+    /// The table recursive references in the projection resolve in; empty
+    /// when none was added.
+    pub fn definitions(&self) -> &'s DefinitionTable {
+        self.definitions.unwrap_or(&NO_DEFINITIONS)
     }
 
     /// Adds the owner's static frontmatter: a concrete scalar there is
@@ -278,7 +295,9 @@ impl<'s> DeclaredTypes<'s> {
     /// refine it).
     ///
     /// A property declared `A(required)` is `A`, constraints kept; an optional
-    /// one adds `null` by the shared presence rule. A name absent from the
+    /// one adds `null` by the shared presence rule. A recursive-typed property
+    /// is its named reference, never an expansion, so the projection is finite;
+    /// a consumer sees through it with [`Self::definitions`]. A name absent from the
     /// map is `unknown`: undeclared, or the owner has no single typed
     /// projection (a raw JSON Schema, a mixed root union, root-union arms that
     /// disagree). Passive: no file, no value, no expression.
@@ -350,6 +369,8 @@ impl<'s> DeclaredTypes<'s> {
 }
 
 const CONTEXT_ROOT: &str = "ctx";
+
+static NO_DEFINITIONS: std::sync::LazyLock<DefinitionTable> = std::sync::LazyLock::new(DefinitionTable::default);
 
 static AVAILABLE: Availability = Availability::Available;
 

@@ -6,7 +6,10 @@ use super::GuardOrigin;
 use super::projection::DeclaredType;
 use crate::markdown::compose::expression::equality::values_equal;
 use crate::markdown::schemas::completion::alternative_accepts;
-use crate::markdown::schemas::{Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives};
+use crate::markdown::schemas::simplified::query::reachable_definitions;
+use crate::markdown::schemas::{
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives,
+};
 
 /// The values a subject may hold at one site.
 #[derive(Debug, Clone, PartialEq)]
@@ -105,11 +108,16 @@ impl ScopedType {
 
     /// Whether `value` is one the type admits. Constraints of the remaining
     /// alternatives are checked; an unknown shape admits every non-null value.
+    /// So does an alternative that is or contains a recursive reference: a
+    /// shape carries no definition table, and judging one without it would
+    /// reject every value of a recursive type.
     pub fn admits(&self, value: &Value) -> bool {
         match (&self.shape, value) {
             (shape, Value::Null) => shape.admits_null(),
             (Shape::Unknown { .. }, _) => true,
-            (Shape::Arms { arms, .. }, value) => arms.iter().any(|arm| alternative_accepts(arm, value)),
+            (Shape::Arms { arms, .. }, value) => arms
+                .iter()
+                .any(|arm| reaches_definition(arm) || alternative_accepts(arm, value)),
         }
     }
 
@@ -428,10 +436,17 @@ fn families(atom: &PropertyAtom) -> &'static [Family] {
             _ => ALL_FAMILIES,
         },
         TypeExpr::Tuple(_) => &[Family::Array],
+        // A recursive reference stays a named arm, so narrowing never expands
+        // it; without its definition table a guard keeps it on both sides.
         TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
             ALL_FAMILIES
         }
     }
+}
+
+/// Whether `atom` is or contains a recursive reference.
+fn reaches_definition(atom: &PropertyAtom) -> bool {
+    reachable_definitions(atom, &DefinitionTable::default()).is_none()
 }
 
 fn is_truthy_literal(value: &Value) -> bool {
@@ -509,6 +524,7 @@ fn pinned_atom(value: &Value) -> PropertyAtom {
 /// the narrowed type never rejects a live value the evaluator sends there.
 fn pinned_number(value: &Value) -> Option<PropertyAtom> {
     let atom = literal_atom(value.clone());
+    // A literal never holds a reference, so the table-less check is exact.
     equal_storages(value).iter().all(|storage| alternative_accepts(&atom, storage)).then_some(atom)
 }
 

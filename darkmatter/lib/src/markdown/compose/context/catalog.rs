@@ -20,7 +20,7 @@ use std::sync::LazyLock;
 
 use crate::catalog::{Described, Example};
 use crate::markdown::schemas::catalog::GlobalCatalog;
-use crate::markdown::schemas::{Constraint, PropertyDef, SimplifiedType, TypeExpr};
+use crate::markdown::schemas::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr};
 
 /// SimplifiedSchema type of a context variable, projected from the base schema.
 ///
@@ -252,27 +252,49 @@ pub fn context_variable_descriptors() -> &'static [ContextVariableDescriptor] {
 /// shape's `IndexMap` preserves YAML declaration order, so descriptor order and
 /// `order` indices match the authored partial.
 fn project_descriptors() -> Vec<ContextVariableDescriptor> {
-    GlobalCatalog::darkmatter()
+    let ctx = GlobalCatalog::darkmatter()
         .global("ctx")
-        .and_then(|ctx| ctx.shape())
+        .expect("the global catalog declares `ctx`");
+    ctx.shape()
         .expect("the global catalog declares `ctx` as an object shape")
         .properties
         .iter()
         .enumerate()
-        .map(|(index, (name, def))| project_one(index, name, def))
+        .map(|(index, (name, def))| project_one(index, name, def, ctx.definitions()))
         .collect()
 }
 
-/// Projects one `ctx.*` property atom into a descriptor.
-fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDescriptor {
-    let atom = match def {
+/// The first atom `def` is written as.
+fn first_atom(def: &PropertyDef) -> &PropertyAtom {
+    match def {
         PropertyDef::Single(atom) => atom,
         PropertyDef::Union(atoms) => atoms
             .first()
             .expect("`ctx` property union must be non-empty"),
-    };
+    }
+}
 
-    let base = match &atom.ty {
+/// Projects one `ctx.*` property atom into a descriptor.
+///
+/// A member typed by a recursive named type is displayed as its
+/// definition's value type, found by following the reference (and any alias
+/// chain, which admission keeps acyclic) through `definitions`; its presence
+/// markers stay the use site's, where the resolver puts them.
+fn project_one(
+    index: usize,
+    name: &str,
+    def: &PropertyDef,
+    definitions: &DefinitionTable,
+) -> ContextVariableDescriptor {
+    let atom = first_atom(def);
+    let mut value = atom;
+    for _ in 0..definitions.len() {
+        let TypeExpr::Ref(key) = &value.ty else { break };
+        let Some(definition) = definitions.get(key) else { break };
+        value = first_atom(&definition.body);
+    }
+
+    let base = match &value.ty {
         TypeExpr::Primitive(ty) => *ty,
         // `ctx.*` never authors an inline object or import; fall back defensively.
         TypeExpr::InlineObject(_)
@@ -296,7 +318,7 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
         .iter()
         .chain(&atom.array_constraints)
         .any(|c| matches!(c, Constraint::Generated));
-    let integer = atom
+    let integer = value
         .constraints
         .iter()
         .any(|c| matches!(c, Constraint::Integer));
@@ -311,7 +333,7 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
         name: leak(name),
         display_type: ContextValueType {
             base,
-            is_array: atom.is_array,
+            is_array: atom.is_array || value.is_array,
             integer,
         },
         description: leak(atom.description.as_deref().unwrap_or("")),
@@ -512,8 +534,40 @@ mod tests {
             description: None,
         });
 
-        let descriptor = project_one(0, "with_default", &def);
+        let descriptor = project_one(0, "with_default", &def, &DefinitionTable::default());
         assert_eq!(descriptor.default, Some(value));
+    }
+
+    /// No shipped `ctx.*` member is recursive, so this drives a synthetic
+    /// reference: the descriptor shows the definition's value type (a list
+    /// here) and keeps the use site's `required`, rather than a bare object.
+    #[test]
+    fn project_one_follows_a_recursive_reference_to_its_definition() {
+        use crate::markdown::schemas::{
+            DefKey, DefNamespace, PropertyAtom, SchemaReferenceSite, SchemaSourceId, SchemaSourcePath,
+        };
+
+        let key = DefKey::new(DefNamespace::InlineRoot, "names");
+        let mut body = PropertyAtom::bare(SimplifiedType::String);
+        body.is_array = true;
+        let mut definitions = DefinitionTable::default();
+        definitions.insert(
+            key.clone(),
+            PropertyDef::Single(body),
+            SchemaReferenceSite {
+                source: SchemaSourceId::InlineDocument,
+                path: SchemaSourcePath::root().property("names"),
+            },
+        );
+        let mut use_site = PropertyAtom::bare(SimplifiedType::Unknown);
+        use_site.ty = TypeExpr::Ref(key);
+        use_site.constraints.push(Constraint::Required);
+
+        let descriptor = project_one(0, "names", &PropertyDef::Single(use_site), &definitions);
+
+        assert_eq!(descriptor.display_type.base, SimplifiedType::String);
+        assert!(descriptor.display_type.is_array);
+        assert!(descriptor.required);
     }
 
     /// Grouping totality (spec acceptance criterion 3): every projected key has

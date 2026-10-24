@@ -29,6 +29,7 @@
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 use serde_json::{Map, Value};
 
@@ -373,8 +374,17 @@ fn display_location(location: &str) -> String {
     if location.is_empty() { "/".to_string() } else { location.to_string() }
 }
 
-fn pointer_token(key: &str) -> String {
-    key.replace('~', "~0").replace('/', "~1")
+/// Appends `/` and `key` as an escaped JSON Pointer token, allocating
+/// nothing for the walk's many keys that need no escape.
+fn push_pointer_token(location: &mut String, key: &str) {
+    location.push('/');
+    for character in key.chars() {
+        match character {
+            '~' => location.push_str("~0"),
+            '/' => location.push_str("~1"),
+            other => location.push(other),
+        }
+    }
 }
 
 /// Visits every schema object reachable from `schema` through
@@ -386,14 +396,12 @@ fn walk_schemas<'v>(schema: &'v Value, location: &mut String, visit: &mut dyn Fn
     visit(object, location);
     for (keyword, value) in object {
         let mark = location.len();
-        location.push('/');
-        location.push_str(&pointer_token(keyword));
+        push_pointer_token(location, keyword);
         if SCHEMA_MAPS.contains(&keyword.as_str()) {
             if let Value::Object(entries) = value {
                 for (name, sub) in entries {
                     let inner = location.len();
-                    location.push('/');
-                    location.push_str(&pointer_token(name));
+                    push_pointer_token(location, name);
                     walk_schemas(sub, location, visit);
                     location.truncate(inner);
                 }
@@ -403,7 +411,7 @@ fn walk_schemas<'v>(schema: &'v Value, location: &mut String, visit: &mut dyn Fn
                 Value::Array(items) => {
                     for (index, sub) in items.iter().enumerate() {
                         let inner = location.len();
-                        location.push_str(&format!("/{index}"));
+                        let _ = write!(location, "/{index}");
                         walk_schemas(sub, location, visit);
                         location.truncate(inner);
                     }

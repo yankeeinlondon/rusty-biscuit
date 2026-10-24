@@ -445,7 +445,7 @@ impl HoleType {
     pub fn declared_text(&self) -> String {
         match &self.validator {
             HoleValidator::FallbackScalar => "string".to_string(),
-            HoleValidator::Declared(def) => super::typing::declaration_text(def),
+            HoleValidator::Declared { definition, .. } => super::typing::declaration_text(definition),
         }
     }
 }

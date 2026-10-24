@@ -143,7 +143,7 @@ pub struct SchemaExtensionConfig {
 }
 
 /// Frontmatter schema behavior.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SchemaConfig {
     /// Strict mode: unknown frontmatter keys become errors rather than
@@ -151,6 +151,20 @@ pub struct SchemaConfig {
     pub strict: bool,
     /// Baseline schema extensions by name.
     pub extensions: BTreeMap<String, SchemaExtensionConfig>,
+    /// The total, in milliseconds, at or above which a document's schema
+    /// validation is logged at `warn` rather than `debug`; zero logs every
+    /// one at `warn`. Read only by the log, never by validation.
+    pub slow_validation_ms: u64,
+}
+
+impl Default for SchemaConfig {
+    fn default() -> Self {
+        Self {
+            strict: false,
+            extensions: BTreeMap::new(),
+            slow_validation_ms: 200,
+        }
+    }
 }
 
 /// `style:` frontmatter behavior.

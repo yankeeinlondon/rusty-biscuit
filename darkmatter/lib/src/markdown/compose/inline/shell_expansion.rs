@@ -81,7 +81,7 @@ pub(crate) fn run_stage(
     let scope = authored
         .iter()
         .any(Option::is_some)
-        .then(|| SiteScope::new(options, schemas.effective_for(markdown).and_then(|effective| effective.simplified)));
+        .then(|| SiteScope::new(options, schemas.effective_for(markdown)));
     let authored_ctx = authored_context(markdown, body.authored.as_ref().map(|authored| authored.text()));
 
     // Every directive is read before any runs, so one that cannot run fails

@@ -8,6 +8,12 @@
 //! binder; any other argument by its design-time type at the call site, read
 //! from a [`TypeScope`] so guards narrow it.
 //!
+//! A recursive-typed argument keeps its named reference and is judged through
+//! the definition table its scope carries
+//! ([`DeclaredTypes::with_definitions`](super::DeclaredTypes::with_definitions)):
+//! subtyping is coinductive and conversion fit reads the reference's body
+//! without re-entering it, so every check terminates.
+//!
 //! The rules are the spec's (`2026-10-28-schema-enhancements`, "Argument-Type
 //! Categories"); `docs/` describes them for authors.
 //!
@@ -34,14 +40,14 @@ use super::absence::branch_scope;
 use super::ast::{SpannedExpr, SpannedExprKind};
 use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
-    shape_from_property_def,
+    shape_from_property_def_with_definitions,
 };
 use super::functions;
 use super::prepared::PreparedValue;
 use super::scope::{Shape as ScopeShape, TypeScope};
 use crate::markdown::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
 use crate::markdown::schemas::simplified::serialize_property_atom;
-use crate::markdown::schemas::{Constraint, PropertyAtom, PropertyDef, is_subtype};
+use crate::markdown::schemas::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, is_subtype_with_definitions};
 use crate::markdown::span::SourceSpan;
 
 /// How an argument's design-time type relates to a parameter's type.
@@ -164,7 +170,20 @@ fn type_text(atom: &PropertyAtom) -> String {
 /// checked at runtime and never warn. Registered source exclusions apply.
 /// Use [`check_call`] for a whole call: arity, overloads, and numeric
 /// recovery change an argument's verdict.
+///
+/// A recursive reference in `source` resolves in nothing here, so its
+/// argument is category 4; use [`classify_argument_with_definitions`].
 pub fn classify_argument(source: &ArgumentType, parameter: &CompiledParameter) -> ArgumentCategory {
+    classify_argument_with_definitions(source, parameter, &DefinitionTable::default())
+}
+
+/// [`classify_argument`] for a source whose recursive references point into
+/// `definitions`.
+pub fn classify_argument_with_definitions(
+    source: &ArgumentType,
+    parameter: &CompiledParameter,
+    definitions: &DefinitionTable,
+) -> ArgumentCategory {
     match source {
         ArgumentType::Literal(value) => {
             if parameter.binds(value) {
@@ -184,7 +203,7 @@ pub fn classify_argument(source: &ArgumentType, parameter: &CompiledParameter) -
             let null_fits = parameter.admits_null();
             let mut fits = Vec::with_capacity(arms.len() + 1);
             for arm in arms {
-                fits.push(arm_fit(arm, parameter));
+                fits.push(arm_fit(arm, parameter, definitions));
             }
             if *nullable {
                 fits.push(if null_fits { Fit::Fits } else { Fit::Wrong });
@@ -258,13 +277,14 @@ impl Fit {
     }
 }
 
-fn arm_fit(arm: &PropertyAtom, parameter: &CompiledParameter) -> Fit {
+fn arm_fit(arm: &PropertyAtom, parameter: &CompiledParameter, definitions: &DefinitionTable) -> Fit {
     // A literal alternative (a guard narrowed to `literal('release')`) is a
     // value: the binder decides it.
     if let Some(value) = arm.literal_value().filter(|_| !arm.is_array) {
         return if parameter.binds(value) { Fit::Fits } else { Fit::Wrong };
     }
-    let Ok(source) = shape_from_property_def(&PropertyDef::Single(arm.clone()), &NoNamedTypes) else {
+    let Ok(source) = shape_from_property_def_with_definitions(&PropertyDef::Single(arm.clone()), &NoNamedTypes, definitions)
+    else {
         return Fit::Unknown;
     };
     let excluded = parameter.excluded_sources();
@@ -277,7 +297,7 @@ fn arm_fit(arm: &PropertyAtom, parameter: &CompiledParameter) -> Fit {
             return fit(&source, parameter.shape()).best(Fit::Wrong).min_maybe();
         }
     }
-    if subtype_of_parameter(arm, parameter.declared()) {
+    if subtype_of_parameter(arm, parameter.declared(), definitions) {
         return Fit::Fits;
     }
     fit(&source, parameter.shape())
@@ -293,10 +313,12 @@ impl Fit {
     }
 }
 
-fn subtype_of_parameter(arm: &PropertyAtom, declared: &PropertyDef) -> bool {
+fn subtype_of_parameter(arm: &PropertyAtom, declared: &PropertyDef, definitions: &DefinitionTable) -> bool {
     match declared {
-        PropertyDef::Single(target) => is_subtype(arm, target),
-        PropertyDef::Union(targets) => targets.iter().any(|target| is_subtype(arm, target)),
+        PropertyDef::Single(target) => is_subtype_with_definitions(arm, target, definitions),
+        PropertyDef::Union(targets) => {
+            targets.iter().any(|target| is_subtype_with_definitions(arm, target, definitions))
+        }
     }
 }
 
@@ -325,6 +347,7 @@ fn source_kinds(shape: &Shape) -> Vec<ValueKind> {
             kinds
         }
         Shape::Assert(inner, _) => source_kinds(inner),
+        Shape::Ref(reference) => reference.target().map_or_else(Vec::new, |target| source_kinds(&target)),
     }
 }
 
@@ -359,9 +382,17 @@ fn literal_family(value: &Value) -> Option<Family> {
 /// Whether every value of `source` binds to `target`, some might, or none
 /// can. Both are non-null source shapes; a target's constraints and
 /// assertions are runtime checks and never decide a type-level verdict.
+///
+/// A source reference is judged by its target's body. That terminates:
+/// translators close a cycle only through a value descent (an item, a
+/// property, a tuple slot), and of those only an array item is compared, and
+/// only against the target's own item shape, so every re-entry of a
+/// reference is one level deeper into the finite `target`. A target-side
+/// reference is never unfolded; it is judged by its family.
 fn fit(source: &Shape, target: &Shape) -> Fit {
     match (source, target) {
         (Shape::Assert(inner, _), _) => fit(inner, target),
+        (Shape::Ref(reference), _) => reference.target().map_or(Fit::Unknown, |body| fit(&body, target)),
         (Shape::Union(options), _) => Fit::all(options.iter().map(|option| fit(option, target))),
         // `numberlike` and `boolish` deliver either the native scalar or the
         // text as sent; every value fits only if both representations do.
@@ -444,6 +475,7 @@ fn family(shape: &Shape) -> Option<Family> {
         Shape::Object(_) => Some(Family::Object),
         Shape::Literal(value) => literal_family(value),
         Shape::Assert(inner, _) => family(inner),
+        Shape::Ref(reference) => reference.target().and_then(|target| family(&target)),
         Shape::Any | Shape::Null | Shape::Union(_) => None,
     }
 }
@@ -670,12 +702,26 @@ pub struct CallFinding {
 /// design-time types: arity, overload selection, source exclusions, and
 /// numeric recovery. `None` for a name nothing dispatches.
 ///
-/// `span` and `argument_spans` locate the call's findings.
+/// `span` and `argument_spans` locate the call's findings. A recursive
+/// reference in an argument type resolves in nothing here; use
+/// [`check_call_with_definitions`].
 pub fn check_call(
     name: &str,
     arguments: &[ArgumentType],
     span: SourceSpan,
     argument_spans: Vec<SourceSpan>,
+) -> Option<CallCheck> {
+    check_call_with_definitions(name, arguments, span, argument_spans, &DefinitionTable::default())
+}
+
+/// [`check_call`] for argument types whose recursive references point into
+/// `definitions`.
+pub fn check_call_with_definitions(
+    name: &str,
+    arguments: &[ArgumentType],
+    span: SourceSpan,
+    argument_spans: Vec<SourceSpan>,
+    definitions: &DefinitionTable,
 ) -> Option<CallCheck> {
     functions::inspect_registration(name, |registration| {
         let mut check = CallCheck {
@@ -686,12 +732,17 @@ pub fn check_call(
             problem: None,
             binding_error: None,
         };
-        classify_call(registration, arguments, &mut check);
+        classify_call(registration, arguments, definitions, &mut check);
         check
     })
 }
 
-fn classify_call(registration: &FunctionRegistration, arguments: &[ArgumentType], check: &mut CallCheck) {
+fn classify_call(
+    registration: &FunctionRegistration,
+    arguments: &[ArgumentType],
+    definitions: &DefinitionTable,
+    check: &mut CallCheck,
+) {
     let signatures = || registration.overloads().iter().map(ToString::to_string).collect::<Vec<_>>();
     let candidates: Vec<&CompiledSignature> =
         registration.overloads().iter().filter(|signature| signature.accepts_count(arguments.len())).collect();
@@ -716,7 +767,7 @@ fn classify_call(registration: &FunctionRegistration, arguments: &[ArgumentType]
     }
 
     let verdicts: Vec<Vec<ArgumentCheck>> =
-        candidates.iter().map(|signature| classify_against(signature, arguments)).collect();
+        candidates.iter().map(|signature| classify_against(signature, arguments, definitions)).collect();
     let worst = |checks: &[ArgumentCheck]| {
         checks
             .iter()
@@ -845,7 +896,11 @@ fn classify_literal_call(
 /// Every argument's category against one overload, with numeric recovery
 /// applied: a subject that may fail is recovered as far as its fallback is
 /// certain to bind.
-fn classify_against(signature: &CompiledSignature, arguments: &[ArgumentType]) -> Vec<ArgumentCheck> {
+fn classify_against(
+    signature: &CompiledSignature,
+    arguments: &[ArgumentType],
+    definitions: &DefinitionTable,
+) -> Vec<ArgumentCheck> {
     let mut checks: Vec<ArgumentCheck> = arguments
         .iter()
         .enumerate()
@@ -856,7 +911,7 @@ fn classify_against(signature: &CompiledSignature, arguments: &[ArgumentType]) -
                 parameter: parameter.name().to_string(),
                 parameter_type: parameter.type_text().to_string(),
                 argument_type: argument.clone(),
-                category: classify_argument(argument, parameter),
+                category: classify_argument_with_definitions(argument, parameter, definitions),
                 recovered: false,
             }
         })
@@ -884,7 +939,8 @@ fn classify_against(signature: &CompiledSignature, arguments: &[ArgumentType]) -
 ///
 /// `site` must be built over the declaration-only layer
 /// ([`DeclaredTypes::new`]): static frontmatter values are runtime values,
-/// not design-time types. Unknown functions are skipped
+/// not design-time types. Recursive-typed arguments resolve in the layer's
+/// [`DeclaredTypes::definitions`](super::DeclaredTypes::definitions). Unknown functions are skipped
 /// ([`validate_expression`](super::validate_expression) reports them).
 pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<CallCheck> {
     let mut checks = Vec::new();
@@ -897,7 +953,8 @@ pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<C
             .map(|arg| ArgumentType::of(arg, &branch_scope(expr, &arg.span, site.clone())))
             .collect();
         let spans = args.iter().map(|arg| arg.span.clone()).collect();
-        if let Some(check) = check_call(name, &types, call.span.clone(), spans) {
+        let definitions = site.declared().definitions();
+        if let Some(check) = check_call_with_definitions(name, &types, call.span.clone(), spans, definitions) {
             checks.push(check);
         }
     });

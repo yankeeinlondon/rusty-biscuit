@@ -16,8 +16,8 @@
 
 use darkmatter::markdown::FrontmatterMap;
 use darkmatter::markdown::schemas::{
-    EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr,
+    DefKey, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+    SimplifiedType, TypeExpr,
 };
 use serde_json::{Map, Value};
 
@@ -150,6 +150,8 @@ fn coerce_value(assignment: &Assignment, schema: Option<&EffectiveSchema>) -> Va
 
 /// Returns `true` when `schema` declares `path` as a string-shaped scalar
 /// (string, date, datetime, time, url, email, enum, file, or alphanumeric).
+/// A recursive named type is judged by its definition's body, looked up in
+/// the effective schema's definition table.
 ///
 /// The declaration is the authored `$schema`'s, else the last matching
 /// trigger payload's that declares the property — the per-property
@@ -181,17 +183,31 @@ fn force_string_for_path(path: &[String], schema: Option<&EffectiveSchema>) -> b
     }) else {
         return false;
     };
-    match def {
-        PropertyDef::Single(atom) => atom_prefers_string(atom),
-        PropertyDef::Union(arms) => arms.iter().any(atom_prefers_string),
-    }
+    def_prefers_string(def, effective, &mut Vec::new())
 }
 
 fn lookup_property<'a>(shape: &'a SchemaShape, name: &str) -> Option<&'a PropertyDef> {
     shape.properties.get(name)
 }
 
-fn atom_prefers_string(atom: &PropertyAtom) -> bool {
+fn def_prefers_string<'a>(
+    def: &'a PropertyDef,
+    effective: &'a EffectiveSchema,
+    opened: &mut Vec<&'a DefKey>,
+) -> bool {
+    match def {
+        PropertyDef::Single(atom) => atom_prefers_string(atom, effective, opened),
+        PropertyDef::Union(arms) => arms
+            .iter()
+            .any(|arm| atom_prefers_string(arm, effective, opened)),
+    }
+}
+
+fn atom_prefers_string<'a>(
+    atom: &'a PropertyAtom,
+    effective: &'a EffectiveSchema,
+    opened: &mut Vec<&'a DefKey>,
+) -> bool {
     if atom.is_array {
         return false;
     }
@@ -200,11 +216,28 @@ fn atom_prefers_string(atom: &PropertyAtom) -> bool {
         TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => return false,
+        | TypeExpr::Function(_) => return false,
         // A postfixed union reference (`U(required)`) prefers a string when
         // any alternative does, as a property-level union does.
-        TypeExpr::Union(arms) => return arms.iter().any(atom_prefers_string),
+        TypeExpr::Union(arms) => {
+            return arms
+                .iter()
+                .any(|arm| atom_prefers_string(arm, effective, opened));
+        }
+        // A recursive type is judged by its body. Each definition opens at
+        // most once: a body's own uses of it sit below a child-value boundary
+        // (array item, property), which never prefers a string here, so a
+        // second visit could not change the answer. A missing definition
+        // prefers nothing, leaving the YAML parse.
+        TypeExpr::Ref(key) => {
+            if opened.contains(&key) {
+                return false;
+            }
+            opened.push(key);
+            return effective
+                .definition(key)
+                .is_some_and(|definition| def_prefers_string(&definition.body, effective, opened));
+        }
     };
     matches!(
         primitive,
@@ -584,6 +617,24 @@ mod tests {
         let mut map: FrontmatterMap = FrontmatterMap::new();
         apply_all(&mut map, &[a], Some(&eff));
         assert_eq!(map["flag"], json!("true"));
+    }
+
+    #[test]
+    fn a_recursive_type_is_judged_by_its_definition_body() {
+        // `node` is cyclic, so `label` and `tree` hold a `TypeExpr::Ref`; its
+        // body's string arm makes a bare `42` arrive as text, while a body
+        // with no string arm keeps the number.
+        let eff = effective_for(
+            "$schema:\n  node:\n    - string\n    - \"{ kids: node[] }\"\n  tree: \"{ value: number, kids: tree[] }\"\n  label: node\n  root: tree",
+        );
+        let mut map: FrontmatterMap = FrontmatterMap::new();
+        let assignments = [
+            make_assignment(&["label"], json!(42), "42"),
+            make_assignment(&["root"], json!(42), "42"),
+        ];
+        apply_all(&mut map, &assignments, Some(&eff));
+        assert_eq!(map["label"], json!("42"));
+        assert_eq!(map["root"], json!(42));
     }
 
     #[test]

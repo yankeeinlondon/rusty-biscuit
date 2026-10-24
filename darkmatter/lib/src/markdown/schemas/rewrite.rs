@@ -20,6 +20,13 @@
 //! [`make_portable_relative`] so the stored string uses `/` separators on every
 //! OS (Decision #2 / cross-platform stability).
 //!
+//! A local `$ref` is followed to its definition (recursive types lower to
+//! root `$defs`), applying the reference's sibling keywords along with the
+//! target. A reference that names nothing never authorizes a rewrite.
+//! Revisiting a definition at a deeper value is normal for a recursive type;
+//! only re-entering the same definition with the same value, which descends
+//! nowhere, is cut short.
+//!
 //! See `darkmatter/features/2026-06-27-file-property-rewrite/spec.md` for
 //! the full contract (Decisions #1–#9).
 //!
@@ -34,6 +41,7 @@ use jsonschema::Validator;
 use serde_json::{Map, Value};
 
 use super::format::DARKMATTER_FILE_FORMAT;
+use super::scope::SchemaScope;
 use super::validate::{self, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
 use crate::markdown::compose::expression::resolve_ctx::{
@@ -216,6 +224,7 @@ fn rewrite_object(
 
     let mut out: Map<String, Value> = obj.clone();
     let mut changed = false;
+    let mut active = Vec::new();
     for (name, value) in obj {
         // Skip top-level keys still holding a `$(...)` shell expression —
         // the post-shell re-validation will rewrite them once they expand
@@ -226,9 +235,15 @@ fn rewrite_object(
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
-        if let Some(rewritten) =
-            rewrite_property(prop_schema, value, base_dir, fallback, request_context, root)
-        {
+        if let Some(rewritten) = rewrite_property(
+            prop_schema,
+            value,
+            base_dir,
+            fallback,
+            request_context,
+            root,
+            &mut active,
+        ) {
             out.insert(name.clone(), rewritten);
             changed = true;
         }
@@ -254,13 +269,25 @@ fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
     }
 }
 
+/// The `(definition, value)` pairs a walk is currently inside: the schema
+/// a reference was followed to and the address of the value it was applied
+/// to. Both are borrowed for as long as an entry is on the stack, so their
+/// addresses identify a location.
+type ActiveReferences = Vec<(*const Value, *const Value)>;
+
 /// Rewrites a single property's value (or array item), descending through
-/// nullable wrappers, unions, inline objects, and arrays to reach any
-/// eager-file markers.
+/// nullable wrappers, references, unions, inline objects, and arrays to reach
+/// any eager-file markers.
 ///
 /// Returns `Some(new_value)` when the value (or a nested sub-value) was
 /// rewritten, `None` to leave it untouched. Absent / null / non-string
 /// scalars never match the eager-file marker (Decision #7).
+///
+/// A local `$ref` applies its sibling keywords, then its target. A chain
+/// that cannot be resolved (missing target, reference-only loop) leaves the
+/// value untouched: the validator reports it, and an unresolvable schema is
+/// never read as permission to rewrite. Re-entering a definition already
+/// `active` for the same value descends nowhere, so it rewrites nothing.
 fn rewrite_property(
     prop_schema: &Value,
     value: &Value,
@@ -268,6 +295,7 @@ fn rewrite_property(
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
+    active: &mut ActiveReferences,
 ) -> Option<Value> {
     if value.is_null() {
         return None;
@@ -277,11 +305,62 @@ fn rewrite_property(
     // property still triggers on its present, non-null arm.
     let effective = unwrap_nullable_arm(prop_schema).unwrap_or(prop_schema);
 
+    let hops = SchemaScope::new(root).chain(effective, "").ok()?;
+    let [through @ .., target] = hops.as_slice() else {
+        return None;
+    };
+    if through.is_empty() {
+        return rewrite_shape(effective, value, base_dir, fallback, request_context, root, active);
+    }
+    let location = (std::ptr::from_ref::<Value>(target), std::ptr::from_ref(value));
+    if active.contains(&location) {
+        return None;
+    }
+    active.push(location);
+    let mut current: Option<Value> = None;
+    for hop in through {
+        let next = rewrite_shape(
+            hop,
+            current.as_ref().unwrap_or(value),
+            base_dir,
+            fallback,
+            request_context,
+            root,
+            active,
+        );
+        if next.is_some() {
+            current = next;
+        }
+    }
+    let next = rewrite_property(
+        target,
+        current.as_ref().unwrap_or(value),
+        base_dir,
+        fallback,
+        request_context,
+        root,
+        active,
+    );
+    active.pop();
+    next.or(current)
+}
+
+/// Rewrites `value` through the keywords of `effective` alone, ignoring any
+/// `$ref` on it ([`rewrite_property`] follows references).
+fn rewrite_shape(
+    effective: &Value,
+    value: &Value,
+    base_dir: &Path,
+    fallback: Option<&Path>,
+    request_context: &biscuit_file::FileResolutionContext,
+    root: &Value,
+    active: &mut ActiveReferences,
+) -> Option<Value> {
     // Union (property-level, item-level, or an arm's own sentinel wrapper).
     // Rewrite only through the one validating arm that carries the eager-file
     // marker (Decision #9: "no guessing").
     if let Some(arms) = effective.get("anyOf").and_then(Value::as_array) {
-        return rewrite_property_union(arms, value, base_dir, fallback, request_context, root);
+        return rewrite_property_union(arms, value, base_dir, fallback, request_context, root, active);
     }
 
     // Direct eager-file marker on the effective schema.
@@ -293,7 +372,7 @@ fn rewrite_property(
     if effective.get("type").and_then(Value::as_str) == Some("array")
         && let Some(items_schema) = effective.get("items")
     {
-        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context, root);
+        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context, root, active);
     }
 
     // Inline object with declared sub-properties: descend into each present
@@ -301,7 +380,7 @@ fn rewrite_property(
     if effective.get("type").and_then(Value::as_str) == Some("object")
         && let Some(sub_props) = effective.get("properties").and_then(Value::as_object)
     {
-        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context, root);
+        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context, root, active);
     }
 
     None
@@ -313,9 +392,10 @@ fn rewrite_property(
 /// "no guessing"); an arm that merely scores closest gains no file effects.
 ///
 /// An arm is eligible when its compiled fragment contains
-/// `format: darkmatter-file` anywhere: a scalar `file(eager)` arm, the
-/// optional `[{const: ""}, file(eager)]` sentinel wrapper, or an object arm
-/// with a nested eager field. Arms without the marker are never counted, even
+/// `format: darkmatter-file` anywhere, including through the definitions it
+/// references: a scalar `file(eager)` arm, the optional
+/// `[{const: ""}, file(eager)]` sentinel wrapper, or an object arm (inline or
+/// a recursive type) with a nested eager field. Arms without the marker are never counted, even
 /// if they validate, because they do not identify the value as
 /// eager-file-typed. The eligible arm is then walked by [`rewrite_property`],
 /// so object arms rewrite only their own eager fields.
@@ -326,10 +406,11 @@ fn rewrite_property_union(
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
+    active: &mut ActiveReferences,
 ) -> Option<Value> {
     let mut selected: Option<&Value> = None;
     for arm in arms {
-        if !contains_eager_file_fragment(arm) {
+        if !contains_eager_file_fragment(arm, root) {
             continue;
         }
         // Preserve the production validator's request-scoped candidate plan
@@ -351,7 +432,7 @@ fn rewrite_property_union(
             selected = Some(arm);
         }
     }
-    rewrite_property(selected?, value, base_dir, fallback, request_context, root)
+    rewrite_property(selected?, value, base_dir, fallback, request_context, root, active)
 }
 
 /// Rewrites a single present eager-file value to its document-relative resolved
@@ -421,6 +502,7 @@ fn rewrite_array_items(
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
+    active: &mut ActiveReferences,
 ) -> Option<Value> {
     let Value::Array(items) = value else {
         return None;
@@ -428,7 +510,7 @@ fn rewrite_array_items(
     let mut out = Vec::with_capacity(items.len());
     let mut changed = false;
     for item in items {
-        match rewrite_property(items_schema, item, base_dir, fallback, request_context, root) {
+        match rewrite_property(items_schema, item, base_dir, fallback, request_context, root, active) {
             Some(rewritten) => {
                 out.push(rewritten);
                 changed = true;
@@ -449,6 +531,7 @@ fn rewrite_inline_object(
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
+    active: &mut ActiveReferences,
 ) -> Option<Value> {
     let Value::Object(obj) = value else {
         return None;
@@ -460,7 +543,7 @@ fn rewrite_inline_object(
             continue;
         };
         if let Some(rewritten) =
-            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context, root)
+            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context, root, active)
         {
             out.insert(name.clone(), rewritten);
             changed = true;
@@ -476,13 +559,34 @@ fn is_eager_file_fragment(schema: &Value) -> bool {
     schema.get("format").and_then(Value::as_str) == Some(DARKMATTER_FILE_FORMAT)
 }
 
-/// Whether the eager marker appears anywhere inside a compiled fragment.
-fn contains_eager_file_fragment(schema: &Value) -> bool {
-    match schema {
+/// Whether the eager marker appears anywhere inside a compiled fragment or
+/// the definitions it references in `root`. Each definition is searched once,
+/// and a reference that names nothing contributes no marker.
+fn contains_eager_file_fragment(schema: &Value, root: &Value) -> bool {
+    contains_eager_marker(schema, SchemaScope::new(root), &mut Vec::new())
+}
+
+fn contains_eager_marker<'a>(
+    schema: &'a Value,
+    scope: SchemaScope<'a>,
+    searched: &mut Vec<*const Value>,
+) -> bool {
+    let found = match schema {
         Value::Object(map) => {
-            is_eager_file_fragment(schema) || map.values().any(contains_eager_file_fragment)
+            is_eager_file_fragment(schema)
+                || map.values().any(|child| contains_eager_marker(child, scope, searched))
         }
-        Value::Array(values) => values.iter().any(contains_eager_file_fragment),
+        Value::Array(values) => values.iter().any(|child| contains_eager_marker(child, scope, searched)),
+        _ => return false,
+    };
+    if found {
+        return true;
+    }
+    match scope.resolve(schema, "") {
+        Ok(Some(target)) if !searched.contains(&std::ptr::from_ref(target)) => {
+            searched.push(std::ptr::from_ref(target));
+            contains_eager_marker(target, scope, searched)
+        }
         _ => false,
     }
 }
@@ -1167,6 +1271,40 @@ mod tests {
         );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!(42));
+    }
+
+    /// A definition that reaches itself without descending into the value
+    /// (here through its own optional wrapper) is entered once per value, so
+    /// the walk ends and rewrites nothing, while a sibling eager field still
+    /// rewrites.
+    #[test]
+    fn a_definition_reentered_for_the_same_value_rewrites_nothing() {
+        let repo = repo_fixture();
+        std::fs::write(repo.path().join("spec.md"), "# Spec\n").unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "looped": {"$ref": "#/$defs/looped"},
+                "spec": {"$ref": "#/$defs/file"}
+            },
+            "$defs": {
+                "looped": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/looped"}]},
+                "file": {"type": "string", "format": DARKMATTER_FILE_FORMAT}
+            }
+        });
+        let instance = json!({"looped": "./spec.md", "spec": "./spec.md"});
+
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &HashSet::new(),
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
+
+        assert_eq!(outcome.value["looped"], json!("./spec.md"));
+        assert_eq!(outcome.value["spec"], json!("spec.md"));
     }
 
     /// Sanity: a non-object instance (e.g. a bare string at the root) is

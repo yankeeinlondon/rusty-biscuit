@@ -73,6 +73,7 @@ pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 pub mod simplified;
+mod timings;
 pub mod triggers;
 pub mod validate;
 mod positions;
@@ -114,7 +115,8 @@ pub use errors::{CycleReference, SchemaError};
 pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
-    frontmatter_expression_values, nested_property_shape, property_def_at_path,
+    frontmatter_expression_values, nested_property_shape, nested_property_shape_with_definitions, property_def_at_path,
+    property_def_at_path_with_definitions,
 };
 pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
@@ -130,7 +132,7 @@ pub use simplified::{
     SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
-    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_definition_subtype, is_string_like, is_subtype, is_union_arm_path, lint_suggestions, mapping_separator,
+    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions, is_union_arm_path, lint_suggestions, mapping_separator,
     locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
@@ -152,6 +154,7 @@ pub use triggers::{
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
+pub use timings::{CompileCache, ValidationStage, ValidationTimings};
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
@@ -282,6 +285,35 @@ pub struct DarkmatterSchemas {
 /// different launch-area fallbacks share the map without cross-contamination.
 static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
     std::sync::LazyLock::new(ValidatorCache::new);
+
+/// Benchmarking seam: empties the process-wide schema caches so the next
+/// validation does its schema work cold.
+///
+/// Cleared: the shared, conversion, completion-alternative, and
+/// example-target validator caches; the conversion-plan, format-validator,
+/// example-artifact, emitted-pattern, and named-type parse caches; the
+/// trigger payload and embedded-trigger memos; the trigger merge, phase
+/// derivation, and root-arm memos; and the calling thread's trigger-matcher regex cache. Compiled-in
+/// constants (the shipped baseline, the global catalog) are kept.
+///
+/// Never call it from production code: it only discards work. Verdicts are
+/// unchanged; a reset makes the next lookup of each cache a miss.
+#[doc(hidden)]
+pub fn reset_process_caches_for_bench() {
+    SHARED_VALIDATOR_CACHE.clear();
+    coerce::reset_process_caches();
+    completion::reset_process_caches();
+    example::reset_process_caches();
+    json_shape::reset_process_caches();
+    simplified::convert::reset_process_caches();
+    resolve::reset_process_caches();
+    triggers::assemble::reset_process_caches();
+    triggers::discovery::reset_process_caches();
+    triggers::matcher::reset_thread_caches();
+    DERIVATIONS.lock().expect("phase schema memo poisoned").clear();
+    MERGES.lock().expect("trigger merge memo poisoned").clear();
+    WRAPPED.lock().expect("root arm memo poisoned").clear();
+}
 
 #[derive(Clone)]
 struct BaselineSchema {
@@ -580,6 +612,7 @@ impl DarkmatterSchemas {
         source: &Markdown,
         schema_override: Option<&Value>,
     ) -> Result<Option<EffectiveSchema>, SchemaError> {
+        let _resolve = timings::stage(ValidationStage::Resolve);
         let base_dir = base_dir_for(source, &self.file_resolution_context);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
@@ -625,11 +658,9 @@ impl DarkmatterSchemas {
             // Baseline only — share the Arc, no deep clone.
             (Some(base), true, None) => Arc::clone(&base.json_schema),
             (None, true, None) => return Ok(None),
-            (None, true, Some(doc)) => Arc::new(doc),
-            (Some(base), true, Some(doc)) => Arc::new(resolve::merge_baseline(&base.json_schema, doc)?),
             // A lone trigger payload is shared as resolved.
             (None, false, None) if trigger_layers.len() == 1 => Arc::clone(&trigger_layers[0].json_schema),
-            (baseline, false, doc) => merged_trigger_schema(
+            (baseline, _, doc) => merged_trigger_schema(
                 baseline.as_ref().map(|base| &base.json_schema),
                 &trigger_layers,
                 doc,
@@ -703,8 +734,18 @@ impl DarkmatterSchemas {
         // constructed registries do not and fall back to on-demand resolution.
         let pre_resolved = registry.payloads.len() == registry.triggers.len();
 
-        let evaluations =
-            triggers::assemble::evaluate_registry(registry, &fm_json, document);
+        let evaluations = ValidationStage::Match.time(|| {
+            let evaluations = triggers::assemble::evaluate_registry(registry, &fm_json, document);
+            for eval in evaluations.iter().filter(|eval| eval.matched) {
+                timings::matched_trigger(|| {
+                    eval.trigger
+                        .source
+                        .file_name()
+                        .map_or_else(|| eval.trigger.source.to_string(), str::to_owned)
+                });
+            }
+            evaluations
+        });
         let mut layers = Vec::with_capacity(
             evaluations.iter().filter(|eval| eval.matched).count(),
         );
@@ -767,6 +808,16 @@ impl DarkmatterSchemas {
                 advisories: Vec::new(),
             }),
         }
+    }
+
+    /// [`Self::validate`], also returning the request's stage timings.
+    ///
+    /// The result is exactly what [`Self::validate`] returns; timings are
+    /// returned on failure too, covering the work done before it stopped.
+    /// Trigger discovery done by [`Self::with_trigger_discovery`] is not part
+    /// of this call (see [`ValidationTimings`]).
+    pub fn validate_timed(&self, source: &Markdown) -> (Result<ValidationReport, SchemaError>, ValidationTimings) {
+        ValidationTimings::record(|| self.validate(source))
     }
 
     /// Validates a document's frontmatter at a runtime [`SchemaPhase`].
@@ -1060,6 +1111,7 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
+        let _validate = timings::stage(ValidationStage::Validate);
         let working_copy = if self.accepts_as_is(frontmatter) {
             frontmatter.clone()
         } else {
@@ -1095,6 +1147,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
+        let resolve = timings::stage(ValidationStage::Resolve);
         let (projected, definitions, projected_document) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
@@ -1127,6 +1180,7 @@ impl EffectiveSchema {
             advisories: self.advisories.clone(),
             conversion: OnceLock::new(),
         };
+        drop(resolve);
         Ok(match phase {
             SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
             SchemaPhase::Completion => {
@@ -1155,6 +1209,7 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
+        let _validate = timings::stage(ValidationStage::Validate);
         self.validate_instance(frontmatter, positions)
     }
 
@@ -1745,6 +1800,16 @@ impl SchemaOrigin {
 /// property name in schema declaration order.
 pub type SchemaOriginMap = indexmap::IndexMap<String, SchemaOrigin>;
 
+struct Derivation {
+    effective: Arc<Value>,
+    projected_document: Option<Value>,
+    phase: SchemaPhase,
+    derived: Arc<Value>,
+}
+const RECENT_DERIVATIONS: usize = 8;
+/// [`phase_json_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
+
 /// `effective` judged at `phase`: the phase projection of its document schema
 /// (`projected_document`, when it has one) merged over it, made passive.
 ///
@@ -1759,15 +1824,6 @@ fn phase_json_schema(
     projected_document: Option<Value>,
     phase: SchemaPhase,
 ) -> Result<Arc<Value>, SchemaError> {
-    struct Derivation {
-        effective: Arc<Value>,
-        projected_document: Option<Value>,
-        phase: SchemaPhase,
-        derived: Arc<Value>,
-    }
-    const RECENT_DERIVATIONS: usize = 8;
-    static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
-
     let same = |derivation: &Derivation| {
         Arc::ptr_eq(&derivation.effective, effective)
             && derivation.phase == phase
@@ -1809,6 +1865,16 @@ fn phase_json_schema(
     Ok(derived)
 }
 
+struct Merge {
+    baseline: Option<Arc<Value>>,
+    layers: Vec<Arc<Value>>,
+    doc: Option<Value>,
+    merged: Arc<Value>,
+}
+const RECENT_MERGES: usize = 8;
+/// [`merged_trigger_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
+
 /// The merge of `baseline`, the trigger `layers` (in order), and the document
 /// schema `doc`, highest precedence last.
 ///
@@ -1818,21 +1884,14 @@ fn phase_json_schema(
 /// verdict. An entry holds its inputs alive and is matched by `Arc` identity
 /// for the baseline and payloads and by value for the (small) document
 /// schema, so a hit is always the merge of equal inputs. The shared result
-/// also keeps the validator cache's pointer-keyed content hash warm.
+/// also keeps the validator cache's pointer-keyed content hash warm, which is
+/// why a document schema with no trigger layer (alone or over the baseline)
+/// is memoized here too: each request resolves it to a new value.
 fn merged_trigger_schema(
     baseline: Option<&Arc<Value>>,
     layers: &[TriggerLayer],
     doc: Option<Value>,
 ) -> Result<Arc<Value>, SchemaError> {
-    struct Merge {
-        baseline: Option<Arc<Value>>,
-        layers: Vec<Arc<Value>>,
-        doc: Option<Value>,
-        merged: Arc<Value>,
-    }
-    const RECENT_MERGES: usize = 8;
-    static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
-
     let same = |merge: &Merge| {
         merge.baseline.as_ref().map(Arc::as_ptr) == baseline.map(Arc::as_ptr)
             && merge.layers.len() == layers.len()
@@ -1849,18 +1908,26 @@ fn merged_trigger_schema(
         }
     }
 
-    let mut higher = layers
-        .iter()
-        .map(|layer| layer.json_schema.as_ref().clone())
-        .chain(doc.clone());
-    let mut acc = match baseline {
-        Some(base) => resolve::merge_baseline(base, higher.next().expect("a trigger layer"))?,
-        None => higher.next().expect("a trigger layer"),
+    // The lowest layer is borrowed as the first merge base; each higher one
+    // is cloned because a merge consumes it.
+    let (lowest, rest): (Option<&Value>, &[TriggerLayer]) = match (baseline, layers.split_first()) {
+        (Some(base), _) => (Some(base), layers),
+        (None, Some((first, rest))) => (Some(&first.json_schema), rest),
+        (None, None) => (None, layers),
     };
-    for layer in higher {
-        acc = resolve::merge_baseline(&acc, layer)?;
-    }
-    let merged = Arc::new(acc);
+    let mut higher = rest.iter().map(|layer| layer.json_schema.as_ref().clone()).chain(doc.clone());
+    let merged = match (lowest, higher.next()) {
+        (Some(lowest), Some(next)) => {
+            let mut acc = resolve::merge_baseline(lowest, next)?;
+            for layer in higher {
+                acc = resolve::merge_baseline(&acc, layer)?;
+            }
+            Arc::new(acc)
+        }
+        (None, Some(doc)) => Arc::new(doc),
+        (Some(lowest), None) => Arc::new(lowest.clone()),
+        (None, None) => unreachable!("the caller merges at least one schema"),
+    };
 
     let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
     if merges.len() == RECENT_MERGES {
@@ -1903,6 +1970,11 @@ impl CompiledValidators {
     }
 }
 
+type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
+const RECENT_SCHEMAS: usize = 8;
+/// [`wrapped_root_arms`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
+
 /// Each arm of `schema`'s root union, wrapped as a root schema, or `None` for
 /// a schema that is not a root union.
 ///
@@ -1911,10 +1983,6 @@ impl CompiledValidators {
 /// a large trigger payload has megabyte-sized arms, and each verdict would
 /// otherwise copy and rehash them for the validator cache.
 fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
-    type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
-    const RECENT_SCHEMAS: usize = 8;
-    static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
-
     let arms = schema.get("anyOf").and_then(Value::as_array)?;
     let mut wrapped = WRAPPED.lock().expect("root arm memo poisoned");
     if let Some((_, hit)) = wrapped.iter().find(|(held, _)| Arc::ptr_eq(held, schema)) {
@@ -1932,14 +2000,15 @@ fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
 }
 
 /// The top-level frontmatter key a problem is attributable to, mirroring the
-/// compose-time deferral rule: a missing-required failure is keyed by the
-/// missing property (its path points at the parent), everything else by the
-/// first pointer segment.
+/// compose-time deferral rule: the first pointer segment, or the missing
+/// property for a missing-required failure on the root itself (its path
+/// points at the parent, so a nested one belongs to the key that holds it).
 fn attributable_top_level_key(problem: &ValidationProblem) -> Option<String> {
-    if problem.code == ValidationProblemCode::MissingRequired {
-        return problem.property.clone();
+    match problem.instance_path.first() {
+        Some(key) => Some(key.to_string()),
+        None if problem.code == ValidationProblemCode::MissingRequired => problem.property.clone(),
+        None => None,
     }
-    problem.instance_path.first().map(str::to_string)
 }
 
 /// Scans a frontmatter instance for top-level values a later compose stage

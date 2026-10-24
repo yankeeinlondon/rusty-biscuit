@@ -43,7 +43,7 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::effects::EffectEngine;
-use crate::markdown::schemas::SimplifiedSchema;
+use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::{Frontmatter, Markdown};
 use crate::markdown::compose::expression::{
     AuthoredMode, Availability, BindingError, BindingView, ExpressionError, ResolutionContext, RuntimeBinding,
@@ -251,13 +251,12 @@ pub fn stamp_lifecycle_shells(
     sites.stamp(config, || Ok(request.local_expression_resolution_context()))
 }
 
-/// `document`'s effective schema projection under `request`, or `None` when
-/// it has none or it does not resolve; composition reports that.
-fn document_schema(document: &Markdown, request: &ComposeRequest) -> Option<SimplifiedSchema> {
+/// `document`'s effective schema under `request`, or `None` when it has none
+/// or it does not resolve; composition reports that.
+fn document_schema(document: &Markdown, request: &ComposeRequest) -> Option<EffectiveSchema> {
     crate::markdown::compose::schema_validation::prepare_schemas(document, request, &mut None)
         .ok()
         .and_then(|schemas| schemas.effective_for(document))
-        .and_then(|effective| effective.simplified)
 }
 
 /// The lifecycle's shell commands and sites as extra sources of the

@@ -166,7 +166,9 @@ fn a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back() 
     let shadowed = latest(&mut fixture, &doc);
     assert!(rejects_model(&shadowed), "the nearer `Fields: number` is selected: {shadowed:#?}");
     let advanced = schema_registrations(&fixture);
-    assert_eq!(advanced.len(), registrations.len() + 1, "the watch set changed, so it is registered again");
+    // The diagnostics refresh and the registry worker each sync the watches,
+    // in either order, so an intermediate registration may come first.
+    assert!(advanced.len() > registrations.len(), "the watch set changed, so it is registered again");
     let advanced = advanced.last().unwrap();
     assert!(advanced.contains(&watch(&schemas, "shared/*")), "{advanced:?}");
     assert!(!advanced.contains(&watch(&schemas, "shared")), "the folder exists now: {advanced:?}");

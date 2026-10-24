@@ -1,0 +1,125 @@
+# Claudine's frontmatter catalog, applied to any document that sets a
+# lifecycle event, `loop`, `prompt`, `agent`, or `model` to a non-null value.
+# Hand-maintained; see README.md.
+#
+# Each identifying key is matched once per non-null YAML type, so a value of
+# the wrong type still selects this schema and the payload then rejects it.
+# The payload declares no required property and leaves the document open, so
+# application data beside Claudine's controls is kept. `sequence` is declared
+# only by sequence.yaml, which every document with a non-null `sequence`
+# selects.
+#
+# `composed` and `failed` are Darkmatter's names for the events Claudine
+# calls `start` and `blocked`. The payload types them as null, overriding the
+# baseline's `md` stacks, so a value under either is an error whose
+# description names the Claudine event to write instead.
+kind: schema-trigger
+match:
+    group:
+        - initialize: string(required)
+        - initialize: number(required)
+        - initialize: boolean(required)
+        - initialize: object(required)
+        - initialize: "unknown[](required)"
+        - start: string(required)
+        - start: number(required)
+        - start: boolean(required)
+        - start: object(required)
+        - start: "unknown[](required)"
+        - blocked: string(required)
+        - blocked: number(required)
+        - blocked: boolean(required)
+        - blocked: object(required)
+        - blocked: "unknown[](required)"
+        - success: string(required)
+        - success: number(required)
+        - success: boolean(required)
+        - success: object(required)
+        - success: "unknown[](required)"
+        - failure: string(required)
+        - failure: number(required)
+        - failure: boolean(required)
+        - failure: object(required)
+        - failure: "unknown[](required)"
+        - cancelled: string(required)
+        - cancelled: number(required)
+        - cancelled: boolean(required)
+        - cancelled: object(required)
+        - cancelled: "unknown[](required)"
+        - finalize: string(required)
+        - finalize: number(required)
+        - finalize: boolean(required)
+        - finalize: object(required)
+        - finalize: "unknown[](required)"
+        - loop: string(required)
+        - loop: number(required)
+        - loop: boolean(required)
+        - loop: object(required)
+        - loop: "unknown[](required)"
+        - prompt: string(required)
+        - prompt: number(required)
+        - prompt: boolean(required)
+        - prompt: object(required)
+        - prompt: "unknown[](required)"
+        - agent: string(required)
+        - agent: number(required)
+        - agent: boolean(required)
+        - agent: object(required)
+        - agent: "unknown[](required)"
+        - model: string(required)
+        - model: number(required)
+        - model: boolean(required)
+        - model: object(required)
+        - model: "unknown[](required)"
+$schema:
+    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    agent:
+        - "string -> the agent (provider) to run"
+        - "string[](min(1)) -> agents to try, in preference order"
+    model:
+        - "string -> the model to run"
+        - "string[] -> models to try, in preference order"
+    interactive: "boolean -> run the agent interactively instead of headless"
+    "$schema": "schema -> the document's own SimplifiedSchema, referenced file, or root union; applied after this catalog"
+    hash:
+        - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"
+        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> hash resolution stored in longhand form"
+          value: "unknown -> stored hash payload"
+          ignored: "string[] -> extra frontmatter keys ignored during hash computation"
+    last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
+    loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop"
+    argv: "string[] -> arguments passed through to the agent"
+    title: "string -> the document's title"
+    description: "string -> the document's summary, shown by dry runs"
+    initialize: "initialize-stack@./lifecycle.yaml -> actions run before preflight; shell-free"
+    start: "stack@./lifecycle.yaml -> actions run before the agent starts"
+    blocked: "stack@./lifecycle.yaml -> actions run when the agent is blocked"
+    success: "stack@./lifecycle.yaml -> actions run after a successful run"
+    failure: "stack@./lifecycle.yaml -> actions run after a failed run"
+    cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
+    finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+    composed: "null -> Claudine names this event `start`; write `start:` instead of `composed:`"
+    failed: "null -> Claudine names this event `blocked`; write `blocked:` instead of `failed:`"
+    timeout: "string(not-empty) -> the run's overall timeout, such as 30m"
+    step_timeout: "string(not-empty) -> the timeout for one sequence step"
+    timeout_warn: "string(not-empty) -> when to warn that the run timeout is near"
+    step_timeout_warn: "string(not-empty) -> when to warn that the step timeout is near"
+    exit_expressions:
+        - "{ pattern: string, patterns: string[], kind: enum(literal, regex), ignore_case: boolean, scope: string }[] -> output patterns that end the run (merged into the configured rules)"
+        - "{ mode: enum(merge, override), rules: { pattern: string, patterns: string[], kind: enum(literal, regex), ignore_case: boolean, scope: string }[] } -> output patterns that end the run, with how they combine with the configured rules"
+    guard_settings: "{ repetition: { enabled: boolean, max_repeats: number(integer; min(0)), max_cycle_length: number(integer; min(0)) }, volume: { enabled: boolean, max_lines: number(integer; min(0)), max_bytes: number(integer; min(0)) } } -> thresholds for the runaway-output guards"
+    operation: "string -> a sequence task's operation; set by flag or task, not read from a document"
+    yolo: "boolean -> skip permission prompts; set by flag, not read from a document"
+    verbosity: "string(suggest(silent, quiet, verbose)) -> prompt-reporting verbosity of a system prompt: silent, quiet, or verbose in any letter case"
+    mode: "enum(append, replace) -> whether a system prompt appends to or replaces the provider's own"
+    name: name@./linking.yaml
+    allowed-tools: allowed-tools@./linking.yaml
+    tools: tools@./linking.yaml
+    skills: skills@./linking.yaml
+    license: license@./linking.yaml
+    compatibility: compatibility@./linking.yaml
+    metadata: metadata@./linking.yaml
+    user-invocable: user-invocable@./linking.yaml
+    disable-model-invocation: disable-model-invocation@./linking.yaml
+    argument-hint: argument-hint@./linking.yaml
+    max_turns: max_turns@./linking.yaml

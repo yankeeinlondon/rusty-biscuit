@@ -98,7 +98,8 @@ fn a_self_recursive_type_validates_depth_eight_and_positions_a_bad_leaf() {
     let report = validate_document(dir.path(), &good);
     assert!(report.valid, "a finite depth-8 tree validates: {:#?}", report.problems);
 
-    let bad = format!("---\n{}{TREE_SCHEMA}---\nbody\n", nested_tree(8, "42"));
+    // A list has no conversion to text; a deep number would convert.
+    let bad = format!("---\n{}{TREE_SCHEMA}---\nbody\n", nested_tree(8, "[42]"));
     let report = validate_document(dir.path(), &bad);
     assert!(!report.valid);
     let pointer = format!("/tree{}/value", "/children/0".repeat(7));
@@ -108,8 +109,8 @@ fn a_self_recursive_type_validates_depth_eight_and_positions_a_bad_leaf() {
         .find(|problem| problem.path == pointer)
         .unwrap_or_else(|| panic!("no problem at {pointer}: {:#?}", report.problems));
     assert!(matches!(problem.kind, ValidationProblemKind::Type), "{problem:#?}");
-    let line = bad.lines().position(|line| line.ends_with("value: 42")).expect("bad leaf line") + 1;
-    let column = bad.lines().nth(line - 1).expect("line").find("42").expect("value") + 1;
+    let line = bad.lines().position(|line| line.ends_with("value: [42]")).expect("bad leaf line") + 1;
+    let column = bad.lines().nth(line - 1).expect("line").find("[42]").expect("value") + 1;
     assert_eq!((problem.line, problem.column), (Some(line as u32), Some(column as u32)), "{problem:#?}");
 }
 

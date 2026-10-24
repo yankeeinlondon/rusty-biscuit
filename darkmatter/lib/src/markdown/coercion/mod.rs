@@ -45,7 +45,7 @@ pub use error::{
 };
 pub use shape::{
     DESCRIPTION_LIMIT,    Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
-    ObjectShape, PatternScope, PatternSlot, PropertySlot, Shape, TextPattern, TextShape, TupleShape, TupleSlot,
+    ObjectShape, PatternScope, PatternSlot, PropertySlot, RefSlot, RefTarget, Shape, ShapeRef, TextPattern, TextShape, TupleShape, TupleSlot,
 };
 
 pub use engine::content_error;

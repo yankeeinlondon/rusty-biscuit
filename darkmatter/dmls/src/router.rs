@@ -50,6 +50,7 @@ use lsp_types::{
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use darkmatter::markdown::compose::RequestSnapshot;
+use darkmatter::markdown::schemas::ValidationStage;
 use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 
@@ -66,6 +67,7 @@ use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::registry_jobs::{
     PendingRegistries, RegistryJob, RegistryJobKind, RegistryQueue, StartupPhase, StartupReady,
 };
+use crate::validation_timing;
 use crate::request_timing::{
     CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, Wait, document_uri,
 };
@@ -1017,18 +1019,34 @@ impl ServerState {
     /// list's arrival refreshes every open document. An open document whose
     /// trigger registry is not prepared keeps its published diagnostics: its
     /// preparation is queued, and the refresh runs when it is installed.
+    ///
+    /// A refresh whose overlay looked up the document's effective schema
+    /// logs one slow-validation event ([`crate::validation_timing`]).
     fn refresh_diagnostics(&self, uri: &Uri) {
         let version = self.documents.get(uri).map(|doc| doc.version());
-        if self.documents.is_open(uri) {
-            if let Some(need) = self.registry_need(uri) {
-                self.registries.borrow_mut().wait_for(need, Some(uri.clone()), None);
-                return;
+        let (computed, validation) = validation_timing::collect(|| {
+            if self.documents.is_open(uri) {
+                let need = validation_timing::part(|| {
+                    ValidationStage::Discover.time(|| self.registry_need(uri))
+                });
+                if let Some(need) = need {
+                    self.registries.borrow_mut().wait_for(need, Some(uri.clone()), None);
+                    return None;
+                }
+                self.prepare_document(uri);
             }
-            self.prepare_document(uri);
+            Some(self.with_document(uri, |ctx| (self.registry.diagnostics(ctx), ctx.path.to_path_buf())))
+        });
+        let Some(computed) = computed else {
+            return;
+        };
+        if let (Some(validation), Some((_, path))) = (validation, &computed) {
+            let threshold = Duration::from_millis(self.config.effective().schema.slow_validation_ms);
+            validation.emit(path, threshold);
         }
         let listing = self.snapshot.load().listing();
-        let diagnostics = self
-            .with_document(uri, |ctx| self.registry.diagnostics(ctx))
+        let diagnostics = computed
+            .map(|(diagnostics, _)| diagnostics)
             .unwrap_or_default()
             .into_iter()
             .filter(|diagnostic| !listing_gates(listing, diagnostic))

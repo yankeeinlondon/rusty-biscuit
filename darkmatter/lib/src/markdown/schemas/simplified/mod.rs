@@ -25,7 +25,9 @@ pub mod types;
 pub mod yaml_scalar;
 
 pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
-pub use subtype::{is_definition_subtype, is_string_like, is_subtype};
+pub use subtype::{
+    is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
+};
 pub use convert::{DRAFT_2020_12, to_json_schema, to_json_schema_with_definitions};
 pub use definitions::{
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,

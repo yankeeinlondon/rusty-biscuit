@@ -6,12 +6,19 @@
 //! stay authoritative: a keyword the shape cannot express exactly (`allOf`,
 //! `not`, `if`/`then`/`else`, `dependent*`, `propertyNames`, `contains`,
 //! `unevaluated*`, `oneOf`'s exactly-one rule, a `$ref` with constraining
-//! siblings, a cyclic or over-deep reference, Darkmatter's validating custom
-//! keywords) drives no conversion, and the subschema that carries it becomes a
-//! passive [`Assertion`] checked by `jsonschema` on the final value, so it is
-//! never unconstrained success. A recursive reference expands a few levels
-//! ([`CYCLE_EXPANSIONS`]); below that the value is validation-only. Callers
-//! still validate the final document with the complete schema.
+//! siblings, a cycle that never descends into a child value, an over-deep
+//! reference chain, Darkmatter's validating custom keywords) drives no
+//! conversion, and the subschema that carries it becomes a passive
+//! [`Assertion`] checked by `jsonschema` on the final value, so it is never
+//! unconstrained success. Callers still validate the final document with the
+//! complete schema.
+//!
+//! A recursive reference whose cycle passes through a value descent (a
+//! property, an item, a tuple slot, a pattern or additional property) becomes
+//! a reusable [`ShapeRef`] to its target, translated once, so declared
+//! conversions apply at every depth the engine walks
+//! ([`crate::markdown::coercion::MAX_DEPTH`]); a value nested deeper fails
+//! with [`crate::markdown::coercion::FailureReason::ResourceLimit`].
 //!
 //! Local references resolve through the document's own identity: `$id`
 //! changes the base URI of the subschema that declares it, `$anchor` names a
@@ -45,23 +52,20 @@ use super::simplified::{DRAFT_2020_12, SimplifiedType};
 use super::validate::build_structural_validator;
 use crate::markdown::coercion::{
     Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
-    ObjectShape, PatternScope, PatternSlot, PropertySlot, Shape, TextPattern, TextShape, TupleShape, TupleSlot,
+    ObjectShape, PatternScope, PatternSlot, PropertySlot, RefSlot, Shape, TextPattern, TextShape, TupleShape, TupleSlot,
 };
 
 /// The base URI `jsonschema` gives a document without `$id`.
 const DOCUMENT_BASE: &str = "json-schema:///";
 
-/// How many references one translation path expands before the rest of the
-/// path becomes validation-only.
+/// How many distinct reference targets one translation path expands before
+/// the rest of the path becomes validation-only. A recursive target counts
+/// once: its later uses on the path are reusable references.
 const MAX_REFERENCE_DEPTH: usize = 32;
 
-/// How many times one translation path may expand the same reference target:
-/// a recursive schema converts this many levels deep, and below that the
-/// value is validation-only.
-const CYCLE_EXPANSIONS: usize = 4;
-
 /// How many reference expansions one translation performs in total, so a
-/// schema whose references branch cannot grow the shape exponentially.
+/// schema whose acyclic references branch cannot grow the shape
+/// exponentially.
 const REFERENCE_BUDGET: usize = 4096;
 
 /// Keywords that hold one subschema.
@@ -154,6 +158,7 @@ pub fn shape_from_json_schema(schema: &Value) -> Shape {
     let translator = Translator {
         index,
         budget: std::cell::Cell::new(REFERENCE_BUDGET),
+        descent: std::cell::Cell::new(0),
         document: Arc::new(Document {
             root: schema.clone(),
             embedded: OnceLock::new(),
@@ -273,6 +278,9 @@ struct Translator<'s> {
     index: Index<'s>,
     /// Reference expansions left; see [`REFERENCE_BUDGET`].
     budget: std::cell::Cell<usize>,
+    /// Value descents on the current translation path; a reference cycle is
+    /// expressible only when this grew since its target was entered.
+    descent: std::cell::Cell<usize>,
     document: Arc<Document>,
 }
 
@@ -314,6 +322,14 @@ impl Kind {
     }
 }
 
+/// A reference target being expanded on the current translation path.
+struct Frame {
+    target: *const Value,
+    /// [`Translator::descent`] when the target was entered.
+    descent: usize,
+    slot: RefSlot,
+}
+
 /// A translated part of one subschema and whether it captures everything that
 /// part asserts.
 struct Part {
@@ -328,7 +344,7 @@ impl Part {
 }
 
 impl<'s> Translator<'s> {
-    fn node(&self, node: &'s Value, references: &mut Vec<*const Value>) -> Shape {
+    fn node(&self, node: &'s Value, references: &mut Vec<Frame>) -> Shape {
         match node {
             Value::Bool(true) => Shape::Any,
             Value::Bool(false) => Shape::Union(Vec::new()),
@@ -338,7 +354,7 @@ impl<'s> Translator<'s> {
         }
     }
 
-    fn object_node(&self, node: &'s Value, map: &'s Map<String, Value>, references: &mut Vec<*const Value>) -> Shape {
+    fn object_node(&self, node: &'s Value, map: &'s Map<String, Value>, references: &mut Vec<Frame>) -> Shape {
         // The `type-definition` and `schema` meta types hold declarations, not
         // data: `true` is not the bare schema name `"true"`.
         if map.contains_key(DARKMATTER_TYPE_DEFINITION_KEYWORD) || map.contains_key(DARKMATTER_SCHEMA_KEYWORD) {
@@ -386,7 +402,7 @@ impl<'s> Translator<'s> {
     }
 
     /// The `type`, `const`, `enum`, and per-kind keywords of one subschema.
-    fn base(&self, map: &'s Map<String, Value>, references: &mut Vec<*const Value>) -> Part {
+    fn base(&self, map: &'s Map<String, Value>, references: &mut Vec<Frame>) -> Part {
         let declared: Option<Vec<Kind>> = match map.get("type") {
             None => None,
             Some(Value::String(name)) => match Kind::parse(name) {
@@ -578,7 +594,7 @@ impl<'s> Translator<'s> {
         Part { shape, exact }
     }
 
-    fn array(&self, map: &'s Map<String, Value>, references: &mut Vec<*const Value>) -> Part {
+    fn array(&self, map: &'s Map<String, Value>, references: &mut Vec<Frame>) -> Part {
         let mut exact = true;
         let mut count = |keyword: &str| match map.get(keyword) {
             None => None,
@@ -605,14 +621,14 @@ impl<'s> Translator<'s> {
                 .iter()
                 .enumerate()
                 .map(|(position, schema)| TupleSlot {
-                    shape: self.node(schema, references),
+                    shape: self.child(schema, references),
                     optional: position >= required,
                 })
                 .collect();
             let rest = match map.get("items") {
                 None => Some(Box::new(Shape::Any)),
                 Some(Value::Bool(false)) => None,
-                Some(schema) => Some(Box::new(self.node(schema, references))),
+                Some(schema) => Some(Box::new(self.child(schema, references))),
             };
             return Part {
                 shape: Shape::Tuple(TupleShape { prefix, rest }),
@@ -626,7 +642,7 @@ impl<'s> Translator<'s> {
                 exact = false;
                 Shape::Any
             }
-            Some(schema) => self.node(schema, references),
+            Some(schema) => self.child(schema, references),
         };
         Part {
             shape: Shape::Array(ArrayShape {
@@ -639,7 +655,7 @@ impl<'s> Translator<'s> {
         }
     }
 
-    fn object(&self, map: &'s Map<String, Value>, references: &mut Vec<*const Value>) -> Part {
+    fn object(&self, map: &'s Map<String, Value>, references: &mut Vec<Frame>) -> Part {
         let mut exact = true;
         let required: HashSet<&str> = match map.get("required") {
             None => HashSet::new(),
@@ -665,7 +681,7 @@ impl<'s> Translator<'s> {
             .flatten()
             .map(|(name, schema)| PropertySlot {
                 name: name.clone(),
-                shape: self.node(schema, references),
+                shape: self.child(schema, references),
                 required: required.contains(name.as_str()),
             })
             .collect();
@@ -675,7 +691,7 @@ impl<'s> Translator<'s> {
                 match TextPattern::new(source.as_str()) {
                     Ok(pattern) => patterns.push(PatternSlot {
                         matcher: KeyMatcher::Pattern(pattern),
-                        shape: self.node(schema, references),
+                        shape: self.child(schema, references),
                     }),
                     Err(_) => exact = false,
                 }
@@ -684,7 +700,7 @@ impl<'s> Translator<'s> {
         let additional = match map.get("additionalProperties") {
             None | Some(Value::Bool(true)) => Additional::Any,
             Some(Value::Bool(false)) => Additional::Forbidden,
-            Some(schema) => match self.node(schema, references) {
+            Some(schema) => match self.child(schema, references) {
                 Shape::Any => Additional::Any,
                 shape => Additional::Shape(Box::new(shape)),
             },
@@ -712,22 +728,52 @@ impl<'s> Translator<'s> {
         }
     }
 
-    /// The target of a `$ref`, or a validation-only shape for an unresolved,
-    /// cyclic, or over-deep reference.
-    fn reference(&self, from: &'s Value, reference: &str, references: &mut Vec<*const Value>) -> Shape {
+    /// The subschema of a child value: a property, an item, a tuple slot, a
+    /// pattern or additional property.
+    fn child(&self, node: &'s Value, references: &mut Vec<Frame>) -> Shape {
+        self.descent.set(self.descent.get() + 1);
+        let shape = self.node(node, references);
+        self.descent.set(self.descent.get() - 1);
+        shape
+    }
+
+    /// The target of a `$ref`: expanded in place, a reusable reference back
+    /// to a target this path is already expanding below a value descent, or a
+    /// validation-only shape for an unresolved reference, a cycle with no
+    /// descent, or an over-deep or over-budget expansion.
+    ///
+    /// A target is a reusable reference only when its own body refers back
+    /// to it; every other target is expanded inline, as an acyclic reference
+    /// always was.
+    fn reference(&self, from: &'s Value, reference: &str, references: &mut Vec<Frame>) -> Shape {
         let Some(target) = self.index.resolve(from, reference) else {
             return Shape::Any.assert(self.node_assertion(from));
         };
         let key = target as *const Value;
-        let repeats = references.iter().filter(|seen| **seen == key).count();
-        if repeats >= CYCLE_EXPANSIONS || references.len() >= MAX_REFERENCE_DEPTH || self.budget.get() == 0 {
+        if let Some(frame) = references.iter().rev().find(|frame| frame.target == key) {
+            // Without a descent the engine would meet the same reference at
+            // the same value again: not a type a shape can express.
+            if self.descent.get() > frame.descent {
+                return Shape::Ref(frame.slot.back_reference());
+            }
+            return Shape::Any.assert(self.node_assertion(target));
+        }
+        if references.len() >= MAX_REFERENCE_DEPTH || self.budget.get() == 0 {
             return Shape::Any.assert(self.node_assertion(target));
         }
         self.budget.set(self.budget.get() - 1);
-        references.push(key);
+        references.push(Frame {
+            target: key,
+            descent: self.descent.get(),
+            slot: RefSlot::new(reference_name(reference)),
+        });
         let shape = self.node(target, references);
-        references.pop();
-        shape
+        let frame = references.pop().expect("the frame pushed above");
+        if frame.slot.is_referenced() {
+            Shape::Ref(frame.slot.finish(shape))
+        } else {
+            shape
+        }
     }
 
     /// A passive check of `node` by `jsonschema`, compiled on first use.
@@ -818,13 +864,21 @@ impl AssertionSource {
     }
 }
 
+/// [`format_assertion`]'s validators, one per format name.
+static FORMAT_VALIDATORS: LazyLock<Mutex<HashMap<String, Arc<Option<Validator>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Empties this module's process-wide caches (see
+/// [`super::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    FORMAT_VALIDATORS.lock().expect("format validator cache poisoned").clear();
+}
+
 /// A passive check that a string satisfies `format`, through the validator's
 /// registered format so the two agree.
 fn format_assertion(format: &str) -> Assertion {
-    static VALIDATORS: LazyLock<Mutex<HashMap<String, Arc<Option<Validator>>>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
     let validator = {
-        let mut cache = VALIDATORS.lock().expect("format validator cache poisoned");
+        let mut cache = FORMAT_VALIDATORS.lock().expect("format validator cache poisoned");
         cache
             .entry(format.to_string())
             .or_insert_with(|| {
@@ -947,6 +1001,15 @@ fn holds_reference(node: &Value) -> bool {
         }),
         Value::Array(items) => items.iter().any(holds_reference),
         _ => false,
+    }
+}
+
+/// The expected-type text of a recursive target: the last token of its
+/// reference (`item` for `#/$defs/item`), else the reference as written.
+fn reference_name(reference: &str) -> String {
+    match reference.rsplit('/').next().filter(|token| !token.is_empty() && !token.contains('#')) {
+        Some(token) => token.replace("~1", "/").replace("~0", "~"),
+        None => reference.to_string(),
     }
 }
 

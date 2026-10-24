@@ -508,12 +508,20 @@ fn is_required(atom: &PropertyAtom) -> bool {
     atom.is_required()
 }
 
+thread_local! {
+    /// [`regex_match`]'s compiled patterns.
+    static REGEX_CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Empties the calling thread's matcher regex cache (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_thread_caches() {
+    REGEX_CACHE.with_borrow_mut(Vec::clear);
+}
+
 fn regex_match(pattern: &str, input: &str) -> bool {
-    thread_local! {
-        static CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
-            const { std::cell::RefCell::new(Vec::new()) };
-    }
-    CACHE.with(|cell| {
+    REGEX_CACHE.with(|cell| {
         if let Some(re) = cell.borrow().iter().find(|(p, _)| p == pattern) {
             return re.1.is_match(input);
         }

@@ -1280,7 +1280,7 @@ struct DiscoverySiteContext {
     resolution: crate::markdown::compose::expression::ResolutionContext,
     markdown: Markdown,
     options: crate::markdown::compose::ComposeRequest,
-    schema: std::cell::OnceCell<Option<crate::markdown::schemas::SimplifiedSchema>>,
+    effective: std::cell::OnceCell<Option<crate::markdown::schemas::EffectiveSchema>>,
 }
 
 impl DiscoverySiteContext {
@@ -1310,7 +1310,7 @@ impl DiscoverySiteContext {
             resolution: discovery.expression_resolution_context(remote_fetch),
             markdown: prepared.clone(),
             options: discovery.clone(),
-            schema: std::cell::OnceCell::new(),
+            effective: std::cell::OnceCell::new(),
         }
     }
 
@@ -1338,8 +1338,8 @@ impl DiscoverySiteContext {
             })
     }
 
-    fn schema(&self) -> Option<&crate::markdown::schemas::SimplifiedSchema> {
-        self.schema
+    fn effective(&self) -> Option<&crate::markdown::schemas::EffectiveSchema> {
+        self.effective
             .get_or_init(|| {
                 crate::markdown::compose::schema_validation::prepare_schemas(
                     &self.markdown,
@@ -1348,7 +1348,6 @@ impl DiscoverySiteContext {
                 )
                 .ok()
                 .and_then(|schemas| schemas.effective_for(&self.markdown))
-                .and_then(|effective| effective.simplified)
             })
             .as_ref()
     }
@@ -1370,8 +1369,14 @@ impl DiscoverySiteContext {
             .unwrap_or(false);
         let host_globals = host_global_roots(&self.options);
         let host_roots: Vec<&str> = host_globals.iter().map(String::as_str).collect();
-        let declared = crate::markdown::compose::expression::DeclaredTypes::new(if has_holes { self.schema() } else { None })
-            .with_host_globals(&host_roots);
+        let effective = if has_holes { self.effective() } else { None };
+        let mut declared = crate::markdown::compose::expression::DeclaredTypes::new(
+            effective.and_then(|effective| effective.simplified.as_ref()),
+        )
+        .with_host_globals(&host_roots);
+        if let Some(effective) = effective {
+            declared = declared.with_definitions(effective.definitions());
+        }
         // `SiteScope::site` narrows the compose pass's site by the same
         // guards, so the approved shape is the shape that runs.
         let types = crate::markdown::compose::page_blocks::guards::within(

@@ -13,6 +13,7 @@ mod clean_suggestions;
 mod content_policy_fixtures;
 mod embedded_sources;
 mod positions;
+mod reset_process_caches;
 
 use super::*;
 use crate::markdown::Markdown;

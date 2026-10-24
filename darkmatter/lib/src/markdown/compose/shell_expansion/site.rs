@@ -429,10 +429,11 @@ fn approve_template_only(
 }
 
 /// What one document's shell stages need to build its command sites: the
-/// owner schema its placeholders are typed by and the roots its host
-/// declared.
+/// owner schema its placeholders are typed by, with the recursive
+/// definitions that schema reaches, and the roots its host declared.
 pub(crate) struct SiteScope<'a> {
     schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
     host_globals: Vec<String>,
     deferred: &'a template::DeferredShellRoots,
     source_file: std::path::PathBuf,
@@ -441,10 +442,10 @@ pub(crate) struct SiteScope<'a> {
 
 impl<'a> SiteScope<'a> {
     /// The scope of the document `options` compose, whose effective schema
-    /// projection is `schema`.
+    /// is `effective`.
     pub(crate) fn new(
         options: &'a crate::markdown::compose::ComposeRequest,
-        schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+        effective: Option<crate::markdown::schemas::EffectiveSchema>,
     ) -> Self {
         use crate::markdown::compose::ComposeSource;
         let (source_file, owner) = match &options.source {
@@ -460,8 +461,13 @@ impl<'a> SiteScope<'a> {
             ComposeSource::Url(url) => (std::path::PathBuf::from(url.as_str()), Some(url.to_string())),
             ComposeSource::Unknown => (std::path::PathBuf::from("<unknown>"), None),
         };
+        let (schema, definitions) = effective.map_or_else(Default::default, |effective| {
+            let definitions = std::sync::Arc::clone(effective.definitions());
+            (effective.simplified, definitions)
+        });
         Self {
             schema,
+            definitions,
             host_globals: options
                 .host_globals
                 .as_ref()
@@ -506,7 +512,9 @@ impl<'a> SiteScope<'a> {
         };
         let host_roots: Vec<&str> = self.host_globals.iter().map(String::as_str).collect();
         let declared =
-            crate::markdown::compose::expression::DeclaredTypes::new(self.schema.as_ref()).with_host_globals(&host_roots);
+            crate::markdown::compose::expression::DeclaredTypes::new(self.schema.as_ref())
+                .with_definitions(&self.definitions)
+                .with_host_globals(&host_roots);
         // The site's types must be the ones discovery typed it with, so its
         // shape matches what was approved.
         let types = crate::markdown::compose::page_blocks::guards::within(

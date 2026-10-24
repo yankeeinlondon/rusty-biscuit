@@ -33,12 +33,14 @@ use biscuit_hash::xx_hash_bytes;
 
 use crate::context::DocumentResolution;
 use crate::request_timing::{RequestTimings, Stage};
+use crate::validation_timing;
 use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::resolve::expand_named_types;
 use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
+    ValidationStage,
     StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
 };
@@ -750,6 +752,7 @@ impl OverlayCache {
         resolution: &DocumentResolution,
         timings: &RequestTimings,
     ) -> FrontmatterSchema {
+        validation_timing::note_assembly(false);
         // A document whose context failed resolves no `$schema` reference or
         // trigger payload; its context-failure diagnostic says why.
         let Ok(context) = resolution.context() else {
@@ -757,7 +760,9 @@ impl OverlayCache {
             return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
         let registry = match timings.time(Stage::TriggerRegistry, || {
-            self.trigger_registry(path, workspace_roots)
+            validation_timing::part(|| {
+                ValidationStage::Discover.time(|| self.trigger_registry(path, workspace_roots))
+            })
         }) {
             Ok(registry) => registry,
             Err(error) => {
@@ -779,6 +784,9 @@ impl OverlayCache {
             && cached.key == key
             && deps_unchanged(&cached.deps)
         {
+            if matches!(cached.outcome, SchemaOutcome::Ready(Some(_))) {
+                validation_timing::note_assembly(true);
+            }
             return FrontmatterSchema {
                 outcome: cached.outcome.clone(),
                 named_types: Arc::clone(&cached.named_types),
@@ -793,14 +801,10 @@ impl OverlayCache {
             .as_ref()
             .map(|registry| registry.dependencies().map(Path::to_path_buf).collect())
             .unwrap_or_default();
-        let outcome = match schema::assemble(
-            path,
-            text,
-            config,
-            workspace_roots,
-            registry,
-            context,
-        ) {
+        let assembled = validation_timing::part(|| {
+            schema::assemble(path, text, config, workspace_roots, registry, context)
+        });
+        let outcome = match assembled {
             Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
@@ -1045,8 +1049,11 @@ fn fallback_areas(
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
+/// `schema.slow_validation_ms` only chooses a log level, so changing it
+/// keeps the cached bundle.
 fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
-    let config_bytes = serde_json::to_vec(&config.schema).unwrap_or_default();
+    let config_bytes =
+        serde_json::to_vec(&(config.schema.strict, &config.schema.extensions)).unwrap_or_default();
     xx_hash_bytes(text.as_bytes()) ^ xx_hash_bytes(&config_bytes)
 }
 
@@ -1098,8 +1105,9 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
 
 /// The schema files a resolution error names: the referenced schema that
 /// failed, the namespace searched for an unknown name, the file defining a
-/// union a reference misuses, and every file that authored a reference or a
-/// conflicting constraint.
+/// union a reference misuses, every file that authored a reference or a
+/// conflicting constraint, and every file holding a reference of a cycle
+/// that never descends or the type it names.
 fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
     fn file(source: &SchemaSourceId, out: &mut Vec<PathBuf>) {
         if let SchemaSourceId::File(path) = source {
@@ -1124,6 +1132,12 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
             SchemaError::UnionReference { site, definition, .. } => {
                 file(&site.source, out);
                 file(&definition.source, out);
+            }
+            SchemaError::NonDescendingCycle { cycles } => {
+                for reference in cycles.iter().flatten() {
+                    file(&reference.site.source, out);
+                    file(&reference.target_source, out);
+                }
             }
             _ => {}
         }
