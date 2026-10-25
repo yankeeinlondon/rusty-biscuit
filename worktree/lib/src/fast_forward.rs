@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use crate::git::{git_from, git_from_bytes_allow_no_match};
 use crate::live_remote::is_valid_branch_name;
-use crate::remove::lifecycle::PendingRemovals;
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
 
 /// Why a fast-forward did not move the branch.
@@ -48,14 +47,6 @@ pub enum FfRefusal {
     /// The checkout holding the branch is one Git marks `prunable` (payload:
     /// its path as `git worktree list` spells it).
     UnavailableHolder(PathBuf),
-    /// The checkout holding the branch is one a `wt remove` has started and
-    /// not finished; updating its files would stop that removal.
-    RemovingHolder {
-        /// As `git worktree list` spells it.
-        path: PathBuf,
-        /// The name the removal was started with.
-        name: String,
-    },
     /// Any other git failure. Git's stderr is deliberately not carried.
     Other,
 }
@@ -84,24 +75,23 @@ pub enum FfResult {
 ///
 /// [`FfResult::UpToDate`] when the local branch equals or contains the
 /// tracking ref, and [`FfResult::Refused`] for everything that is not a clean
-/// fast-forward, including a needed move whose holder Git marks `prunable` or
-/// is under removal. An invalid branch name is [`FfRefusal::Other`] with no git
+/// fast-forward, including a needed move whose holder Git marks `prunable`. An invalid branch name is [`FfRefusal::Other`] with no git
 /// mutation.
 pub fn fast_forward_default(main: &Path, default: &str) -> FfResult {
     if !is_valid_branch_name(default) {
         return FfResult::Refused(FfRefusal::Other);
     }
-    // An unavailable holder, or one under removal, refuses only a needed
-    // move, so a branch already in sync still reads as up to date.
+    // An unavailable holder refuses only a needed move, so a branch already
+    // in sync still reads as up to date.
     let holder = match holder_of(main, default) {
         Ok(holder) => Ok(holder),
-        Err(refusal @ (FfRefusal::UnavailableHolder(_) | FfRefusal::RemovingHolder { .. })) => Err(refusal),
+        Err(FfRefusal::UnavailableHolder(path)) => Err(path),
         Err(refusal) => return FfResult::Refused(refusal),
     };
     match target(main, default) {
         Ok(Some((old, new))) => match holder {
             Ok(holder) => move_branch(main, default, &old, &new, holder),
-            Err(refusal) => FfResult::Refused(refusal),
+            Err(path) => FfResult::Refused(FfRefusal::UnavailableHolder(path)),
         },
         Ok(None) => FfResult::UpToDate,
         Err(refusal) => FfResult::Refused(refusal),
@@ -139,8 +129,7 @@ fn read_ref(main: &Path, refname: &str) -> Option<String> {
 
 /// The worktree that has `refs/heads/<default>` checked out, if any. Two
 /// holders (possible with `--force`) are refused: moving the branch under
-/// one would leave the other's files stale. So is a `prunable` holder, and
-/// one under removal.
+/// one would leave the other's files stale. So is a `prunable` holder.
 fn holder_of(main: &Path, default: &str) -> Result<Option<PathBuf>, FfRefusal> {
     let listing = crate::git::worktree_list_from(main, main).map_err(|_| FfRefusal::Other)?;
     let mut holders: Vec<WorktreeEntry> = parse_worktree_list(&listing)
@@ -151,9 +140,6 @@ fn holder_of(main: &Path, default: &str) -> Result<Option<PathBuf>, FfRefusal> {
         0 => Ok(None),
         1 => {
             let holder = holders.remove(0);
-            if let Some(name) = PendingRemovals::read(main, std::slice::from_ref(&holder)).name_for(&holder.path) {
-                return Err(FfRefusal::RemovingHolder { name: name.to_string(), path: holder.path });
-            }
             match holder.prunable {
                 Some(_) => Err(FfRefusal::UnavailableHolder(holder.path)),
                 None => Ok(Some(holder.path)),

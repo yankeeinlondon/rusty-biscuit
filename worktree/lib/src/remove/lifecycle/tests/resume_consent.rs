@@ -129,34 +129,27 @@ fn confirmed_deletions_from_several_attempts_are_all_excluded() {
     assert_eq!((attempt_of(SRC_FILES[0]), attempt_of(README)), (Some(1), Some(2)));
 }
 
-/// Rewrites the result of `path` in the current (version 3) journal: `None`
-/// cuts the journal before its results line, as a crash before those results
-/// were durable leaves it. A batch names entries by inventory position, so
-/// the path is found through the inventory line.
+/// Rewrites the result of `path` in the current journal: `None` cuts the
+/// journal before its results line, as a crash before those results were
+/// durable leaves it.
 fn rewrite_result(journal: &Path, path: &str, state: Option<&str>) {
     let text = fs::read_to_string(journal).unwrap();
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let parsed: Vec<Value> = lines.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
-    let position = parsed[1]["inventory"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .position(|entry| serde_json::from_value::<NativeString>(entry["path"].clone()).is_ok_and(|named| named.as_path() == Path::new(path)))
-        .expect("the inventory lists the path") as u64;
-    let (batch, slot) = parsed
-        .iter()
-        .find_map(|line| {
-            let entries = line["intent"]["entries"].as_array()?;
-            let slot = entries.iter().position(|entry| entry.as_u64() == Some(position))?;
-            Some((line["intent"]["batch"].clone(), slot))
+    let holds = |line: &Value| {
+        line["results"]["entries"].as_array().is_some_and(|entries| {
+            entries.iter().any(|entry| serde_json::from_value::<NativeString>(entry["path"].clone()).is_ok_and(|named| named.as_path() == Path::new(path)))
         })
-        .expect("an intent plans the path");
-    let index = parsed.iter().position(|line| line["results"]["batch"] == batch).expect("a results line closes the batch");
+    };
+    let index = lines.iter().position(|line| holds(&serde_json::from_str(line).unwrap())).expect("a results line names the path");
     match state {
         None => lines.truncate(index),
         Some(state) => {
-            let mut line = parsed[index].clone();
-            line["results"]["states"][slot] = Value::from(state);
+            let mut line: Value = serde_json::from_str(&lines[index]).unwrap();
+            for entry in line["results"]["entries"].as_array_mut().unwrap() {
+                if serde_json::from_value::<NativeString>(entry["path"].clone()).unwrap().as_path() == Path::new(path) {
+                    entry["state"] = Value::from(state);
+                }
+            }
             lines[index] = line.to_string();
         }
     }
@@ -246,10 +239,11 @@ fn staged_and_recreated_paths_keep_consent() {
     assert_eq!(excluded(&consent()), sorted(&[README]), "restored");
 }
 
-/// A path recreated after the retry's report is deleted with the rest, and
-/// the difference from what the user agreed to is reported.
+/// The approval binds the state reported: a path recreated, or a change
+/// staged, after the report refuses the retry under the lock with nothing
+/// deleted; the unchanged state then goes ahead on the same approval.
 #[test]
-fn a_change_between_the_report_and_the_retry_is_reported() {
+fn a_change_between_the_report_and_the_retry_refuses() {
     let fixture = fixture();
     let id = first_stopped_when_gone(&fixture, &[README]);
     let quarantine = fixture.quarantine_of(&id);
@@ -257,11 +251,24 @@ fn a_change_between_the_report_and_the_retry_is_reported() {
     assert!(!approval.inventory.needs_consent(), "{:?}", approval.inventory.dirty);
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&approval), record: None, branches: &BranchActions::default() };
+    let retry = || with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env));
+    let left = || DeletionInventory::capture(&quarantine, &[]).unwrap().entries().len();
+    let before = left();
 
     fs::write(quarantine.join(README), "new work\n").unwrap();
-    let resumed = finished(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env)));
+    let refusal = refused(retry());
+    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
+    assert_eq!(fs::read_to_string(quarantine.join(README)).unwrap(), "new work\n");
+    fs::remove_file(quarantine.join(README)).unwrap();
+
+    fixture.repo.git_in(&quarantine, &["rm", "-q", "--cached", README]);
+    let refusal = refused(retry());
+    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
+    fixture.repo.git_in(&quarantine, &["reset", "-q", "--", README]);
+    assert_eq!((left(), fixture.pending()), (before, id.clone()), "nothing was deleted");
+
+    let resumed = finished(retry());
     assert_removed(&fixture, &resumed);
-    assert!(resumed.warnings.iter().any(|warning| warning.contains("files")), "{:?}", resumed.warnings);
 }
 
 fn dirty(status: &str, path: &str) -> DirtyEntry {

@@ -15,7 +15,6 @@ use biscuit_terminal::terminal::Terminal;
 use serde_json::json;
 use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 use worktree::remove::lifecycle::{Candidate, ExitClass, Finished, Inspection, Presence, Refusal, Resolution};
-use worktree::remove::observation::inventory::{Change, InventoryRefusal};
 use worktree::remove::observation::{
     CoverageLost, FsEventsLossFlag, ObservationBackend, ObservationDiagnostics, ObservationError, ObservationLoss,
     ObservationStage, Root,
@@ -277,35 +276,22 @@ fn stopped_markup_of(report: OperationReport) -> String {
 
 /// A removal goes ahead despite limited discovery, so a stop says what the
 /// check before the move could not see, and what each check after the stop
-/// could not see, beside the recovery guidance. Checks with the same gap
-/// share one line.
+/// could not see, beside the recovery guidance.
 #[test]
 fn a_stop_names_the_limits_of_each_process_check() {
-    let shapes = limited(ORIGINAL);
-    for ((shape, before), (_, after)) in shapes.iter().zip(limited(QUARANTINE)) {
+    for ((shape, before), (_, after)) in limited(ORIGINAL).into_iter().zip(limited(QUARANTINE)) {
         let mut report = moved(RemovalOutcome::ActivityDetected, 6);
         report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, before.clone()));
         report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, after.clone()));
 
         let markup = stopped_markup_of(report);
 
-        let merged = format!("<dim>Before the move and after the stop, at {QUARANTINE}: {}</dim>", note(before));
-        assert_eq!(note(before), note(&after), "{shape}: the same shape has the same note");
-        assert!(markup.contains(&merged), "{shape}: {markup}");
-        let guidance = markup.find("Retry: ").expect("guidance");
-        assert!(markup.find(&merged).unwrap() < guidance, "{shape}: coverage precedes the guidance\n{markup}");
-    }
-
-    for (index, (shape, before)) in shapes.iter().enumerate() {
-        let (_, after) = &limited(QUARANTINE)[(index + 1) % shapes.len()];
-        let mut report = moved(RemovalOutcome::ActivityDetected, 6);
-        report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, before.clone()));
-        report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, after.clone()));
-
-        let markup = stopped_markup_of(report);
-
-        assert!(markup.contains(&format!("<dim>Before the move: {}</dim>", note(before))), "{shape}: {markup}");
-        assert!(markup.contains(&format!("<dim>After the stop, at {QUARANTINE}: {}</dim>", note(after))), "{shape}: {markup}");
+        let before_line = format!("<dim>Before the move: {}</dim>", note(&before));
+        let after_line = format!("<dim>After the stop, at {QUARANTINE}: {}</dim>", note(&after));
+        assert!(markup.contains(&before_line), "{shape}: {markup}");
+        assert!(markup.contains(&after_line), "{shape}: {markup}");
+        let guidance = markup.find("Stop any tasks using either path").expect("guidance");
+        assert!(markup.find(&after_line).unwrap() < guidance, "{shape}: coverage precedes the guidance\n{markup}");
     }
 }
 
@@ -599,116 +585,4 @@ fn a_slow_startup_warns_with_its_duration() {
     assert!(rendered[0].contains("took 1.6 s."), "{}", rendered[0]);
     assert!(rendered[1].contains("took 12.3 s."), "{}", rendered[1]);
     insta::assert_snapshot!(rendered.join("\n---\n"));
-}
-
-const ADMIN: &str = "/repo/.git/worktrees/fix-path-spelling";
-
-/// A removal stopped by `observed` in [`ADMIN`] (or elsewhere), after
-/// deleting entries, with the same limited process check before the move
-/// and after the stop.
-fn stopped_by(location: ActivityLocation, path: &str) -> OperationReport {
-    let mut report = moved(RemovalOutcome::ActivityDetected, 817_460);
-    report.journal.deleted = EntryCounts { files: 16_137, directories: 1_863, links: 0 };
-    report.push_activity(ObservedActivity { location, path: native(path), kind: ActivityKind::Modified, received_at_ms: AT_MS });
-    let [(_, partial), ..] = limited(ORIGINAL);
-    report.discovery.push(run(DiscoveryPurpose::Preflight, ORIGINAL, partial.clone()));
-    report.discovery.push(run(DiscoveryPurpose::Diagnostic, QUARANTINE, partial));
-    not_attempted(&mut report);
-    report
-}
-
-/// A `git status` in the moved checkout rewrites its index: the stop says a
-/// Git command ran, that only approved entries were deleted, the process
-/// check's gap once, and what to do before the retry.
-#[test]
-fn a_git_command_in_the_moved_checkout() {
-    let report = stopped_by(ActivityLocation::Admin, &format!("{ADMIN}/index.lock"));
-
-    insta::assert_snapshot!(stopped(&finished(report), Some("fix/path-spelling")));
-}
-
-/// Each kind of stop gets its own step before the retry, and a stop no
-/// step helps with gets the retry alone.
-#[test]
-fn a_stop_says_what_to_do_for_what_stopped_it() {
-    let head = stopped(&finished(stopped_by(ActivityLocation::Admin, &format!("{ADMIN}/HEAD.lock"))), None);
-    assert!(head.contains("Removal stopped: a Git command changed this worktree's HEAD while it was being removed."), "{head}");
-    assert!(head.contains("1. Let that Git command finish."), "{head}");
-
-    let gitdir = stopped(&finished(stopped_by(ActivityLocation::Admin, &format!("{ADMIN}/gitdir"))), None);
-    assert!(gitdir.contains("Removal stopped: Git's record of the worktree changed."), "{gitdir}");
-    assert!(gitdir.contains(&format!("1. Stop whatever is writing to {ADMIN}/gitdir.")), "{gitdir}");
-
-    let written = format!("{QUARANTINE}/target/debug/app");
-    let moved_files = stopped(&finished(stopped_by(ActivityLocation::Quarantine, &written)), None);
-    assert!(moved_files.contains("Removal stopped: files changed in the moved checkout."), "{moved_files}");
-    assert!(moved_files.contains(&format!("1. Stop whatever is writing to {written}.")), "{moved_files}");
-    assert!(moved_files.contains("2. Retry: wt remove fix/path-spelling"), "{moved_files}");
-
-    let mut interrupted = moved(RemovalOutcome::CleanupFailed, 2);
-    interrupted.errors.push("the removal was interrupted".into());
-    let interrupted = stopped(&finished(interrupted), None);
-    assert!(!interrupted.contains("What to do:"), "{interrupted}");
-    assert!(!interrupted.contains("Only entries you approved"), "nothing was deleted\n{interrupted}");
-    assert!(interrupted.contains("Retry: wt remove fix/path-spelling\n  Run it from anywhere outside the moved directory"), "{interrupted}");
-}
-
-/// Something still writing while the removal is prepared is named as that,
-/// with the entry it touched and the advice to let it finish; an entry
-/// that needs fixing keeps its own advice.
-#[test]
-fn a_refusal_for_a_write_while_preparing_says_to_let_it_finish() {
-    let changed = Refusal::Inventory(InventoryRefusal::Changed {
-        path: PathBuf::from(format!("{ORIGINAL}/target/release/deps/full.rmeta")),
-        change: Change::Appeared,
-    });
-    let uninspectable = Refusal::Inventory(InventoryRefusal::Uninspectable {
-        path: PathBuf::from(format!("{ORIGINAL}/locked")),
-        source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
-    });
-
-    let rendered: Vec<String> = [&changed, &uninspectable]
-        .into_iter()
-        .map(|refusal| {
-            let error = refusal_error(refusal, "fix-path-spelling", "fix/path-spelling", false);
-            assert_eq!(exit_code(&error), 3, "{refusal:?}");
-            render(&error.to_string())
-        })
-        .collect();
-
-    assert!(rendered[0].contains("something is still writing into it"), "{}", rendered[0]);
-    assert!(rendered[1].contains("Fix what is named above"), "{}", rendered[1]);
-    insta::assert_snapshot!(rendered.join("\n---\n"));
-}
-
-/// A removal that finished although things changed after the user agreed
-/// says so, names at most three changes and the lost watch, marks the
-/// original path as untouched, and names the saved report.
-#[test]
-fn a_finished_removal_names_what_changed_after_you_agreed() {
-    use worktree_cli::commands::remove::recovery::agreed_changes_markup;
-
-    let mut report = moved(RemovalOutcome::Removed, 0);
-    report.observation = Some(ObservationDiagnostics {
-        backend: ObservationBackend::FsEvents,
-        startup_ms: Some(12),
-        last_round_trip_ms: Some(10),
-        longest_round_trip_ms: Some(1007),
-        loss: Some(ObservationLoss {
-            stage: ObservationStage::Deletion,
-            reason: CoverageLost::FsEventsDropped { raw: 3, flags: vec![FsEventsLossFlag::UserDropped, FsEventsLossFlag::MustScanSubDirs] },
-            entries_since_drain: Some(2053),
-        }),
-    });
-    for (location, path, kind) in [
-        (ActivityLocation::Quarantine, format!("{QUARANTINE}/notes.txt"), ActivityKind::Created),
-        (ActivityLocation::Quarantine, QUARANTINE.to_string(), ActivityKind::CoverageLost),
-        (ActivityLocation::Original, ORIGINAL.to_string(), ActivityKind::Created),
-        (ActivityLocation::Admin, "/repo/.git/worktrees/fix-path-spelling/index".to_string(), ActivityKind::Modified),
-    ] {
-        report.push_activity(ObservedActivity { location, path: native(&path), kind, received_at_ms: AT_MS });
-    }
-
-    insta::assert_snapshot!(render(&agreed_changes_markup(&finished(report)).expect("changes")));
-    assert_eq!(agreed_changes_markup(&finished(moved(RemovalOutcome::Removed, 0))), None, "nothing changed, nothing said");
 }

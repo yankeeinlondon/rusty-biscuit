@@ -27,7 +27,7 @@ use crate::remove::observation::{CoverageLost, EventKind, ObservationStage, Root
 use crate::remove::outcome::{BranchState, EntryCounts, MAX_REPORTED_DELETED};
 use crate::remove::recovery::journal::EntryState;
 use crate::remove::recovery::store::fault::{self as store_fault, Fault};
-use crate::remove::recovery::store::{ENTRIES_FILE, JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
+use crate::remove::recovery::store::{JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
 use crate::remove::test_support::TestRepo;
 use crate::worktree::parse_worktree_list;
 
@@ -142,15 +142,22 @@ impl Fixture {
     }
 }
 
-/// A usage source answering every query with `processes`, counting queries.
+/// A usage source answering every query with `processes` (or, after the
+/// first, `then` when set), counting queries and recording the pauses before
+/// a Windows Search recheck instead of sleeping.
 struct Usage {
     outcome: &'static str,
     processes: Vec<ProcessRecord>,
+    then: Option<Vec<ProcessRecord>>,
     /// The shared budget ran out (partial discovery).
     exhausted: bool,
     /// Queries after this many fail.
     fail_after: Option<usize>,
+    /// The system directory a Windows Search image must be in; `None` (the
+    /// default, whatever the host) never rechecks.
+    system: Option<&'static str>,
     queries: AtomicUsize,
+    pauses: Mutex<Vec<Duration>>,
 }
 
 impl Usage {
@@ -159,13 +166,34 @@ impl Usage {
             outcome: "usable",
             exhausted: false,
             processes: Vec::new(),
+            then: None,
             fail_after: None,
+            system: None,
             queries: AtomicUsize::new(0),
+            pauses: Mutex::new(Vec::new()),
         }
+    }
+
+    /// First `first`, then `then` for every later query, on a Windows host
+    /// whose system directory is [`SYSTEM32`].
+    fn search_first(first: Vec<ProcessRecord>, then: Vec<ProcessRecord>) -> Self {
+        Self { processes: first, then: Some(then), system: Some(SYSTEM32), ..Self::clear() }
+    }
+
+    fn pauses(&self) -> Vec<Duration> {
+        self.pauses.lock().unwrap().clone()
     }
 }
 
 impl UsageSource for Usage {
+    fn system_directory(&self) -> Option<NativeString> {
+        self.system.map(NativeString::from)
+    }
+
+    fn pause(&self, wait: Duration) {
+        self.pauses.lock().unwrap().push(wait);
+    }
+
     fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
         let earlier = self.queries.fetch_add(1, Ordering::SeqCst);
         if self.fail_after.is_some_and(|after| earlier >= after) {
@@ -191,7 +219,10 @@ impl UsageSource for Usage {
             "limitations": []
         }))
         .unwrap();
-        report.processes = self.processes.clone();
+        report.processes = match &self.then {
+            Some(then) if earlier > 0 => then.clone(),
+            _ => self.processes.clone(),
+        };
         Ok(report)
     }
 }
@@ -219,6 +250,27 @@ fn holder(path: &Path) -> ProcessRecord {
             access: None,
             event_only: None,
         }],
+    }
+}
+
+const SYSTEM32: &str = r"C:\Windows\System32";
+
+/// Windows Search's protocol host, from the system directory, with an open
+/// file in the checkout.
+fn search_holder(path: &Path) -> ProcessRecord {
+    let file = path.join("notes.txt");
+    ProcessRecord {
+        pid: 6808,
+        creation_token: Some(91),
+        name: Some(NativeString::from("SearchProtocolHost.exe")),
+        executable: Some(NativeString::from(r"C:\WINDOWS\System32\SearchProtocolHost.exe")),
+        evidence: vec![Evidence {
+            matched_paths: vec![NativeString::from(file.as_path())],
+            observed_path: Some(NativeString::from(file.as_path())),
+            descriptor: None,
+            ..holder(path).evidence.remove(0)
+        }],
+        ..holder(path)
     }
 }
 
@@ -295,24 +347,8 @@ fn finished(removal: Removal) -> Finished {
     }
 }
 
-/// The saved report with its entries read back from the entries file it
-/// names. The saved JSON lists none inline, and names the file exactly when
-/// there are entries.
 fn saved_report(finished: &Finished) -> OperationReport {
-    let bytes = fs::read(&finished.report_path).unwrap();
-    let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert!(raw.get("journal_entries").is_none(), "no inline entries: {raw}");
-    let mut report: OperationReport = serde_json::from_slice(&bytes).unwrap();
-    let entries = finished.report_path.with_file_name(ENTRIES_FILE);
-    match report.entries_file.as_deref() {
-        Some(name) => {
-            assert_eq!(name, ENTRIES_FILE);
-            report.journal_entries = crate::remove::recovery::store::read_entries(&entries);
-            assert!(!report.journal_entries.is_empty(), "an entries file is named only when there are entries");
-        }
-        None => assert!(!entries.exists(), "no entries file beside a report that names none"),
-    }
-    report
+    serde_json::from_slice(&fs::read(&finished.report_path).unwrap()).unwrap()
 }
 
 /// Asserts a completed removal: both locations and the registration gone,
@@ -472,7 +508,7 @@ fn a_clean_removal_starts_only_its_deliberate_git_processes() {
 }
 
 /// More deletions than the report names: the named list is capped, and the
-/// saved entries file still lists every entry after the journal is deleted.
+/// saved report still lists every entry after the journal is deleted.
 #[test]
 fn a_completed_report_lists_every_entry_past_the_deleted_cap() {
     let fixture = fixture();
@@ -521,22 +557,20 @@ fn unsupported_discovery_still_removes_and_is_kept_in_the_report() {
     assert_incomplete_discovery_removes("unsupported", false);
 }
 
-/// Another process using the checkout never stops a removal the user
-/// agreed to: it is named in a warning, and the report keeps the query.
+/// Acceptance item 1: usage refuses before anything moves; consent to
+/// discard does not override it.
 #[test]
-fn observed_usage_is_reported_and_the_removal_completes() {
+fn observed_usage_refuses_before_anything_moves() {
     let fixture = fixture();
     let usage = Usage { processes: vec![holder(&fixture.gone)], ..Usage::clear() };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-    assert_removed(&fixture, &finished);
-    assert!(
-        finished.warnings.iter().any(|warning| warning.contains("node (PID 8124) was using the worktree")),
-        "{:?}",
-        finished.warnings
-    );
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 1, "queried once, never rechecked");
-    let DiscoveryResult::Report(report) = &finished.report.discovery[0].result else { panic!("{:?}", finished.report.discovery) };
-    assert_eq!(report.processes[0].pid, 8124);
+    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
+    match &refusal {
+        Refusal::Usage(UsageRefusal::InUse(in_use)) => assert_eq!(in_use.holders[0].pid, 8124),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(fixture.untouched());
+    assert!(fixture.no_pending(), "no record is created before the decisive query clears");
 }
 
 /// A query that could not verify the checkout refuses.
@@ -550,6 +584,85 @@ fn an_unverified_checkout_refuses() {
     assert!(fixture.untouched());
 }
 
+/// Only Windows Search holding a file: one 500 ms pause, exactly one more
+/// query, and the removal goes ahead with the recheck in the saved report
+/// (`assert_removed` compares it with the returned one).
+#[test]
+fn a_windows_search_hold_is_rechecked_once_and_recorded() {
+    let fixture = fixture();
+    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], Vec::new());
+
+    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
+
+    assert_removed(&fixture, &finished);
+    assert_eq!(usage.queries.load(Ordering::SeqCst), 2);
+    assert_eq!(usage.pauses(), [crate::remove::usage::SEARCH_RECHECK_WAIT]);
+    let purposes: Vec<_> = finished.report.discovery.iter().map(|run| run.purpose).collect();
+    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
+    let DiscoveryResult::Report(first) = &finished.report.discovery[0].result else { panic!("{:?}", finished.report.discovery) };
+    assert_eq!(first.processes[0].pid, 6808, "the first query's report is kept");
+    let discovery = finished.report.timeline.iter().find(|event| event.step == Step::Discovery).expect("a discovery step");
+    assert_eq!(discovery.detail.as_deref(), Some("Windows Search held 1 file(s); rechecked after 500 ms; released"));
+}
+
+/// Windows Search still holding a file at the recheck refuses, as any
+/// holder does, after exactly one recheck.
+#[test]
+fn a_windows_search_hold_that_outlasts_the_recheck_refuses() {
+    let fixture = fixture();
+    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], vec![search_holder(&fixture.gone)]);
+
+    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
+
+    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
+    assert_eq!(in_use.holders[0].pid, 6808);
+    assert_eq!(in_use.search_recheck.as_ref().map(|search| search.held), Some(1), "the refusal says a recheck happened");
+    assert_eq!(usage.queries.load(Ordering::SeqCst), 2, "one recheck, never a loop");
+    assert_eq!(usage.pauses().len(), 1);
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(fixture.untouched());
+    assert!(fixture.no_pending());
+}
+
+/// Any other holder beside Windows Search refuses at once: no pause and no
+/// second query.
+#[test]
+fn a_windows_search_hold_beside_another_holder_refuses_without_waiting() {
+    let fixture = fixture();
+    let usage = Usage::search_first(vec![holder(&fixture.gone), search_holder(&fixture.gone)], Vec::new());
+
+    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
+
+    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
+    assert_eq!(in_use.holders.len(), 2);
+    assert!(in_use.search_recheck.is_none());
+    assert_eq!(usage.queries.load(Ordering::SeqCst), 1);
+    assert!(usage.pauses().is_empty());
+    assert!(fixture.untouched());
+}
+
+/// A retry rechecks the quarantine the same way and records it.
+#[test]
+fn a_retry_rechecks_a_windows_search_hold_of_the_quarantine() {
+    let fixture = fixture();
+    let observers = Observers::default();
+    let id = crash_at(&fixture, &observers, Boundary::Moved);
+    let quarantine = fixture.quarantine_of(&id);
+    let fresh = fixture.resume_approval(&id);
+    let usage = Usage::search_first(vec![search_holder(&quarantine)], Vec::new());
+    let base = fixture.base();
+    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
+
+    let resumed = finished(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
+
+    assert_removed(&fixture, &resumed);
+    assert_eq!((usage.queries.load(Ordering::SeqCst), usage.pauses().len()), (2, 1));
+    let purposes: Vec<_> = resumed.report.discovery.iter().map(|run| run.purpose).collect();
+    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
+    assert!(resumed.report.timeline.iter().any(|event| event.step == Step::Discovery
+        && event.detail.as_deref() == Some("Windows Search held 1 file(s); rechecked after 500 ms; released")));
+}
+
 #[test]
 fn files_that_need_consent_refuse_without_it() {
     let fixture = fixture();
@@ -560,33 +673,28 @@ fn files_that_need_consent_refuse_without_it() {
     assert!(fixture.untouched());
 }
 
-/// The consent fingerprint and the tip are rechecked after discovery. The
-/// user agreed to the removal, so a difference is a warning and the removal
-/// completes.
+/// The consent fingerprint and the tip are rechecked after discovery.
 #[test]
-fn files_changed_after_approval_are_deleted_and_reported() {
+fn files_changed_after_approval_refuse() {
     let fixture = fixture();
     let approval = fixture.approval();
     fs::write(fixture.gone.join("README.md"), "changed after the report\n").unwrap();
-    let finished = finished(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert_removed(&fixture, &finished);
-    assert!(finished.warnings.iter().any(|warning| warning.contains("files")), "{:?}", finished.warnings);
+    let refusal = refused(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
+    assert!(matches!(&refusal, Refusal::Changed(why) if why.contains("files")), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert_eq!(fs::read_to_string(fixture.gone.join("README.md")).unwrap(), "changed after the report\n");
+    assert!(fixture.no_pending());
 }
 
-/// A tip that moved is reported; the approved branch deletion still
-/// compares the approved tip, so the moved branch is kept.
 #[test]
-fn a_tip_moved_after_approval_is_reported_and_the_moved_branch_kept() {
+fn a_tip_moved_after_approval_refuses() {
     let fixture = fixture();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
+    let approval = fixture.approval();
     let other = fixture.repo.commit("later.txt");
     fixture.repo.git(&["update-ref", &format!("refs/heads/{BRANCH}"), &other]);
-    let finished = finished(run(&fixture, &approval, &branches, &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::Removed);
-    assert!(!fixture.gone.exists());
-    assert!(finished.warnings.iter().any(|warning| warning.contains("HEAD moved")), "{:?}", finished.warnings);
-    assert!(finished.report.branch_failed(), "the branch moved, so its deletion fails safely");
-    assert!(fixture.branch_exists());
+    let refusal = refused(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
+    assert!(matches!(&refusal, Refusal::Changed(why) if why.contains("HEAD moved")), "{refusal:?}");
+    assert!(fixture.gone.join("README.md").is_file());
 }
 
 /// Observation that cannot be established is an environment limit (exit
@@ -616,10 +724,10 @@ fn a_locked_worktree_refuses() {
     assert!(fixture.untouched());
 }
 
-/// A change between the record's creation and the move is reported, and
-/// the new file is deleted with the rest.
+/// A change between the record's creation and the move refuses (exit 3),
+/// and the record of an operation that changed nothing is discarded.
 #[test]
-fn a_change_just_before_the_move_is_deleted_and_reported() {
+fn a_change_just_before_the_move_refuses_and_discards_the_record() {
     let fixture = fixture();
     let observers = Observers::default();
     let mut hook = |boundary: Boundary| {
@@ -629,14 +737,13 @@ fn a_change_just_before_the_move_is_deleted_and_reported() {
         }
         false
     };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert_removed(&fixture, &finished);
-    assert!(
-        finished.report.activity.iter().any(|observed| observed.path.as_path().ends_with("late.txt")),
-        "{:?}",
-        finished.report.activity
-    );
-    assert!(!fixture.branch_exists());
+    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
+    assert!(matches!(&refusal, Refusal::Inventory(InventoryRefusal::Changed { .. })), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(fixture.untouched() && fixture.gone.join("late.txt").is_file());
+    assert!(fixture.no_pending());
+    let store_dirs: Vec<_> = fs::read_dir(fixture.store().root()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    assert_eq!(store_dirs, ["locks"], "the operation directory is gone");
 }
 
 /// An interrupt that arrives before the move (during the usage query, say)
@@ -727,10 +834,11 @@ fn an_interrupt_during_a_wait_after_the_move_stops_with_a_pending_record() {
     assert!(fixture.branch_exists());
 }
 
-/// An admin event other than the move's own `gitdir` rewrite is reported,
-/// and the removal completes.
+/// An admin event other than the move's own `gitdir` rewrite stops the
+/// removal after the move: exit 1, both paths and the registration in their
+/// actual state, the branch kept, and the record pending.
 #[test]
-fn unexplained_activity_during_the_move_is_reported() {
+fn unexplained_activity_during_the_move_stops_after_it() {
     let fixture = fixture();
     let observers = Observers::default();
     let mut hook = |boundary: Boundary| {
@@ -740,16 +848,27 @@ fn unexplained_activity_during_the_move_is_reported() {
         false
     };
     let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert_removed(&fixture, &finished);
+    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
+    assert_eq!(finished.exit_class(), ExitClass::Failure);
     assert_eq!(finished.report.activity[0].location, ActivityLocation::Admin);
-    assert!(!fixture.branch_exists());
+    assert_eq!(finished.report.original_state, OriginalState::Moved);
+    assert_eq!(finished.report.registration, RegistrationState::AtQuarantine);
+    let quarantine = finished.report.quarantine.as_ref().unwrap();
+    assert_eq!(quarantine.state, QuarantineState::Present);
+    assert!(quarantine.path.as_path().join("README.md").is_file(), "nothing was deleted");
+    assert_eq!(finished.report.journal.deleted.total(), 0);
+    assert_eq!(finished.report.branches[0].state, BranchState::NotAttempted);
+    assert!(fixture.branch_exists());
+    assert_eq!(saved_report(&finished), finished.report);
+    assert_eq!(fixture.pending(), *finished.report.operation_id.as_ref().unwrap());
 }
 
-/// A retained-cwd style write into the quarantine during deletion is
-/// deleted with the rest and reported; the removal and its branch step
-/// complete.
+/// Acceptance item 3 at lifecycle level: a retained-cwd style write into
+/// the quarantine during deletion stops it, keeps the new file and the
+/// rest, reports both paths and the deletions so far, and runs no branch
+/// action.
 #[test]
-fn a_write_into_the_quarantine_during_deletion_is_deleted_and_reported() {
+fn a_write_into_the_quarantine_during_deletion_stops_with_an_honest_report() {
     let fixture = fixture();
     let observers = Observers::default();
     let quarantine = std::cell::RefCell::new(None::<PathBuf>);
@@ -766,22 +885,44 @@ fn a_write_into_the_quarantine_during_deletion_is_deleted_and_reported() {
     };
     let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
     let quarantine = quarantine.into_inner().unwrap();
-    assert_removed(&fixture, &finished);
-    assert!(!quarantine.exists());
-    assert!(
-        finished.report.activity.iter().any(|observed| observed.path.as_path() == quarantine.join("written-late.txt")),
-        "{:?}",
-        finished.report.activity
-    );
+    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
+    assert_eq!(finished.exit_class(), ExitClass::Failure);
+    assert_eq!(fs::read_to_string(quarantine.join("written-late.txt")).unwrap(), "new work");
+    assert!(finished.report.journal.deleted.total() >= 1, "batch 1 was deleted before the write");
+    assert_eq!(finished.report.deleted.len() as u64, finished.report.journal.deleted.total());
+    let reported = finished.report.quarantine.as_ref().unwrap();
+    assert_eq!(reported.state, QuarantineState::Present);
+    assert!(reported.retained.iter().any(|path| path.as_path() == Path::new("written-late.txt")));
+    assert_eq!(reported.retained_entries as usize, retained_entries(&quarantine, &reported.identity).unwrap().len());
     assert!(finished.report.notes.contains(&crate::remove::outcome::ReportNote::ConcurrentWriteLimit));
-    assert!(!fixture.branch_exists(), "the approved branch deletion ran");
+    assert_eq!(finished.report.registration, RegistrationState::AtQuarantine);
+    assert!(fixture.branch_exists(), "no branch operation");
+    assert_eq!(finished.report.branches[0].state, BranchState::NotAttempted);
+    // Diagnostics ask who uses the quarantine, a validated real directory.
+    assert!(finished.report.discovery.iter().any(|run| run.purpose == DiscoveryPurpose::Diagnostic
+        && run.path.as_path() == quarantine.as_path()));
+
+    // A retry that deletes the rest keeps the activity that stopped this one.
+    let id = fixture.pending();
+    let fresh = fixture.resume_approval(&id);
+    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    let report = &resumed.report;
+    let with_late_file = EntryCounts { files: FIXTURE_ENTRIES.files + 1, ..FIXTURE_ENTRIES };
+    assert_accounted_once(report, with_late_file);
+    let [earlier] = report.earlier_attempts.as_slice() else { panic!("{:?}", report.earlier_attempts) };
+    assert_eq!(earlier.outcome, RemovalOutcome::ActivityDetected);
+    assert!(!earlier.activity.is_empty());
+    assert_eq!(earlier.activity, finished.report.activity);
+    assert_eq!(earlier.original_state, finished.report.original_state);
+    assert_eq!(earlier.discovery, finished.report.discovery);
+    assert!(report.activity.is_empty(), "the retry saw no activity of its own");
 }
 
-/// Recreation at the original path is outside what the user agreed to: it
-/// is never touched, and reported, while the moved checkout and its record
-/// are removed.
+/// Acceptance item 3's other half: recreation at the original path stops
+/// the removal; the recreated tree is never touched or deleted.
 #[test]
-fn recreation_at_the_original_path_is_reported_and_left_alone() {
+fn recreation_at_the_original_path_stops_and_is_left_alone() {
     let fixture = fixture();
     let observers = Observers::default();
     let usage = Usage::clear();
@@ -794,22 +935,21 @@ fn recreation_at_the_original_path_is_reported_and_left_alone() {
         false
     };
     let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &observers, &mut hook).unwrap());
-    assert_eq!(finished.exit_class(), ExitClass::Success, "{:?}", finished.report);
-    assert_eq!(finished.report.outcome, RemovalOutcome::Removed);
-    assert_eq!(finished.report.registration, RegistrationState::Removed);
+    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
+    assert_eq!(finished.report.original_state, OriginalState::Recreated);
     assert_eq!(fs::read_to_string(fixture.gone.join("index.db")).unwrap(), "recreated");
-    assert!(finished.report.activity.iter().any(|observed| observed.location == ActivityLocation::Original), "{:?}", finished.report.activity);
-    assert!(!finished.report.quarantine.as_ref().unwrap().path.as_path().exists());
-    assert!(fixture.no_pending());
+    assert!(fixture.branch_exists());
+    let diagnostics: Vec<_> = finished.report.discovery.iter().filter(|run| run.purpose == DiscoveryPurpose::Diagnostic).collect();
+    assert!(diagnostics.iter().any(|run| same_location(run.path.as_path(), &fixture.gone)), "{diagnostics:?}");
 }
 
-/// Lost coverage right after the move is reported once, with its stage,
-/// and the removal completes without watching.
+/// Lost coverage right after the move stops as unverified state, and a
+/// diagnostic query that fails is recorded without changing the stop.
 #[test]
-fn lost_coverage_after_the_move_is_reported_and_the_removal_completes() {
+fn lost_coverage_after_the_move_stops_and_a_failed_diagnostic_is_recorded() {
     let fixture = fixture();
     let observers = Observers::default();
-    let usage = Usage::clear();
+    let usage = Usage { fail_after: Some(1), ..Usage::clear() };
     let mut hook = |boundary: Boundary| {
         if boundary == Boundary::Moved {
             observers.injector().overflow();
@@ -817,19 +957,22 @@ fn lost_coverage_after_the_move_is_reported_and_the_removal_completes() {
         false
     };
     let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &observers, &mut hook).unwrap());
-    assert_removed(&fixture, &finished);
-    let lost: Vec<_> = finished.report.activity.iter().filter(|observed| observed.kind == ActivityKind::CoverageLost).collect();
-    assert_eq!(lost.len(), 1, "{:?}", finished.report.activity);
+    assert_eq!(finished.report.outcome, RemovalOutcome::StateUnverified);
+    assert_eq!(finished.exit_class(), ExitClass::Failure);
+    assert_eq!(finished.report.activity.last().unwrap().kind, ActivityKind::CoverageLost);
     let loss = finished.report.observation.as_ref().and_then(|observation| observation.loss.clone()).expect("recorded");
     assert_eq!((loss.stage, loss.reason, loss.entries_since_drain), (ObservationStage::PostMove, CoverageLost::Overflow, None));
-    assert!(!fixture.branch_exists());
+    let diagnostic = finished.report.discovery.iter().find(|run| run.purpose == DiscoveryPurpose::Diagnostic).expect("a diagnostic query");
+    assert!(matches!(&diagnostic.result, DiscoveryResult::Failed { kind, .. } if kind == "root_identity"), "{diagnostic:?}");
+    assert!(fixture.branch_exists());
 }
 
 /// Lost coverage during deletion is saved with the attempt's observation
 /// diagnostics: the deletion stage and the entries processed since the
-/// previous drain. The removal completes.
+/// previous drain. A retry carries them as the earlier attempt's and records
+/// its own.
 #[test]
-fn a_loss_during_deletion_is_reported_with_its_stage() {
+fn a_loss_during_deletion_is_reported_with_its_stage_and_carried_by_the_retry() {
     let fixture = fixture();
     let observers = Observers::default();
     let mut hook = |boundary: Boundary| {
@@ -839,16 +982,25 @@ fn a_loss_during_deletion_is_reported_with_its_stage() {
         false
     };
     let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert_removed(&fixture, &finished);
+    assert_eq!(finished.report.outcome, RemovalOutcome::StateUnverified);
     let observation = finished.report.observation.clone().expect("the attempt observed");
     let loss = observation.loss.as_ref().expect("the overflow");
     assert_eq!((loss.stage, &loss.reason), (ObservationStage::Deletion, &CoverageLost::Overflow));
     // Received by the drain that ends batch 2's level, after at least that
     // batch.
     assert!(loss.entries_since_drain.is_some_and(|entries| entries >= 1), "{loss:?}");
-    let saved = saved_report(&finished);
+    let id = fixture.pending();
+    let saved = fixture.store().read_report(&id).unwrap().expect("saved");
     assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
-    assert_eq!(saved.observation, Some(observation), "persisted as returned");
+    assert_eq!(saved.observation, Some(observation.clone()), "persisted as returned");
+
+    let fresh = fixture.resume_approval(&id);
+    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    let [earlier] = resumed.report.earlier_attempts.as_slice() else { panic!("{:?}", resumed.report.earlier_attempts) };
+    assert_eq!(earlier.observation, Some(observation));
+    let own = resumed.report.observation.as_ref().expect("the retry observed");
+    assert_eq!(own.loss, None, "the retry lost nothing");
 }
 
 /// An interrupt stops at the next entry boundary; the operation stays
@@ -878,7 +1030,6 @@ fn an_interrupted_removal_is_resumed() {
     assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
     assert_eq!(finished.exit_class(), ExitClass::Failure);
     assert!(fixture.branch_exists());
-    assert_eq!(saved_report(&finished), finished.report, "the stop saves every entry so far");
     let first = finished.report;
     let deleted_first = first.journal.deleted.total();
     assert!(deleted_first >= 2 && deleted_first < FIXTURE_ENTRIES.total(), "{:?}", first.journal);
@@ -903,352 +1054,6 @@ fn an_interrupted_removal_is_resumed() {
     assert_eq!(earlier.discovery, first.discovery);
     assert_eq!(earlier.branches, first.branches);
     assert!(report.errors.is_empty(), "the earlier stop is not this attempt's: {:?}", report.errors);
-}
-
-/// Stops a first removal once `batches` deletion batches are done, with
-/// `at_batch` run at each batch boundary.
-fn interrupted_after(fixture: &Fixture, batches: u64, mut at_batch: impl FnMut(u64)) -> Finished {
-    let entry = fixture.entry();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let interrupted = std::sync::atomic::AtomicBool::new(false);
-    let mut hook = |boundary: Boundary| {
-        if let Boundary::DeletionBatch(batch) = boundary {
-            at_batch(batch);
-            if batch == batches + 1 {
-                interrupted.store(true, Ordering::SeqCst);
-            }
-        }
-        false
-    };
-    let stop = || interrupted.load(Ordering::SeqCst);
-    let finished = finished(with_env(&Usage::clear(), &Observers::default(), &stop, |env| run_with(&request, env, &mut hook)).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
-    finished
-}
-
-/// A pending operation whose report a version 5 `wt` saved, with its
-/// entries inline and no entries file, resumes: that report is read and
-/// carried as the earlier attempt, and the completed entries file lists
-/// every attempt's entries as the journals recorded them, never the inline
-/// list.
-#[test]
-fn a_removal_stopped_by_a_version_5_wt_resumes_and_completes() {
-    let fixture = fixture();
-    let first = interrupted_after(&fixture, 2, |_| {});
-    let id = fixture.pending();
-    let report_path = first.report_path.clone();
-    let quarantine = fixture.quarantine_of(&id);
-    let deleted_by_first: Vec<_> = first.report.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).cloned().collect();
-    assert!(!deleted_by_first.is_empty());
-    let original = serde_json::to_value(NativeString::from(fixture.gone.as_path())).unwrap();
-    // Frozen version 5 bytes: only the operation's own id and paths are
-    // filled in. Its one inline entry is one no journal planned.
-    let legacy = json!({
-        "report_version": 5,
-        "operation_id": id.as_str(),
-        "outcome": "activity_detected",
-        "original": original,
-        "original_state": "moved",
-        "quarantine": null,
-        "registration": "at_quarantine",
-        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
-        "discovery": [],
-        "activity": [],
-        "journal": {
-            "deleted": {"files": 1, "directories": 0, "links": 0},
-            "externally_absent": {"files": 0, "directories": 0, "links": 0},
-            "kept": {"files": 0, "directories": 0, "links": 0},
-            "planned": {"files": 0, "directories": 0, "links": 0},
-            "uncertain": {"files": 0, "directories": 0, "links": 0}
-        },
-        "journal_entries": [{"attempt": 1, "batch": 1, "path": {"display": "only-in-version-5"}, "kind": "file", "state": "deleted"}],
-        "deleted": [],
-        "notes": [],
-        "branches": [],
-        "errors": ["stopped by version 5"],
-        "truncation": {"activity_omitted": 0, "retained_omitted": 0, "deleted_omitted": 0},
-        "earlier_attempts": [],
-        "observation": null
-    });
-    // Overwriting keeps the saved file's owner-only mode.
-    fs::write(&report_path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
-    fs::remove_file(report_path.with_file_name(ENTRIES_FILE)).unwrap();
-    let read = fixture.store().read_report(&id).unwrap().expect("read");
-    assert_eq!((read.report_version, read.journal_entries.len()), (5, 1));
-
-    let fresh = fixture.resume_approval(&id);
-    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    assert!(!quarantine.exists());
-    let saved = saved_report(&resumed);
-    assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
-    assert_accounted_once(&saved, FIXTURE_ENTRIES);
-    let from_first: Vec<_> = saved.journal_entries.iter().filter(|entry| entry.attempt == 1).cloned().collect();
-    assert_eq!(from_first, deleted_by_first, "the first attempt's entries come from its journal");
-    assert!(saved.journal_entries.iter().all(|entry| entry.path.as_path() != Path::new("only-in-version-5")));
-    let [earlier] = saved.earlier_attempts.as_slice() else { panic!("{:?}", saved.earlier_attempts) };
-    assert_eq!((earlier.outcome, earlier.errors.as_slice()), (RemovalOutcome::ActivityDetected, ["stopped by version 5".to_string()].as_slice()));
-    assert_eq!((earlier.timeline[0].at_ms, earlier.observation.as_ref()), (5, None));
-}
-
-/// Stops a retry of pending operation `id` once `batches` deletion batches
-/// of its new journal are done.
-fn resume_interrupted_after(fixture: &Fixture, id: &OperationId, batches: u64) -> Finished {
-    let fresh = fixture.resume_approval(id);
-    let (base, branches) = (fixture.base(), fixture.delete_branch());
-    let request = ResumeRequest { base: &base, id, approval: Some(&fresh), record: None, branches: &branches };
-    let interrupted = std::sync::atomic::AtomicBool::new(false);
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::DeletionBatch(batches + 1) {
-            interrupted.store(true, Ordering::SeqCst);
-        }
-        false
-    };
-    let stop = || interrupted.load(Ordering::SeqCst);
-    let finished = finished(with_env(&Usage::clear(), &Observers::default(), &stop, |env| resume::resume_with(&request, env, &mut hook)).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
-    finished
-}
-
-/// Rewrites the version 3 journal at `path` as the frozen version 2 bytes an
-/// older `wt` wrote for the same batches: each position becomes the path and
-/// kind the inventory line lists there, and each state the path it is for.
-/// Built with `json!`, never the production writer.
-fn rewrite_as_version_2(path: &Path) {
-    let text = fs::read_to_string(path).unwrap();
-    let mut lines = text.lines();
-    let mut header: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
-    assert_eq!(header["header"]["journal_version"], 3, "{header}");
-    header["header"]["journal_version"] = json!(2);
-    let inventory_line = lines.next().unwrap();
-    let inventory: serde_json::Value = serde_json::from_str(inventory_line).unwrap();
-    let listed = inventory["inventory"]["entries"].as_array().unwrap();
-    let planned_at = |position: &serde_json::Value| {
-        let entry = &listed[usize::try_from(position.as_u64().unwrap()).unwrap()];
-        let kind = entry["shape"].as_object().unwrap().keys().next().unwrap().clone();
-        json!({"path": entry["path"], "kind": kind})
-    };
-    let mut out = vec![header.to_string(), inventory_line.to_string()];
-    let mut open: Vec<serde_json::Value> = Vec::new();
-    for line in lines {
-        let value: serde_json::Value = serde_json::from_str(line).unwrap();
-        if let Some(intent) = value.get("intent") {
-            open = intent["entries"].as_array().unwrap().iter().map(planned_at).collect();
-            out.push(json!({"intent": {"batch": intent["batch"], "entries": open}}).to_string());
-        } else {
-            let results = &value["results"];
-            let states = results["states"].as_array().unwrap();
-            assert_eq!(states.len(), open.len(), "{line}");
-            let entries: Vec<_> = open.iter().zip(states).map(|(planned, state)| json!({"path": planned["path"], "state": state})).collect();
-            out.push(json!({"results": {"batch": results["batch"], "entries": entries}}).to_string());
-        }
-    }
-    // Overwriting keeps the file's owner-only mode.
-    fs::write(path, format!("{}\n", out.join("\n"))).unwrap();
-}
-
-/// What a version 5 `wt` saved for one earlier attempt, inside a report's
-/// `earlier_attempts`.
-fn version_5_earlier_attempt(errors: &str) -> serde_json::Value {
-    json!({
-        "outcome": "cleanup_failed",
-        "original_state": "moved",
-        "quarantine": null,
-        "registration": "at_quarantine",
-        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
-        "discovery": [],
-        "activity": [],
-        "activity_omitted": 0,
-        "branches": [],
-        "errors": [errors],
-        "observation": null
-    })
-}
-
-/// Replaces the saved report of operation `id` with the frozen version 5
-/// bytes a stopped older `wt` saved: entries inline, no entries file.
-fn save_version_5_report(fixture: &Fixture, id: &OperationId, report_path: &Path, errors: &str, earlier: Vec<serde_json::Value>) {
-    let original = serde_json::to_value(NativeString::from(fixture.gone.as_path())).unwrap();
-    let zero = json!({"files": 0, "directories": 0, "links": 0});
-    let legacy = json!({
-        "report_version": 5,
-        "operation_id": id.as_str(),
-        "outcome": "cleanup_failed",
-        "original": original,
-        "original_state": "moved",
-        "quarantine": null,
-        "registration": "at_quarantine",
-        "timeline": [{"at_ms": 5, "step": "moved", "result": "succeeded", "detail": null}],
-        "discovery": [],
-        "activity": [],
-        "journal": {"deleted": zero, "externally_absent": zero, "kept": zero, "planned": zero, "uncertain": zero},
-        "journal_entries": [],
-        "deleted": [],
-        "notes": [],
-        "branches": [],
-        "errors": [errors],
-        "truncation": {"activity_omitted": 0, "retained_omitted": 0, "deleted_omitted": 0},
-        "earlier_attempts": earlier,
-        "observation": null
-    });
-    fs::write(report_path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
-    let _ = fs::remove_file(report_path.with_file_name(ENTRIES_FILE));
-    assert_eq!(fixture.store().read_report(id).unwrap().expect("read").report_version, 5);
-}
-
-/// The `journal_version` the first line of the journal at `path` declares.
-fn journal_version_of(path: &Path) -> u64 {
-    let text = fs::read_to_string(path).unwrap();
-    let header: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
-    header["header"]["journal_version"].as_u64().unwrap()
-}
-
-/// Two attempts an older `wt` stopped, each leaving a version 2 journal and
-/// a version 5 report, resume with this build: its attempt writes a version
-/// 3 journal beside the two version 2 archives, and the completed report
-/// lists every attempt's entries once, in attempt order, keeps the first
-/// attempt's unconfirmed batch uncertain, and carries both earlier reports.
-#[test]
-fn a_removal_stopped_twice_by_an_older_wt_resumes_with_version_3_journals() {
-    use crate::remove::recovery::journal::JournalEntry;
-
-    let fixture = fixture();
-    let first = interrupted_after(&fixture, 2, |_| {});
-    let id = fixture.pending();
-    let dir = fixture.store().operation_dir(&id);
-    let quarantine = fixture.quarantine_of(&id);
-    let journal = dir.join(JOURNAL_FILE);
-    rewrite_as_version_2(&journal);
-    // The older `wt` crashed in the window of its last deleting batch: the
-    // unlinks happened, the results line never became durable, and nothing
-    // after it was written. The stop's own batch, which kept its entries, is
-    // dropped with it.
-    let last_batch = first.report.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).map(|entry| entry.batch).max().unwrap();
-    assert!(last_batch >= 2, "{:?}", first.report.journal_entries);
-    let text = fs::read_to_string(&journal).unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    // Header, inventory, then an intent and a results line per batch.
-    let through_intent = 2 + 2 * usize::try_from(last_batch).unwrap() - 1;
-    assert!(lines[through_intent].starts_with("{\"results\""), "{text}");
-    fs::write(&journal, format!("{}\n", lines[..through_intent].join("\n"))).unwrap();
-    save_version_5_report(&fixture, &id, &first.report_path, "stopped by version 5 (attempt 1)", Vec::new());
-    let expected_first: Vec<JournalEntry> = first
-        .report
-        .journal_entries
-        .iter()
-        .filter(|entry| entry.batch <= last_batch)
-        .map(|entry| JournalEntry {
-            state: if entry.batch == last_batch { EntryState::Uncertain } else { entry.state },
-            ..entry.clone()
-        })
-        .collect();
-    assert!(expected_first.iter().all(|entry| entry.attempt == 1 && matches!(entry.state, EntryState::Deleted | EntryState::Uncertain)));
-
-    // Attempt 2, also an older `wt`'s: stopped again after one batch.
-    let second = resume_interrupted_after(&fixture, &id, 1);
-    assert!(fixture.branch_exists());
-    assert_eq!(journal_version_of(&dir.join("journal-1.jsonl")), 2, "attempt 1's journal is archived as written");
-    // An archived attempt's entries it kept are planned again by the next.
-    let expected_second: Vec<JournalEntry> =
-        second.report.journal_entries.iter().filter(|entry| entry.attempt == 2 && entry.state == EntryState::Deleted).cloned().collect();
-    assert!(!expected_second.is_empty(), "{:?}", second.report.journal_entries);
-    rewrite_as_version_2(&journal);
-    save_version_5_report(
-        &fixture,
-        &id,
-        &second.report_path,
-        "stopped by version 5 (attempt 2)",
-        vec![version_5_earlier_attempt("stopped by version 5 (attempt 1)")],
-    );
-
-    // Attempt 3, this build's: checked at its first batch, before anything
-    // more is deleted.
-    let fresh = fixture.resume_approval(&id);
-    let (base, branches) = (fixture.base(), fixture.delete_branch());
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &branches };
-    let versions = Mutex::new(None);
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::DeletionBatch(1) {
-            let read = |name: &str| journal_version_of(&dir.join(name));
-            *versions.lock().unwrap() = Some([read("journal-1.jsonl"), read("journal-2.jsonl"), read(JOURNAL_FILE)]);
-            assert!(!dir.join("journal-3.jsonl").exists());
-        }
-        false
-    };
-    let resumed = finished(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume::resume_with(&request, env, &mut hook)).unwrap());
-    assert_eq!(versions.into_inner().unwrap(), Some([2, 2, 3]), "two version 2 archives and this build's version 3 journal");
-    assert_removed(&fixture, &resumed);
-    assert!(!quarantine.exists() && !fixture.branch_exists());
-    assert!(!dir.join("journal-2.jsonl").exists(), "every journal is deleted after completion");
-
-    let saved = saved_report(&resumed);
-    assert_eq!(saved, resumed.report, "the entries file holds the complete list");
-    assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
-    assert_accounted_once(&saved, FIXTURE_ENTRIES);
-    let attempts: Vec<u32> = saved.journal_entries.iter().map(|entry| entry.attempt).collect();
-    assert!(attempts.is_sorted(), "{attempts:?}");
-    assert_eq!(attempts.first().zip(attempts.last()), Some((&1, &3)), "{attempts:?}");
-    let of = |attempt| saved.journal_entries.iter().filter(|entry| entry.attempt == attempt).cloned().collect::<Vec<_>>();
-    assert_eq!(of(1), expected_first, "attempt 1's version 2 journal, its last batch uncertain");
-    assert_eq!(of(2), expected_second, "attempt 2's version 2 journal");
-    assert!(of(3).iter().all(|entry| entry.state == EntryState::Deleted) && !of(3).is_empty());
-    let uncertain = expected_first.iter().filter(|entry| entry.state == EntryState::Uncertain).count() as u64;
-    assert!(uncertain >= 1);
-    assert_eq!(saved.journal.uncertain.total(), uncertain, "{:?}", saved.journal);
-    assert_eq!(saved.journal.deleted.total() + uncertain, FIXTURE_ENTRIES.total());
-    let errors: Vec<_> = saved.earlier_attempts.iter().map(|earlier| earlier.errors.as_slice()).collect();
-    assert_eq!(
-        errors,
-        [["stopped by version 5 (attempt 1)".to_string()].as_slice(), ["stopped by version 5 (attempt 2)".to_string()].as_slice()],
-        "both older reports are carried, oldest first"
-    );
-    assert!(saved.errors.is_empty(), "{:?}", saved.errors);
-}
-
-/// A stopped retry whose earlier report cannot be read warns, naming the
-/// file, and still resumes from the journals.
-#[test]
-fn an_unreadable_earlier_report_is_named_and_the_retry_still_completes() {
-    let fixture = fixture();
-    let first = interrupted_after(&fixture, 2, |_| {});
-    let id = fixture.pending();
-    fs::write(&first.report_path, b"{\"report_version\":6,").unwrap();
-    let fresh = fixture.resume_approval(&id);
-    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    assert_accounted_once(&saved_report(&resumed), FIXTURE_ENTRIES);
-    let path = first.report_path.display().to_string();
-    assert!(
-        resumed.warnings.iter().any(|warning| warning.starts_with("the earlier attempt's report could not be read") && warning.contains(&path)),
-        "{:?}",
-        resumed.warnings
-    );
-    assert!(resumed.report.earlier_attempts.is_empty());
-}
-
-/// A journal that cannot be read back when the stop is reported: the report
-/// says so, lists no entries, and names no entries file, and the journal is
-/// kept.
-#[test]
-fn a_stop_whose_journal_cannot_be_summarized_saves_no_entries_file() {
-    use std::io::Write as _;
-    let fixture = fixture();
-    let store = fixture.store();
-    let stopped = interrupted_after(&fixture, 1, |batch| {
-        if batch == 2 {
-            // A complete line no journal version has: replay refuses it.
-            let id = fixture.pending();
-            let journal = store.operation_dir(&id).join(JOURNAL_FILE);
-            fs::OpenOptions::new().append(true).open(journal).unwrap().write_all(b"{\"surprise\":true}\n").unwrap();
-        }
-    });
-    let report = &stopped.report;
-    assert!(report.errors.iter().any(|error| error.starts_with("the deletion journal could not be summarized")), "{:?}", report.errors);
-    assert_eq!((report.entries_file.as_deref(), report.journal_entries.len()), (None, 0));
-    assert_eq!(saved_report(&stopped), *report);
-    assert!(stopped.report_path.with_file_name(JOURNAL_FILE).exists());
-    assert!(!stopped.report_path.with_file_name(ENTRIES_FILE).exists());
 }
 
 #[test]
@@ -1382,10 +1187,9 @@ fn a_crash_after_the_move_is_resumed_by_the_original_name() {
     assert!(observers.started.load(Ordering::SeqCst) >= 2, "the retry observes again");
 }
 
-/// New content after a retry's approval is deleted and reported; content
-/// that needs consent still needs it.
+/// A retry never deletes content its fresh consent does not cover.
 #[test]
-fn new_content_in_the_quarantine_is_deleted_after_a_retry_is_approved() {
+fn new_content_in_the_quarantine_needs_fresh_consent() {
     let fixture = fixture();
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
@@ -1394,21 +1198,21 @@ fn new_content_in_the_quarantine_is_deleted_after_a_retry_is_approved() {
     fs::write(quarantine.join("new-work.txt"), "written after the crash").unwrap();
 
     let base = fixture.base();
-    let without_consent = Approval { discard_files: false, ..fixture.resume_approval(&id) };
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&without_consent), record: None, branches: &BranchActions::default() };
-    assert!(matches!(refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env))), Refusal::ConsentRequired));
-    assert!(quarantine.join("new-work.txt").is_file(), "no answer, nothing deleted");
+    let request = ResumeRequest { base: &base, id: &id, approval: Some(&before), record: None, branches: &BranchActions::default() };
+    let refusal = refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env)));
+    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
+    assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "written after the crash");
+    assert_eq!(fixture.pending(), id);
 
-    let request = ResumeRequest { approval: Some(&before), ..request };
-    let resumed = finished(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env)));
-    assert_removed(&fixture, &resumed);
-    assert!(resumed.warnings.iter().any(|warning| warning.contains("files")), "{:?}", resumed.warnings);
+    let without_consent = Approval { discard_files: false, ..fixture.resume_approval(&id) };
+    let request = ResumeRequest { approval: Some(&without_consent), ..request };
+    assert!(matches!(refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env))), Refusal::ConsentRequired));
+    assert!(quarantine.join("new-work.txt").is_file());
 }
 
-/// Usage of the quarantine is reported on a retry, as on a first attempt,
-/// and the retry completes.
+/// Usage of the quarantine refuses the retry, as it would a first attempt.
 #[test]
-fn usage_of_the_quarantine_is_reported_on_the_retry() {
+fn usage_of_the_quarantine_refuses_the_retry() {
     let fixture = fixture();
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
@@ -1417,9 +1221,9 @@ fn usage_of_the_quarantine_is_reported_on_the_retry() {
     let usage = Usage { processes: vec![holder(&quarantine)], ..Usage::clear() };
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-    let resumed = finished(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
-    assert_removed(&fixture, &resumed);
-    assert!(resumed.warnings.iter().any(|warning| warning.contains("PID 8124")), "{:?}", resumed.warnings);
+    let refusal = refused(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
+    assert!(matches!(refusal, Refusal::Usage(UsageRefusal::InUse(_))), "{refusal:?}");
+    assert!(quarantine.join("README.md").is_file());
 }
 
 #[test]
@@ -1855,59 +1659,3 @@ fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
 
 mod resume_consent;
 mod startup_warning;
-
-// ---- Other commands leave a checkout under removal alone -------------------
-
-/// `git status` refreshes a checkout's index, which a removal's watcher sees
-/// as activity and stops for. A listing runs it in every other worktree and
-/// in none a pending removal identifies: not in the quarantine Git now
-/// registers, and not in an unmoved checkout whose record is durable.
-#[test]
-#[serial_test::serial]
-fn a_listing_runs_no_git_status_in_a_checkout_under_removal() {
-    for at in [Boundary::Moved, Boundary::Begun] {
-        let fixture = fixture_with_neighbor();
-        let id = crash_at(&fixture, &Observers::default(), at);
-        let under_removal = match at {
-            Boundary::Moved => fixture.quarantine_of(&id),
-            _ => fixture.gone.clone(),
-        };
-        let stores = [crate::cache::cache_path(&fixture.base()).unwrap(), crate::fork_origin::fork_origin_path(&fixture.base()).unwrap()];
-
-        recorder::start_recording();
-        let mut list = crate::worktree::parse_worktree_state_in(&fixture.base()).unwrap();
-        crate::worktree::fill_worktree_statuses(&mut list).unwrap();
-        let calls = recorder::finish_recording();
-        for store in &stores {
-            let _ = fs::remove_file(store);
-        }
-
-        let statuses = calls.iter().filter(|args| args.iter().any(|arg| arg == "status")).count();
-        assert_eq!(statuses, 2, "{at:?}: the base and the neighbor only: {calls:?}");
-        let status = list.statuses.iter().find(|status| same_location(&status.entry.path, &under_removal)).expect("listed");
-        assert_eq!(status.removal.as_deref(), Some(BRANCH), "{at:?}");
-        assert_eq!(status.dirty, crate::worktree::DirtyStatus::Unknown, "{at:?}");
-        let keep = fixture.keep.as_deref().unwrap();
-        assert!(list.statuses.iter().filter(|status| !same_location(&status.entry.path, &under_removal)).all(|status| status.removal.is_none()));
-        assert!(list.statuses.iter().any(|status| same_location(&status.entry.path, keep)));
-    }
-}
-
-/// Lost coverage before the move, after the user agreed, is reported once
-/// and the removal goes ahead without watching.
-#[test]
-fn lost_coverage_before_the_move_is_reported_and_the_removal_completes() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Begun {
-            observers.injector().overflow();
-        }
-        false
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert_removed(&fixture, &finished);
-    let lost = finished.report.activity.iter().filter(|observed| observed.kind == ActivityKind::CoverageLost).count();
-    assert_eq!(lost, 1, "{:?}", finished.report.activity);
-    assert!(!fixture.branch_exists());
-}

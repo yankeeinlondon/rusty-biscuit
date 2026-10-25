@@ -76,18 +76,6 @@ flowchart TD
   `commit` onto `WorktreeStatus::availability` from `symlink_metadata` alone.
   Only `NotFound` counts as absence, and a link or reparse point is Other.
   Never read Git's reason text for a decision; it is localized.
-- **A checkout under removal is never inspected.** `git status` refreshes
-  the worktree's index (`index.lock`), which `wt remove`'s watcher treats as
-  activity and stops for (2026-10-23: `wt list` in another terminal stopped
-  an 835k-entry removal). `parse_worktree_state_in` reads
-  `remove::lifecycle::PendingRemovals` once (gix common dir, no git
-  process; same `same_operation` match a retry resolves with), and
-  `entry_dirtiness` returns `Unknown` for those entries in both
-  `gather_dirtiness` and `refresh_dirty_status`. `commit` puts the
-  removal's requested name on `WorktreeStatus::removal`; the table shows
-  `⊘` and a "has not finished" note, and `--ff` refuses such a holder
-  (`FfRefusal::RemovingHolder`). Any new per-worktree Git call in `wt list`
-  must skip these entries too.
 - Scoped tasks never print; the spinner is the CLI's, driven on the calling
   thread through `on_phase` and cleared at `WaitProgress::Finished`. A scoped
   panic surfaces at `join` after the wait.

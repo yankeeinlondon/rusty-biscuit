@@ -13,6 +13,7 @@ Watching stopped before the move: delivery of earlier changes on the folder hold
   Nothing is known to have been lost; wt stops because it cannot confirm that every change arrived.
   Confirmed checks took up to 2.4 s before this.
 
+Stop any tasks using either path. Inspect both locations and save new work.
 Retry: wt remove fix/path-spelling
-  Run it from anywhere outside the moved directory, such as the base checkout at /repo. It lists what is left and asks again about anything new or changed before deleting more.
+  Run it from the base checkout at /repo.
 Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

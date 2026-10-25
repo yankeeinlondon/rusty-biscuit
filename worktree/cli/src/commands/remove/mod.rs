@@ -28,7 +28,6 @@ pub mod recovery;
 mod report;
 pub mod usage;
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,9 +49,7 @@ use worktree::remove::lifecycle::{
     native_observation, release_unstarted, remove_checkout, resolve_target, resolve_target_in, resume, resume_consent,
 };
 use worktree::remove::outcome::{BranchState, BranchTarget};
-use worktree::remove::admin_entry::common_git_dir;
 use worktree::remove::recovery::record::BranchBinding;
-use worktree::remove::recovery::store::{RecoveryStore, STORE_DIR, StoreError};
 use worktree::remove::remote::{
     Reinterpretation, RemoteState, delete_remote_branch, origin_url, preflight_remote_deletion, remote_destination,
 };
@@ -62,7 +59,7 @@ use worktree::remove::safety::{
 };
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
-use worktree::remove::usage::{OwnedHandles, ReportedUsage, SniffUsage, UsageClearance, UsageSource, check_usage};
+use worktree::remove::usage::SniffUsage;
 use worktree::remove::{
     CheckoutState, Inventory, PrepareRefusal, branch_tip, collect_inventory, prepare, remove_local_branch,
 };
@@ -153,11 +150,6 @@ struct Facts {
     /// The checkout and its registration are already gone
     /// ([`Resolution::CheckoutRemoved`]): only branch actions are left.
     branch_only: bool,
-    /// Who was using the checkout when the report was made, shown before
-    /// the question and passed to the removal as its usage check. `None`
-    /// when nothing was queried (no checkout, a handoff's second run) or the
-    /// query failed, which the removal's own query then reports.
-    usage: Option<UsageClearance>,
 }
 
 impl Facts {
@@ -205,7 +197,6 @@ impl Facts {
             excluded: 0,
             retry: None,
             branch_only: false,
-            usage: None,
         })
     }
 
@@ -239,7 +230,6 @@ impl Facts {
             excluded: 0,
             retry: None,
             branch_only: true,
-            usage: None,
         }
     }
 
@@ -359,20 +349,6 @@ impl SafetyContext {
     }
 }
 
-/// Deletes the removal store's expired finished operations
-/// ([`RecoveryStore::prune_completed`]), silently and only when the store
-/// exists. `wt list` reads the store too but never calls this: only a removal
-/// writes there.
-fn prune_recovery_store(base: &Path) {
-    let Ok(common) = common_git_dir(base) else { return };
-    if fs::symlink_metadata(common.join(STORE_DIR)).is_err() {
-        return;
-    }
-    if let Ok(store) = RecoveryStore::open(&common) {
-        store.prune_completed(SystemTime::now());
-    }
-}
-
 /// `wt remove <name>`.
 pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
@@ -380,7 +356,6 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     // One listing finds the base checkout and resolves the name.
     let entries = worktree_entries()?;
     let base = resolve_worktree(&entries, "base")?.path;
-    prune_recovery_store(&base);
     let (entry, retry) = resolve(&terminal, &base, entries, name)?;
     if entry.is_main {
         return Err(WorktreeError::GitCommand(format!(
@@ -449,20 +424,11 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         facts.reported = Some(fingerprint(&facts)?);
     }
     facts.assess(flags.force_remote);
-    // Part of what the user weighs before answering; it never stops the
-    // removal.
-    if facts.missing().is_none() && !facts.branch_only {
-        facts.usage = check_usage(&SniffUsage, &facts.entry.path, &OwnedHandles::default()).ok();
-    }
     if let Some(inspection) = &facts.retry {
         eprintln!();
         print(&terminal, retry_markup(inspection, facts.excluded));
     }
     eprintln!("{}", facts.render_report(&terminal));
-    if let Some(holders) = facts.usage.as_ref().and_then(usage::holders_markup) {
-        print(&terminal, holders);
-        eprintln!();
-    }
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
         return Err(WorktreeError::RefusedToLoseWork(refusal + &facts.kept_link_note()));
     }
@@ -513,7 +479,7 @@ fn resolve(
 ) -> Result<(WorktreeEntry, Option<Inspection>), WorktreeError> {
     let target = match resolve_target_in(base, entries, name) {
         Ok(Target::Pending(pending)) => {
-            let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error))?;
+            let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error.to_string()))?;
             match inspection.resolution {
                 Resolution::NotStarted | Resolution::MovedUnassociated => {
                     let display = original_name(&inspection);
@@ -559,10 +525,7 @@ fn resolve(
     };
     match target {
         Ok(Target::Live(entry)) => Ok((entry, None)),
-        // An invariant of the release just made, not an unreadable store.
-        Ok(Target::Pending(_)) => Err(WorktreeError::RemovalFailed(unreadable_store_markup(
-            "the removal was released, but a pending record still matches the name",
-        ))),
+        Ok(Target::Pending(_)) => Err(store_error("the removal was released, but a pending record still matches the name")),
         Ok(Target::Ambiguous(candidates)) => {
             let live: Option<Vec<WorktreeCandidate>> = candidates
                 .iter()
@@ -583,22 +546,16 @@ fn resolve(
         }
         Err(ResolveError::NotFound(name)) => Err(WorktreeError::WorktreeNotFound(name)),
         Err(ResolveError::Git(error)) => Err(error),
-        Err(ResolveError::Store(error)) => Err(store_error(&error)),
+        Err(ResolveError::Store(error)) => Err(store_error(&error.to_string())),
     }
 }
 
-/// A recovery store that could not be read while resolving the name: nothing
-/// was changed, and the exit code is the one [`StoreError::exit_class`] gives
-/// the same error inside the lifecycle.
-fn store_error(error: &StoreError) -> WorktreeError {
-    recovery::exit_error(error.exit_class(), unreadable_store_markup(&error.to_string()))
-}
-
-fn unreadable_store_markup(reason: &str) -> String {
-    format!(
+/// A recovery store that could not be read: nothing was changed (exit 1).
+fn store_error(reason: &str) -> WorktreeError {
+    WorktreeError::RemovalFailed(format!(
         "<red><b>Nothing was removed.</b></red> The record of an earlier removal could not be read: {}.",
         usage::visible(reason)
-    )
+    ))
 }
 
 /// The directory name the pending removal's checkout had.
@@ -818,17 +775,12 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
         return execute_record_only(terminal, facts, actions);
     }
     let branches = branch_actions(facts, &actions);
-    // The report's query stands in for the removal's, so the checkout is
-    // queried once.
-    let usage: Box<dyn UsageSource> = match &facts.usage {
-        Some(clearance) => Box::new(ReportedUsage::new(&facts.entry.path, clearance.report.clone())),
-        None => Box::new(SniffUsage),
-    };
+    let usage = SniffUsage;
     // Opened only now: an interrupt while asking keeps its default effect.
     let window = interrupt::Window::open();
     let interrupted = || window.interrupted();
     let env = Environment {
-        usage: usage.as_ref(),
+        usage: &usage,
         interrupted: &interrupted,
         observe: &native_observation,
         slow_startup: &|startup| print(terminal, recovery::slow_startup_markup(startup)),
@@ -943,9 +895,6 @@ fn report_finished(terminal: &Terminal, facts: &Facts, actions: &Actions, finish
         removed.push(format!("branch {branch}"));
     }
     branch_messages(terminal, facts, actions);
-    if let Some(changes) = recovery::agreed_changes_markup(finished) {
-        print(terminal, changes);
-    }
     if actions.delete_remote {
         delete_on_origin(terminal, facts, &removed, true)?;
     }
@@ -1344,7 +1293,6 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     // One listing finds the base checkout and the target.
     let entries = worktree_entries()?;
     let base = resolve_worktree(&entries, "base")?.path;
-    prune_recovery_store(&base);
 
     let record = handoff::handoff_path(&base, token)
         .and_then(|path| handoff::consume(&path, now()))
@@ -1460,44 +1408,6 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
 mod tests {
     use super::*;
     use crate::exit::exit_code;
-    use worktree::remove::lifecycle::Refusal;
-    use worktree::remove::recovery::journal::{JournalInvalid, JournalWriteError};
-    use worktree::remove::recovery::lock::LockError;
-    use worktree::remove::recovery::record::RecordInvalid;
-    use worktree::remove::recovery::{OperationId, StorageProblem};
-
-    /// Resolving a name and running the lifecycle classify a store error
-    /// the same way, so `wt remove` exits with one code for it either way.
-    #[test]
-    fn a_store_error_exits_alike_from_name_lookup_and_the_lifecycle() {
-        let id = || OperationId::parse(&"0".repeat(32)).unwrap();
-        let errors = [
-            (StoreError::Storage { path: "/s".into(), problem: StorageProblem::Link }, 4),
-            (StoreError::Lock(LockError::Busy), 4),
-            (StoreError::Io(std::io::Error::other("denied")), 4),
-            (StoreError::JournalWrite(JournalWriteError::LimitReached { limit: 1 }), 4),
-            (StoreError::Pending(id()), 3),
-            (StoreError::Record { id: id().to_string(), reason: RecordInvalid::OperationMismatch }, 3),
-            (StoreError::Report { path: "/s/report.json".into(), reason: "eof".into() }, 3),
-            (
-                StoreError::Journal {
-                    path: "/s/journal-1.jsonl".into(),
-                    reason: JournalInvalid::Malformed { line: 2, reason: "bad".into() },
-                },
-                3,
-            ),
-            (StoreError::InventoryMismatch, 3),
-            (StoreError::WrongLock, 1),
-            (StoreError::PhaseOrder, 1),
-            (StoreError::Completed(id()), 1),
-        ];
-        for (error, code) in errors {
-            let looked_up = store_error(&error);
-            assert_eq!(exit_code(&looked_up), code, "{error:?}");
-            let refusal = Refusal::Store(error);
-            assert_eq!(exit_code(&recovery::refusal_error(&refusal, "feat-x", "feat-x", false)), code, "{refusal:?}");
-        }
-    }
 
     #[test]
     fn context_never_changes_an_exit_code() {

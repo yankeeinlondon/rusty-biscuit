@@ -6,20 +6,13 @@
 //! | File | Written | Kept after completion |
 //! | --- | --- | --- |
 //! | `record.json` ([`record`]) | before any mutation; rewritten as phases finish | yes, marked completed |
-//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after, both naming entries by inventory position | only when the final entries file could not list its entries |
+//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | only when the final report could not list its entries |
 //! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, a copy of the journal so far is kept under the next free `<n>` | as `journal.jsonl` |
 //! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes; a retry carries the earlier attempt's report into its own | yes |
-//! | `entries.jsonl.gz` ([`store::ENTRIES_FILE`]) | just before each `report.json` that names it: every journal entry, gzip-compressed JSON Lines | yes |
 //!
 //! Every attempt's journal counts toward the report: the archives are read
 //! with the current journal (see [`store::Operation::journal_entries`]), and
-//! the completed operation's entries file lists every entry before the
-//! journals are deleted. Nothing reads the entries file back; recovery
-//! always reads the journals.
-//!
-//! "Kept after completion" lasts 14 days: the next `wt remove` after that
-//! deletes the whole folder ([`store::RecoveryStore::prune_completed`]). A
-//! pending operation is never deleted that way.
+//! the completed report lists every entry before the journals are deleted.
 //!
 //! The store lives in the common Git directory, outside both checkout paths
 //! and outside the target's own worktree record, which removal deletes.
@@ -34,12 +27,9 @@
 //!   temporary name, flushed, and renamed into place. A crash before the
 //!   rename leaves only a hidden directory that names no operation, and
 //!   nothing has been mutated yet.
-//! - `record.json`, `report.json`, and `entries.jsonl.gz` are replaced by
-//!   write-temp, `fsync`, rename, then `fsync` of the directory, so a reader
-//!   sees the old or the new file, never a torn one. The entries file is
-//!   published before the report that names it, and completion is recorded
-//!   only after both; a crash between the two leaves newer entries beside an
-//!   older report of a still-pending operation, whose journals remain.
+//! - `record.json` and `report.json` are replaced by write-temp, `fsync`,
+//!   rename, then `fsync` of the directory, so a reader sees the old or the
+//!   new record, never a torn one.
 //! - A retry replaces `journal.jsonl` without ever leaving the operation
 //!   without a readable journal: it first copies the old journal durably to
 //!   `journal-<n>.jsonl` (reusing the newest archive when a stopped retry

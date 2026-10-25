@@ -662,12 +662,12 @@ fn an_unknown_name_fails_and_the_base_checkout_is_refused() {
         .stderr(predicate::str::contains("main checkout"));
 }
 
-/// Usage is part of the report, before the questions: a process standing in
-/// the worktree is named by PID, and the removal goes ahead once the user
-/// agreed (here through the force flags), with a warning naming it again.
+/// Usage is checked after the report and the questions, right before
+/// anything moves: a process standing in the worktree refuses with exit 3,
+/// names its PID, and no force flag overrides it.
 #[cfg(unix)]
 #[test]
-fn a_process_standing_in_the_worktree_is_reported_and_the_removal_completes() {
+fn a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/busy", "busy");
     let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
@@ -682,19 +682,17 @@ fn a_process_standing_in_the_worktree_is_reported_and_the_removal_completes() {
     let _ = holder.kill();
     let _ = holder.wait();
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("In use: 1 process is using this worktree now."), "{stderr}");
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Removal paused: another process is using busy."), "{stderr}");
     assert!(stderr.contains(&format!("PID {pid}")) && stderr.contains("sleep"), "{stderr}");
     assert!(stderr.contains("Working directory:"), "{stderr}");
-    assert!(stderr.contains("They don't stop the removal"), "{stderr}");
-    assert!(stderr.find("Branch feat/busy") < stderr.find("In use:"), "with the report: {stderr}");
-    assert!(stderr.find("In use:") < stderr.find("Removed worktree"), "before the removal: {stderr}");
-    assert!(stderr.contains(&format!("(PID {pid}) was using the worktree when it was removed")), "{stderr}");
-    assert!(!stderr.contains("Removal paused"), "{stderr}");
+    assert!(stderr.contains("The checkout and branches were kept."), "{stderr}");
+    assert!(stderr.find("Branch feat/busy") < stderr.find("Removal paused"), "after the report: {stderr}");
     assert!(output.stdout.is_empty(), "no protocol lines");
-    assert!(!wt.exists());
-    assert!(listed_block(&fixture, &wt).is_none(), "unregistered");
-    assert_eq!(pending_removals(&fixture), 0);
+    assert!(wt.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/busy"));
+    assert!(listed_block(&fixture, &wt).is_some(), "still registered");
+    assert_eq!(pending_removals(&fixture), 0, "a refusal leaves no recovery record");
 }
 
 /// The pending (or any) operation directories under the repository's
@@ -1904,10 +1902,10 @@ fn the_parent_shell_inside_does_not_block_the_handoff_and_the_second_run_removes
 }
 
 /// A different process still using the worktree when the second run starts
-/// is named in a warning there, and the removal completes.
+/// refuses there (exit 3), with no protocol line, and nothing is removed.
 #[cfg(unix)]
 #[test]
-fn a_process_still_inside_after_the_handoff_is_reported_by_the_second_run() {
+fn a_process_still_inside_after_the_handoff_refuses_the_second_run() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/x", "feat-x");
     let (landing, token) = first_run(&fixture, &wt, &[]);
@@ -1919,10 +1917,10 @@ fn a_process_still_inside_after_the_handoff_is_reported_by_the_second_run() {
     let _ = holder.kill();
     let _ = holder.wait();
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains(&format!("(PID {pid}) was using the worktree when it was removed")), "{stderr}");
-    assert!(!stderr.contains("Removal paused"), "{stderr}");
-    assert!(!wt.exists());
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Removal paused") && stderr.contains(&format!("PID {pid}")), "{stderr}");
+    assert!(output.stdout.is_empty(), "no cd: or remove-handoff: after a refusal");
+    assert_nothing_removed(&fixture, &wt);
     assert_eq!(pending_removals(&fixture), 0);
 }
 
@@ -3819,11 +3817,11 @@ fn a_branch_that_moves_after_its_worktree_is_removed_is_kept() {
 
 /// `--force-worktree` approves discarding the files the report listed. A
 /// version staged after the report (here, as soon as the files were
-/// fingerprinted) was never shown; the user agreed to the removal, so it
-/// goes ahead and a warning says the files changed after they agreed.
+/// fingerprinted) was never shown, and `git worktree remove --force` would
+/// discard it, so removal refuses.
 #[cfg(unix)]
 #[test]
-fn a_change_staged_after_the_report_is_reported() {
+fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fs::write(wt.join("notes.txt"), "reported\n").unwrap();
@@ -3841,9 +3839,15 @@ fn a_change_staged_after_the_report_is_reported() {
         .unwrap();
 
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("files or staged changes changed after you agreed"), "{stderr}");
-    assert!(stderr.contains("Removed worktree"), "{stderr}");
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("changed after they were checked"), "{stderr}");
+    assert!(!stderr.contains("Removed worktree"), "{stderr}");
+    assert_eq!(git(&wt, &["diff", "--cached", "--name-only"]), "README.md", "the staged change survives");
+    assert!(wt.join("notes.txt").exists());
+    assert!(fixture.branch_exists("feat/x"));
+
+    // Unchanged since its report, the same removal goes ahead.
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"]).assert().code(0);
     assert!(!wt.exists());
 }
 

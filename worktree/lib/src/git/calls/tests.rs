@@ -125,7 +125,7 @@ fn the_library_spawn_sites_return_their_tasks_counts() {
     assert_eq!(entries.len(), 3);
 
     let scope = CallScope::enter();
-    let dirty = gather_dirtiness(&entries, &Default::default());
+    let dirty = gather_dirtiness(&entries);
     assert_eq!(dirty.len(), 3);
     assert_eq!(scope.finish(), 3, "one `git status` per entry, each on its own thread");
 }

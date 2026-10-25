@@ -204,7 +204,7 @@ What counts is what the refresh worker recorded for the exact answer this listin
 
 The closing fallback notice below is about a different request and may appear in the same listing.
 
-The `Worktree` legend line gains entries at its end only when the table needs them: `✕ git can't read worktree` when some row shows `✕` for that reason, `⊘ being removed` when some row shows `⊘`, and `? couldn't check` when some row shows `?`. A `✕` row whose path is [a link Git still reads through](#a-link-in-place-of-the-worktree) is explained as `✕ its path is a link`, or, beside rows Git can't read, `✕ git can't read worktree, or its path is a link`. A listing with neither shows the two lines above. With both:
+The `Worktree` legend line gains entries at its end only when the table needs them: `✕ git can't read worktree` when some row shows `✕` for that reason, and `? couldn't check` when some row shows `?`. A `✕` row whose path is [a link Git still reads through](#a-link-in-place-of-the-worktree) is explained as `✕ its path is a link`, or, beside rows Git can't read, `✕ git can't read worktree, or its path is a link`. A listing with neither shows the two lines above. With both:
 
 ```text
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files    ✕ git can't read worktree    ? couldn't check
@@ -220,7 +220,6 @@ The table is never narrower than the legend beneath it; a table with short conte
     - `●` (yellow): uncommitted files, none of them source code
     - `●` (red, the same red as `conflicts`): at least one uncommitted source file
     - `✕` (red): Git can't read this worktree, so its files were not checked, or its path is a link that may have replaced it; a [closing note](#closing-notes) says what is wrong and how to recover
-    - `⊘` (yellow): a `wt remove` of this worktree has started and not finished, so its files were not checked; a [closing note](#closing-notes) names the command that finishes it (see [Worktrees being removed](#worktrees-being-removed))
     - `?` (dim): `git status` failed for a worktree Git otherwise lists normally, so its files are unknown. A `?` is never shown as clean
 - **Branch** -- a tree built from the fork records `wt create` keeps (see `--from` in the [README](../../README.md)):
     - the default branch comes first, as a badge; branches forked from another branch nest under it
@@ -258,20 +257,6 @@ A linked worktree can lose its connection to the repository while Git still reco
 | Anything else: a file or a link at the path, a path or `.git` that can't be inspected, or a `.git` that exists but Git can't use | other | `Git can't read this worktree: <what was found>; Git reports: <Git's reason>.` |
 
 "Does not exist" means the operating system answered "not found". A permission or I/O error is never read as absence; it is the "other" case, with the system's message. See [`wt remove`](remove.md) for what removing each kind does.
-
-#### Worktrees being removed
-
-`wt remove` moves a checkout aside to a hidden `.wt-remove-<name>-<token>` folder, deletes it, and stops if anything else writes there meanwhile. `git status` counts as a write: it refreshes the worktree's index file. So `wt list` never runs `git status` in a worktree a `wt remove` has started and not finished, whether it is still at its own path or already moved aside. Running `wt list` in another terminal while a removal runs can't stop it.
-
-Such a row shows `⊘` and gets a closing note with the name the removal was started with:
-
-```text
-│ ⊘ .wt-remove-feat-x-a91c0d2e4f6b8a10 │ feat/x │ clean │ — │
-…
-- .wt-remove-feat-x-a91c0d2e4f6b8a10: a wt remove of it has not finished; wt remove feat-x finishes it.
-```
-
-The note is the same whether that removal is still running or stopped earlier; `wt remove feat-x` continues a stopped one (see [Recovery records and retry](remove.md#recovery-records-and-retry)). `wt` knows a removal is pending from its record under `<git-common-dir>/wt-removal/`; if that folder can't be read, no row is marked.
 
 #### A link in place of the worktree
 
@@ -387,7 +372,7 @@ After a blank line, the output can end with up to six kinds of note, in this ord
     ```
 
     The last names the lane by what you know it as (`origin/main` when it is ahead of `main`), and the carrying branch only when it is drawn; otherwise it says `merged through another branch`. The graph tags that branch's tip `in origin/main` too, when the tip is drawn.
-- **Unavailable worktrees.** One note per `✕` or `⊘` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read) and [Worktrees being removed](#worktrees-being-removed):
+- **Unavailable worktrees.** One note per `✕` row, in table order (a `?` row gets none), as described under [Worktrees Git can't read](#worktrees-git-cant-read):
 
     ```text
     - feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely.
@@ -446,7 +431,6 @@ Waits for the check like `--refresh`, then moves the local default branch to `or
 - when a worktree has it checked out, it runs `git merge --ff-only` there, which refuses rather than overwrite local changes to files the update touches
 - a diverged branch, or a missing local branch or tracking ref, is refused with a note and nothing is created or changed; in sync or ahead does nothing and prints nothing
 - when the worktree holding the default branch is one Git can't read (`✕`), the move is refused rather than made underneath it: `main wasn't fast-forwarded: Git can't read the worktree that has it checked out, /code/wts/main-copy.` `--ff` never repairs that worktree. When the branch is already in sync, there is nothing to refuse and no note
-- when the worktree holding the default branch is [being removed](#worktrees-being-removed) (`⊘`), the move is refused the same way, since updating its files would stop the removal: `main wasn't fast-forwarded: the worktree that has it checked out, /code/wts/.wt-remove-main-copy-a91c, is being removed; wt remove main-copy finishes that.`
 
 Both refs and their ancestry are read again immediately before the move. The move happens after the listing's local work is done, and a checkout whose files it moved gets its uncommitted-file status measured again; see [Local work during the wait](#local-work-during-the-wait). When the check or fetch failed, `--ff` still fast-forwards to the local `origin/<default>` if that is ahead, and the caption keeps the failure reason, so you know the target may itself be out of date. A refusal does not fail the listing.
 

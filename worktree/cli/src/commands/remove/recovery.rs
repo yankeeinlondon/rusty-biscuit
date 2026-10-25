@@ -25,7 +25,6 @@ use std::time::Duration;
 use sniff::filesystem::query::NativeString;
 use worktree::WorktreeError;
 use worktree::remove::lifecycle::{Candidate, ExitClass, Finished, Inspection, Presence, Refusal, Resolution};
-use worktree::remove::observation::inventory::{Change, InventoryRefusal};
 use worktree::remove::observation::{
     CoverageLost, ObservationBackend, ObservationDiagnostics, ObservationError, ObservationLoss, ObservationStage, Root,
 };
@@ -72,12 +71,8 @@ pub fn refusal_error(refusal: &Refusal, display_name: &str, name: &str, resumed:
     if let Refusal::Recovery(inspection) = refusal {
         return WorktreeError::RefusedToLoseWork(inspection_markup(inspection, name));
     }
-    exit_error(refusal.exit_class(), refusal_markup(refusal, display_name, name, resumed))
-}
-
-/// The error that exits `wt` with `class`'s code and shows `markup`.
-pub fn exit_error(class: ExitClass, markup: String) -> WorktreeError {
-    match class {
+    let markup = refusal_markup(refusal, display_name, name, resumed);
+    match refusal.exit_class() {
         ExitClass::Blocked => WorktreeError::BlockedByEnvironment(markup),
         ExitClass::Failure => WorktreeError::RemovalFailed(markup),
         ExitClass::Refused | ExitClass::Success => WorktreeError::RefusedToLoseWork(markup),
@@ -109,22 +104,14 @@ pub fn refusal_markup(refusal: &Refusal, display_name: &str, name: &str, resumed
             or with <i>git worktree remove</i> instead."
                 .to_string()
         }
-        (Refusal::Inventory(InventoryRefusal::Changed { .. }), _) => {
-            format!("Let it finish, or stop it, then run {rerun} again.")
-        }
         (Refusal::Inventory(_) | Refusal::Ineligible(_), _) => {
             format!("Nothing was moved. Fix what is named above, then run {rerun} again.")
         }
         _ => format!("Run {rerun} again."),
     };
-    let reason = match (refusal, startup_loss) {
-        (_, Some((_, reason))) => format!("the watch did not start delivering changes: {}", loss_reason(reason, None)),
-        (Refusal::Inventory(InventoryRefusal::Changed { path, change }), None) => format!(
-            "something is still writing into it ({} {} while <i>wt</i> was preparing the removal)",
-            visible(&path.display().to_string()),
-            change_verb(*change)
-        ),
-        (_, None) => visible(&refusal.to_string()),
+    let reason = match startup_loss {
+        Some((_, reason)) => format!("the watch did not start delivering changes: {}", loss_reason(reason, None)),
+        None => visible(&refusal.to_string()),
     };
     let stopped = if resumed { "stopped before deleting more of" } else { "stopped before moving" };
     format!(
@@ -136,10 +123,7 @@ pub fn refusal_markup(refusal: &Refusal, display_name: &str, name: &str, resumed
 
 /// The report for a removal that changed something and did not finish: both
 /// locations, what was deleted and what is left, observed activity, Git's
-/// registration, each branch, that only approved entries were deleted,
-/// limited process checks (one line per distinct gap), and what to do: a
-/// step for what stopped it when one helps ([`first_step`]), then the
-/// retry. `branch` is the worktree's
+/// registration, each branch, limited process checks, and how to retry. `branch` is the worktree's
 /// branch, reported kept when no step touched it; `base` is the base
 /// checkout a retry runs from.
 pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branch: Option<&str>, base: &Path) -> String {
@@ -169,82 +153,31 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
     if report.errors.len() > ERROR_LIMIT {
         lines.push(format!("<dim>…and {} more errors, listed in the saved report</dim>", report.errors.len() - ERROR_LIMIT));
     }
-    if report.outcome != RemovalOutcome::Removed && report.journal.deleted.total() > 0 {
-        lines.push("Only entries you approved before the move were deleted.".to_string());
-        if report.notes.contains(&ReportNote::ConcurrentWriteLimit) {
-            lines.push(
-                "  <dim>A file written in the instant before <i>wt</i> deleted its path would have been deleted \
-                too; the saved entries list (entries.jsonl.gz) names every deleted path.</dim>"
-                    .to_string(),
-            );
-        }
+    if report.outcome != RemovalOutcome::Removed
+        && report.notes.contains(&ReportNote::ConcurrentWriteLimit)
+        && report.journal.deleted.total() > 0
+    {
+        lines.push(
+            "<dim>A write that landed just before its entry was deleted was deleted with it; \
+            the saved report lists every deleted entry.</dim>"
+                .to_string(),
+        );
     }
     lines.extend(discovery_lines(report));
 
     lines.push(String::new());
-    let retry = format!("Retry: {}", rerun(name));
-    // Only a checkout that is still partly there is listed and asked about
-    // again; a removed one's retry asks only about the branches.
-    let explained = report.outcome != RemovalOutcome::Removed && report.original_state != OriginalState::Kept;
-    let explanation = format!(
-        "Run it from anywhere outside the moved directory, such as the base checkout at {}. It lists what is \
-        left and asks again about anything new or changed before deleting more.",
-        visible(&base.display().to_string())
-    );
-    match first_step(report) {
-        Some(step) => {
-            lines.push("What to do:".to_string());
-            lines.push(format!("  1. {step}"));
-            lines.push(format!("  2. {retry}"));
-            if explained {
-                lines.push(format!("     <dim>{explanation}</dim>"));
-            }
-        }
-        None => {
-            lines.push(retry);
-            if explained {
-                lines.push(format!("  <dim>{explanation}</dim>"));
-            }
-        }
+    if report.outcome != RemovalOutcome::Removed {
+        lines.push("Stop any tasks using either path. Inspect both locations and save new work.".to_string());
+    }
+    lines.push(format!("Retry: {}", rerun(name)));
+    if report.original_state != OriginalState::Kept {
+        lines.push(format!("  <dim>Run it from the base checkout at {}.</dim>", visible(&base.display().to_string())));
     }
     lines.push(format!("Full report: {}", visible(&finished.report_path.display().to_string())));
     for warning in &finished.warnings {
         lines.push(format!("<yellow>Warning:</yellow> {}", visible(warning)));
     }
     lines.join("\n")
-}
-
-/// The warning for a removal that finished although things changed after
-/// the user agreed, or watching stopped: what happened (at most
-/// [`ACTIVITY_LIMIT`] changes, then a count) and the saved report. `None`
-/// when nothing did.
-pub fn agreed_changes_markup(finished: &Finished) -> Option<String> {
-    let report = &finished.report;
-    let total = report.activity.len() as u64 + report.truncation.activity_omitted;
-    if total == 0 {
-        return None;
-    }
-    let mut lines = vec![format!(
-        "<yellow>Warning:</yellow> {total} {} after you agreed; <i>wt</i> removed the worktree anyway.",
-        if total == 1 { "change happened" } else { "changes happened" }
-    )];
-    for observed in report.activity.iter().take(ACTIVITY_LIMIT) {
-        lines.push(match (observed.kind, report.observation.as_ref().and_then(|observation| observation.loss.as_ref())) {
-            (ActivityKind::CoverageLost, Some(loss)) => {
-                format!("  watching for changes stopped: {}", loss_reason(&loss.reason, Some(report)))
-            }
-            (ActivityKind::CoverageLost, None) => "  watching for changes stopped".to_string(),
-            (kind, _) if observed.location == ActivityLocation::Original => {
-                format!("  {} {} <dim>(outside the worktree; not touched)</dim>", native(&observed.path), activity_verb(kind))
-            }
-            (kind, _) => format!("  {} {}", native(&observed.path), activity_verb(kind)),
-        });
-    }
-    if total > ACTIVITY_LIMIT as u64 {
-        lines.push(format!("  <dim>…and {} more, listed in the saved report</dim>", total - ACTIVITY_LIMIT as u64));
-    }
-    lines.push(format!("Full report: {}", visible(&finished.report_path.display().to_string())));
-    Some(lines.join("\n"))
 }
 
 /// Why watching stopped and where, and for a delay what it means, the
@@ -395,35 +328,9 @@ fn discovery_lines(report: &OperationReport) -> Vec<String> {
                 // The recheck after it is the decisive preflight.
                 DiscoveryPurpose::WindowsSearchHold => return None,
             };
-            run_note(run).map(|note| (context, note))
+            run_note(run).map(|note| format!("<dim>{context}: {note}</dim>"))
         })
-        .fold(Vec::<(Vec<String>, String)>::new(), |mut merged, (context, note)| {
-            // The same gap seen before the move and after the stop is said once.
-            match merged.iter_mut().find(|(_, seen)| *seen == note) {
-                Some((contexts, _)) => contexts.push(lowercase_first(&context)),
-                None => merged.push((vec![context], note)),
-            }
-            merged
-        })
-        .into_iter()
-        .map(|(contexts, note)| format!("<dim>{}: {note}</dim>", join_and(&contexts)))
         .collect()
-}
-
-/// `context` with its first letter lowercased, to follow another in one
-/// sentence.
-fn lowercase_first(context: &str) -> String {
-    let mut chars = context.chars();
-    chars.next().map(|first| first.to_lowercase().chain(chars).collect()).unwrap_or_default()
-}
-
-/// `a`, `a and b`, `a, b and c`.
-fn join_and(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [only] => only.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
 }
 
 /// [`coverage_note`] for `run`, or why the query itself failed.
@@ -450,13 +357,7 @@ fn reason(report: &OperationReport) -> String {
             Some((ActivityLocation::Original, ActivityKind::Created)) => "new files appeared at the original path".to_string(),
             Some((ActivityLocation::Original, _)) => "something changed at the original path".to_string(),
             Some((ActivityLocation::Quarantine, _)) => "files changed in the moved checkout".to_string(),
-            Some((ActivityLocation::Admin, _)) => match git_change(report) {
-                Some(GitChange::Index) => "a Git command ran in this worktree while it was being removed".to_string(),
-                Some(GitChange::Head) => {
-                    "a Git command changed this worktree's HEAD while it was being removed".to_string()
-                }
-                None => "Git's record of the worktree changed".to_string(),
-            },
+            Some((ActivityLocation::Admin, _)) => "Git's record of the worktree changed".to_string(),
             None => "unexpected activity was observed".to_string(),
         },
         RemovalOutcome::StateUnverified => {
@@ -472,49 +373,6 @@ fn reason(report: &OperationReport) -> String {
         },
         RemovalOutcome::UsageRefused => "another process is using the checkout".to_string(),
     }
-}
-
-/// A change in Git's record of the worktree that only a Git command makes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GitChange {
-    /// `index` or `index.lock`: `git status` refreshing it is enough.
-    Index,
-    /// `HEAD` or `HEAD.lock`: a checkout, commit, or reset.
-    Head,
-}
-
-/// The [`GitChange`] behind the first observed change, when it is one.
-fn git_change(report: &OperationReport) -> Option<GitChange> {
-    let first = report.activity.first().filter(|observed| observed.location == ActivityLocation::Admin)?;
-    match first.path.as_path().file_name()?.to_str()? {
-        "index" | "index.lock" => Some(GitChange::Index),
-        "HEAD" | "HEAD.lock" => Some(GitChange::Head),
-        _ => None,
-    }
-}
-
-/// What to do before retrying a removal stopped by observed activity, or
-/// `None` when the retry alone is the remedy.
-fn first_step(report: &OperationReport) -> Option<String> {
-    if report.outcome != RemovalOutcome::ActivityDetected {
-        return None;
-    }
-    if report.original_state == OriginalState::Recreated {
-        return Some(format!(
-            "Move or save what is now at {}; <i>wt</i> never deletes it, and the retry refuses until it is gone.",
-            native(&report.original)
-        ));
-    }
-    if git_change(report).is_some() {
-        return Some(
-            "Let that Git command finish. A shell prompt that shows Git status, an editor's Git integration, or a \
-            <i>git</i> command in another terminal can start one; don't run Git in the moved directory until the \
-            removal finishes."
-                .to_string(),
-        );
-    }
-    let observed = report.activity.iter().find(|observed| observed.kind != ActivityKind::CoverageLost)?;
-    Some(format!("Stop whatever is writing to {}.", native(&observed.path)))
 }
 
 fn original_note(state: OriginalState) -> &'static str {
@@ -565,15 +423,6 @@ fn branch_lines(report: &OperationReport, branch: Option<&str>) -> Vec<String> {
     lines
 }
 
-fn change_verb(change: Change) -> &'static str {
-    match change {
-        Change::Appeared => "was created",
-        Change::Vanished => "disappeared",
-        Change::Replaced => "was replaced",
-        Change::Modified => "was modified",
-    }
-}
-
 fn activity_verb(kind: ActivityKind) -> &'static str {
     match kind {
         ActivityKind::Created => "was created",
@@ -584,12 +433,12 @@ fn activity_verb(kind: ActivityKind) -> &'static str {
     }
 }
 
-/// `124 files and 3 folders (listed in entries.jsonl.gz)`, or `nothing`.
+/// `124 files and 3 folders (listed in the saved report)`, or `nothing`.
 fn deleted_phrase(deleted: &EntryCounts) -> String {
     if deleted.total() == 0 {
         return "nothing".to_string();
     }
-    format!("{} <dim>(listed in entries.jsonl.gz)</dim>", counts(deleted))
+    format!("{} <dim>(listed in the saved report)</dim>", counts(deleted))
 }
 
 /// `3 files, 1 folder and 2 links`, leaving out zero counts.

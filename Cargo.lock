@@ -17670,8 +17670,6 @@ dependencies = [
  "cap-std",
  "criterion",
  "dirs",
- "filetime",
- "flate2",
  "fs4",
  "fsevent-sys",
  "getrandom 0.4.2",

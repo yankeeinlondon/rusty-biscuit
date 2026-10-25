@@ -1,14 +1,14 @@
-//! What `wt remove` says about other processes using the checkout: the
-//! report section that lists them before the question ([`holders_markup`]),
-//! which never stops the removal, and the refusal when the usage check
-//! could not verify the checkout at all (exit 3, nothing moved).
+//! The refusal `wt remove` prints when another process is using the checkout
+//! ([`UsageRefusal`]), or when the usage check could not verify it. Both are
+//! exit 3: nothing was moved, and no flag overrides the refusal. A refusal
+//! that followed the usage check's one Windows Search recheck says so.
 //!
 //! Names and paths come from other processes and the filesystem, so every
 //! one is shown with control characters escaped and Prose markup escaped.
 
 use sniff::filesystem::query::{CoverageStatus, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome, PathUsageError};
 use worktree::WorktreeError;
-use worktree::remove::usage::{CoverageSummary, EvidenceLocation, Holder, UsageClearance, UsageRefusal};
+use worktree::remove::usage::{CoverageSummary, EvidenceLocation, Holder, UsageRefusal};
 
 use super::typed_command;
 
@@ -27,46 +27,49 @@ pub fn usage_refusal(refusal: &UsageRefusal, display_name: &str, name: &str) -> 
 /// command.
 pub fn refusal_markup(refusal: &UsageRefusal, display_name: &str, name: &str) -> String {
     let rerun = typed_command("wt remove", name).unwrap_or_else(|| "<i>wt remove</i> for this worktree".to_string());
-    let UsageRefusal::Unverified(error) = refusal;
-    format!(
-        "<red><b>Nothing was removed.</b></red> <i>wt</i> could not confirm the checkout of \
-        <blue>{}</blue> right before removing it: {}.\n  <dim>Run {rerun} again.</dim>",
-        visible(display_name),
-        unverified_reason(error)
-    )
-}
-
-/// The report section naming the other processes using the checkout, for
-/// the reader to weigh before answering; `None` when none was observed. It
-/// says that they do not stop the removal.
-pub fn holders_markup(clearance: &UsageClearance) -> Option<String> {
-    let holders = &clearance.holders;
-    if holders.is_empty() {
-        return None;
+    match refusal {
+        UsageRefusal::InUse(in_use) => {
+            let who = if in_use.holders.len() == 1 { "another process is" } else { "other processes are" };
+            let mut lines = vec![format!(
+                "<yellow><b>Removal paused:</b></yellow> {who} using <blue>{}</blue>.",
+                visible(display_name)
+            )];
+            for holder in in_use.holders.iter().take(HOLDER_LIMIT) {
+                lines.push(String::new());
+                lines.extend(holder_lines(holder));
+            }
+            if in_use.holders.len() > HOLDER_LIMIT {
+                lines.push(format!("<dim>…and {} more processes</dim>", in_use.holders.len() - HOLDER_LIMIT));
+            }
+            lines.push(String::new());
+            lines.push("Stop the relevant process or task, then rerun:".to_string());
+            lines.push(format!("  {rerun}"));
+            lines.push(String::new());
+            lines.push("The checkout and branches were kept.".to_string());
+            lines.push(
+                "<dim>Some of this usage may be harmless, such as a tool watching for changes, \
+                but removal pauses whenever usage is seen.</dim>"
+                    .to_string(),
+            );
+            if let Some(search) = &in_use.search_recheck {
+                lines.push(format!(
+                    "<dim>The first check found only Windows Search, so <i>wt</i> waited {} ms and checked once more; \
+                    the processes above are from that second check.</dim>",
+                    search.waited.as_millis()
+                ));
+            }
+            if let Some(note) = coverage_note(&in_use.coverage) {
+                lines.push(format!("<dim>{note}</dim>"));
+            }
+            lines.join("\n")
+        }
+        UsageRefusal::Unverified(error) => format!(
+            "<red><b>Nothing was removed.</b></red> <i>wt</i> could not confirm the checkout of \
+            <blue>{}</blue> right before removing it: {}.\n  <dim>Run {rerun} again.</dim>",
+            visible(display_name),
+            unverified_reason(error)
+        ),
     }
-    let mut lines = vec![format!(
-        "<yellow><b>In use:</b></yellow> {} {} using this worktree now.",
-        holders.len(),
-        if holders.len() == 1 { "process is" } else { "processes are" }
-    )];
-    for holder in holders.iter().take(HOLDER_LIMIT) {
-        lines.push(String::new());
-        lines.extend(holder_lines(holder));
-    }
-    if holders.len() > HOLDER_LIMIT {
-        lines.push(format!("<dim>…and {} more processes</dim>", holders.len() - HOLDER_LIMIT));
-    }
-    lines.push(String::new());
-    lines.push(
-        "<dim>They don't stop the removal; a tool watching for changes is often harmless. A program working \
-        in the worktree may lose its files. On Windows, a file one of them holds open can stop deletion \
-        partway; running the same command again continues it.</dim>"
-            .to_string(),
-    );
-    if let Some(note) = coverage_note(&clearance.coverage) {
-        lines.push(format!("<dim>{note}</dim>"));
-    }
-    Some(lines.join("\n"))
 }
 
 fn holder_lines(holder: &Holder) -> Vec<String> {

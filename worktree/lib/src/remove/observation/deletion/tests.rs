@@ -123,7 +123,7 @@ impl Fixture {
     }
 
     fn journal(&self, sink: Memory) -> JournalWriter<Memory> {
-        JournalWriter::start(sink, &operation(), Arc::clone(&self.inventory), journal::limit_for(&self.inventory)).unwrap()
+        JournalWriter::start(sink, &operation(), Arc::clone(&self.inventory), journal::DEFAULT_JOURNAL_LIMIT).unwrap()
     }
 
     fn q(&self, relative: &str) -> PathBuf {
@@ -168,19 +168,13 @@ fn state_of(fixture: &Fixture, log: &JournalLog, path: &str) -> Option<EntryStat
     states(fixture, log).into_iter().find(|(entry, _)| entry == path).map(|(_, state)| state)
 }
 
-/// What a deletion reported changed after the user agreed.
-fn warnings(deletion: &Deletion) -> Vec<(ActivityLocation, PathBuf, ActivityKind)> {
-    deletion.warnings.iter().map(|activity| (activity.location, activity.path.as_path().to_path_buf(), activity.kind)).collect()
-}
-
-/// The deletion finished: no stop, and the quarantine is gone.
-fn assert_completed(fixture: &Fixture, deletion: &Deletion, case: &str) {
-    assert!(deletion.stop.is_none(), "{case}: {:?}", deletion.stop);
-    assert!(!fixture.quarantine.exists(), "{case}: the quarantine is gone");
-}
-
-fn lost_watching(deletion: &Deletion) -> bool {
-    deletion.warnings.iter().any(|activity| activity.kind == ActivityKind::CoverageLost)
+fn activities(stop: &Option<Stop>) -> Vec<(ActivityLocation, PathBuf, ActivityKind)> {
+    match stop {
+        Some(Stop::Activity(list) | Stop::Uncertain(list)) => {
+            list.iter().map(|activity| (activity.location, activity.path.as_path().to_path_buf(), activity.kind)).collect()
+        }
+        other => panic!("expected activity, got {other:?}"),
+    }
 }
 
 /// Every entry was deleted after each of its descendants, and `.git` last.
@@ -248,14 +242,12 @@ fn flat_600(checkout: &Path, _outside: &Path) {
     }
 }
 
-/// Deletes `fixture`, whose first drain after the engine's starting one
-/// stalls; returns the loss the observer recorded and the deletion, which
-/// went on without watching.
+/// Deletes `fixture` until the first drain after the engine's starting one,
+/// which stalls; returns the loss the observer recorded and the deletion.
 fn stall_at_the_second_drain(fixture: &Fixture, options: DeletionOptions) -> (crate::remove::observation::ObservationLoss, Deletion) {
     let (mut observation, _injector) = fixture.confirming();
     let (deletion, _log) = run(fixture, &mut observation, options, &mut |_| {});
-    assert_completed(fixture, &deletion, "a stall");
-    assert!(lost_watching(&deletion), "{:?}", deletion.warnings);
+    assert!(matches!(deletion.stop, Some(Stop::CoverageLost(CoverageLost::DeliveryStalled { .. }))), "{:?}", deletion.stop);
     (observation.diagnostics().loss.expect("the stall is recorded"), deletion)
 }
 
@@ -272,7 +264,7 @@ fn the_default_drain_interval_is_2048_on_every_platform() {
     assert_eq!(loss.stage, crate::remove::observation::ObservationStage::Deletion);
     // 600 entries never reach the interval, so only the level's end drains.
     assert_eq!(loss.entries_since_drain, Some(600));
-    assert_eq!(deletion.deleted.len(), fixture.inventory.entries().len(), "deletion went on past the stalled drain");
+    assert_eq!(deletion.deleted.len(), 600, "nothing is deleted past the stalled drain");
 }
 
 /// The interval is checked after each whole batch, so a drain comes at most
@@ -288,10 +280,8 @@ fn a_drain_overshoots_its_interval_by_at_most_one_batch_minus_one_entry() {
     assert_eq!(loss.entries_since_drain, Some((drain_every + MAX_BATCH_ENTRIES - 1) as u64));
 }
 
-/// The user agreed to the removal: an approved file that changed after that
-/// is deleted as it is now, and reported.
 #[test]
-fn a_file_changed_without_any_event_is_deleted_and_reported() {
+fn a_file_changed_without_any_event_is_kept_and_stops_deletion() {
     let cases: Vec<(&str, Edit, ActivityKind)> = vec![
         ("appended", Box::new(|f: &Fixture| fs::write(f.q("README.md"), b"readme\nmore\n").unwrap()), ActivityKind::Modified),
         (
@@ -309,7 +299,7 @@ fn a_file_changed_without_any_event_is_deleted_and_reported() {
             // Written beside the original and renamed over it: deleting first
             // lets Linux hand the freed inode straight to the new file, which
             // is then the same `(device, inode)` with other content, so it
-            // reads as `Modified` (deleted either way).
+            // reads as `Modified` (kept either way).
             Box::new(|f: &Fixture| {
                 fs::write(f.q("README.md.new"), b"readme\n").unwrap();
                 fs::rename(f.q("README.md.new"), f.q("README.md")).unwrap();
@@ -321,21 +311,24 @@ fn a_file_changed_without_any_event_is_deleted_and_reported() {
         let fixture = Fixture::new();
         let (mut observation, _injector) = fixture.injected();
         let changed = if name.contains("hashed") { "src/dirty.rs" } else { "README.md" };
+        let mut changed_bytes = None;
         let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
             if batch == 1 {
                 change(&fixture);
+                changed_bytes = Some(fs::read(fixture.q(changed)).unwrap());
             }
         });
 
-        assert_completed(&fixture, &deletion, name);
-        assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q(changed), kind)], "{name}");
-        assert_eq!(state_of(&fixture, &log, changed), Some(EntryState::Deleted), "{name}");
-        assert!(deletion.deleted.iter().any(|path| path == Path::new(changed)), "{name}");
+        assert_eq!(activities(&deletion.stop), vec![(ActivityLocation::Quarantine, fixture.q(changed), kind)], "{name}");
+        assert_eq!(fs::read(fixture.q(changed)).unwrap(), changed_bytes.unwrap(), "{name}: the changed entry is kept");
+        assert_eq!(state_of(&fixture, &log, changed), Some(EntryState::Kept), "{name}");
+        assert!(!deletion.deleted.is_empty(), "{name}: deeper entries were already deleted");
+        assert!(deletion.deleted.iter().all(|path| path != Path::new(changed)), "{name}");
     }
 }
 
 #[test]
-fn a_reported_write_is_deleted_and_reported() {
+fn a_reported_write_stops_at_the_next_drain() {
     let fixture = Fixture::new();
     let (mut observation, injector) = fixture.injected();
     let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
@@ -344,13 +337,15 @@ fn a_reported_write_is_deleted_and_reported() {
             injector.event(Root::Tree, "target/new.o", EventKind::Created);
         }
     });
-    assert_completed(&fixture, &deletion, "a reported write");
-    assert_eq!(warnings(&deletion)[0], (ActivityLocation::Quarantine, fixture.q("target/new.o"), ActivityKind::Created));
-    assert_eq!(state_of(&fixture, &log, "target"), Some(EntryState::Deleted), "its folder is approved, deleted with the new file");
+    assert_eq!(activities(&deletion.stop), vec![(ActivityLocation::Quarantine, fixture.q("target/new.o"), ActivityKind::Created)]);
+    assert_eq!(fs::read(fixture.q("target/new.o")).unwrap(), b"written during deletion");
+    // The deepest level finished; nothing at a shallower level was touched.
+    assert_eq!(deletion.deleted, [PathBuf::from("target/debug/deps/a.o"), PathBuf::from("target/debug/deps/b.o")]);
+    assert_eq!(state_of(&fixture, &log, "target"), None, "never planned");
 }
 
 #[test]
-fn an_unreported_new_file_is_deleted_with_its_folder_and_reported() {
+fn an_unreported_new_file_stops_deletion_when_its_directory_cannot_be_removed() {
     let fixture = Fixture::new();
     let (mut observation, _injector) = fixture.injected();
     let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
@@ -359,13 +354,16 @@ fn an_unreported_new_file_is_deleted_with_its_folder_and_reported() {
             fs::write(fixture.q("target/debug/deps/late.o"), b"x").unwrap();
         }
     });
-    assert_completed(&fixture, &deletion, "an unreported new file");
-    assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q("target/debug/deps"), ActivityKind::Created)]);
-    assert_eq!(state_of(&fixture, &log, "target/debug/deps"), Some(EntryState::Deleted));
+    assert_eq!(
+        activities(&deletion.stop),
+        vec![(ActivityLocation::Quarantine, fixture.q("target/debug/deps"), ActivityKind::Created)]
+    );
+    assert!(fixture.q("target/debug/deps/late.o").is_file());
+    assert_eq!(state_of(&fixture, &log, "target/debug/deps"), Some(EntryState::Kept));
 }
 
 #[test]
-fn an_entry_deleted_by_someone_else_is_recorded_absent_and_reported() {
+fn an_entry_deleted_by_someone_else_is_recorded_absent_and_stops() {
     let fixture = Fixture::new();
     let (mut observation, _injector) = fixture.injected();
     let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
@@ -373,16 +371,17 @@ fn an_entry_deleted_by_someone_else_is_recorded_absent_and_reported() {
             fs::remove_file(fixture.q("target/debug/deps/a.o")).unwrap();
         }
     });
-    assert_completed(&fixture, &deletion, "an entry deleted elsewhere");
-    assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q("target/debug/deps/a.o"), ActivityKind::Vanished)]);
+    assert_eq!(
+        activities(&deletion.stop),
+        vec![(ActivityLocation::Quarantine, fixture.q("target/debug/deps/a.o"), ActivityKind::Vanished)]
+    );
     assert_eq!(deletion.externally_absent, [PathBuf::from("target/debug/deps/a.o")]);
-    assert!(deletion.deleted.iter().all(|path| path != Path::new("target/debug/deps/a.o")), "never claimed as this operation's deletion");
+    assert!(deletion.deleted.is_empty(), "never claimed as this operation's deletion");
     assert_eq!(state_of(&fixture, &log, "target/debug/deps/a.o"), Some(EntryState::ExternallyAbsent));
-    assert_eq!(state_of(&fixture, &log, "target/debug/deps/b.o"), Some(EntryState::Deleted));
+    assert_eq!(state_of(&fixture, &log, "target/debug/deps/b.o"), Some(EntryState::Kept));
+    assert!(fixture.q("target/debug/deps/b.o").is_file());
 }
 
-/// A folder replaced by a link is deleted as the link it now is; the link's
-/// target, outside the checkout, is never reached.
 #[test]
 fn a_directory_replaced_by_a_link_is_never_descended() {
     let fixture = Fixture::new();
@@ -398,34 +397,14 @@ fn a_directory_replaced_by_a_link_is_never_descended() {
             link_dir(&decoy, &fixture.q("src"));
         }
     });
-    assert_completed(&fixture, &deletion, "a folder replaced by a link");
-    assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q("src"), ActivityKind::Replaced)]);
+    assert_eq!(activities(&deletion.stop), vec![(ActivityLocation::Quarantine, fixture.q("src"), ActivityKind::Replaced)]);
     for name in ["dirty.rs", "lib.rs"] {
         assert_eq!(fs::read(decoy.join(name)).unwrap(), b"outside the checkout");
     }
-    assert!(fixture.outside.join("moved-src").join("lib.rs").is_file(), "what was moved out is outside too");
-}
-
-/// New content inside the checkout is deleted with it, through every depth;
-/// a link in it is removed as a link.
-#[test]
-fn new_folders_and_links_inside_are_deleted_and_reported() {
-    let fixture = Fixture::new();
-    let (mut observation, _injector) = fixture.injected();
-    let (deletion, _log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
-        if batch == 1 {
-            fs::create_dir_all(fixture.q("fresh/deeper")).unwrap();
-            fs::write(fixture.q("fresh/deeper/notes.txt"), b"new").unwrap();
-            link_dir(&fixture.outside, &fixture.q("fresh/escape"));
-        }
-    });
-    assert_completed(&fixture, &deletion, "new folders");
-    assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q("fresh"), ActivityKind::Created)]);
-    assert_eq!(fs::read(fixture.outside.join("keep.txt")).unwrap(), b"never deleted", "the link's target is untouched");
 }
 
 #[test]
-fn recreation_at_the_original_is_reported_and_never_touched() {
+fn recreation_at_the_original_stops_and_is_never_touched() {
     let fixture = Fixture::new();
     let (mut observation, injector) = fixture.injected();
     let (deletion, _log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
@@ -435,13 +414,13 @@ fn recreation_at_the_original_is_reported_and_never_touched() {
             injector.event(Root::Parent, "checkout", EventKind::Created);
         }
     });
-    assert_completed(&fixture, &deletion, "recreation at the original");
-    assert!(warnings(&deletion).contains(&(ActivityLocation::Original, fixture.original.clone(), ActivityKind::Created)), "{:?}", deletion.warnings);
+    assert_eq!(activities(&deletion.stop), vec![(ActivityLocation::Original, fixture.original.clone(), ActivityKind::Created)]);
     assert_eq!(fs::read(fixture.original.join(".gitnexus").join("index.db")).unwrap(), b"recreated");
+    assert!(fixture.q("README.md").is_file(), "the quarantine's remaining content is preserved");
 }
 
 #[test]
-fn a_recreated_original_found_only_by_the_final_check_is_reported() {
+fn a_recreated_original_found_only_by_the_final_check_stops() {
     let fixture = Fixture::new();
     let (mut observation, _injector) = fixture.injected();
     let (deletion, _log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
@@ -449,13 +428,12 @@ fn a_recreated_original_found_only_by_the_final_check_is_reported() {
             fs::create_dir(&fixture.original).unwrap();
         }
     });
-    assert_completed(&fixture, &deletion, "a recreated original");
-    assert_eq!(warnings(&deletion), vec![(ActivityLocation::Original, fixture.original.clone(), ActivityKind::Created)]);
+    assert_eq!(activities(&deletion.stop), vec![(ActivityLocation::Original, fixture.original.clone(), ActivityKind::Created)]);
     assert!(fixture.original.is_dir());
 }
 
 #[test]
-fn lost_coverage_and_admin_changes_are_reported_and_deletion_goes_on() {
+fn lost_coverage_and_admin_changes_stop_deletion() {
     let cases: Vec<(&str, Inject)> = vec![
         ("overflow", Box::new(|injector: &Injector| injector.overflow())),
         ("lost parent watch", Box::new(|injector: &Injector| injector.lose_watch(Root::Parent))),
@@ -470,13 +448,20 @@ fn lost_coverage_and_admin_changes_are_reported_and_deletion_goes_on() {
                 inject(&injector);
             }
         });
-        assert_completed(&fixture, &deletion, name);
-        if name.starts_with("admin") {
-            assert_eq!(warnings(&deletion), vec![(ActivityLocation::Admin, fixture.admin.join("index"), ActivityKind::Modified)], "{name}");
-        } else {
-            assert!(lost_watching(&deletion), "{name}: {:?}", deletion.warnings);
-            assert_eq!(deletion.warnings.iter().filter(|activity| activity.kind == ActivityKind::CoverageLost).count(), 1, "{name}: once");
+        match (&deletion.stop, name) {
+            (Some(Stop::CoverageLost(_)), "overflow" | "lost parent watch" | "lost admin watch") => {}
+            (Some(Stop::Activity(list)), "admin index write") => {
+                assert_eq!(list[0].location, ActivityLocation::Admin, "{name}");
+                assert_eq!(list[0].path.as_path(), fixture.admin.join("index"));
+            }
+            other => panic!("{name}: {other:?}"),
         }
+        assert_eq!(deletion.stop.as_ref().unwrap().outcome(), if name.starts_with("admin") {
+            RemovalOutcome::ActivityDetected
+        } else {
+            RemovalOutcome::StateUnverified
+        });
+        assert!(fixture.q("README.md").is_file(), "{name}: remaining content is preserved");
     }
 }
 
@@ -514,13 +499,13 @@ fn a_write_like_event_on_a_deleted_file_is_uncertain_unless_kinds_are_cumulative
                 injector.event(Root::Tree, "target/debug/deps/a.o", EventKind::Removed);
             }
         });
-        assert_completed(&fixture, &deletion, "a write-like event");
         if cumulative_kinds {
             // FSEvents reports history: `Modified` beside `Removed` is the
             // same deletion.
-            assert!(deletion.warnings.is_empty(), "{:?}", deletion.warnings);
+            assert!(deletion.stop.is_none(), "{:?}", deletion.stop);
         } else {
-            assert_eq!(warnings(&deletion), vec![(ActivityLocation::Quarantine, fixture.q("target/debug/deps/a.o"), ActivityKind::Modified)]);
+            assert!(matches!(deletion.stop, Some(Stop::Uncertain(_))), "{:?}", deletion.stop);
+            assert_eq!(deletion.stop.unwrap().outcome(), RemovalOutcome::StateUnverified);
         }
     }
 }
@@ -563,22 +548,22 @@ fn an_interrupt_ends_a_drain_wait_and_nothing_more_is_deleted() {
     assert!(fixture.q("README.md").is_file() && fixture.q(".git").is_file(), "later levels are kept");
 }
 
-/// A drain whose delivery stalls is lost coverage: reported once, and
-/// deletion goes on without waiting again.
+/// A drain whose delivery stalls is lost coverage: deletion stops there and
+/// keeps everything not yet deleted.
 #[test]
-fn a_stalled_drain_is_reported_and_deletion_goes_on() {
+fn a_stalled_drain_stops_deletion_as_lost_coverage() {
     let fixture = Fixture::new();
     let (mut observation, injector) = fixture.confirming();
 
     let (deletion, _log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |_| {});
 
-    assert_completed(&fixture, &deletion, "a stall");
-    assert!(lost_watching(&deletion), "{:?}", deletion.warnings);
-    match observation.diagnostics().loss.map(|loss| loss.reason) {
-        Some(crate::remove::observation::CoverageLost::DeliveryStalled { waited, watch: None }) => assert_eq!(waited, Duration::from_secs(30)),
+    match &deletion.stop {
+        Some(Stop::CoverageLost(CoverageLost::DeliveryStalled { waited, watch: None })) => assert_eq!(*waited, Duration::from_secs(30)),
         other => panic!("expected a stall, got {other:?}"),
     }
-    assert_eq!(injector.elapsed(), Duration::from_secs(30), "one wait, never another after the loss");
+    assert_eq!(deletion.stop.as_ref().unwrap().outcome(), RemovalOutcome::StateUnverified);
+    assert_eq!(injector.elapsed(), Duration::from_secs(30));
+    assert!(fixture.q("README.md").is_file() && fixture.q(".git").is_file(), "remaining content is preserved");
 }
 
 #[test]
@@ -604,9 +589,9 @@ fn the_report_names_deleted_entries_and_states_the_concurrent_write_limit() {
             fs::write(fixture.q("README.md"), b"changed").unwrap();
         }
     });
-    assert!(deletion.stop.is_none(), "{:?}", deletion.stop);
-    let mut report = OperationReport::new(Some(operation()), RemovalOutcome::Removed, NativeString::from(fixture.original.as_path()));
+    let mut report = OperationReport::new(Some(operation()), deletion.stop.as_ref().unwrap().outcome(), NativeString::from(fixture.original.as_path()));
     report.record_deletion(&fixture.quarantine, &deletion);
+    assert_eq!(report.outcome, RemovalOutcome::ActivityDetected);
     assert_eq!(report.notes, [ReportNote::ConcurrentWriteLimit]);
     assert_eq!(
         report.deleted.iter().map(|path| path.as_path().to_path_buf()).collect::<Vec<_>>(),
@@ -615,7 +600,7 @@ fn the_report_names_deleted_entries_and_states_the_concurrent_write_limit() {
     assert_eq!(report.activity.len(), 1);
     assert_eq!(report.activity[0].path.as_path(), fixture.q("README.md"));
 
-    let untouched = Deletion { deleted: Vec::new(), externally_absent: Vec::new(), warnings: Vec::new(), stop: Some(Stop::Interrupted) };
+    let untouched = Deletion { deleted: Vec::new(), externally_absent: Vec::new(), stop: Some(Stop::Interrupted) };
     let mut report = OperationReport::new(None, RemovalOutcome::CleanupFailed, NativeString::from(fixture.original.as_path()));
     report.record_deletion(&fixture.quarantine, &untouched);
     assert!(report.notes.is_empty(), "nothing deleted, nothing to qualify");
@@ -661,14 +646,6 @@ impl Writer {
         self.stdout.read_line(&mut line).unwrap();
         assert_eq!(line.trim(), "done", "the writer acted");
     }
-
-    /// Ends the writer once it has acted. Windows refuses to delete a
-    /// directory that is any process's working directory.
-    #[cfg(windows)]
-    fn exit(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 impl Drop for Writer {
@@ -699,7 +676,7 @@ fn native_a_tree_is_deleted_with_its_own_events_explained() {
 /// into the quarantine after the move (on Windows that directory blocks the
 /// move, so the writer there uses the quarantine's path).
 #[test]
-fn native_a_writer_in_the_moved_checkout_is_reported_and_its_file_deleted() {
+fn native_a_writer_in_the_moved_checkout_stops_deletion_and_its_file_is_kept() {
     let fixture = Fixture::new();
     #[cfg(unix)]
     let mut writer = Writer::spawn(&fixture.original.join("target"), "echo data > written.txt");
@@ -710,22 +687,23 @@ fn native_a_writer_in_the_moved_checkout_is_reported_and_its_file_deleted() {
     let (deletion, log) = run(&fixture, &mut observation, DeletionOptions::default(), &mut |batch| {
         if batch == 1 {
             writer.act();
-            #[cfg(windows)]
-            writer.exit();
         }
     });
 
-    let found = warnings(&deletion);
+    let written = fixture.q("target/written.txt");
+    let found = activities(&deletion.stop);
     assert!(
-        found.iter().any(|(location, path, _)| *location == ActivityLocation::Quarantine && path.starts_with(fixture.q("target"))),
+        found.contains(&(ActivityLocation::Quarantine, written.clone(), ActivityKind::Created)),
         "{found:?}"
     );
-    assert_completed(&fixture, &deletion, "a writer in the moved checkout");
-    assert_eq!(state_of(&fixture, &log, "target"), Some(EntryState::Deleted));
+    assert!(fs::read_to_string(&written).unwrap().starts_with("data"), "the writer's file is kept");
+    assert_eq!(state_of(&fixture, &log, "target"), None, "a directory holding new content is never planned");
+    assert!(fixture.q("README.md").is_file() && fixture.q(".git").is_file(), "remnants are preserved");
+    assert!(!deletion.deleted.is_empty(), "the stop is a partial deletion, reported as such");
 }
 
 #[test]
-fn native_recreation_at_the_original_path_is_reported_and_kept() {
+fn native_recreation_at_the_original_path_stops_deletion() {
     let fixture = Fixture::new();
     let parent = fixture.original.parent().unwrap().to_path_buf();
     #[cfg(unix)]
@@ -741,14 +719,14 @@ fn native_recreation_at_the_original_path_is_reported_and_kept() {
         }
     });
 
-    let found = warnings(&deletion);
+    let found = activities(&deletion.stop);
     assert!(found.iter().any(|(location, _, _)| *location == ActivityLocation::Original), "{found:?}");
     assert!(fs::read_to_string(fixture.original.join("index.db")).unwrap().starts_with("data"), "the recreated tree is untouched");
-    assert_completed(&fixture, &deletion, "recreation at the original");
+    assert!(fixture.q("README.md").is_file(), "the quarantine's remnants are preserved");
 }
 
 #[test]
-fn native_a_full_queue_is_reported_and_deletion_goes_on() {
+fn native_a_full_queue_stops_with_lost_coverage() {
     let fixture = Fixture::with(|checkout, _| {
         fs::write(checkout.join(".git"), b"gitdir: x\n").unwrap();
         fs::create_dir(checkout.join("flat")).unwrap();
@@ -759,12 +737,8 @@ fn native_a_full_queue_is_reported_and_deletion_goes_on() {
     let mut observation = native(&fixture, ObserverOptions { queue_capacity: 8, ..ObserverOptions::default() });
     let options = DeletionOptions { drain_every: usize::MAX, ..DeletionOptions::default() };
     let (deletion, _log) = run(&fixture, &mut observation, options, &mut |_| {});
-    assert_completed(&fixture, &deletion, "a full queue");
-    assert!(lost_watching(&deletion), "{:?}", deletion.warnings);
-    assert!(matches!(
-        observation.diagnostics().loss.map(|loss| loss.reason),
-        Some(crate::remove::observation::CoverageLost::QueueFull { capacity: 8 })
-    ));
+    assert!(matches!(deletion.stop, Some(Stop::CoverageLost(CoverageLost::QueueFull { capacity: 8 }))), "{:?}", deletion.stop);
+    assert!(fixture.q(".git").is_file(), "deletion stopped before `.git`");
 }
 
 #[test]
@@ -778,5 +752,6 @@ fn received_times_are_recorded_for_reported_activity() {
             injector.event(Root::Tree, "new.txt", EventKind::Created);
         }
     });
-    assert!(deletion.warnings[0].received_at_ms >= before, "{:?}", deletion.warnings);
+    let Some(Stop::Activity(list)) = &deletion.stop else { panic!("{:?}", deletion.stop) };
+    assert!(list[0].received_at_ms >= before, "{list:?}");
 }

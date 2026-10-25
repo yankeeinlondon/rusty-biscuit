@@ -17,9 +17,6 @@ biscuit-file = { path = "../../biscuit-file/lib", default-features = false, feat
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
 cap-std = "4"
 dirs = "6"
-# Writes a removal's `entries.jsonl.gz`; the pure-Rust backend only, so no C
-# compiler or system zlib is needed on any OS.
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 fs4 = "0.13"
 getrandom = "0.4"
 # In-process reads of local repository metadata (`git_metadata`) and of the
@@ -53,12 +50,15 @@ fsevent-sys = "4.1"
 [target.'cfg(windows)'.dependencies]
 # The quarantine move's no-replacement rename (`SetFileInformationByHandle`)
 # and its `FileIdInfo` directory identity; `wt remove`'s activity observer
-# (`ReadDirectoryChangesW` with overlapped reads and events).
+# (`ReadDirectoryChangesW` with overlapped reads and events); the system
+# directory (`GetSystemDirectoryW`) that Windows Search's processes must run
+# from for the usage check's one recheck.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
 ] }
 
@@ -66,7 +66,6 @@ windows-sys = { version = "0.61", features = [
 count-git = []
 
 [dev-dependencies]
-filetime = "0.2"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"

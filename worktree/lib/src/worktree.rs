@@ -12,7 +12,6 @@ use crate::listing::{
 };
 use crate::availability::{self, Availability};
 use crate::git::{calls, git_command, git_command_in, git_from, repo_info};
-use crate::remove::lifecycle::PendingRemovals;
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
 use crate::util::dasherize;
 
@@ -59,10 +58,6 @@ pub struct WorktreeStatus {
     /// Whether the checkout is usable (Git can read it and its path is not a
     /// link), classified once per listing.
     pub availability: Availability,
-    /// The name a pending `wt remove` of this checkout was started with.
-    /// Such a checkout is never inspected: its dirtiness is
-    /// [`DirtyStatus::Unknown`].
-    pub removal: Option<String>,
 }
 
 #[derive(Debug)]
@@ -247,9 +242,6 @@ pub struct WorktreeList {
     /// decides [`WorktreeEntry::is_current`].
     repo: PathBuf,
     entries: Vec<WorktreeEntry>,
-    /// Entries a `wt remove` has started and not finished, read once by the
-    /// parse step.
-    removals: PendingRemovals,
     /// The parse step's read until [`WorktreeList::commit`] adopts the
     /// accepted one.
     refs: RefSnapshot,
@@ -303,7 +295,6 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
 pub fn parse_worktree_state_in(repo: &Path) -> Result<WorktreeList, WorktreeError> {
     let porcelain = crate::git::worktree_list_in(repo)?;
     let entries = parse_worktree_list_from(&porcelain, repo);
-    let removals = PendingRemovals::read(repo, &entries);
     let default_branch = default_branch_in(repo)?;
     let refs = RefSnapshot::read_in(repo);
     let main_path = entries.first().map(|entry| entry.path.clone());
@@ -323,7 +314,6 @@ pub fn parse_worktree_state_in(repo: &Path) -> Result<WorktreeList, WorktreeErro
         default_branch,
         repo: repo.to_path_buf(),
         entries,
-        removals,
         refs,
         forks,
         fork_file,
@@ -348,14 +338,13 @@ pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeErr
 }
 
 /// Every entry's dirtiness, one `git status` per entry on its own thread, in
-/// entry order. Independent of every ref. An entry under removal runs
-/// none.
-pub fn gather_dirtiness(entries: &[WorktreeEntry], removals: &PendingRemovals) -> Vec<DirtyStatus> {
+/// entry order. Independent of every ref.
+pub fn gather_dirtiness(entries: &[WorktreeEntry]) -> Vec<DirtyStatus> {
     let counted = calls::TaskHandle::current();
     std::thread::scope(|scope| {
         let handles: Vec<_> = entries
             .iter()
-            .map(|entry| scope.spawn(move || counted.run(|| entry_dirtiness(entry, removals))))
+            .map(|entry| scope.spawn(move || counted.run(|| entry_dirtiness(entry))))
             .collect();
         handles
             .into_iter()
@@ -421,11 +410,6 @@ impl WorktreeList {
         &self.entries
     }
 
-    /// The entries under removal, read by the parse step.
-    pub fn removals(&self) -> &PendingRemovals {
-        &self.removals
-    }
-
     /// Branch tips from the parse step, or from the read
     /// [`WorktreeList::commit`] adopted; empty when `for-each-ref` failed.
     pub fn refs(&self) -> &RefTips {
@@ -455,7 +439,7 @@ impl WorktreeList {
     pub fn gather_local(&self, refs: &RefTips, cache: &Mutex<Cache>) -> (Vec<DirtyStatus>, RefFacts) {
         let counted = calls::TaskHandle::current();
         std::thread::scope(|scope| {
-            let dirty = scope.spawn(|| counted.run(|| gather_dirtiness(&self.entries, &self.removals)));
+            let dirty = scope.spawn(|| counted.run(|| gather_dirtiness(&self.entries)));
             let facts = self.gather_ref_facts(refs, cache);
             (calls::joined(dirty.join().expect("dirtiness thread panicked")), facts)
         })
@@ -549,8 +533,7 @@ impl WorktreeList {
             .zip(dirty)
             .map(|(entry, dirty)| {
                 let availability = availability::classify(&entry);
-                let removal = self.removals.name_for(&entry.path).map(str::to_string);
-                WorktreeStatus { entry, dirty, availability, removal }
+                WorktreeStatus { entry, dirty, availability }
             })
             .collect();
         self.caption = facts.caption;
@@ -566,7 +549,7 @@ impl WorktreeList {
     pub fn refresh_dirty_status(&mut self, checkout: &Path) -> bool {
         match self.statuses.iter_mut().find(|status| status.entry.path == checkout) {
             Some(status) => {
-                status.dirty = entry_dirtiness(&status.entry, &self.removals);
+                status.dirty = entry_dirtiness(&status.entry);
                 true
             }
             None => false,
@@ -576,11 +559,9 @@ impl WorktreeList {
 
 /// [`dirty_status`] for a readable entry; [`DirtyStatus::Unknown`] without
 /// running Git for one Git marks `prunable`, where `git status` would fail or
-/// report a parent repository's files as this entry's, and for one under
-/// removal, where `git status` may rewrite the index and so stop the
-/// removal.
-fn entry_dirtiness(entry: &WorktreeEntry, removals: &PendingRemovals) -> DirtyStatus {
-    if entry.prunable.is_some() || removals.name_for(&entry.path).is_some() {
+/// report a parent repository's files as this entry's.
+fn entry_dirtiness(entry: &WorktreeEntry) -> DirtyStatus {
+    if entry.prunable.is_some() {
         DirtyStatus::Unknown
     } else {
         dirty_status(&entry.path)

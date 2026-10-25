@@ -43,29 +43,29 @@ drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
 `delete_content` → `unregister_quarantine` → original's copy record → branch
 actions → `Operation::complete`.
 
-- **`check_usage` never refuses for a holder and never waits** (author
-  decision 2026-10-23, replacing the 2026-10-12 Windows Search recheck).
-  The CLI queries the checkout for its report, shows `UsageClearance::holders`
-  before the question (`usage::holders_markup`), and passes that report in as
-  `ReportedUsage`, which answers the lifecycle's one query for that path and
-  sends any other (the post-stop `Diagnostic` queries) to Sniff. Holders
-  become `holders_warning` on the attempt. Only `UsageRefusal::Unverified`
-  refuses. `DiscoveryPurpose::WindowsSearchHold` stays readable for old
-  reports; nothing writes it. `REPORT_VERSION` 4 added the purpose; 5 added the
+- **`check_usage` has one bounded exception to "no retry"** (author decision
+  2026-10-12): when every holder `is_windows_search` (image path, from
+  Sniff's process record, exactly `<system dir>\{SearchProtocolHost,
+  SearchFilterHost,SearchIndexer}.exe`, ASCII-case-insensitive, `\\?\`
+  stripped; no path, an uncertain identity, or the name elsewhere is an
+  ordinary holder), it calls `UsageSource::pause(SEARCH_RECHECK_WAIT)`
+  (500 ms) and queries exactly once more; that query decides. Any other
+  holder refuses without waiting. `UsageSource::system_directory` is
+  `GetSystemDirectoryW` on Windows and `None` elsewhere, so other OSes never
+  recheck. It is the only any-holder decision: the first attempt and the
+  `Quarantined` retry both go through `check_usage`; the `Diagnostic`
+  queries after a stop only name processes. The recheck lands in
+  `UsageClearance::search_recheck` / `InUse::search_recheck`;
+  `preflight_runs` records the first report as a `WindowsSearchHold`
+  discovery run before the `Preflight` one, and the `Discovery` timeline
+  event carries `SearchRecheck::summary` (the retry pushes that event only
+  when it rechecked). `REPORT_VERSION` 4 added the purpose; 5 added the
   optional `observation` diagnostics on the report and on each
   `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
   load).
 - **The recheck runs `git status`, which may rewrite the index**, so its admin
-  events are drained before `bind_index` and allowed; an admin event after
-  the binding is a warning. After consent, `recheck` (tip, fingerprint) and
-  `confirm_unchanged` return warnings (strings and `ObservedActivity`) that
-  the attempt carries into its report; they refuse only for an interrupt or
-  a tree root that is no longer the checkout. `unregister_quarantine`
-  returns `Unregistered { activity }` and calls `remove_listed_record` with
-  `Changes::Allow` (a changed index or HEAD is reported); something at the
-  quarantine path still keeps the registration (`git worktree remove`
-  would delete it). Still refused after consent: the usage check, watch
-  startup (`ObservationError`), and the handoff's second-run comparison.
+  events are drained before `bind_index` and allowed; any admin event after
+  the binding refuses (before the move) or stops (after it).
 - **`confirm_unchanged` skips `Original("")`** (the tree root itself); a
   replaced root is caught by `open_root`'s identity check inside `confirm`.
 - **The move's own events** are `Original("")` with `own_move` kinds and the
@@ -147,10 +147,7 @@ registration from the admin `gitdir` (`registration_state`), then:
 - **A retry's report covers the whole operation.** `Resumed::attempt`
   carries the saved `report.json` into `earlier_attempts`
   (`OperationReport::continue_from`), and `Operation::journal_entries` /
-  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`, each
-  parsed by its own header, so an older `wt`'s version 2 archives sit beside
-  this build's version 3 journal (test:
-  `a_removal_stopped_twice_by_an_older_wt_resumes_with_version_3_journals`). An
+  `recover` replay every `journal-<n>.jsonl` before `journal.jsonl`. An
   archive keeps only `deleted`, `externally_absent`, and `uncertain` entries,
   and decides whether an unconfirmed entry was still present from the **next
   generation's inventory**, never the filesystem now; that is what keeps a
@@ -158,14 +155,10 @@ registration from the admin `gitdir` (`registration_state`), then:
   into a deletion. So registration and branch-only retries reopen with
   `DeletionInventory::empty`: copying the old inventory would make every
   unconfirmed entry look present and drop it. `complete(report,
-  journal_reported)` deletes the journals only once `entries.jsonl.gz`
-  (written from `report.journal_entries`), then `report.json`, then the
-  completed record are all durable.
+  journal_reported)` deletes the journals only once `report.journal_entries`
+  lists them all.
 - **A completed record** is `StoreError::Completed` from `inspect`,
-  `resume`, and `reopen`, and `pending()` skips it. Its folder is deleted by
-  the next `wt remove` once its report's last timeline event is more than 14
-  days old ([remove.md](remove.md), retention); a pending record is never
-  expired.
+  `resume`, and `reopen`, and `pending()` skips it.
 
 ## How `wt remove` drives it (`cli/src/commands/remove/`)
 
@@ -180,14 +173,6 @@ registration from the admin `gitdir` (`registration_state`), then:
   `recovery::inspection_markup` (exit 3). A retry never repairs (an unlinked
   quarantine refuses before `prepare`) and never hands off (a cwd inside the
   quarantine is exit 4).
-- **A `StoreError` has one exit class**, `StoreError::exit_class`, which
-  `Refusal::exit_class` delegates to. A store error met while resolving the
-  name (`resolve_target_in`, `inspect`) goes through `store_error` →
-  `recovery::exit_error` with it, so an unusable record or journal is exit 3
-  whether resolution or the lifecycle meets it (test:
-  `a_store_error_exits_alike_from_name_lookup_and_the_lifecycle`).
-  `StoreError::Journal` carries the `path` of the journal that failed
-  (`journal.jsonl` or an archived `journal-<n>.jsonl`), as `Report` does.
 - **Every existing checkout is fingerprinted** before the report
   (`Facts::reported`), because `Approval` needs one; `Approval.tip` is
   `Facts::head`. The old `files_unchanged` recheck is gone: the lifecycle's
@@ -209,12 +194,6 @@ registration from the admin `gitdir` (`registration_state`), then:
   attempt's, each diagnostic run, and the record's saved `discovery`); a
   complete check adds no line, and the success path never calls them, so
   `remove.rs`'s "no `Discovery`" assertion guards the no-chatter rule.
-  Identical process-check notes merge into one line. A stop's "What to
-  do" step comes from `first_step` (recreated original, then a Git command
-  named by the first `Admin` activity's file name, `index`/`HEAD` and their
-  `.lock`, then the first observed path); interrupts, failed steps, and lost
-  watching get the retry alone. `InventoryRefusal::Changed` refuses as
-  "something is still writing into it", not "fix what is named above".
   Nothing reaches stdout, so no `cd:` or
   `remove-handoff:` follows a failure. The handoff's second run sets
   `Facts::reported` from the verified fresh state, then runs the same

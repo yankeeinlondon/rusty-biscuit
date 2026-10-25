@@ -517,7 +517,7 @@ fn gather_local(
         let counted = calls::TaskHandle::current();
         std::thread::scope(|scope| {
             let dirty = scope.spawn(|| {
-                counted.run(|| timing::measure(Stage::WorktreeStatus, || gather_dirtiness(list.entries(), list.removals())))
+                counted.run(|| timing::measure(Stage::WorktreeStatus, || gather_dirtiness(list.entries())))
             });
             let (facts, comparisons) = timing::measure(Stage::BranchComparisons, || list.gather_ref_facts(refs, cache));
             let (dirty, status) = calls::joined(dirty.join().expect("dirtiness thread panicked"));

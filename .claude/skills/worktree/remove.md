@@ -99,8 +99,8 @@ code touches the network.
   `wt` nor a git child holds the worktree on Windows.
 - A checkout that exists is removed by `remove::lifecycle` after the
   questions ([lifecycle.md](lifecycle.md) has the order and the CLI wiring).
-  Usage is checked once, for the report, and the lifecycle reuses that
-  answer (`ReportedUsage`); it informs and never refuses. The old `remove_worktree`/`check_no_processes`/
+  Usage is checked there, once, right before the move; nothing checks it
+  before the report. The old `remove_worktree`/`check_no_processes`/
   `check_not_in_use` (Windows rename probe)/`finish_unregistered` path and
   the `DirectoryInUse`, `FolderNotFullyRemoved`, `LockProbeRenameBack`, and
   `NotARealDirectory` errors are gone.
@@ -368,29 +368,10 @@ The module docs of `recovery` state the crash guarantees; the facts below are
 the ones that cost time.
 
 - **Layout:** `<common-git-dir>/wt-removal/<operation-id>/` holds
-  `record.json`, `journal.jsonl`, `report.json`, and `entries.jsonl.gz`;
-  `wt-removal/locks/` holds
+  `record.json`, `journal.jsonl`, and `report.json`; `wt-removal/locks/` holds
   one `fs4` lock file per worktree record (key: BLAKE3 of the admin directory
   name, 32 hex). A lock file is never deleted; only a held lock is an active
   operation.
-- **Retention (`store/retention.rs`, `RecoveryStore::prune_completed`):**
-  only a valid record at `Phase::Completed` may expire; a pending or
-  unreadable one never does. Never infer completion from the report's
-  `outcome`: a branch failure leaves `outcome: removed` with a pending
-  record. Age is the report's **last** `timeline` event (a permissive
-  `timeline[].at_ms`-only read, so every report version dates alike), else
-  the folder mtime; strictly more than 14 days. The record is reread under
-  `self.lock(&record.repository)` (taken without waiting) and the lock is
-  held through deletion. Only `run`/`run_handoff` call it, through
-  `prune_recovery_store`, never `open`/`pending`/`resolve_target_in`:
-  `wt list` reads those and must not write the store.
-- **Trap: an expired operation is renamed to `.<id>.expired` before
-  `remove_dir_all`.** Deleting in place can remove `record.json` first,
-  leaving a folder named as an operation with no readable record, which
-  `pending()` reports and `begin` then refuses for every worktree. A leftover
-  `.<id>.expired` is deleted on the next run regardless of age. Staging
-  `.<id>.tmp` folders expire by their own mtime without a lock; `.discarded`
-  folders are left alone.
 - **An operation directory appears atomically.** `RecoveryStore::begin` builds
   it as `.<id>.tmp`, flushes, and renames it. `pending()` skips any name that
   is not an operation ID, so a staging directory a crash left is not a record.
@@ -403,58 +384,17 @@ the ones that cost time.
   recovery test took 0.3–4 s; with `fsync`, ~30 ms.
 - **`begin` refuses while any record is unreadable,** not only one for the same
   worktree: an unreadable record could describe it.
-- **Report version 6 keeps entries out of `report.json`.**
-  `OperationReport::journal_entries` is still the full in-memory list
-  (`#[serde(skip_serializing)]`); `Operation::save_report` streams it into
-  `entries.jsonl.gz` (`store/entries.rs`, `flate2` Rust backend, mtime 0, no
-  name) **before** publishing the report, and only when
-  `entries_file == Some(ENTRIES_FILE)`. Set both through
-  `OperationReport::set_entries`, never by hand; a failed summary sets none,
-  and saving a `null` report deletes a stale sidecar. Production never reads
-  the sidecar (`read_report` returns a v6 report with an empty list); tests
-  decode it with `store::read_entries`. Compare a saved report with its
-  in-memory one only after hydrating that list (`lifecycle/tests.rs`
-  `saved_report`).
-- **Report reading is hand-written** (`outcome.rs`, `impl Deserialize for
-  OperationReport`): `strict_json::nested` refuses repeated keys, then
-  `report_version` dispatches: 4/5 require inline `journal_entries` and
-  refuse `entries_file`; 6 requires `entries_file` (`null` or exactly
-  `"entries.jsonl.gz"`) and refuses `journal_entries`. The rest goes through
-  `SharedMembers` (`deny_unknown_fields`). Errors surface as
-  `StoreError::Report { path, .. }`. Retention never uses this reader.
-- **Publication faults** are injected with `store::fault::inject_save` at
-  `SaveStep`s (entries written, flushed, published; report published;
-  completion persisted), beside `inject` for `reopen`'s `ReopenStep`s.
 - **Strict reading:** `record::parse` reads `record_version` through
   `strict_json::members` first (an unknown version is `UnsupportedVersion`, not
   `Malformed`), then the typed struct. Every field is required, with no
   `Option` and no `serde(default)`. A detached checkout is the enum value
   `"detached"`, not a null branch. Sniff's internally tagged `FileIdentity`
   refuses an integer `kind` and a repeated inner key (both are matrix cells).
-- **Journal (writes version 3, reads 2 and 3):** line 2 is the
-  operation-start `DeletionInventory`, written by `begin` in the staging
-  directory, so an operation always has one. Version 3 batch lines name
-  entries by zero-based **inventory position** (`{"intent":{"batch":1,
-  "entries":[4,5]}}`, `{"results":{"batch":1,"states":[…]}}`); version 2
-  repeated each path and kind. The private wire types are `Line<I, R>` with
-  `IntentV2`/`ResultsV2` and `IntentV3`/`ResultsV3`; `parse` reads the
-  header (`HeaderLine`) and dispatches per file, so archived
-  `journal-<n>.jsonl` files of either version mix freely. Both versions
-  normalize to the same `Batch { entries: Vec<PlannedEntry>, .. }` before
-  `check_batch`, so every rule (listed in the inventory with that kind, one
-  directory, at most 256, no entry twice in a batch **or across batches**)
-  is enforced once for both, by writer and reader alike. A position is
-  converted with `usize::try_from` and bounds-checked; never sort or
-  renumber positions. The size limit counts batch lines only (the inventory
-  is as large as the checkout) and is **derived from the inventory**
-  (`journal::limit_for`): the exact version 3 encoding of each position
-  planned alone with batch `u64::MAX` and the longest state
-  (`externally_absent`), summed with saturating arithmetic. A fixed 64 MiB
-  cap (until 2026-10-23) stopped every removal past about 150k entries.
-- **Trap: a test that edits a journal by path no longer works on version 3**
-  lines. Resolve the path through the inventory line's position first
-  (`lifecycle/tests/resume_consent.rs::rewrite_result`), and build version 2
-  fixtures from `json!` literals, never the writer.
+- **Journal (version 2):** line 2 is the operation-start `DeletionInventory`,
+  written by `begin` in the staging directory, so an operation always has
+  one. A batch may only plan inventory entries, with the same kind; the
+  reader refuses anything else. The size limit counts batch lines only (the
+  inventory is as large as the checkout).
 - **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
   worst-case results line for the batch would still fit, so a confirmation is
   never lost to the size limit. An unterminated last line is a torn write and is
@@ -474,12 +414,14 @@ the ones that cost time.
 
 ## Usage check (`remove::usage`)
 
-Information, never a gate: `check_usage(source, checkout, own)` queries once
-through a `UsageSource` (`SniffUsage` uses Sniff's default options;
-`ReportedUsage` replays the report's answer once; tests inject reports) and
-`assess` returns every holder left after exclusion in `UsageClearance`. Only
-a `PathUsageError` refuses, as `UsageRefusal::Unverified` (exit 3). There is
-no recheck and no wait.
+The decisive check before the move: `check_usage(source, checkout, own)`
+queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
+options; tests inject reports) and `assess` applies the policy. The one
+exception is a second query when only Windows Search held files
+([lifecycle.md](lifecycle.md#order-do-not-reorder)). Any evidence
+left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is
+`UsageRefusal::Unverified`. Both are exit 3. No match clears, whatever the
+coverage, and `UsageClearance` keeps the whole report.
 
 - **Sniff does not drop the caller's own evidence.** Only Windows open handles
   are excluded, by the kernel. A watcher that `wt` itself opens would refuse
@@ -488,10 +430,12 @@ no recheck and no wait.
   PID alone.** A record with `identity_uncertain`, or any record when
   this PID's certain records disagree on their creation token, is never
   excluded. Evidence without a descriptor, such as a loaded module when `wt`
-  runs from inside the checkout, is always reported.
-- **The CLI renderer** is `cli/src/commands/remove/usage.rs`
-  (`holders_markup`, `refusal_markup`, `usage_refusal`, `coverage_note`). Its
-  snapshots are in `cli/tests/remove_usage_holders.rs`.
+  runs from inside the checkout, always refuses.
+- **The CLI renderer** is `cli/src/commands/remove/usage.rs` (`refusal_markup`,
+  `usage_refusal`, `coverage_note`). Its snapshots are in
+  `cli/tests/remove_usage_refusal.rs`. Until `run` calls it, its module
+  declaration carries `#[allow(dead_code)]`, because the `wt` binary target
+  compiles it unused. Remove the attribute when wiring the call.
 - **Cost:** the real-query test (two queries of a small temp tree) takes
   about 0.5 s on macOS and about 2 s on native Windows, where Sniff opens each
   path to ask for its holders.

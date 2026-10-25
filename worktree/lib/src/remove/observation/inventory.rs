@@ -8,10 +8,7 @@
 //! permission bits; a link's target). Only the consent-sensitive paths (dirty
 //! entries and protected included files) get a content hash; ignored build
 //! output is never read. A FIFO, socket, device, nested mount, or unsupported
-//! reparse point refuses before anything is moved, and is never opened. An
-//! entry that vanishes while the list is taken is left out, and a folder
-//! replaced meanwhile is listed but not walked: the user already agreed to
-//! the removal, and deletion removes whatever is there when it gets to it.
+//! reparse point refuses before anything is moved, and is never opened.
 //!
 //! Directories are compared by identity and permission bits only: the
 //! operation's own deletions change a directory's modification time and entry
@@ -127,8 +124,8 @@ pub enum InventoryRefusal {
 }
 
 /// The approved content of one checkout.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "InventoryRecord")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "InventoryRecord", into = "InventoryRecord")]
 pub struct DeletionInventory {
     root: FileIdentity,
     /// Parents before children; each directory's children in byte order.
@@ -137,7 +134,7 @@ pub struct DeletionInventory {
 }
 
 /// The persisted form, validated by [`DeletionInventory::try_from`].
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InventoryRecord {
     root: FileIdentity,
@@ -183,16 +180,9 @@ impl TryFrom<InventoryRecord> for DeletionInventory {
     }
 }
 
-/// Written as an [`InventoryRecord`], borrowing rather than copying what
-/// can be millions of entries.
-impl Serialize for DeletionInventory {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        #[derive(Serialize)]
-        struct Record<'a> {
-            root: &'a FileIdentity,
-            entries: &'a [InventoryEntry],
-        }
-        Record { root: &self.root, entries: &self.entries }.serialize(serializer)
+impl From<DeletionInventory> for InventoryRecord {
+    fn from(inventory: DeletionInventory) -> Self {
+        Self { root: inventory.root, entries: inventory.entries }
     }
 }
 
@@ -237,11 +227,6 @@ impl DeletionInventory {
 
     pub fn get(&self, path: &Path) -> Option<&InventoryEntry> {
         self.index.get(path).map(|&at| &self.entries[at])
-    }
-
-    /// Where `path` is in [`entries`](Self::entries).
-    pub fn position(&self, path: &Path) -> Option<usize> {
-        self.index.get(path).copied()
     }
 
     /// The finishing consistency check: `drain` holds what the observer saw
@@ -416,9 +401,7 @@ impl Walk<'_> {
             let hash = self.is_sensitive(&child);
             let snapshot = match look(dir, &name, &full, hash) {
                 Ok(Some(snapshot)) => snapshot,
-                // Gone while the list was taken (a build cleaning up, say):
-                // nothing to approve, and the user agreed to the removal.
-                Ok(None) => continue,
+                Ok(None) => return Err(InventoryRefusal::Changed { path: full, change: Change::Vanished }),
                 Err(LookError::Ineligible(reason)) => return Err(InventoryRefusal::Ineligible { path: full, reason }),
                 Err(LookError::Io(source)) => return Err(InventoryRefusal::Uninspectable { path: full, source }),
             };
@@ -429,15 +412,9 @@ impl Walk<'_> {
             let identity = snapshot.identity;
             self.entries.push(InventoryEntry { path: NativeString::from(child.as_path()), identity: snapshot.identity, shape: snapshot.shape });
             if is_directory {
-                let opened = match dir.open_dir(&name) {
-                    Ok(opened) => opened,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(source) => return Err(InventoryRefusal::Uninspectable { path: full, source }),
-                };
-                // Replaced while the list was taken: its recorded entry no
-                // longer matches, so deletion removes what is there then.
+                let opened = dir.open_dir(&name).map_err(uninspectable(full.clone()))?;
                 if dir_identity(&opened, &full).map_err(uninspectable(full.clone()))? != identity {
-                    continue;
+                    return Err(InventoryRefusal::Changed { path: full, change: Change::Replaced });
                 }
                 self.directory(&opened, &child)?;
             }
@@ -552,7 +529,7 @@ pub(crate) fn dir_identity(dir: &Dir, full: &Path) -> io::Result<FileIdentity> {
     platform::dir_identity(dir, full)
 }
 
-pub(crate) fn device(identity: &FileIdentity) -> Option<u64> {
+fn device(identity: &FileIdentity) -> Option<u64> {
     match identity {
         FileIdentity::Unix { device, .. } => Some(*device),
         FileIdentity::Windows { .. } => None,

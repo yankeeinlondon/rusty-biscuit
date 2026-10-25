@@ -1,9 +1,8 @@
 //! Checked deletion of a quarantined checkout.
 //!
-//! [`delete_content`] removes the operation's [`DeletionInventory`],
-//! children before directories and `.git` last. The user agreed to the
-//! removal, so what it finds changed is deleted as it is now and reported,
-//! never a reason to stop:
+//! [`delete_content`] removes exactly the entries of the operation's
+//! [`DeletionInventory`], children before directories and `.git` last, and
+//! stops at the next entry boundary when anything it did not do shows up:
 //!
 //! - every entry is compared with its inventory record immediately before it
 //!   is unlinked, through a handle on its parent directory whose own identity
@@ -18,21 +17,12 @@
 //!   report the directory's removal in their place);
 //! - each drained event is resolved by checking its exact path: an entry this
 //!   operation deleted must still be absent, an approved entry not yet
-//!   reached must still match its record, and anything else is activity,
-//!   reported as a warning ([`Deletion::warnings`]);
-//! - an approved entry that no longer matches its record, a folder that is
-//!   not empty when its turn comes, and a changed folder on the way down are
-//!   deleted as they are now by [`sweep`], which never follows a link and
-//!   never enters another filesystem; that content is not journaled, since
-//!   the journal lists approved entries only;
-//! - a [`CoverageLost`](super::CoverageLost) (dropped notifications, a lost watch, a full queue,
-//!   or a delivery wait that stalled or reached its ceiling) is one warning,
-//!   after which deletion goes on without draining; the observer records the
-//!   loss at its deletion stage, with the entries processed since the
-//!   previous drain.
-//!
-//! Only an interrupt, a quarantine that is no longer the moved directory, an
-//! entry that cannot be removed, and a journal failure stop deletion.
+//!   reached must still match its record, and anything else is activity;
+//! - any [`CoverageLost`] (dropped notifications, a lost watch, a full queue,
+//!   or a delivery wait that stalled or reached its ceiling) stops the
+//!   operation, as does an interrupt request; the observer records the loss
+//!   at its deletion stage, with the entries processed since the previous
+//!   drain.
 //!
 //! The checks narrow the window in which a concurrent write can be lost; they
 //! cannot close it. A write that lands between an entry's final check and its
@@ -51,7 +41,7 @@ use cap_std::fs::Dir;
 use sniff::filesystem::query::NativeString;
 
 use super::inventory::{self, Change, Content, DeletionInventory, InventoryEntry, InventoryRefusal, LookError, Shape};
-use super::{EventKind, Observation, ObservationStage, Scope};
+use super::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, OperationReport, RemovalOutcome, ReportNote};
 use crate::remove::recovery::journal::{EntryKind, JournalSink, JournalWriteError, JournalWriter, MAX_BATCH_ENTRIES, PlannedEntry, ResultState};
 
@@ -90,10 +80,15 @@ impl Default for DeletionOptions {
 /// deleted is still in place.
 #[derive(Debug, thiserror::Error)]
 pub enum Stop {
-    /// The quarantine is no longer the directory this operation moved there,
-    /// so nothing in it is this removal's to delete.
-    #[error("the moved checkout was replaced")]
-    Replaced(Vec<ObservedActivity>),
+    /// Something other than this operation changed either location.
+    #[error("activity was observed at the checkout's locations")]
+    Activity(Vec<ObservedActivity>),
+    /// An event that this operation's own deletion and a concurrent write
+    /// would both explain.
+    #[error("an observed change could not be told apart from this removal's own")]
+    Uncertain(Vec<ObservedActivity>),
+    #[error("activity observation was lost: {0}")]
+    CoverageLost(CoverageLost),
     #[error("the removal was interrupted")]
     Interrupted,
     #[error("{} could not be removed: {source}", path.display())]
@@ -107,7 +102,8 @@ impl Stop {
     /// The typed outcome of an operation that stopped this way.
     pub fn outcome(&self) -> RemovalOutcome {
         match self {
-            Self::Replaced(_) => RemovalOutcome::ActivityDetected,
+            Self::Activity(_) => RemovalOutcome::ActivityDetected,
+            Self::Uncertain(_) | Self::CoverageLost(_) => RemovalOutcome::StateUnverified,
             Self::Interrupted | Self::Io { .. } | Self::Journal(_) => RemovalOutcome::CleanupFailed,
         }
     }
@@ -120,9 +116,6 @@ pub struct Deletion {
     pub deleted: Vec<PathBuf>,
     /// Already gone when this operation reached them.
     pub externally_absent: Vec<PathBuf>,
-    /// What changed after the user agreed, deleted anyway (or, at the
-    /// original path, left alone), and lost watching.
-    pub warnings: Vec<ObservedActivity>,
     /// `None` when the quarantine is verified gone and nothing is at the
     /// original path.
     pub stop: Option<Stop>,
@@ -137,10 +130,7 @@ impl OperationReport {
         if !deletion.deleted.is_empty() && !self.notes.contains(&ReportNote::ConcurrentWriteLimit) {
             self.notes.push(ReportNote::ConcurrentWriteLimit);
         }
-        for observed in &deletion.warnings {
-            self.push_activity(observed.clone());
-        }
-        if let Some(Stop::Replaced(activity)) = &deletion.stop {
+        if let Some(Stop::Activity(activity) | Stop::Uncertain(activity)) = &deletion.stop {
             for observed in activity {
                 self.push_activity(observed.clone());
             }
@@ -187,13 +177,9 @@ pub(crate) fn delete_content_with<S: JournalSink>(
         since_drain: 0,
         deleted: Vec::new(),
         externally_absent: Vec::new(),
-        warnings: Vec::new(),
-        warned: HashSet::new(),
-        watching: true,
-        root_device: inventory::device(inventory.root()),
     };
     let stop = engine.run().err();
-    Deletion { deleted: engine.deleted, externally_absent: engine.externally_absent, warnings: engine.warnings, stop }
+    Deletion { deleted: engine.deleted, externally_absent: engine.externally_absent, stop }
 }
 
 struct Engine<'a, S: JournalSink> {
@@ -211,13 +197,6 @@ struct Engine<'a, S: JournalSink> {
     since_drain: usize,
     deleted: Vec<PathBuf>,
     externally_absent: Vec<PathBuf>,
-    warnings: Vec<ObservedActivity>,
-    /// Paths already warned about, so a swept folder is named once, not
-    /// once per approved entry below it.
-    warned: HashSet<PathBuf>,
-    /// Cleared by the first lost coverage; nothing is drained after it.
-    watching: bool,
-    root_device: Option<u64>,
 }
 
 /// The entries of one directory, by depth then directory, deepest first.
@@ -255,36 +234,8 @@ impl<S: JournalSink> Engine<'_, S> {
     fn open_root(&self) -> Result<Dir, Stop> {
         inventory::open_root(self.quarantine, Some(self.inventory.root())).map(|(dir, _)| dir).map_err(|refusal| match refusal {
             InventoryRefusal::Uninspectable { path, source } => Stop::Io { path, source },
-            _ => Stop::Replaced(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Replaced, None)]),
+            _ => Stop::Activity(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Replaced, None)]),
         })
-    }
-
-    /// Records a change at `relative` in the quarantine, unless it or a
-    /// folder above it was already named.
-    fn warn(&mut self, relative: &Path, kind: ActivityKind) {
-        if relative.ancestors().any(|ancestor| self.warned.contains(ancestor)) {
-            return;
-        }
-        self.warned.insert(relative.to_path_buf());
-        self.warnings.push(activity(ActivityLocation::Quarantine, &self.quarantine.join(relative), kind, None));
-    }
-
-    /// The folder `changed` on the way down to a batch's entries no longer
-    /// matches its record: deleted as it is now (nothing, if it vanished).
-    fn sweep_changed_folder(&mut self, root: &Dir, changed: &Path, change: Change) -> Result<(), Stop> {
-        self.warn(changed, activity_kind(change));
-        if change == Change::Vanished {
-            return Ok(());
-        }
-        let full = self.quarantine.join(changed);
-        let parent = match self.inventory.open_parent(root, self.quarantine, changed) {
-            Ok(Ok(parent)) => parent,
-            // A folder above it changed too; that one is swept first.
-            Ok(Err((above, change))) => return self.sweep_changed_folder(root, &above, change),
-            Err(source) => return Err(Stop::Io { path: full, source }),
-        };
-        let name = changed.file_name().expect("inventory paths have names");
-        sweep(&parent, name, &full, self.root_device).map_err(|source| Stop::Io { path: full, source })
     }
 
     /// Checks and deletes one batch: entries of one directory, all at one
@@ -297,11 +248,8 @@ impl<S: JournalSink> Engine<'_, S> {
         (self.before_batch)(self.batches);
         let first = entries[0].path.as_path();
         let parent = match self.inventory.open_parent(root, self.quarantine, first) {
-            Ok(Ok(parent)) => Some(parent),
-            Ok(Err((path, change))) => {
-                self.sweep_changed_folder(root, &path, change)?;
-                None
-            }
+            Ok(Ok(parent)) => parent,
+            Ok(Err((path, change))) => return Err(self.changed(&path, change)),
             Err(source) => return Err(Stop::Io { path: self.quarantine.join(first.parent().unwrap_or(first)), source }),
         };
         let planned = entries
@@ -309,17 +257,6 @@ impl<S: JournalSink> Engine<'_, S> {
             .map(|entry| PlannedEntry { path: entry.path.clone(), kind: EntryKind::of(&entry.shape) })
             .collect();
         self.journal.begin_batch(planned).map_err(Stop::Journal)?;
-        let Some(parent) = parent else {
-            // The folder holding them was not the approved one: none of them
-            // was there to delete.
-            for entry in entries {
-                let relative = entry.path.as_path().to_path_buf();
-                self.externally_absent.push(relative.clone());
-                self.gone.insert(relative);
-            }
-            self.since_drain += entries.len();
-            return self.journal.finish_batch(&vec![ResultState::ExternallyAbsent; entries.len()]).map_err(Stop::Journal);
-        };
 
         let mut states = vec![ResultState::Kept; entries.len()];
         let mut stop = None;
@@ -339,25 +276,21 @@ impl<S: JournalSink> Engine<'_, S> {
                     *state = ResultState::ExternallyAbsent;
                     self.externally_absent.push(relative.to_path_buf());
                     self.gone.insert(relative.to_path_buf());
-                    self.warn(relative, ActivityKind::Vanished);
+                    stop = Some(self.changed(relative, Change::Vanished));
+                    break;
                 }
-                Err(outcome @ (Outcome::Changed(_) | Outcome::NotEmpty)) => {
-                    // Changed after the user agreed, or new content in a
-                    // folder: deleted as it is now.
-                    let kind = match outcome {
-                        Outcome::Changed(change) => activity_kind(change),
-                        _ => ActivityKind::Created,
-                    };
-                    let full = self.quarantine.join(relative);
-                    let name = relative.file_name().expect("inventory paths have names");
-                    if let Err(source) = sweep(&parent, name, &full, self.root_device) {
-                        stop = Some(Stop::Io { path: full, source });
-                        break;
-                    }
-                    *state = ResultState::Deleted;
-                    self.deleted.push(relative.to_path_buf());
-                    self.gone.insert(relative.to_path_buf());
-                    self.warn(relative, kind);
+                Err(Outcome::Changed(change)) => {
+                    stop = Some(self.changed(relative, change));
+                    break;
+                }
+                Err(Outcome::NotEmpty) => {
+                    stop = Some(Stop::Activity(vec![activity(
+                        ActivityLocation::Quarantine,
+                        &self.quarantine.join(relative),
+                        ActivityKind::Created,
+                        None,
+                    )]));
+                    break;
                 }
                 Err(Outcome::Failed(source)) => {
                     stop = Some(Stop::Io { path: self.quarantine.join(relative), source });
@@ -412,33 +345,32 @@ impl<S: JournalSink> Engine<'_, S> {
         match inventory::look(&parent, &name, self.quarantine, false) {
             Ok(Some(now)) if now.identity == *self.inventory.root() && matches!(now.shape, Shape::Directory { .. }) => {}
             Ok(Some(_)) | Err(LookError::Ineligible(_)) => {
-                return Err(Stop::Replaced(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Replaced, None)]));
+                return Err(Stop::Activity(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Replaced, None)]));
             }
             Ok(None) => {
-                return Err(Stop::Replaced(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Vanished, None)]));
+                return Err(Stop::Activity(vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Vanished, None)]));
             }
             Err(LookError::Io(source)) => return Err(io_error(source)),
         }
-        // Whatever appeared at the top after its approved entries went.
         match parent.remove_dir(&name) {
-            Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {
-                let root = self.open_root()?;
-                let names: Vec<_> = root
-                    .entries()
-                    .and_then(|entries| entries.map(|entry| entry.map(|entry| entry.file_name())).collect::<io::Result<Vec<_>>>())
-                    .map_err(io_error)?;
-                for child in names {
-                    let full = self.quarantine.join(&child);
-                    sweep(&root, &child, &full, self.root_device).map_err(|source| Stop::Io { path: full, source })?;
-                    self.warn(Path::new(&child), ActivityKind::Created);
-                }
-                drop(root);
-                parent.remove_dir(&name).map_err(io_error)?;
+            Ok(()) => {
+                self.root_removed = true;
+                Ok(())
             }
-            removed => removed.map_err(io_error)?,
+            Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => Err(Stop::Activity(self.reappeared())),
+            Err(source) => Err(io_error(source)),
         }
-        self.root_removed = true;
-        Ok(())
+    }
+
+    /// What is in the quarantine after every approved entry is gone.
+    fn reappeared(&self) -> Vec<ObservedActivity> {
+        let names: Vec<PathBuf> = std::fs::read_dir(self.quarantine)
+            .map(|entries| entries.filter_map(Result::ok).map(|entry| entry.path()).collect())
+            .unwrap_or_default();
+        if names.is_empty() {
+            return vec![activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Created, None)];
+        }
+        names.iter().map(|path| activity(ActivityLocation::Quarantine, path, ActivityKind::Created, None)).collect()
     }
 
     fn drain_and_check(&mut self, root: &Dir) -> Result<(), Stop> {
@@ -449,18 +381,12 @@ impl<S: JournalSink> Engine<'_, S> {
     /// of its exact path. `root` is `None` once the quarantine is removed.
     fn drain_and_check_optional(&mut self, root: Option<&Dir>) -> Result<(), Stop> {
         let processed = std::mem::take(&mut self.since_drain) as u64;
-        if !self.watching {
-            return if (self.interrupted)() { Err(Stop::Interrupted) } else { Ok(()) };
-        }
         let drain = self.observation.drain_after(processed, self.interrupted);
+        if let Some(lost) = drain.lost {
+            return Err(Stop::CoverageLost(lost));
+        }
         if drain.interrupted {
             return Err(Stop::Interrupted);
-        }
-        if drain.lost.is_some() {
-            // The observer keeps the reason; what arrived before it is still
-            // resolved below.
-            self.watching = false;
-            self.warnings.push(activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::CoverageLost, None));
         }
         let mut by_scope: HashMap<Scope, (Vec<EventKind>, SystemTime)> = HashMap::new();
         let mut order = Vec::new();
@@ -502,12 +428,7 @@ impl<S: JournalSink> Engine<'_, S> {
                         None => self.root_removed && absent(self.quarantine),
                     };
                     if !intact {
-                        return Err(Stop::Replaced(vec![activity(
-                            ActivityLocation::Quarantine,
-                            self.quarantine,
-                            ActivityKind::Replaced,
-                            received,
-                        )]));
+                        activities.push(activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Replaced, received));
                     }
                 }
                 Scope::Tree(relative) => {
@@ -522,10 +443,13 @@ impl<S: JournalSink> Engine<'_, S> {
                 Scope::Quarantine(_) => unreachable!("folded into Tree above"),
             }
         }
-        // Reported, and the entries they name are deleted as they are when
-        // their turn comes.
-        self.warnings.extend(activities);
-        self.warnings.extend(uncertain);
+        if !activities.is_empty() {
+            activities.extend(uncertain);
+            return Err(Stop::Activity(activities));
+        }
+        if !uncertain.is_empty() {
+            return Err(Stop::Uncertain(uncertain));
+        }
         Ok(())
     }
 
@@ -572,62 +496,21 @@ impl<S: JournalSink> Engine<'_, S> {
         }
     }
 
-    /// Warns about anything at either location now: a new quarantine is not
-    /// the moved directory, and the original path is outside what the user
-    /// agreed to, so neither is touched.
-    fn confirm_locations(&mut self) -> Result<(), Stop> {
-        let original = self.observation.targets().original().to_path_buf();
+    /// Neither the quarantine nor anything at the original path exists.
+    fn confirm_locations(&self) -> Result<(), Stop> {
+        let original = self.observation.targets().original();
+        let mut activities = Vec::new();
         if !absent(self.quarantine) {
-            self.warnings.push(activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Created, None));
+            activities.push(activity(ActivityLocation::Quarantine, self.quarantine, ActivityKind::Created, None));
         }
-        if !absent(&original) {
-            self.warnings.push(activity(ActivityLocation::Original, &original, ActivityKind::Created, None));
+        if !absent(original) {
+            activities.push(activity(ActivityLocation::Original, original, ActivityKind::Created, None));
         }
-        Ok(())
+        if activities.is_empty() { Ok(()) } else { Err(Stop::Activity(activities)) }
     }
-}
 
-/// Deletes the entry `name` of `parent` (at `full`) as it is now: a file, a
-/// link (never followed), or a special file is unlinked, and a real folder
-/// has its contents deleted first. A folder on another device than
-/// `root_device`, or a volume mount, is refused, so nothing outside the
-/// checkout's filesystem is ever reached. Nothing at `name` is success.
-pub(crate) fn sweep(parent: &Dir, name: &OsStr, full: &Path, root_device: Option<u64>) -> io::Result<()> {
-    let refuse = |what: &str| io::Error::other(format!("{} is {what}, which wt does not delete", full.display()));
-    let snapshot = match inventory::look(parent, name, full, false) {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => return Ok(()),
-        Err(LookError::Io(error)) => return Err(error),
-        Err(LookError::Ineligible(inventory::Ineligibility::MountPoint)) => return Err(refuse("a mount point")),
-        Err(LookError::Ineligible(inventory::Ineligibility::ReparsePoint)) => return Err(refuse("a reparse point")),
-        // A pipe, socket, or device node: unlinking it touches nothing else.
-        Err(LookError::Ineligible(_)) => return not_found_is_done(parent.remove_file(name)),
-    };
-    match snapshot.shape {
-        Shape::Link { .. } => not_found_is_done(remove_link(parent, name)),
-        Shape::File { .. } => not_found_is_done(parent.remove_file(name)),
-        Shape::Directory { .. } => {
-            if root_device.is_some() && inventory::device(&snapshot.identity) != root_device {
-                return Err(refuse("a mount point"));
-            }
-            let dir = parent.open_dir(name)?;
-            if inventory::dir_identity(&dir, full)? != snapshot.identity {
-                return Err(io::Error::other(format!("{} changed while it was being deleted", full.display())));
-            }
-            let names = dir.entries()?.map(|entry| entry.map(|entry| entry.file_name())).collect::<io::Result<Vec<_>>>()?;
-            for child in names {
-                sweep(&dir, &child, &full.join(&child), root_device)?;
-            }
-            drop(dir);
-            not_found_is_done(parent.remove_dir(name))
-        }
-    }
-}
-
-fn not_found_is_done(result: io::Result<()>) -> io::Result<()> {
-    match result {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        result => result,
+    fn changed(&self, relative: &Path, change: Change) -> Stop {
+        Stop::Activity(vec![activity(ActivityLocation::Quarantine, &self.quarantine.join(relative), activity_kind(change), None)])
     }
 }
 

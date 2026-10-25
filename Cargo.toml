@@ -128,18 +128,6 @@ opt-level = 3
 [profile.test.package.serde_json]
 opt-level = 3
 
-# `wt remove` gzip-compresses every entry of a removal (`entries.jsonl.gz`).
-# Its 100,000-entry storage-size fixture compresses tens of megabytes in an L1
-# test, which unoptimized compression keeps close to the 5 s budget.
-[profile.test.package.miniz_oxide]
-opt-level = 3
-
-[profile.test.package.crc32fast]
-opt-level = 3
-
-[profile.test.package.adler2]
-opt-level = 3
-
 # Every test that measures or draws a Mermaid diagram lays it out with Merman,
 # often dozens of times (`GitGraph::plan` measures each trimming candidate),
 # and loads the host's fonts once per process. Unoptimized, the `wt list` graph

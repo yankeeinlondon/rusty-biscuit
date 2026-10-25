@@ -12,7 +12,6 @@
 //! ambiguous and refused, never resolved by picking one. Saved names are
 //! lookup keys only; they grant no filesystem authority.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::{Presence, presence};
@@ -123,44 +122,6 @@ pub fn resolve_target_in(base: &Path, entries: Vec<WorktreeEntry>, name: &str) -
                 }))
                 .collect(),
         )),
-    }
-}
-
-/// The checkouts a `wt remove` has started and not finished, by the path
-/// Git lists each at, with the name its removal was started with. Commands
-/// other than `wt remove` leave these alone: a write into one stops the
-/// removal.
-#[derive(Debug, Clone, Default)]
-pub struct PendingRemovals(HashMap<PathBuf, String>);
-
-impl PendingRemovals {
-    /// The entries of `entries` that a pending record of `base`'s repository
-    /// identifies, matched as a retry matches them. Best effort: a store or
-    /// record that can't be read marks nothing, since `wt remove` refuses to
-    /// start any removal while such a record exists.
-    pub fn read(base: &Path, entries: &[WorktreeEntry]) -> Self {
-        let Ok(pending) = pending_records(base) else { return Self::default() };
-        Self(
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    let target = pending.iter().find(|target| same_operation(entry, &target.record))?;
-                    Some((entry.path.clone(), target.record.requested_name.clone()))
-                })
-                .collect(),
-        )
-    }
-
-    /// The name the removal of the checkout Git lists at `path` was started
-    /// with, when one is pending.
-    pub fn name_for(&self, path: &Path) -> Option<&str> {
-        self.0.get(path).map(String::as_str)
-    }
-}
-
-impl FromIterator<(PathBuf, String)> for PendingRemovals {
-    fn from_iter<I: IntoIterator<Item = (PathBuf, String)>>(iter: I) -> Self {
-        Self(iter.into_iter().collect())
     }
 }
 
