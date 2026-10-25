@@ -323,7 +323,9 @@ matrix! {
 /// and the artifact that registration writes
 /// (`HostFunctions::facts_artifact`), kept fresh by a test comparing the two
 /// byte for byte. This test fails when a catalog or an artifact appears
-/// without that wiring.
+/// without that wiring. The host lifecycle artifact beside `globals.yaml`
+/// (`globals.lifecycle.json`) is a different artifact, about events rather
+/// than functions; [`lifecycle_artifact`] keeps it fresh.
 #[test]
 fn claudine_ships_no_host_function_catalog_and_no_facts_artifact() {
     let schemas = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schemas");
@@ -346,4 +348,119 @@ fn claudine_ships_no_host_function_catalog_and_no_facts_artifact() {
         "claudine/schemas holds host function catalogs {catalogs:?} or facts artifacts {artifacts:?}; register \
          each function through `HostFunctions`, install it at startup, and add a freshness test for its artifact"
     );
+}
+
+// ── The host lifecycle artifact ─────────────────────────────────────────────
+
+mod lifecycle_artifact {
+    use std::path::Path;
+
+    use claudine::composition::lifecycle::registry::claudine_registry;
+    use claudine::composition::lifecycle::{lifecycle_artifact, reject_incompatible_calls};
+    use claudine::composition::parse_lifecycle_config;
+    use claudine::composition::schema::globals::{HOST_CATALOG_PATH, HOST_CATALOG_TEXT, claudine_globals};
+    use darkmatter::lifecycle::UnknownVerbPolicy;
+    use darkmatter::lifecycle::host_profile::HostLifecycleProfile;
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::expression::host::FactsArtifact;
+    use darkmatter::markdown::schemas::DarkmatterSchemas;
+
+    /// The committed artifact DMLS reads beside `globals.yaml`.
+    const COMMITTED: &str = include_str!("../../../schemas/globals.lifecycle.json");
+
+    fn profile() -> HostLifecycleProfile {
+        HostLifecycleProfile::from_artifact(
+            claudine_globals(),
+            Path::new(HOST_CATALOG_PATH),
+            HOST_CATALOG_TEXT,
+            FactsArtifact::Text(COMMITTED),
+        )
+        .expect("the committed artifact reads")
+    }
+
+    /// The freshness check: Claudine's registration and parse options, written
+    /// now, are the committed bytes.
+    #[test]
+    fn the_committed_lifecycle_artifact_is_fresh() {
+        assert!(
+            lifecycle_artifact() == COMMITTED,
+            "claudine/schemas/globals.lifecycle.json is stale; run `just regen-lifecycle-artifact` in claudine/"
+        );
+    }
+
+    /// The artifact rebuilds exactly the registry composition uses, rejects
+    /// unknown verbs as composition does, and knows the same effect names.
+    #[test]
+    fn the_artifact_rebuilds_claudines_registry_and_parse_options() {
+        let profile = profile();
+        assert_eq!(profile.registry(), claudine_registry());
+        assert_eq!(profile.parse_options(None).unknown_verbs, UnknownVerbPolicy::Reject);
+        for name in playa::SoundEffect::all_names() {
+            for spelling in [name.to_string(), name.to_uppercase(), name.replace('-', "_")] {
+                assert_eq!(
+                    profile.is_known_effect(&spelling),
+                    playa::SoundEffect::from_name(&spelling).is_some(),
+                    "{spelling}"
+                );
+            }
+        }
+        assert!(!profile.is_known_effect("no-such-effect"));
+    }
+
+    fn frontmatter(text: &str) -> serde_json::Value {
+        let md = Markdown::from(text);
+        serde_json::Value::Object(md.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect())
+    }
+
+    /// Runtime parity for the guard → call → set → call shape in each
+    /// Claudine-only event and verb: the walk under the rebuilt profile finds
+    /// exactly what it finds under Claudine's registry, the only finding is
+    /// the post-write call's, and composition's warnings are the walk's
+    /// default-severity findings.
+    #[test]
+    fn the_rebuilt_profile_types_claudine_events_as_composition_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = profile();
+        for event in ["start", "success", "blocked", "failure"] {
+            for verb in ["stdout", "say"] {
+                let text = format!(
+                    "---\n$schema:\n  count: number\n  label: string(required)\ncount: 1\nlabel: x\n{event}:\n  - when: count\n    then:\n      - {verb}: \"{{{{ min(count, 5) }}}}\"\n      - set:\n          count: 7\n      - {verb}: \"{{{{ min(count, 6) }}}}\"\n      - {verb}: \"{{{{ min(label, 7) }}}}\"\n---\nBody\n"
+                );
+                let value = frontmatter(&text);
+                let schema = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
+                    .effective_for(&Markdown::from(text.as_str()))
+                    .expect("the schema resolves")
+                    .expect("an effective schema");
+                let runtime_config = parse_lifecycle_config(&value, Path::new("doc.md")).expect("composition parses it");
+                let editor_config = darkmatter::lifecycle::parse_lifecycle_config_with(
+                    &value,
+                    Path::new("doc.md"),
+                    &profile.parse_options(None),
+                )
+                .expect("the profile parses it");
+                let runtime =
+                    darkmatter::lifecycle::lifecycle_call_checks(&value, &runtime_config, claudine_registry(), Some(&schema));
+                let editor =
+                    darkmatter::lifecycle::lifecycle_call_checks(&value, &editor_config, profile.registry(), Some(&schema));
+                assert_eq!(editor, runtime, "{event}/{verb}");
+
+                let strict: Vec<String> = editor
+                    .iter()
+                    .filter(|surface| surface.checks.iter().any(|found| !found.check.diagnostics(true).is_empty()))
+                    .map(|surface| surface.property.to_string())
+                    .collect();
+                assert_eq!(
+                    strict,
+                    [format!("{event}[0].then[2].{verb}.text"), format!("{event}[0].then[3].{verb}.text")],
+                    "{event}/{verb}: only the post-write and the string calls warn under strict"
+                );
+                let defaults: usize =
+                    editor.iter().flat_map(|surface| &surface.checks).map(|found| found.check.diagnostics(false).len()).sum();
+                let warnings = reject_incompatible_calls(&value, &runtime_config, Path::new("doc.md"), None, Some(&schema))
+                    .expect("nothing is rejected");
+                assert_eq!(warnings.len(), defaults, "{event}/{verb}: {warnings:#?}");
+                assert_eq!(defaults, 1, "{event}/{verb}: the string argument is the one default-severity finding");
+            }
+        }
+    }
 }

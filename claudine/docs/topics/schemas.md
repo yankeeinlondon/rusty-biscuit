@@ -791,6 +791,83 @@ Either failure stops the launch before `start` and the provider. Validation
 and editor requests never run an action: no expression is evaluated, no
 effect is dispatched, and no shell is started.
 
+### What Claudine adds to expression checking
+
+Claudine is a host of Darkmatter's expression language. It extends the
+language in one way only: it declares the globals `seq`, `loop`, and `group`
+in its host catalog, [`globals.yaml`](../../schemas/globals.yaml). That file
+is a catalog, never a document schema or a trigger. Darkmatter types every
+read of those roots from it, so a call such as `min(loop.count, 5)` is
+checked like a call on a schema-declared property, both before launch and in
+DMLS:
+
+```yaml
+---
+loop: { max: 3 }
+finalize:
+    - say: "{{ min(loop.count, 'many') }}"   # rejected before launch: 'many' is not a number
+---
+```
+
+Claudine registers **no expression function** of its own. Every function a
+Claudine document calls is a Darkmatter built-in, so Claudine ships no
+function catalog and no facts artifact, and needs none for DMLS to check its
+calls. Adding a Claudine function takes all three of these together:
+
+1. a `function(...)` catalog in `claudine/schemas/` declaring its
+   signatures;
+2. a Rust registration through Darkmatter's
+   `expression::host::HostFunctions`, installed when the CLI starts;
+3. the generated `<stem>.facts.json` artifact beside the catalog, with a test
+   that fails when it is stale.
+
+`claudine/lib/tests/l1/host_catalog.rs` fails while a catalog or an artifact
+exists without the others. How registration, the artifact, and DMLS's
+incomplete-analysis warning work is described in Darkmatter's
+[Host Expression Functions](../../../darkmatter/docs/topics/host-functions.md).
+
+Claudine's lifecycle differs from the `md` host's: `composed` is `start`,
+`failed` is `blocked`, `success`, `failure`, and `loop` are Claudine events,
+and verbs such as `say`, `retry`, and `proxy` run. So DMLS can check
+lifecycle expressions as a launch does, Claudine writes its event
+registration and parse options to
+[`globals.lifecycle.json`](../../schemas/globals.lifecycle.json), beside
+`globals.yaml`. With it, a guard narrows the calls it selects in every
+Claudine event and verb, and a `set` ends the fact, in the editor exactly as
+before launch:
+
+```yaml
+---
+$schema:
+    count: number
+count: 1
+success:
+    - when: count
+      then:
+          - say: "{{ min(count, 5) }}"   # silent
+          - set:
+                count: 7
+          - say: "{{ min(count, 6) }}"   # with [expressions] strict: may be null
+---
+```
+
+The file is generated: run `just regen-lifecycle-artifact` in `claudine/`
+after changing `globals.yaml`, the event registry, or the sound-effect
+catalog. `host_catalog.rs` fails while it is stale, and DMLS reports a stale
+or missing one as `dm.lifecycle.incomplete_analysis`, analyzing the document
+as the `md` host's until it is regenerated. The format and the editor's
+behavior are described in Darkmatter's
+[Host Lifecycle Artifacts](../../../darkmatter/docs/topics/lifecycle/host-artifact.md).
+
+Claudine also no longer walks expressions itself to find which roots and
+paths they read (loop control variables, retired `seq`/`loop` spellings,
+sequence target identities, guard subjects). It asks Darkmatter
+(`static_access_reads` and `static_variable_reads`) and filters the answer by
+its own names, so a read hidden in parentheses, brackets, or either branch of
+a ternary is found the same way everywhere. A source guard,
+`claudine/lib/tests/l1/type_scope_ownership_guard.rs`, fails on a new
+hand-written walk.
+
 ### Optional inputs and open metadata
 
 Every Claudine property is optional, and the schema reads an explicit `null`

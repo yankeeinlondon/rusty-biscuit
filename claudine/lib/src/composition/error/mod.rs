@@ -710,6 +710,9 @@ pub enum CompositionError {
         property: String,
         /// The expression holding the call, as authored.
         expression: String,
+        /// Darkmatter's shared category 5 record for the call: the code,
+        /// message, types, and authored position DMLS reports for it.
+        diagnostic: Box<darkmatter::markdown::compose::expression::Diagnostic>,
         /// Darkmatter's `ExpressionError::CallCheck` verdict.
         #[source]
         source: Box<darkmatter::markdown::compose::expression::ExpressionError>,
@@ -3510,6 +3513,16 @@ impl CompositionError {
                 .collect();
         }
         self
+    }
+
+    /// Darkmatter's shared record of the lifecycle call this error rejects,
+    /// when it is a [`CompositionError::LifecycleCallRejected`]: the fields
+    /// `md compose --output report-json` and DMLS report for the same call.
+    pub fn lifecycle_call_diagnostic(&self) -> Option<&darkmatter::markdown::compose::expression::Diagnostic> {
+        match self {
+            Self::LifecycleCallRejected { diagnostic, .. } => Some(diagnostic),
+            _ => None,
+        }
     }
 
     /// The biscuit-file failure class of a prompt-argument reference that did

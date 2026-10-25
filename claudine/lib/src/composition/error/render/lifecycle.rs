@@ -193,6 +193,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             property,
             expression,
             source,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(

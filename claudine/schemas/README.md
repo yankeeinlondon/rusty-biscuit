@@ -28,13 +28,18 @@ them.
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
 | `globals.yaml` | host catalog (`kind: schema` + `$schema`) | the shapes of Claudine's host globals `seq`, `loop`, and `group` |
+| `globals.lifecycle.json` | generated host lifecycle artifact | Claudine's event registry and lifecycle parse options, for DMLS; regenerate with `just regen-lifecycle-artifact` |
 
 The **host catalog** (`globals.yaml`) declares the shape of each global
 Claudine supplies to lifecycle and sequence expressions, in Darkmatter's
 global-catalog format. The `claudine` binary embeds it separately from the
 trigger bundle and registers it with its events; it is never a document
 schema or a trigger, and which events may read each global is decided in
-code. DMLS reads it from a schema location for hover and completion.
+code. DMLS reads it from a schema location for hover and completion. Beside
+it, the generated `globals.lifecycle.json` records Claudine's events, renames,
+per-event globals, and accepted verbs, so DMLS types lifecycle stacks as a
+launch does; copy it with `globals.yaml`
+([Host Lifecycle Artifacts](../../darkmatter/docs/topics/lifecycle/host-artifact.md)).
 
 A **library** (`kind: schema`) holds named types only and reaches a document
 only when a trigger or a document's `$schema` imports it

@@ -463,6 +463,11 @@ generate-models:
     echo
     cd -
 
+# rewrite schemas/globals.lifecycle.json, the host lifecycle artifact DMLS reads
+regen-lifecycle-artifact:
+    @cargo run -q -p claudine --example lifecycle_artifact -- --write
+    @echo "Lifecycle artifact regenerated in schemas/globals.lifecycle.json"
+
 git-conflict:
     #!/usr/bin/env bash
     base=$(git merge-base HEAD main)

@@ -123,3 +123,24 @@ fn a_category_3_lifecycle_call_returns_its_located_warning() {
     // `label` in `  - when: min(label, 5) > 1`, line 6.
     assert_eq!((source.line, source.column), (6, 15));
 }
+
+/// A rejected lifecycle call keeps Darkmatter's shared record through the
+/// conversion, located at the argument in the authored text.
+#[test]
+fn a_rejected_lifecycle_call_keeps_its_located_shared_record() {
+    use darkmatter::markdown::compose::expression::{INCOMPATIBLE_CALL_CODE, Severity};
+
+    let text = "---\nsuccess:\n  - say: \"{{ min(true, 5) }}\"\n---\nbody\n";
+    let value = frontmatter(text);
+    let config = parse_lifecycle_config(&value, dummy_path()).expect("the lifecycle parses");
+    let error = reject_incompatible_calls(&value, &config, dummy_path(), Some(text), None).expect_err("rejected");
+    let diagnostic = error.lifecycle_call_diagnostic().unwrap_or_else(|| panic!("no shared record: {error:?}"));
+    assert_eq!(diagnostic.code, INCOMPATIBLE_CALL_CODE);
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert_eq!(diagnostic.expected_type.as_deref(), Some("number"));
+    assert_eq!(diagnostic.actual_type.as_deref(), Some("literal true"));
+    let source = diagnostic.source.as_ref().expect("located");
+    assert_eq!(source.file.as_deref(), Some(dummy_path()));
+    // `true` in `  - say: "{{ min(true, 5) }}"`, line 3.
+    assert_eq!((source.line, source.column), (3, 18));
+}

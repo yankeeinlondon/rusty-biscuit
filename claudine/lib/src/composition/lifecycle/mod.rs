@@ -102,7 +102,9 @@ pub fn validate_no_nested_spans_in_literals(
 ///
 /// ## Errors
 ///
-/// [`CompositionError::LifecycleCallRejected`] for the first rejected call.
+/// [`CompositionError::LifecycleCallRejected`] for the first rejected call,
+/// carrying its shared record located the same way
+/// ([`CompositionError::lifecycle_call_diagnostic`]).
 pub fn reject_incompatible_calls(
     frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
@@ -147,6 +149,25 @@ fn claudine_parse_options<'a>(
         unknown_verbs: UnknownVerbPolicy::Reject,
         registry: claudine_registry(),
     }
+}
+
+/// The repository-relative path of Claudine's host lifecycle artifact, beside
+/// its host catalog ([`crate::composition::schema::globals::HOST_CATALOG_PATH`]).
+pub const LIFECYCLE_ARTIFACT_PATH: &str = "claudine/schemas/globals.lifecycle.json";
+
+/// Claudine's host lifecycle artifact: its event registry, its parse options
+/// (unknown verbs rejected, the embedded Playa effect names), versioned
+/// against its host catalog
+/// ([`darkmatter::lifecycle::host_profile::lifecycle_artifact`]). DMLS reads
+/// the committed copy at [`LIFECYCLE_ARTIFACT_PATH`] to type Claudine
+/// lifecycle stacks as composition does; a test keeps it fresh, and
+/// `just regen-lifecycle-artifact` in `claudine/` rewrites it.
+pub fn lifecycle_artifact() -> String {
+    darkmatter::lifecycle::host_profile::lifecycle_artifact(
+        &claudine_parse_options(None),
+        playa::SoundEffect::all_names(),
+        crate::composition::schema::globals::HOST_CATALOG_TEXT,
+    )
 }
 
 /// Parses lifecycle configuration from composition frontmatter.

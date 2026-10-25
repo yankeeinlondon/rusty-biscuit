@@ -515,7 +515,17 @@ Claudine registers no host expression function. Adding one means a
 Darkmatter's `expression::host::HostFunctions` installed at startup, and its
 generated `<stem>.facts.json` with a freshness test. Until all of that is
 wired, `lib/tests/l1/host_catalog.rs::claudine_ships_no_host_function_catalog_and_no_facts_artifact`
-fails (see `darkmatter/docs/topics/host-functions.md`).
+fails (see `darkmatter/docs/topics/host-functions.md`; user docs:
+[Schemas → What Claudine adds to expression checking](topics/schemas.md#what-claudine-adds-to-expression-checking)).
+DMLS types Claudine lifecycle stacks (its events, renames, per-event `err`,
+and verbs such as `say`/`retry`/`proxy`) from the generated
+`claudine/schemas/globals.lifecycle.json` beside `globals.yaml`
+(`composition::lifecycle::lifecycle_artifact()`, Darkmatter's
+`lifecycle::host_profile`): after changing `claudine_registry()`,
+`claudine_parse_options`, `globals.yaml`, or the Playa effect catalog, run
+`just regen-lifecycle-artifact` in `claudine/`;
+`host_catalog.rs::lifecycle_artifact` fails while it is stale and proves the
+rebuilt registry equals `claudine_registry()`.
 A new host site adds an entry with its reason. Runtime `is_null` checks are not
 restricted. The guard/site conformance matrix is
 `composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
@@ -577,7 +587,8 @@ predicates and action operands get the same verdict, each typed at its site
 under the enclosing `when:` items (a `set` ends the fact; no fact crosses an
 event), from `darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
 right after the launch schema resolves (`lifecycle::reject_incompatible_calls`,
-error twin `CompositionError::LifecycleCallRejected`); on success it returns
+error twin `CompositionError::LifecycleCallRejected`, whose
+`lifecycle_call_diagnostic()` keeps Darkmatter's located shared record); on success it returns
 the stacks' category 3 and always-false warnings, located in
 `source.original_text`, which lead `PreparedComposition.warnings`. Expressions are typed
 by every schema layer (`DeclaredTypes::for_schema`), and Claudine's globals
