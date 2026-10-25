@@ -23,7 +23,7 @@ use biscuit_file::{SourceSpan, YamlAnalysis, YamlDiagnostic, YamlRepair, analyze
 use super::diagnostic::{CleanCode, CleanDiagnostic, CleanStage, shift, shift_repair};
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::{FrontmatterExtraction, extract_frontmatter_block};
-use crate::markdown::schemas::{CleanSchemaConfig, SchemaError};
+use crate::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding, SchemaError};
 use crate::markdown::{Markdown, MarkdownError};
 
 /// Why [`repair_frontmatter`] could not produce a result.
@@ -36,8 +36,14 @@ pub enum FrontmatterRepairError<E> {
     #[error(transparent)]
     Extraction(MarkdownError),
     /// A referenced schema is missing, unreadable, or invalid.
-    #[error(transparent)]
-    Schema(SchemaError),
+    #[error("{error}")]
+    Schema {
+        error: Box<SchemaError>,
+        /// The triggers discovery skipped as invalid before the failure, so
+        /// the caller can still deliver them; empty when discovery itself
+        /// failed or did not run.
+        trigger_findings: Vec<InvalidTriggerFinding>,
+    },
     /// The caller's schema closure failed to build its configuration.
     #[error("{0}")]
     Context(E),
@@ -57,6 +63,10 @@ pub struct FrontmatterRepair {
     pub diagnostics: Vec<CleanDiagnostic>,
     /// Repairs actually accepted, in authored document coordinates.
     pub applied: Vec<YamlRepair>,
+    /// The schema triggers discovery skipped as invalid, in discovery order;
+    /// empty when the schema tier did not run. They describe trigger files,
+    /// not this document, so they are never among `diagnostics`.
+    pub trigger_findings: Vec<InvalidTriggerFinding>,
     /// The final repaired YAML, kept so settings can be read from it even
     /// after [`Self::discard_repairs`].
     candidate_yaml: Option<String>,
@@ -101,6 +111,7 @@ impl FrontmatterRepair {
             repaired: false,
             diagnostics: Vec::new(),
             applied: Vec::new(),
+            trigger_findings: Vec::new(),
             candidate_yaml: None,
             coordinate_map: AuthoredCoordinateMap::default(),
         }
@@ -203,6 +214,7 @@ pub fn repair_frontmatter<E>(
             frontmatter_span: Some(frontmatter_span),
             diagnostics: Vec::new(),
             applied: bom_repair.into_iter().collect(),
+            trigger_findings: Vec::new(),
             candidate_yaml: Some(extraction.yaml.to_string()),
             coordinate_map: AuthoredCoordinateMap::default(),
         });
@@ -269,16 +281,21 @@ pub fn repair_frontmatter<E>(
     // The schema tier needs a parsed document, so it is unreachable until the
     // syntax tier has restored parseability. This ordering is also what keeps
     // schema resolution off the hot path for unparseable input.
+    let mut trigger_findings = Vec::new();
     if parses(&yaml) {
         let after_syntax = splice_frontmatter(source, &extraction, &yaml);
         if let Ok(markdown) = build_markdown(after_syntax, document_path) {
             let config = schema().map_err(FrontmatterRepairError::Context)?;
-            let context = config
-                .resolve(document_path)
-                .map_err(FrontmatterRepairError::Schema)?;
-            let schema_analysis = context
-                .analyze(&markdown, &yaml)
-                .map_err(FrontmatterRepairError::Schema)?;
+            let context = config.resolve(document_path).map_err(|error| FrontmatterRepairError::Schema {
+                error: Box::new(error),
+                trigger_findings: Vec::new(),
+            })?;
+            let schema_analysis =
+                context.analyze(&markdown, &yaml).map_err(|error| FrontmatterRepairError::Schema {
+                    error: Box::new(error),
+                    trigger_findings: context.discovery_findings().to_vec(),
+                })?;
+            trigger_findings = schema_analysis.trigger_findings().to_vec();
 
             let auto_apply: Vec<YamlRepair> = schema_analysis
                 .diagnostics()
@@ -324,6 +341,7 @@ pub fn repair_frontmatter<E>(
         source: repaired_source,
         diagnostics,
         applied,
+        trigger_findings,
         candidate_yaml: Some(yaml),
         coordinate_map,
     })

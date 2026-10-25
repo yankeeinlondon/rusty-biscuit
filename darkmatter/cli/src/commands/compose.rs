@@ -502,8 +502,10 @@ pub fn run_compose(
                 });
             }
             Err(e) => {
-                if let Some(sink) = sink {
-                    sink.warnings(&compose_request.options().take_preflight_failure_warnings());
+                let warnings = compose_request.options().take_preflight_failure_warnings();
+                match sink {
+                    Some(sink) => sink.warnings(&warnings),
+                    None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
                 }
                 return Err(preflight_approval_error(e));
             }
@@ -511,8 +513,9 @@ pub fn run_compose(
     }
 
     let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|failure| {
-        if let Some(sink) = sink {
-            sink.warnings(&failure.warnings);
+        match sink {
+            Some(sink) => sink.warnings(&failure.warnings),
+            None => report_failure_trigger_warnings(&failure.warnings, failure.error.blocked_diagnostics(), &term_cell),
         }
         compose_error(failure.error)
     })?;
@@ -816,6 +819,39 @@ fn shell_compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::ey
             other => eyre!("{other}"),
         },
         other => other.into(),
+    }
+}
+
+/// The skipped-trigger warnings (`dm.schema.invalid_trigger`) a failed
+/// composition found before it failed, on stderr ahead of the error, so the
+/// failure does not hide them. Those the error itself shows as blocking are
+/// left to it. Other warning families keep their success-only delivery.
+pub(crate) fn report_failure_trigger_warnings(
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+    blocking: Option<&[darkmatter::markdown::compose::ComposeWarning]>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    use darkmatter::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE;
+
+    let blocking = blocking.unwrap_or_default();
+    for warning in warnings {
+        if warning.code.as_deref() == Some(SCHEMA_INVALID_TRIGGER_CODE)
+            && !blocking.iter().any(|shown| shown.code == warning.code && shown.message == warning.message)
+        {
+            let term = term_cell.get_or_init(biscuit_terminal::terminal::Terminal::default);
+            eprintln!("{}", warning_rows(&warning.message, term));
+        }
+    }
+}
+
+/// The blocking warnings a failed preflight walk stopped at, if it stopped
+/// at any.
+pub(crate) fn preflight_blocked(
+    error: &darkmatter::markdown::compose::ShellExpansionError,
+) -> Option<&[darkmatter::markdown::compose::ComposeWarning]> {
+    match error {
+        darkmatter::markdown::compose::ShellExpansionError::Preflight(inner) => inner.blocked_diagnostics(),
+        _ => None,
     }
 }
 

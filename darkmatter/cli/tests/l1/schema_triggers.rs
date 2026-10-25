@@ -486,10 +486,13 @@ fn schema_validate_skips_a_trigger_with_a_forbidden_path_prefix() {
         .output()
         .unwrap();
     // The trigger is skipped as invalid, so the document validates without
-    // its payload; the library's `schema_roots::path_field_input_matrix`
-    // proves the finding names the pattern.
+    // its payload, and the warning names the trigger and its pattern.
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(stdout_of(&output).contains("is valid"), "{output:?}");
+    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+    for expected in ["ignoring invalid schema trigger", "bad.trigger.yaml", "@prompts/**"] {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
+    }
 }
 
 #[test]
@@ -642,22 +645,39 @@ fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working
 
 /// A schema-root file that claims the envelope but is not valid YAML is
 /// skipped: composition succeeds and warns with the file and its YAML
-/// location, never the match-grammar help.
+/// location, never the match-grammar help, and the trigger trace lists it
+/// as skipped beside the neighboring trigger it still matches.
 #[test]
 fn an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location() {
     let process = CliProcessFixture::new();
     let document = fixture(&process, "kind: prompt\nowner: me");
     write(process.cwd(), "schemas/broken.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
-    let output = process.command().arg("compose").arg(&document).output().unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
-    for expected in [
+    let expected = [
         "ignoring invalid schema trigger",
         "broken.yaml",
         "not valid YAML at line 4, column 9",
         "mapping values are not allowed",
-    ] {
+    ];
+    let output = process.command().arg("compose").arg(&document).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+    for expected in expected {
         assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
     }
     assert!(!stderr.contains("combinators"), "{stderr}");
+
+    let output = process
+        .command_builder()
+        .plain_terminal(1000, 50)
+        .build()
+        .args(["schema", "triggers"])
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = compact(&strip_ansi(&stdout_of(&output)));
+    for expected in expected.iter().chain(&["prompt.trigger.yaml — matched"]) {
+        assert!(stdout.contains(&compact(expected)), "`{expected}` not in {stdout}");
+    }
+    assert!(!stdout.contains("combinators"), "{stdout}");
 }

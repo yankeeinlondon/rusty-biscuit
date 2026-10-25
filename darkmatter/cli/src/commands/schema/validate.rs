@@ -2,6 +2,7 @@
 
 use crate::args::SchemaValidateFormat;
 use crate::commands::compose::{NO_BASELINE_SCHEMA_ENV, disables_baseline_schema};
+use crate::commands::trigger_findings::{DeliveredFindings, FindingRow, emit_warnings};
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument, resolve_file_path};
 use crate::request::MdRequest;
@@ -14,8 +15,8 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemKind,
-    ValidationTimings,
+    DarkmatterSchemas, InvalidTriggerFinding, SchemaAdvisory, SchemaError, ValidationProblem,
+    ValidationProblemKind, ValidationTimings,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -60,6 +61,11 @@ enum FileOutcome {
 ///
 /// At `verbose >= 2` each validated document's stage timings follow its
 /// outcome on stderr; stdout and the exit code are unaffected.
+///
+/// A schema trigger discovery skipped as invalid is a warning, never an exit
+/// status: it is reported once per invocation, on the first file that
+/// discovers it, whatever that file's outcome (stderr in pretty mode, the
+/// record's `warnings` in JSON mode).
 #[allow(clippy::too_many_arguments)]
 pub fn run_validate(
     inputs: &[String],
@@ -99,15 +105,17 @@ pub fn run_validate(
     let mut any_parse_error = false;
     let mut any_schema_error = false;
     let mut any_validation_failure = false;
+    let mut delivered = DeliveredFindings::default();
 
     for file in &files {
-        let (outcome, timings, document) = match open_argument(file, request) {
+        let (outcome, timings, findings, document) = match open_argument(file, request) {
             Ok(opened) => {
-                let (outcome, timings) = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
-                (outcome, timings, Some(opened.into_path()))
+                let checked = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
+                (checked.outcome, checked.timings, checked.findings, Some(opened.into_path()))
             }
-            Err(err) => (FileOutcome::Unopened(err), None, None),
+            Err(err) => (FileOutcome::Unopened(err), None, Vec::new(), None),
         };
+        let findings = delivered.first_seen(&findings);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
@@ -120,7 +128,7 @@ pub fn run_validate(
             }
             FileOutcome::Validated { .. } => {}
         }
-        emit_outcome(file, document.as_deref(), &outcome, format, quiet, &terminal);
+        emit_outcome(file, document.as_deref(), &outcome, &findings, format, quiet, &terminal);
         if verbose > 1
             && let Some(timings) = &timings
         {
@@ -201,27 +209,37 @@ enum Baseline {
     Embedded,
 }
 
-/// Validates a single file, capturing parse/schema failures separately so the
-/// caller can map them to the spec's exit codes.
+/// One file's validation: its outcome, the schema timings, and the triggers
+/// its discovery skipped as invalid.
 ///
 /// The timings accumulate every schema step of the request: trigger
 /// discovery, the pre-assignment resolution, the final validation, and the
 /// schema-presence lookup. They are `None` when the file failed before
-/// discovery.
+/// discovery. The findings are kept whatever the outcome, so a later schema
+/// or validation failure still reports them.
+struct CheckedFile {
+    outcome: FileOutcome,
+    timings: Option<ValidationTimings>,
+    findings: Vec<InvalidTriggerFinding>,
+}
+
+/// Validates a single file, capturing parse/schema failures separately so the
+/// caller can map them to the spec's exit codes.
 fn validate_one(
     api: &DarkmatterSchemas,
     opened: &OpenedArgument,
     assignments: &[Assignment],
     no_schema_triggers: bool,
     request: &MdRequest,
-) -> (FileOutcome, Option<ValidationTimings>) {
+) -> CheckedFile {
+    let early = |outcome, timings| CheckedFile { outcome, timings, findings: Vec::new() };
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
     let discovery_path = biscuit_file::canonicalize_simplified(opened.path())
         .unwrap_or_else(|_| opened.path().to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
-        Err(err) => return (FileOutcome::ParseError(err.to_string()), None),
+        Err(err) => return early(FileOutcome::ParseError(err.to_string()), None),
     };
 
     // The document's context resolves its schema `file` values and bounds
@@ -229,18 +247,20 @@ fn validate_one(
     // than the file's parse error (exit 3).
     let document_context = match request.document_context(Some(opened.reference()), &discovery_path) {
         Ok(context) => context,
-        Err(err) => return (FileOutcome::ParseError(format!("{err:#}")), None),
+        Err(err) => return early(FileOutcome::ParseError(format!("{err:#}")), None),
     };
     let in_repository = document_context.repository_root().is_some();
     let api = api.clone().with_file_resolution_context(document_context);
     let (api, mut timings) = if in_repository && !no_schema_triggers {
         match ValidationTimings::record(|| api.with_trigger_discovery()) {
             (Ok(api), discovery) => (api, discovery),
-            (Err(err), discovery) => return (FileOutcome::SchemaError(Box::new(err)), Some(discovery)),
+            (Err(err), discovery) => return early(FileOutcome::SchemaError(Box::new(err)), Some(discovery)),
         }
     } else {
         (api, ValidationTimings::default())
     };
+    let findings = api.discovery_findings().to_vec();
+    let checked = |outcome, timings| CheckedFile { outcome, timings: Some(timings), findings: findings.clone() };
 
     if !assignments.is_empty() {
         // Build the pre-assignment effective schema solely to coerce assignment
@@ -252,7 +272,7 @@ fn validate_one(
         timings.absorb(preparation);
         let effective = match effective {
             Ok(effective) => effective,
-            Err(err) => return (FileOutcome::SchemaError(Box::new(err)), Some(timings)),
+            Err(err) => return checked(FileOutcome::SchemaError(Box::new(err)), timings),
         };
         assignment::apply_all(
             md.frontmatter_mut().as_map_mut(),
@@ -278,7 +298,7 @@ fn validate_one(
         })
     });
     timings.absorb(validation);
-    (outcome.unwrap_or_else(|err| FileOutcome::SchemaError(Box::new(err))), Some(timings))
+    checked(outcome.unwrap_or_else(|err| FileOutcome::SchemaError(Box::new(err))), timings)
 }
 
 /// Prints one document's validation stage timings to stderr.
@@ -339,13 +359,18 @@ fn emit_outcome(
     file: &Path,
     document: Option<&Path>,
     outcome: &FileOutcome,
+    findings: &[InvalidTriggerFinding],
     format: SchemaValidateFormat,
     quiet: bool,
     terminal: &Terminal,
 ) {
     match format {
-        SchemaValidateFormat::Pretty => emit_pretty(file, document, outcome, quiet, terminal),
-        SchemaValidateFormat::Json => emit_json(file, outcome),
+        SchemaValidateFormat::Pretty => {
+            // Warnings, so `--quiet` (which hides successes) keeps them.
+            emit_warnings(findings, terminal);
+            emit_pretty(file, document, outcome, quiet, terminal);
+        }
+        SchemaValidateFormat::Json => emit_json(file, outcome, findings),
     }
 }
 
@@ -524,9 +549,16 @@ fn document_link(file: &Path, document: Option<&Path>) -> String {
     )
 }
 
-fn emit_json(file: &Path, outcome: &FileOutcome) {
+/// One file's JSON record. `warnings` holds the discovery findings first
+/// (discovery runs before validation), then the schema advisories, and is
+/// present on any outcome that has one.
+fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFinding]) {
     use serde_json::json;
 
+    let mut warnings_json: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|finding| serde_json::to_value(FindingRow::from(finding)).expect("a finding row is JSON"))
+        .collect();
     let file_str = file.to_string_lossy().into_owned();
     let mut value = match outcome {
         FileOutcome::Validated {
@@ -551,30 +583,20 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                     })
                 })
                 .collect();
-            let warnings_json: Vec<serde_json::Value> = advisories
-                .iter()
-                .map(|advisory| {
-                    json!({
-                        "source": advisory.source(),
-                        "code": advisory.code(),
-                        "path": advisory.path(),
-                        "message": advisory.message(),
-                    })
+            warnings_json.extend(advisories.iter().map(|advisory| {
+                json!({
+                    "source": advisory.source(),
+                    "code": advisory.code(),
+                    "path": advisory.path(),
+                    "message": advisory.message(),
                 })
-                .collect();
-            let mut value = json!({
+            }));
+            json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "problems": problems_json,
-            });
-            if !warnings_json.is_empty() {
-                value
-                    .as_object_mut()
-                    .expect("validated outcome is a JSON object")
-                    .insert("warnings".to_string(), warnings_json.into());
-            }
-            value
+            })
         }
         FileOutcome::Unopened(err) => json!({
             "file": file_str,
@@ -603,6 +625,12 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
             "problems": [],
         }),
     };
+    if !warnings_json.is_empty() {
+        value
+            .as_object_mut()
+            .expect("every outcome is a JSON object")
+            .insert("warnings".to_string(), warnings_json.into());
+    }
     // The JSON report's keys are alphabetical, a published contract that
     // predates `serde_json/preserve_order`.
     value.sort_all_objects();

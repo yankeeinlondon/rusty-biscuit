@@ -22,6 +22,7 @@
 
 mod json;
 
+use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{OpenedArgument, open_argument};
 use crate::request::MdRequest;
 use biscuit_terminal::components::list::UnorderedList;
@@ -163,6 +164,9 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         return Ok(());
     }
 
+    let terminal = Terminal::new();
+    emit_warnings(&result.trigger_findings, &terminal);
+
     if result.outcome == CleanOutcome::Invalid {
         // The error the document itself reports keeps the message today's
         // users see for unrepairable YAML.
@@ -172,7 +176,6 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         });
     }
 
-    let terminal = Terminal::new();
     report_findings(&result.diagnostics, &terminal);
 
     let Some(path) = save_path else {
@@ -243,6 +246,10 @@ fn body_offset(text: &str) -> usize {
 /// Runs the library clean transaction with this invocation's overrides and
 /// schema configuration, keeping each failure's original error so messages
 /// are unchanged.
+///
+/// A schema failure has no report to carry the triggers discovery skipped
+/// before it, so they are written to stderr ahead of the error, in either
+/// output mode.
 fn clean(
     raw: &str,
     overrides: &MarkdownRuleOverrides,
@@ -259,7 +266,10 @@ fn clean(
     clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
         |error| match error {
             FrontmatterRepairError::Extraction(error) => Report::new(error),
-            FrontmatterRepairError::Schema(error) => Report::new(error),
+            FrontmatterRepairError::Schema { error, trigger_findings } => {
+                emit_warnings(&trigger_findings, &Terminal::new());
+                Report::new(*error)
+            }
             FrontmatterRepairError::Context(error) => error,
         },
     )

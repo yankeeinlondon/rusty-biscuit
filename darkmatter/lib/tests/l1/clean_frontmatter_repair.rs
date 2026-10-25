@@ -169,7 +169,7 @@ fn missing_schema_override_is_a_typed_schema_error_for_stdin_input() {
     });
 
     match result {
-        Err(FrontmatterRepairError::Schema(error)) => assert!(
+        Err(FrontmatterRepairError::Schema { error, .. }) => assert!(
             error.to_string().contains("nope.yaml"),
             "the error must name the missing schema: {error}"
         ),

@@ -436,3 +436,71 @@ fn an_accepted_payload_is_resolved_once_across_scans() {
     assert_eq!(second.triggers.len(), 1);
     assert_eq!(tally.counts(), PayloadMemoCounts { hits: 1, misses: 0 });
 }
+
+// ── md clean's transaction ──────────────────────────────────────────────────
+
+/// The incident trigger: unsupported envelope keys and a null `match:`.
+const INCIDENT_TRIGGER: &str = "kind: schema-trigger\nname: memory\ndescription: Memory notes\nmatch:\n$schema: memory-payload.yaml\n";
+
+/// Runs the clean transaction over `docs/{name}` with `config`.
+fn clean(
+    repo: &Repo,
+    name: &str,
+    source: &str,
+    config: darkmatter::markdown::schemas::CleanSchemaConfig,
+) -> Result<
+    darkmatter::markdown::cleanup::CleanResult,
+    darkmatter::markdown::cleanup::frontmatter::FrontmatterRepairError<std::convert::Infallible>,
+> {
+    use darkmatter::markdown::cleanup::rules::MarkdownRuleOverrides;
+    use darkmatter::markdown::cleanup::{CleanRequest, clean_document};
+
+    let path = repo.path("docs").join(name);
+    std::fs::write(&path, source).expect("write document");
+    let overrides = MarkdownRuleOverrides::default();
+    let request = CleanRequest { source, overrides: &overrides, workspace: None, document_path: Some(&path) };
+    clean_document(&request, || Ok(config))
+}
+
+#[test]
+fn clean_carries_the_skipped_trigger_outside_its_diagnostics() {
+    let repo = Repo::new(&[("schemas/memory.yaml", INCIDENT_TRIGGER), ("schemas/good.trigger.yaml", GOOD_TRIGGER)]);
+    let config = darkmatter::markdown::schemas::CleanSchemaConfig::new(repo.context());
+    let result = clean(&repo, "doc.md", "---\ntitle: Notes\nlevel: high\n---\nBody.\n", config).expect("clean runs");
+
+    assert_eq!(result.trigger_findings.len(), 1, "{:?}", result.trigger_findings);
+    assert_eq!(result.trigger_findings[0].source(), &TriggerSource::File(repo.path("schemas/memory.yaml")));
+    assert!(result.trigger_findings[0].message().contains("found unknown keys: name, description"));
+    // The valid neighbor still constrains the document: `level` must be a
+    // number, and that is the only diagnostic.
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert!(result.diagnostics[0].message.contains("level"), "{:?}", result.diagnostics);
+}
+
+#[test]
+fn clean_with_trigger_schemas_disabled_has_no_findings() {
+    let repo = Repo::new(&[("schemas/memory.yaml", INCIDENT_TRIGGER)]);
+    let config = darkmatter::markdown::schemas::CleanSchemaConfig::new(repo.context()).with_trigger_schemas(false);
+    let result = clean(&repo, "doc.md", "---\ntitle: Notes\n---\nBody.\n", config).expect("clean runs");
+    assert!(result.trigger_findings.is_empty(), "{:?}", result.trigger_findings);
+}
+
+/// A schema failure after discovery keeps its error and the findings
+/// discovered before it.
+#[test]
+fn a_clean_schema_failure_carries_the_findings_discovered_before_it() {
+    use darkmatter::markdown::cleanup::frontmatter::FrontmatterRepairError;
+
+    let repo = Repo::new(&[("schemas/memory.yaml", INCIDENT_TRIGGER)]);
+    let config = darkmatter::markdown::schemas::CleanSchemaConfig::new(repo.context());
+    let failure = clean(&repo, "doc.md", "---\n$schema: ./missing.yaml\n---\nBody.\n", config)
+        .expect_err("a missing authored schema fails");
+    match failure {
+        FrontmatterRepairError::Schema { error, trigger_findings } => {
+            assert!(error.to_string().contains("missing.yaml"), "{error}");
+            assert_eq!(trigger_findings.len(), 1, "{trigger_findings:?}");
+            assert_eq!(trigger_findings[0].source(), &TriggerSource::File(repo.path("schemas/memory.yaml")));
+        }
+        other => panic!("expected a schema failure, got {other}"),
+    }
+}

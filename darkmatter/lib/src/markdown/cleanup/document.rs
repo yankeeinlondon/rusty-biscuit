@@ -34,7 +34,7 @@ use super::frontmatter::{FrontmatterRepair, FrontmatterRepairError, repair_front
 use super::rules::{Leaf, MarkdownRuleOverrides, ResolvedMarkdownRules, document_rules, resolve};
 use crate::markdown::extract_frontmatter_block;
 use crate::markdown::frontmatter::load_frontmatter_yaml;
-use crate::markdown::schemas::CleanSchemaConfig;
+use crate::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
 
 /// The inputs to one [`clean_document`] run.
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +69,10 @@ pub struct CleanResult {
     /// The rules the run resolved. For `Invalid`, the document level is
     /// missing because it could not be read.
     pub rules: ResolvedMarkdownRules,
+    /// The schema triggers discovery skipped as invalid, in discovery order,
+    /// whatever the outcome; empty when the schema tier did not run. Not
+    /// diagnostics: they describe trigger files, not this document.
+    pub trigger_findings: Vec<InvalidTriggerFinding>,
 }
 
 /// Runs the clean transaction over a raw document.
@@ -135,6 +139,7 @@ pub fn clean_document<E>(
         diagnostics,
         applied: Vec::new(),
         rules,
+        trigger_findings: repair.trigger_findings.clone(),
     };
     // Neither the authored YAML nor a repaired candidate parses, and
     // Darkmatter cannot load the authored block either.
@@ -174,6 +179,7 @@ pub fn clean_document<E>(
             diagnostics,
             applied: Vec::new(),
             rules,
+            trigger_findings: emitted.trigger_findings,
         });
     }
 
@@ -188,6 +194,7 @@ pub fn clean_document<E>(
         frontmatter_span,
         diagnostics,
         rules,
+        trigger_findings: emitted.trigger_findings,
     })
 }
 

@@ -18,6 +18,7 @@ mod graph;
 mod hash;
 mod render;
 pub mod schema;
+mod trigger_findings;
 mod validate;
 
 use code_block::run_code_block;

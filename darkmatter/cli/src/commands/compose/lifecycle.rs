@@ -417,8 +417,14 @@ impl<'a> ComposeHost<'a> {
                 .md
                 .compose_preflight_approvals_with(&self.request, self.approval_handler.clone(), extra)
                 .map_err(|error| {
-                    if let Some(sink) = self.document.sink {
-                        sink.warnings(&self.request.options().take_preflight_failure_warnings());
+                    let warnings = self.request.options().take_preflight_failure_warnings();
+                    match self.document.sink {
+                        Some(sink) => sink.warnings(&warnings),
+                        None => super::report_failure_trigger_warnings(
+                            &warnings,
+                            super::preflight_blocked(&error),
+                            &OnceCell::new(),
+                        ),
                     }
                     ("shell", preflight_approval_error(error))
                 })?;
@@ -439,8 +445,13 @@ impl<'a> ComposeHost<'a> {
 
         let (composed, mut report) =
             self.md.compose_with_warnings(&self.request).map_err(|failure| {
-                if let Some(sink) = self.document.sink {
-                    sink.warnings(&failure.warnings);
+                match self.document.sink {
+                    Some(sink) => sink.warnings(&failure.warnings),
+                    None => super::report_failure_trigger_warnings(
+                        &failure.warnings,
+                        failure.error.blocked_diagnostics(),
+                        &OnceCell::new(),
+                    ),
                 }
                 ("compose", compose_error(failure.error))
             })?;

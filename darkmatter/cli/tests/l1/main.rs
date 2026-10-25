@@ -71,6 +71,7 @@ mod hash_directory;
 mod hash_entry_precedence;
 mod hash_kind_save_diff;
 mod help;
+mod invalid_trigger_warnings;
 mod layout_alignment;
 mod magic_root;
 mod layout_fill;

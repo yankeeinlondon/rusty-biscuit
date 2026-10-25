@@ -15,8 +15,8 @@ use darkmatter::markdown::schemas::{
 };
 use std::path::Path;
 
-/// Prints the five schema roots, shadowing, and condition-by-condition
-/// trigger results.
+/// Prints the five schema roots, shadowing, the triggers discovery skipped as
+/// invalid, and condition-by-condition trigger results.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
@@ -61,6 +61,23 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
         emit(
             &terminal,
             format!("- {} <dim>(shadowed by {})</dim>", escaped(path), escaped(winner)),
+        );
+    }
+
+    // Inspection output: the trace lists skipped triggers inline rather
+    // than as stderr warnings.
+    emit(&terminal, "<bold>Skipped invalid triggers:</bold>".to_string());
+    if registry.findings().is_empty() {
+        emit(&terminal, "- <dim>none</dim>".to_string());
+    }
+    for finding in registry.findings() {
+        emit(
+            &terminal,
+            format!(
+                "- {} <dim>[{}]</dim>",
+                Prose::escape_text_outside_code_spans(&finding.message()),
+                finding.code()
+            ),
         );
     }
 

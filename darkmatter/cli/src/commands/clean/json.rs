@@ -4,6 +4,7 @@
 //! coordinates; this module adds the source description and 1-based line and
 //! byte-column positions, and is the only place the wire shape is defined.
 
+use crate::commands::trigger_findings::FindingRow;
 use biscuit_file::{SourceSpan, YamlCertainty, YamlRepair};
 use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanResult};
@@ -21,6 +22,10 @@ pub struct CleanJsonReport {
     /// Whether the emitted document differs from the source (outcome
     /// `Changed`). A declined or invalid run is always `false`.
     pub changed: bool,
+    /// The schema triggers discovery skipped as invalid. Separate from
+    /// `diagnostics`, whose spans are positions in this document and cannot
+    /// name a trigger file; always present, empty when there are none.
+    pub warnings: Vec<FindingRow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,6 +111,7 @@ pub fn json_report(
             .collect(),
         applied: result.applied.iter().map(json_repair).collect(),
         changed: result.outcome == CleanOutcome::Changed,
+        warnings: result.trigger_findings.iter().map(FindingRow::from).collect(),
     }
 }
 

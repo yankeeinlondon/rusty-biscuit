@@ -74,7 +74,8 @@ fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
             "diagnostics",
             "frontmatter",
             "source",
-            "version"
+            "version",
+            "warnings"
         ],
         "envelope field set is a wire contract"
     );
@@ -115,6 +116,7 @@ fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
                 "explanation": "quote the scalar so the indicator is treated as string content",
             }],
             "changed": true,
+            "warnings": [],
         })
     );
 }
