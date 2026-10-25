@@ -564,8 +564,9 @@ inline-compose, sequence task) whose authored call is proven wrong, before
 any expression or shell runs, including dead branches. Claudine adds no rule:
 the rejection is Darkmatter's `MarkdownError` carrying
 `ExpressionError::CallCheck` (`rejected_call()`). Lifecycle `when:`
-predicates and action operands get the same verdict from
-`darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
+predicates and action operands get the same verdict, each typed at its site
+under the enclosing `when:` items (a `set` ends the fact; no fact crosses an
+event), from `darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
 right after the launch schema resolves (`lifecycle::reject_incompatible_calls`,
 error twin `CompositionError::LifecycleCallRejected`). Expressions are typed
 by every schema layer (`DeclaredTypes::for_schema`), and Claudine's globals
@@ -578,8 +579,11 @@ through `expression_function_catalog()`) and the argument categories are
 Darkmatter's library; `claudine context --expressions` renders that catalog
 and states no conversion rule. DMLS shows the same verdict while editing
 (`dm.expression.incompatible_call`), plus `dm.expression.uncertain_call`
-warnings that `[expressions] strict` widens; see the darkmatter skill's
-`dmls.md`.
+warnings that `[expressions] strict` widens and `dm.expression.always_false_call`
+warnings (a malformed literal `file_exists` reference, which composition
+reports too); see the darkmatter skill's `dmls.md`. `is_file_type` is a
+generated lifecycle verb, so `action.yaml` and `lifecycle.yaml` carry its
+`-short`/`-long@darkmatter:lifecycle` references like every other verb.
 
 Late roots are `seq`, `loop`, and `group`; sequence and container terminal
 event shells participate in the same closed graph audit. Both group schedulers

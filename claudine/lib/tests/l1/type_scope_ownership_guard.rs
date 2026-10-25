@@ -114,9 +114,9 @@ const ALLOWED: &[Allowed] = &[
     allowed(
         Primitive::Unguarded,
         "darkmatter/lib/src/lifecycle/validate.rs",
-        "reject_incompatible_calls",
+        "lifecycle_call_checks",
         1,
-        "a category 5 verdict holds under every guard (narrowing only removes alternatives), so the rejection reads each event's declarations alone",
+        "each lifecycle event's call check starts from its declarations alone; `walk_stack_scoped` adds its guards",
     ),
     allowed(
         Primitive::DeclaredTypes,
@@ -142,9 +142,9 @@ const ALLOWED: &[Allowed] = &[
     allowed(
         Primitive::Assume,
         "darkmatter/lib/src/lifecycle/actions.rs",
-        "walk_scoped",
+        "branch_scopes",
         2,
-        "a conditional's `then` and `else` bodies get the true and false sides of its `when`",
+        "every scoped lifecycle walk gives a conditional's `then` and `else` bodies the true and false sides of its `when`",
     ),
     allowed(
         Primitive::Assume,

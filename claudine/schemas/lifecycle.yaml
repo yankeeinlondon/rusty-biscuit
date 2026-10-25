@@ -181,6 +181,7 @@ types:
         is_date_time_utc: is_date_time_utc-short@darkmatter:lifecycle
         is_date_utc: is_date_utc-short@darkmatter:lifecycle
         is_empty: is_empty-short@darkmatter:lifecycle
+        is_file_type: is_file_type-short@darkmatter:lifecycle
         is_indexed_file: is_indexed_file-short@darkmatter:lifecycle
         is_integer: is_integer-short@darkmatter:lifecycle
         is_negative: is_negative-short@darkmatter:lifecycle
@@ -521,6 +522,9 @@ types:
         is_empty:
             - is_empty-short@darkmatter:lifecycle
             - is_empty-long@darkmatter:lifecycle
+        is_file_type:
+            - is_file_type-short@darkmatter:lifecycle
+            - is_file_type-long@darkmatter:lifecycle
         is_indexed_file:
             - is_indexed_file-short@darkmatter:lifecycle
             - is_indexed_file-long@darkmatter:lifecycle

@@ -93,6 +93,7 @@ Filesystem
   has_binary(name_or_path)
   has_command(cmd)
   increment_file_index(file)
+  is_file_type(value)
   is_indexed_file(file)
   join(left, right)
   link(file)
