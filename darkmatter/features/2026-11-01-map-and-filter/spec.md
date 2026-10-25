@@ -351,6 +351,33 @@ required by this feature. The editor (DMLS) must:
   not supply the callback. *Downsides:* the parity tests need one documented
   exclusion class.
 
+- **Reconciliation with `2026-10-31-type-aware-evaluation` (implemented
+  2026-10-24).** *Decision:* the callback local joins the analysis that
+  feature built, under these rules: (1) the type scope is now
+  flow-sensitive (`TypeScope`, `compose/expression/scope/`): a guard's fact
+  about a document property `x` never reaches a same-named local `x` inside a
+  body, and a fact proved about a local (`filter(xs, x => x != null && …)`)
+  ends with its body; (2) `static_access_reads` and `static_variable_reads`
+  (`compose/expression/absence.rs`) are the one read inventory, which
+  Claudine now uses for loop control variables, retired `seq`/`loop` reads,
+  and target identities, so both must leave a local and its member reads out
+  (otherwise `map(xs, loop => loop.count)` would read as Claudine's `loop`
+  global); (3) every new diagnostic code (misplaced lambda, forbidden
+  parameter, the shadow advisory if confirmed) is defined in the library and
+  added to `compose::policy::COMPOSE_DIAGNOSTIC_CODES`, so `md compose --deny
+  <code>`, `--help`, `--output report-json`, and DMLS's `codes.rs` share it;
+  (4) absence handling is type-based: an argument bound to a parameter
+  declaring `| null` handles a missing value, so the iterable's
+  `unknown[] | null` makes `map(missing, n => n)` silent for
+  `dm.expression.undeclared_property`, consistent with `map(null, …) → []`;
+  (5) that feature types constant indices (`list[0]`) but not callback
+  parameters, so the local stays `unknown`. *Alternatives:* a separate local
+  scope beside `TypeScope`; keeping the codes CLI-only. *Why:* these are the
+  shared contracts the implemented feature established; a second scope or
+  read walk is what its ownership guards reject. *Downsides:* the local must
+  be threaded through `TypeScope` and the read inventory rather than kept in
+  the new evaluator code alone.
+
 ## Open Questions
 
 1. **Document-property shadowing advisory.** Should an otherwise valid local

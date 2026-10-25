@@ -115,6 +115,26 @@ non-array iterable, no lifecycle verbs for `map`/`filter`).
   operational limits) still need the author's answer before Phase 2, as the
   log says.
 
+### Reconciliation with `2026-10-31-type-aware-evaluation` (2026-10-24)
+
+That feature is implemented; the spec's Decisions section records what it
+changes here. For the unstarted tasks below:
+
+- **Bind passive locals** also covers the flow-sensitive `TypeScope`: a
+  document guard's fact must not narrow a same-named local, and a local's
+  facts end with its body. Extend `static_access_reads` as well as
+  `static_variable_reads` (`compose/expression/absence.rs`); Claudine reads
+  expressions only through them (its `type_scope_ownership_guard.rs` rejects
+  a hand walk), so add a Claudine test that a callback local named `loop` or
+  `seq` is not a retired read or a loop control variable.
+- **Check callback signatures**: define each new code in the library, add it
+  to `compose::policy::COMPOSE_DIAGNOSTIC_CODES`, and re-export it from
+  `dmls/src/diagnostics/codes.rs`; the `md` policy tests then accept it as a
+  `--deny` code and `report-json` reports it.
+- The absence rule is type-based (a parameter declaring `| null` handles a
+  missing argument); test that `map(missing, n => n)` is silent and that a
+  missing property read inside a body still warns.
+
 ### Wave 3 — Extend shared expression infrastructure
 
 Depends on Phase 1. These tasks are sequential because they change shared AST
