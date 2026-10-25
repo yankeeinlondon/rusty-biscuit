@@ -237,7 +237,8 @@ Other L1 facts:
   and wall-clock `commit-tree` dates tie on a fast host (build-linux hid a
   different lane than macOS).
 - `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` is the
-  density proof: at 200×60 the step is `default_gitgraph_commit_step()`;
+  density proof: at 200×60 with `with_max_rows(60)` (width fitting is
+  independent of height elision), the step is `default_gitgraph_commit_step()`;
   `feat/schema-enhancement` and `fix/sniff` keep a second commit after their
   last `+N` square whenever one more commit step still fits 200 columns
   (derived from the geometry's width and step). At the 8×16 fallback cell

@@ -2238,7 +2238,8 @@ fn after_square<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> Vec<&'g Commi
     on_lane[square + 1..].to_vec()
 }
 
-/// The observed history at 200×60 with the real measurement: an isolated
+/// The observed history at 200×60 with the full height available to test
+/// width fitting independently of lane elision: an isolated
 /// `main`/`origin/main` stack does not widen the step, and a long lane keeps
 /// more than its tip after its last `+N` square whenever another commit step
 /// fits the width; `fix/wt-ux` merges into `main` at `M103` from `W1`, where
@@ -2255,6 +2256,7 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
 
     let plan = to_git_graph(&graph, &PrListing::default(), None)
         .with_theme(MermaidTheme::Default)
+        .with_max_rows(60)
         .plan(viewport(200, 60))
         .expect("a plan");
     let context = plan.mermaid.clone();
