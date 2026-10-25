@@ -1,16 +1,20 @@
-//! A trigger whose payload cannot load fails discovery with the same error
+//! A trigger whose payload cannot load is skipped with the same finding
 //! whether or not any document matches it.
 //!
 //! Payloads are resolved when the registry is built, before any document is
 //! matched, so a known-bad payload is never installed and never waits for a
-//! matching document to surface. Each case builds discovery once from the
-//! folder of a document the trigger matches and once from one it does not.
+//! matching document to surface. Discovery itself succeeds: the trigger is
+//! reported as an [`InvalidTriggerFinding`] and left out of the registry.
+//! Each case builds discovery once from the folder of a document the trigger
+//! matches and once from one it does not.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, SchemaError, TriggerSource,
+};
 
 /// A trigger matching any document with a `prompt`.
 fn trigger(payload: &str) -> String {
@@ -38,8 +42,9 @@ impl Repo {
         Self { _dir: dir, root }
     }
 
-    /// The discovery error for the document in `folder`.
-    fn discovery_error(&self, folder: &str, bundle: Option<EmbeddedSchemaBundle>) -> SchemaError {
+    /// The findings of discovery for the document in `folder`, which
+    /// succeeds and installs no trigger.
+    fn discovery_findings(&self, folder: &str, bundle: Option<EmbeddedSchemaBundle>) -> Vec<InvalidTriggerFinding> {
         let context = FileResolutionContext::from_snapshot(self.root.join(folder), None, HashMap::new())
             .with_repository_root(&self.root);
         let discovered = DarkmatterSchemas::new(context).with_trigger_discovery();
@@ -47,81 +52,99 @@ impl Repo {
             Some(bundle) => discovered.and_then(|api| api.with_embedded_trigger_bundle(bundle)),
             None => discovered,
         };
-        match loaded {
-            Ok(_) => panic!("discovery from `{folder}` must fail"),
-            Err(error) => error,
-        }
+        let schemas = loaded.unwrap_or_else(|error| panic!("discovery from `{folder}` must succeed: {error}"));
+        assert!(schemas.trigger_registry().expect("registry").triggers.is_empty(), "a bad payload is never installed");
+        schemas.discovery_findings().to_vec()
     }
 
-    /// The error for the matched and the unmatched document, asserted equal.
-    fn same_error_for_both(&self, bundle: Option<EmbeddedSchemaBundle>) -> SchemaError {
-        let matched = self.discovery_error("matched", bundle);
-        let unmatched = self.discovery_error("unmatched", bundle);
-        assert_eq!(matched.to_string(), unmatched.to_string());
-        assert_eq!(format!("{matched:?}"), format!("{unmatched:?}"));
+    /// The findings for the matched and the unmatched document, asserted
+    /// equal.
+    fn same_findings_for_both(&self, bundle: Option<EmbeddedSchemaBundle>) -> Vec<InvalidTriggerFinding> {
+        let matched = self.discovery_findings("matched", bundle);
+        let unmatched = self.discovery_findings("unmatched", bundle);
+        assert_eq!(matched, unmatched);
         matched
     }
 
-    /// The payload error inside the `TriggerLoad` naming `trigger`.
-    fn payload_error(&self, error: SchemaError, trigger: &str) -> SchemaError {
-        match error {
-            SchemaError::TriggerLoad { path, source } => {
-                assert_eq!(path, self.root.join(trigger), "the error names the trigger file");
-                *source
-            }
-            other => panic!("expected TriggerLoad, got {other:?}"),
-        }
+    /// The cause of the one finding, which names `trigger`.
+    fn payload_error<'a>(&self, findings: &'a [InvalidTriggerFinding], trigger: &str) -> &'a SchemaError {
+        let [finding] = findings else {
+            panic!("one finding expected: {findings:?}");
+        };
+        assert_eq!(finding.source(), &TriggerSource::File(self.root.join(trigger)), "the finding names the trigger file");
+        assert_eq!(finding.code(), "dm.schema.invalid_trigger");
+        finding.cause()
     }
 }
 
 #[test]
-fn a_payload_file_that_is_not_yaml_fails_discovery_for_matched_and_unmatched_documents() {
+fn a_payload_file_that_is_not_yaml_is_skipped_for_matched_and_unmatched_documents() {
     let repo = Repo::new(&[
         ("schemas/host.trigger.yaml", &trigger("./payload.yaml")),
         ("schemas/payload.yaml", "$schema:\n  n: [unclosed\n"),
     ]);
 
-    let error = repo.same_error_for_both(None);
+    let findings = repo.same_findings_for_both(None);
 
-    let source = repo.payload_error(error, "schemas/host.trigger.yaml");
+    let source = repo.payload_error(&findings, "schemas/host.trigger.yaml");
     assert!(source.to_string().contains("payload.yaml"), "names the payload file: {source}");
+    let message = findings[0].message();
+    assert!(message.contains("host.trigger.yaml") && message.contains("payload.yaml"), "{message}");
 }
 
 #[test]
-fn an_unresolvable_payload_reference_fails_discovery_for_matched_and_unmatched_documents() {
+fn an_unresolvable_payload_reference_is_skipped_for_matched_and_unmatched_documents() {
     let repo = Repo::new(&[("schemas/host.trigger.yaml", &trigger("./missing.yaml"))]);
 
-    let error = repo.same_error_for_both(None);
+    let findings = repo.same_findings_for_both(None);
 
-    let source = repo.payload_error(error, "schemas/host.trigger.yaml");
+    let source = repo.payload_error(&findings, "schemas/host.trigger.yaml");
     assert!(source.to_string().contains("missing.yaml"), "names the reference: {source}");
 }
 
 #[test]
-fn a_payload_cycle_fails_discovery_for_matched_and_unmatched_documents() {
+fn a_payload_cycle_skips_each_trigger_for_matched_and_unmatched_documents() {
     let repo = Repo::new(&[
         ("schemas/host.trigger.yaml", &trigger("./other.trigger.yaml")),
         ("schemas/other.trigger.yaml", &trigger("./host.trigger.yaml")),
     ]);
 
-    let error = repo.same_error_for_both(None);
+    let findings = repo.same_findings_for_both(None);
 
-    assert!(
-        matches!(&error, SchemaError::TriggerLoad { source, .. } if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
-        "a payload naming a trigger is a cycle: {error:?}"
+    // Each trigger of the cycle is its own finding, in discovery order.
+    let sources: Vec<_> = findings.iter().map(|finding| finding.source().clone()).collect();
+    assert_eq!(
+        sources,
+        [
+            TriggerSource::File(repo.root.join("schemas/host.trigger.yaml")),
+            TriggerSource::File(repo.root.join("schemas/other.trigger.yaml")),
+        ]
     );
+    for finding in &findings {
+        assert!(
+            matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }),
+            "a payload naming a trigger is a cycle: {finding:?}"
+        );
+    }
 }
 
 #[test]
-fn an_embedded_trigger_with_an_unresolvable_payload_fails_for_matched_and_unmatched_documents() {
+fn an_embedded_trigger_with_an_unresolvable_payload_is_skipped_for_matched_and_unmatched_documents() {
     const HOST: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: ./missing.yaml\n";
     let bundle = EmbeddedSchemaBundle::new("host-bundle", &[("host.yaml", HOST)]);
     let repo = Repo::new(&[]);
 
-    let error = repo.same_error_for_both(Some(bundle));
+    let findings = repo.same_findings_for_both(Some(bundle));
 
-    assert!(
-        matches!(&error, SchemaError::EmbeddedTriggerLoad { bundle, name, .. } if bundle == "host-bundle" && name == "host.yaml"),
-        "names the bundle trigger: {error:?}"
+    let [finding] = findings.as_slice() else {
+        panic!("one finding expected: {findings:?}");
+    };
+    assert_eq!(
+        finding.source(),
+        &TriggerSource::Embedded { bundle: "host-bundle".into(), name: "host.yaml".into() },
+        "names the bundle trigger"
     );
+    assert_eq!(finding.identity(), finding.source(), "an embedded identity is its bundle and document");
+    assert_eq!(finding.cause_path(), None, "an embedded identity never becomes a file");
+    assert!(finding.message().contains("embedded:host-bundle/host.yaml"), "{}", finding.message());
 }

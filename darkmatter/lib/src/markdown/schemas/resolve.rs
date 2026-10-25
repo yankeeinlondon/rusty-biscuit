@@ -670,7 +670,7 @@ fn try_bare_name_in_roots(
     let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
     for root in schema_roots {
         let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-        searched.extend(detailed.probed_paths());
+        observed::probed(searched, detailed.probed_paths());
         if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
             return Ok(Some(path));
         }
@@ -870,6 +870,74 @@ fn load_guarded_in_context(
     loaded
 }
 
+/// An out-of-band record of what schema resolution observed, kept even when
+/// the resolution fails.
+///
+/// A successful [`ResolvedSchema`] carries its `referenced_files` and
+/// `searched` locations, but an error carries neither. Trigger discovery
+/// needs them for a failed payload too, so a repair, or the creation of a
+/// missing file, refreshes the skipped trigger. Probes and reads are recorded
+/// into every collection running on the calling thread; with none running,
+/// nothing is recorded.
+pub(crate) mod observed {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    thread_local! {
+        static FRAMES: RefCell<Vec<Observed>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// What one [`collect`] call observed.
+    #[derive(Debug, Default)]
+    pub(crate) struct Observed {
+        /// Files read successfully, normalized like `referenced_files`.
+        pub(crate) read: BTreeSet<PathBuf>,
+        /// Every location probed, present or absent.
+        pub(crate) searched: BTreeSet<PathBuf>,
+    }
+
+    /// Runs `resolve`, returning its result with everything it observed.
+    pub(crate) fn collect<T>(resolve: impl FnOnce() -> T) -> (T, Observed) {
+        struct Pop;
+        impl Drop for Pop {
+            fn drop(&mut self) {
+                FRAMES.with_borrow_mut(Vec::pop);
+            }
+        }
+        FRAMES.with_borrow_mut(|frames| frames.push(Observed::default()));
+        let pop = Pop;
+        let result = resolve();
+        let observed = FRAMES.with_borrow_mut(|frames| frames.last_mut().map(std::mem::take)).unwrap_or_default();
+        drop(pop);
+        (result, observed)
+    }
+
+    /// Adds `probed` to `searched`, and records it.
+    pub(super) fn probed(searched: &mut BTreeSet<PathBuf>, probed: impl Iterator<Item = PathBuf>) {
+        let probed: Vec<PathBuf> = probed.collect();
+        FRAMES.with_borrow_mut(|frames| {
+            for frame in frames.iter_mut() {
+                frame.searched.extend(probed.iter().cloned());
+            }
+        });
+        searched.extend(probed);
+    }
+
+    /// Records a file read successfully.
+    pub(super) fn read(path: &Path) {
+        FRAMES.with_borrow_mut(|frames| {
+            if frames.is_empty() {
+                return;
+            }
+            let normalized = super::canonical_path(path);
+            for frame in frames.iter_mut() {
+                frame.read.insert(normalized.clone());
+            }
+        });
+    }
+}
+
 /// Resolves `file_ref` from `base_dir`, adding every location it probed to
 /// `searched`. This and [`try_bare_name_in_roots`] are the only places schema
 /// resolution probes a file reference, so `searched` sees every candidate.
@@ -880,7 +948,7 @@ fn resolve_file_reference_in_context(
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
     let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-    searched.extend(detailed.probed_paths());
+    observed::probed(searched, detailed.probed_paths());
     detailed.into_convenience()
 }
 
@@ -894,6 +962,7 @@ fn load_schema_from_path_in_context(
         path: path.to_path_buf(),
         source,
     })?;
+    observed::read(path);
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -2507,6 +2576,7 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
         path: path.to_path_buf(),
         source,
     })?;
+    observed::read(path);
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
@@ -3652,6 +3722,7 @@ fn resolve_one_example(
     let path =
         resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?;
     let canonical = canonical_path(&path);
+    observed::read(&canonical);
     // Reuse the bytes when another `example(...)` site already read this file
     // during the same resolution run.
     let bytes = match reads.get(&canonical) {

@@ -5,8 +5,8 @@
 //! `--no-schema-triggers`, are usage errors naming that replacement;
 //! completions never offer a removed `--no-…` flag and offer
 //! `schema-triggers` and `baseline-schema` as `--disable` values; and the
-//! trigger input matrix reaches `md compose` (the full matrix runs
-//! in-process in the library's `trigger_input_matrix`).
+//! trigger input matrix reaches `md compose` as a skipped-trigger warning
+//! (the full matrix runs in-process in the library's `trigger_input_matrix`).
 
 use crate::common;
 
@@ -116,8 +116,10 @@ fn compose_applies_the_control_trigger() {
         .stderr(predicate::str::contains("owner"));
 }
 
+/// An invalid trigger is skipped with a warning naming the trigger file and
+/// the invalid field's location; the document still composes without it.
 #[test]
-fn compose_reports_an_invalid_trigger_field_by_location_and_composes_nothing() {
+fn compose_warns_about_an_invalid_trigger_field_by_location_and_composes_without_it() {
     for (edit, fragments) in [
         (CONTROL.replace("  - group:\n      - mode: string(required)\n      - level: number(required)\n", "  - group: null\n"), &["match[1].group", "null"][..]),
         (CONTROL.replace("  - group:\n", "  - any:\n"), &["match[1].any", "renamed", "group:"]),
@@ -126,10 +128,11 @@ fn compose_reports_an_invalid_trigger_field_by_location_and_composes_nothing() {
         let process = CliProcessFixture::new();
         let document = repository(&process, &edit);
         let output = process.command().arg("compose").arg(&document).output().expect("md runs");
-        assert!(!output.status.success());
-        assert!(output.stdout.is_empty(), "nothing is composed");
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Composed body"), "the document composes");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // The error box wraps at the terminal width, and a long temp path (as
+        assert!(stderr.contains("ignoring invalid schema trigger"), "{stderr}");
+        // The warning wraps at the terminal width, and a long temp path (as
         // on Windows) can split a fragment across rows; match the rows joined,
         // without the styling that starts each row.
         let unwrapped: String = without_escapes(&stderr)

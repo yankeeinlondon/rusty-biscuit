@@ -12,6 +12,7 @@ mod fixtures;
 mod frontmatter;
 mod icmp;
 mod identity;
+mod invalid_triggers;
 mod lazy_roots;
 mod lookup_parity;
 mod preflight;

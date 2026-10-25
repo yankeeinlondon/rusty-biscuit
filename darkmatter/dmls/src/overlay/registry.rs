@@ -424,7 +424,7 @@ impl Preparation {
     pub fn run(mut self) -> Prepared {
         let _scan = work_counters::record_registry_scan();
         let mut deps = Dependencies::default();
-        let result = scan_with_source(&self.context, &[], &mut self.roots);
+        let result = scan_with_source(&self.context, &[], &mut self.roots).and_then(fail_closed_on_findings);
         if let Ok(roots) = SchemaRoots::for_document(&self.context) {
             record_roots(&roots, &mut deps);
         }
@@ -865,6 +865,27 @@ fn scope_affected(scope: &Scope, path: &Path, current: Option<&mut Option<Option
     (in_root && is_yaml(path)) || scope.deps.folders.contains(parent)
 }
 
+/// Fails a scan that skipped an invalid trigger as the first skipped
+/// trigger's load error, so the scope keeps failing closed with its
+/// last-good registry and trigger-file diagnostic.
+///
+/// Discovery now recovers per trigger; this keeps DMLS's whole-scope failure
+/// contract until DMLS installs a scan's valid subset and publishes its
+/// findings as warnings itself.
+fn fail_closed_on_findings(mut registry: TriggerRegistry) -> Result<TriggerRegistry, SchemaError> {
+    if registry.findings.is_empty() {
+        return Ok(registry);
+    }
+    let finding = registry.findings.swap_remove(0);
+    let path = finding.source().path().map(Path::to_path_buf);
+    let cause = Arc::try_unwrap(finding.into_cause())
+        .unwrap_or_else(|shared| SchemaError::TriggerMatch { message: shared.to_string() });
+    Err(match path {
+        Some(path) => SchemaError::TriggerLoad { path, source: Box::new(cause) },
+        None => cause,
+    })
+}
+
 /// The file or folder a preparation error names.
 fn failing_path(error: &SchemaError) -> Option<PathBuf> {
     match error {
@@ -1300,7 +1321,8 @@ mod tests {
         // failure; the package document, where the file is shadowed, loads.
         let retained = fixture.ready(&mut registries, &fixture.tree_doc());
         assert_eq!(retained.version, tree.version);
-        assert!(scan(&fixture.context(&fixture.tree_doc()).for_source(fixture.tree_doc())).is_err());
+        let skipped = scan(&fixture.context(&fixture.tree_doc()).for_source(fixture.tree_doc())).unwrap();
+        assert_eq!(skipped.findings.len(), 1, "discovery skips the malformed file");
         let reloaded = fixture.ready(&mut registries, &fixture.pkg_doc());
         assert_ne!(reloaded.version, pkg.version);
         assert_eq!(
@@ -1656,7 +1678,11 @@ mod tests {
 
         write(&nearer, "$schema:\n  Fields: [unclosed\n");
         registries.invalidate_paths(std::slice::from_ref(&nearer));
-        assert!(scan(&fixture.context(&doc).for_source(&doc)).is_err(), "the nearer file fails to load");
+        assert_eq!(
+            scan(&fixture.context(&doc).for_source(&doc)).unwrap().findings.len(),
+            1,
+            "the nearer file fails to load, so discovery skips its trigger"
+        );
         assert_eq!(fixture.ready(&mut registries, &doc).version, initial.version, "last-good retained");
         assert_eq!(registries.summary().failed_scopes, 1);
         // The failed resolution reports no candidates, yet the folder holding

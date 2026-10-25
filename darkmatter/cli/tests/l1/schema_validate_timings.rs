@@ -181,20 +181,24 @@ fn an_assignment_that_activates_a_trigger_is_timed_against_the_new_schema() {
     assert!(report.contains("compile cache: miss"), "{report}");
 }
 
+/// An invalid trigger is skipped, so the discovery failure here is an
+/// infrastructure one: a schema-root file that cannot be read as text.
 #[test]
 fn a_discovery_failure_keeps_its_error_and_reports_partial_timings() {
     let fixture = CliProcessFixture::named("schema-validate-timings-discovery-failure");
     assert!(fixture.initialize_repository());
-    write(&fixture, "schemas/bad-trigger.yaml", "kind: schema-trigger\nmatch: 42\n$schema: nope.yaml\n");
+    let unreadable = fixture.cwd().join("schemas/not-text.yaml");
+    std::fs::create_dir_all(unreadable.parent().unwrap()).unwrap();
+    std::fs::write(&unreadable, [0xff, 0xfe, 0x00]).unwrap();
     let document = write(&fixture, "doc.md", "---\ntitle: x\n---\nbody\n");
 
     let quiet = validate(&fixture, &[], &document);
     let verbose = validate(&fixture, &["-vv"], &document);
 
-    assert_eq!(quiet.status.code(), Some(2), "a malformed trigger exits 2");
+    assert_eq!(quiet.status.code(), Some(2), "an unreadable schema-root file exits 2");
     assert_eq!(verbose.status.code(), Some(2));
     assert_eq!(verbose.stdout, quiet.stdout);
-    assert!(String::from_utf8_lossy(&quiet.stdout).contains("schema-trigger file malformed"));
+    assert!(String::from_utf8_lossy(&quiet.stdout).contains("I/O failure"), "{}", String::from_utf8_lossy(&quiet.stdout));
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
     assert_stage_report(&report);

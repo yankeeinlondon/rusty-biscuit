@@ -17,7 +17,7 @@ use darkmatter::markdown::schemas::file_match::FileMatchGlobs;
 use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, InvalidSchemasDir, MatchExpr, PathGlobs, SchemaError, SchemaRootKind,
-    SchemaRootState, SchemaRoots,
+    SchemaRootState, SchemaRoots, TriggerSource,
 };
 use darkmatter::markdown::Markdown;
 use serde_json::json;
@@ -476,8 +476,9 @@ const PATH_TRIGGER: &str =
 enum Outcome {
     /// Loads, and applies to `docs/x.md`.
     Applies,
-    /// A load error whose message contains every fragment.
-    LoadError(&'static [&'static str]),
+    /// Skipped: the scan succeeds without the trigger and reports one
+    /// finding for it whose cause message contains every fragment.
+    Invalid(&'static [&'static str]),
 }
 
 #[test]
@@ -492,37 +493,37 @@ fn path_field_input_matrix() {
     let rows: &[(&str, &str, Outcome)] = &[
         ("control", "  $path: \"^docs/**\"", Outcome::Applies),
         // No `$path` leaves an arm with no condition at all: the existing
-        // vacuous-arm error, not "matches nothing".
-        ("absent", "  {}", Outcome::LoadError(&["at least one key"])),
-        ("explicit null", "  $path: null", Outcome::LoadError(&["$path must be", "got null"])),
-        ("empty value", "  $path:", Outcome::LoadError(&["$path must be", "got null"])),
-        ("wrong type, whole field", "  $path: 123", Outcome::LoadError(&["$path must be", "got number"])),
+        // vacuous-arm failure, not "matches nothing".
+        ("absent", "  {}", Outcome::Invalid(&["at least one key"])),
+        ("explicit null", "  $path: null", Outcome::Invalid(&["$path must be", "got null"])),
+        ("empty value", "  $path:", Outcome::Invalid(&["$path must be", "got null"])),
+        ("wrong type, whole field", "  $path: 123", Outcome::Invalid(&["$path must be", "got number"])),
         (
             "wrong type, one element",
             "  $path: [\"^docs/**\", 123]",
-            Outcome::LoadError(&["items must be strings", "got number"]),
+            Outcome::Invalid(&["items must be strings", "got number"]),
         ),
-        ("wrong type, every element", "  $path: [123]", Outcome::LoadError(&["items must be strings"])),
-        ("empty", "  $path: []", Outcome::LoadError(&["at least one glob pattern"])),
+        ("wrong type, every element", "  $path: [123]", Outcome::Invalid(&["items must be strings"])),
+        ("empty", "  $path: []", Outcome::Invalid(&["at least one glob pattern"])),
         (
             "no positive pattern",
             "  $path: [\"!docs/**\"]",
-            Outcome::LoadError(&["not a `!` exclusion"]),
+            Outcome::Invalid(&["not a `!` exclusion"]),
         ),
         (
             "duplicate key",
             "  $path: \"^docs/**\"\n  $path: \"^other/**\"",
-            Outcome::LoadError(&["duplicate"]),
+            Outcome::Invalid(&["duplicate"]),
         ),
-        ("invalid glob", "  $path: \"^**/[x\"", Outcome::LoadError(&["`^**/[x`", "not a valid glob"])),
-        ("forbidden @", "  $path: \"@x/**\"", Outcome::LoadError(&["`@x/**`", "`@`"])),
-        ("forbidden %", "  $path: \"%x.md\"", Outcome::LoadError(&["`%x.md`"])),
-        ("forbidden vault", "  $path: \"vault:x/**\"", Outcome::LoadError(&["`vault:x/**`", "vault"])),
-        ("forbidden {{VAR}} prefix", "  $path: \"{{X}}/**\"", Outcome::LoadError(&["`{{X}}/**`", "{{VAR}}"])),
+        ("invalid glob", "  $path: \"^**/[x\"", Outcome::Invalid(&["`^**/[x`", "not a valid glob"])),
+        ("forbidden @", "  $path: \"@x/**\"", Outcome::Invalid(&["`@x/**`", "`@`"])),
+        ("forbidden %", "  $path: \"%x.md\"", Outcome::Invalid(&["`%x.md`"])),
+        ("forbidden vault", "  $path: \"vault:x/**\"", Outcome::Invalid(&["`vault:x/**`", "vault"])),
+        ("forbidden {{VAR}} prefix", "  $path: \"{{X}}/**\"", Outcome::Invalid(&["`{{X}}/**`", "{{VAR}}"])),
         (
             "forbidden {{VAR}} inside",
             "  $path: \"docs/{{X}}/*.md\"",
-            Outcome::LoadError(&["`docs/{{X}}/*.md`", "{{VAR}}"]),
+            Outcome::Invalid(&["`docs/{{X}}/*.md`", "{{VAR}}"]),
         ),
     ];
 
@@ -532,16 +533,16 @@ fn path_field_input_matrix() {
     //
     // | Shape                            | Outcome                            |
     // | -------------------------------- | ---------------------------------- |
-    // | valid document plus a second one | load error: more than one document |
-    // | valid document plus invalid YAML | load error at the appended line    |
+    // | valid document plus a second one | invalid: more than one document    |
+    // | valid document plus invalid YAML | invalid at the appended line       |
     let control = PATH_TRIGGER.replace("$PATH_LINE", "  $path: \"^docs/**\"");
     let trailing: &[(&str, &str, Outcome)] = &[
         (
             "second document",
             "---\nkind: schema-trigger\nmatch:\n  $path: \"^other/**\"\n$schema: payload.yaml\n",
-            Outcome::LoadError(&["more than one document"]),
+            Outcome::Invalid(&["more than one document"]),
         ),
-        ("invalid trailing content", "extra: [unclosed\n", Outcome::LoadError(&["not valid YAML", "line 5"])),
+        ("invalid trailing content", "extra: [unclosed\n", Outcome::Invalid(&["not valid YAML", "line 5"])),
     ];
 
     let cells = rows
@@ -550,18 +551,23 @@ fn path_field_input_matrix() {
         .chain(trailing.iter().map(|(shape, suffix, expected)| (*shape, format!("{control}{suffix}"), expected)));
     for (shape, text, expected) in cells {
         write(&schemas.join("matrix.trigger.yaml"), &text);
-        let scanned = darkmatter::markdown::schemas::scan(&context);
+        let registry = darkmatter::markdown::schemas::scan(&context).unwrap_or_else(|error| panic!("{shape}: {error}"));
         match expected {
             Outcome::Applies => {
-                scanned.unwrap_or_else(|error| panic!("{shape}: {error}"));
+                assert!(registry.findings().is_empty(), "{shape}: {:?}", registry.findings());
                 assert_eq!(effective_properties(&context, &document), ["from_trigger"], "{shape}");
             }
-            Outcome::LoadError(fragments) => {
-                let error = scanned.expect_err(shape);
-                let SchemaError::TriggerLoad { source, .. } = &error else {
-                    panic!("{shape}: expected a trigger load error, got {error:?}");
+            Outcome::Invalid(fragments) => {
+                assert!(registry.triggers.is_empty(), "{shape}: the invalid trigger installed");
+                let [finding] = registry.findings() else {
+                    panic!("{shape}: one finding expected: {:?}", registry.findings());
                 };
-                let message = source.to_string();
+                assert_eq!(
+                    finding.source(),
+                    &TriggerSource::File(schemas.join("matrix.trigger.yaml")),
+                    "{shape}"
+                );
+                let message = finding.cause().to_string();
                 for fragment in *fragments {
                     assert!(message.contains(fragment), "{shape}: `{fragment}` not in {message:?}");
                 }
@@ -1018,7 +1024,7 @@ fn no_doc_or_skill_names_the_singular_schema_variable() {
     assert!(offenders.is_empty(), "rename `SCHEMA_DIR` to `SCHEMAS_DIR` in: {offenders:?}");
 }
 
-// ── An unparseable schema-root file decides the scan only when it claims ──
+// ── An unparseable schema-root file is reported only when it claims ───────
 
 /// The 2026-10-17 incident: an ordinary, mid-edit schema file beside a
 /// trigger in the same root leaves the trigger loaded and applied.
@@ -1038,10 +1044,10 @@ fn an_unparseable_unclaimed_schema_root_file_does_not_fail_discovery() {
     assert_eq!(effective_properties(&context, &document), ["from_trigger"]);
 }
 
-/// A claimed envelope that is not valid YAML fails the scan as a trigger
-/// load error naming the file, carrying the YAML location.
+/// A claimed envelope that is not valid YAML is skipped and reported as a
+/// finding naming the file at the YAML location; its neighbor still loads.
 #[test]
-fn an_unparseable_claimed_schema_root_file_fails_discovery_with_its_yaml_location() {
+fn an_unparseable_claimed_schema_root_file_is_reported_with_its_yaml_location() {
     let fixture = Fixture::new();
     let schemas = fixture.repo().join("schemas");
     let broken = schemas.join("broken.yaml");
@@ -1052,14 +1058,19 @@ fn an_unparseable_claimed_schema_root_file_fails_discovery_with_its_yaml_locatio
     write(&document, "---\ntitle: x\n---\n");
     let context = fixture.context(&document, &[]);
 
-    let error = darkmatter::markdown::schemas::scan(&context).expect_err("a claimed file is fatal");
-    let SchemaError::TriggerLoad { path, source } = &error else {
-        panic!("expected a trigger load error, got {error:?}");
+    let registry = darkmatter::markdown::schemas::scan(&context).expect("a claimed file is skipped, not fatal");
+    let [finding] = registry.findings() else {
+        panic!("one finding expected: {:?}", registry.findings());
     };
-    assert_eq!(canonical(path), canonical(&broken));
+    assert_eq!(finding.identity(), &TriggerSource::File(canonical(&broken)));
+    assert_eq!(finding.position(), Some((4, 9)));
     assert!(
-        matches!(**source, SchemaError::TriggerEnvelopeYaml { line: Some(4), column: Some(9), .. }),
-        "{source:?}"
+        matches!(finding.cause(), SchemaError::TriggerEnvelopeYaml { line: Some(4), column: Some(9), .. }),
+        "{:?}",
+        finding.cause()
     );
-    assert!(error.to_string().contains("is not valid YAML at line 4, column 9"), "{error}");
+    let message = finding.message();
+    assert!(message.contains("broken.yaml") && message.contains("not valid YAML at line 4, column 9"), "{message}");
+    assert_eq!(registry.triggers.len(), 1, "the valid neighbor still loads");
+    assert_eq!(effective_properties(&context, &document), ["from_trigger"]);
 }

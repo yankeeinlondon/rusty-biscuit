@@ -18,18 +18,28 @@
 //! - The first root wins by trigger **filename** with no merging; a shadowed
 //!   file is never evaluated.
 //! - A file whose `kind` is absent or a string other than `schema-trigger`
-//!   is silently ignored; `kind: schema-trigger` (the spelling before the
-//!   rename) and a null or non-string `kind` are load errors, as is a file
-//!   that claims the envelope but is malformed.
-//! - Loading is **transactional**: if any unshadowed opted-in trigger is
-//!   invalid, no registry is installed from that scan.
-//! - A root folder whose metadata or entries cannot be read fails the scan
-//!   with an I/O error naming it; it is never treated as absent.
+//!   is silently ignored. A file that claims the envelope but is malformed,
+//!   one claiming it with the spelling before the rename, and a null or
+//!   non-string `kind` are invalid triggers.
+//! - Loading **recovers per trigger**: a trigger is installed only once its
+//!   envelope and payload (with every import, merge-compatible and compiling)
+//!   have loaded. An invalid trigger is left out and recorded as an
+//!   [`InvalidTriggerFinding`] on [`TriggerRegistry::findings`]; every valid
+//!   trigger is still installed in its usual order. A skipped file keeps its
+//!   file name claimed, so it still shadows same-named files and bundle
+//!   documents.
+//! - Infrastructure failures still fail the scan, never yielding an
+//!   apparently empty registry: a root folder whose metadata or entries
+//!   cannot be read (an I/O error naming it; never treated as absent), an
+//!   enumerated file that cannot be read before it is classified, a
+//!   case-fold collision, and an invalid embedded bundle structure.
 //! - A host's [`EmbeddedSchemaBundle`]s are a last-resort location after the
 //!   five roots: a bundle trigger is loaded only when no file of the same
 //!   name was enumerated in any root (whatever that file holds), and only a
 //!   bundle file claiming `kind: schema-trigger` becomes a trigger. Its
-//!   payload and imports resolve inside its bundle.
+//!   payload and imports resolve inside its bundle. An invalid bundle trigger
+//!   is a finding identified by bundle and document name, and still claims
+//!   its name from later bundles.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -45,6 +55,7 @@ use crate::markdown::schemas::roots::SchemaRoots;
 use crate::markdown::schemas::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
+use super::finding::InvalidTriggerFinding;
 
 /// Valid YAML extensions for schema-trigger files.
 const YAML_EXTENSIONS: &[&str] = &["yaml", "yml"];
@@ -141,12 +152,13 @@ pub struct ShadowedFile {
     pub shadowed_by: PathBuf,
 }
 
-/// The unshadowed, loaded trigger envelopes for one document.
+/// The unshadowed, loaded trigger envelopes for one document, and the
+/// triggers discovery skipped as invalid.
 ///
 /// Built by [`scan`] from the document's context, which the registry keeps:
-/// its `$path` patterns are judged in that context. Loading is
-/// transactional: if any unshadowed opted-in trigger is invalid, [`scan`]
-/// returns `Err` and no registry is installed.
+/// its `$path` patterns are judged in that context. Loading recovers per
+/// trigger: an invalid trigger is absent from [`triggers`](Self::triggers)
+/// and reported in [`findings`](Self::findings).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TriggerRegistry {
     /// The five schema roots, for bare-name lookup and the
@@ -163,9 +175,12 @@ pub struct TriggerRegistry {
     pub(crate) payloads: Vec<super::assemble::ResolvedPayload>,
     /// Files shadowed by an earlier root's file of the same name.
     pub shadowed: Vec<ShadowedFile>,
+    /// The triggers discovery skipped, in discovery order (root files first,
+    /// then embedded bundles), one per trigger with its first failure.
+    pub findings: Vec<InvalidTriggerFinding>,
     /// Every file name a later embedded trigger of that name defers to: each
     /// file enumerated in a root (trigger or not, shadowed or not) and each
-    /// embedded trigger already loaded.
+    /// embedded trigger already loaded or skipped as invalid.
     claimed_names: BTreeSet<String>,
     /// The document context the roots were computed in and `$path` patterns
     /// are judged in.
@@ -186,6 +201,7 @@ impl TriggerRegistry {
             triggers,
             payloads: Vec::new(),
             shadowed: Vec::new(),
+            findings: Vec::new(),
             claimed_names,
             context,
         }
@@ -197,36 +213,42 @@ impl TriggerRegistry {
     /// [`scan_with_embedded`]) is skipped unread. Every other bundle document
     /// is classified like a root file: one that does not claim
     /// `kind: schema-trigger` is an import target only. Each embedded
-    /// trigger's payload is resolved now, inside the bundle.
+    /// trigger's payload is resolved now, inside the bundle. A document that
+    /// claims the envelope but whose envelope or payload fails to load is
+    /// skipped and reported in [`findings`](Self::findings); it claims its
+    /// name all the same, so a later bundle never stands in for it.
     ///
-    /// Transactional: on error the registry is unchanged.
+    /// On error the registry is unchanged.
     ///
     /// ## Errors
     ///
-    /// [`SchemaError::EmbeddedBundle`] for an unusable bundle shape;
-    /// [`SchemaError::EmbeddedTriggerLoad`] naming the first malformed
-    /// unclaimed trigger or unresolvable payload.
+    /// [`SchemaError::EmbeddedBundle`] for an unusable bundle shape.
     pub fn append_embedded_bundle(&mut self, bundle: EmbeddedSchemaBundle) -> Result<(), SchemaError> {
         bundle.check()?;
         let base_dir = self.context.base_dir().to_path_buf();
         let mut loaded = Vec::new();
+        let mut skipped = Vec::new();
         for (name, text) in bundle.sorted_files() {
             if self.claimed_names.contains(name) {
                 continue;
             }
-            let Some((envelope, payload)) = load_embedded_trigger(bundle, name, text)? else {
-                continue;
+            let source = TriggerSource::Embedded {
+                bundle: bundle.name().to_string(),
+                name: name.to_string(),
             };
-            let trigger = LoadedTrigger {
-                source: TriggerSource::Embedded {
-                    bundle: bundle.name().to_string(),
-                    name: name.to_string(),
-                },
-                envelope,
-                pattern_cwd: base_dir.clone(),
-                bundle: Some(bundle),
-            };
-            loaded.push((trigger, payload));
+            match load_embedded_trigger(bundle, name, text) {
+                Ok(None) => {}
+                Ok(Some((envelope, payload))) => {
+                    let trigger = LoadedTrigger {
+                        source,
+                        envelope,
+                        pattern_cwd: base_dir.clone(),
+                        bundle: Some(bundle),
+                    };
+                    loaded.push((trigger, payload));
+                }
+                Err(cause) => skipped.push(InvalidTriggerFinding::new(source, cause)),
+            }
         }
         // A programmatic registry resolves payloads on demand; keep its
         // `payloads` empty so the two vectors stay parallel or empty.
@@ -240,7 +262,19 @@ impl TriggerRegistry {
                 self.payloads.push(payload);
             }
         }
+        for finding in skipped {
+            if let Some(name) = finding.source().file_name() {
+                self.claimed_names.insert(name.to_string());
+            }
+            self.findings.push(finding);
+        }
         Ok(())
+    }
+
+    /// The triggers discovery skipped as invalid, in discovery order.
+    #[must_use]
+    pub fn findings(&self) -> &[InvalidTriggerFinding] {
+        &self.findings
     }
 
     /// `true` when no triggers were loaded.
@@ -256,7 +290,9 @@ impl TriggerRegistry {
 
     /// The files an effective schema layered from this registry depends on:
     /// each file trigger's envelope, and each resolved payload file with its
-    /// imports and examples. Embedded triggers contribute none; a registry
+    /// imports and examples. A skipped file trigger contributes its envelope
+    /// and every file its failed payload resolution read, so repairing either
+    /// refreshes the result. Embedded triggers contribute none; a registry
     /// built without [`scan`] contributes only its envelopes.
     pub fn dependencies(&self) -> impl Iterator<Item = &Path> {
         self.triggers
@@ -267,17 +303,22 @@ impl TriggerRegistry {
                     .iter()
                     .flat_map(|payload| payload.dependencies.iter().map(PathBuf::as_path)),
             )
+            .chain(self.findings.iter().flat_map(|finding| {
+                finding.source().path().into_iter().chain(finding.read.iter().map(PathBuf::as_path))
+            }))
     }
 
-    /// The locations each resolved payload probed while selecting its schema
-    /// file, imports, and examples, including absent nearer candidates whose
-    /// creation would change the selection. Paths are lexical and may not
-    /// exist; a path may repeat across payloads. Embedded triggers contribute
-    /// none.
+    /// The locations each payload probed while selecting its schema file,
+    /// imports, and examples, including absent nearer candidates whose
+    /// creation would change the selection, and those a skipped trigger's
+    /// failed payload resolution probed (a missing payload among them).
+    /// Paths are lexical and may not exist; a path may repeat across
+    /// payloads. Embedded triggers contribute none.
     pub fn searched_locations(&self) -> impl Iterator<Item = &Path> {
         self.payloads
             .iter()
             .flat_map(|payload| payload.searched.iter().map(PathBuf::as_path))
+            .chain(self.findings.iter().flat_map(|finding| finding.searched.iter().map(PathBuf::as_path)))
     }
 }
 
@@ -312,6 +353,11 @@ pub(crate) fn reset_process_caches() {
 /// bundle document the payload never reads, such as another trigger, keeps
 /// the entry. Only successes are kept; a failure is recomputed (and reported)
 /// on every load.
+///
+/// ## Errors
+///
+/// The first failure of a document that claims the envelope: its envelope
+/// error, or its payload's resolution, merge, or compile error.
 fn load_embedded_trigger(
     bundle: EmbeddedSchemaBundle,
     name: &str,
@@ -329,12 +375,7 @@ fn load_embedded_trigger(
     {
         return Ok(hit.clone());
     }
-    let load_error = |source: SchemaError| SchemaError::EmbeddedTriggerLoad {
-        bundle: bundle.name().to_string(),
-        name: name.to_string(),
-        source: Box::new(source),
-    };
-    let (loaded, reads) = match parse_trigger_envelope_from_str(text).map_err(load_error)? {
+    let (loaded, reads) = match parse_trigger_envelope_from_str(text)? {
         None => (None, Vec::new()),
         Some(envelope) => {
             let trigger = LoadedTrigger {
@@ -346,8 +387,7 @@ fn load_embedded_trigger(
                 pattern_cwd: PathBuf::new(),
                 bundle: Some(bundle),
             };
-            let (payload, read_paths) =
-                super::assemble::resolve_embedded_trigger_payload(&trigger).map_err(load_error)?;
+            let (payload, read_paths) = super::assemble::resolve_embedded_trigger_payload(&trigger)?;
             let reads: EmbeddedReads = read_paths
                 .into_iter()
                 .filter_map(|path| current_text(&path).map(|read| (path, read)))
@@ -530,12 +570,19 @@ fn check_case_fold_collision(
 /// folder): the package and package-area roots are the document's, and the
 /// registry judges `$path` patterns in it.
 ///
-/// Loading is **transactional**: if any root folder cannot be inspected or
-/// read, or any unshadowed opted-in trigger file is malformed or its payload
-/// fails to resolve (missing file, cyclic reference, non-mergeable shape), no
-/// registry is installed (an error is returned).
-/// Payload resolution runs regardless of whether any current document matches
-/// the trigger, so a registry is never installed with a known-bad payload.
+/// Loading **recovers per trigger**: an unshadowed trigger file that is
+/// malformed, or whose payload fails to resolve, merge, or compile (a missing
+/// file, a cyclic reference, a non-mergeable shape), is left out and reported
+/// in [`TriggerRegistry::findings`]; the scan goes on. Payload resolution
+/// runs regardless of whether any current document matches the trigger, so a
+/// registry never holds a known-bad payload.
+///
+/// ## Errors
+///
+/// Infrastructure failures only (see the [discovery
+/// contract](self#discovery-contract)): a schema root that cannot be
+/// enumerated, an enumerated file that cannot be read, or a case-fold
+/// collision.
 pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaError> {
     scan_with_embedded(context, &[])
 }
@@ -545,9 +592,9 @@ pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaEr
 ///
 /// A bundle document is skipped when a file of the same name was enumerated
 /// in any searched root — a matching, non-matching, non-trigger, or malformed
-/// one alike — or an earlier bundle loaded a trigger of that name. A
-/// malformed claimed disk trigger stays a [`SchemaError::TriggerLoad`]; the
-/// bundle never stands in for it.
+/// one alike — or an earlier bundle loaded or skipped a trigger of that name.
+/// A malformed claimed disk trigger stays a finding; the bundle never stands
+/// in for it.
 ///
 /// ## Errors
 ///
@@ -601,45 +648,44 @@ pub fn scan_with_source(
         }
     }
 
-    // Classify and load each unshadowed file (transactional).
+    // Classify each unshadowed file and resolve its payload. A file that
+    // cannot be read is an infrastructure error; an invalid envelope or a
+    // failed payload skips only that trigger, independent of whether any
+    // current document matches it.
     let mut triggers: Vec<LoadedTrigger> = Vec::new();
-    let mut trigger_paths: Vec<PathBuf> = Vec::new();
+    let mut payloads = Vec::new();
+    let mut findings: Vec<InvalidTriggerFinding> = Vec::new();
     for (file, pattern_cwd) in &unshadowed {
         let content = source.root_file_text(&file.path)?;
-        match parse_trigger_envelope_from_str(&content) {
-            Ok(None) => {
-                // Not a schema trigger — silently ignored.
+        let trigger_source = TriggerSource::File(file.path.clone());
+        let envelope = match parse_trigger_envelope_from_str(&content) {
+            // Not a schema trigger — silently ignored.
+            Ok(None) => continue,
+            Ok(Some(envelope)) => envelope,
+            Err(cause) => {
+                findings.push(InvalidTriggerFinding::new(trigger_source, cause));
+                continue;
             }
-            Ok(Some(envelope)) => {
-                trigger_paths.push(file.path.clone());
-                triggers.push(LoadedTrigger {
-                    source: TriggerSource::File(file.path.clone()),
-                    envelope,
-                    pattern_cwd: pattern_cwd.to_path_buf(),
-                    bundle: None,
-                });
+        };
+        let trigger = LoadedTrigger {
+            source: trigger_source,
+            envelope,
+            pattern_cwd: pattern_cwd.to_path_buf(),
+            bundle: None,
+        };
+        let (payload, observed) = crate::markdown::schemas::resolve::observed::collect(|| {
+            super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context)
+        });
+        match payload {
+            Ok(payload) => {
+                triggers.push(trigger);
+                payloads.push(payload);
             }
-            Err(source) => {
-                return Err(SchemaError::TriggerLoad {
-                    path: file.path.clone(),
-                    source: Box::new(source),
-                });
-            }
+            Err(cause) => findings.push(
+                InvalidTriggerFinding::new(trigger.source, cause)
+                    .with_observations(observed.read.into_iter().collect(), observed.searched.into_iter().collect()),
+            ),
         }
-    }
-
-    // Resolve every payload (transactional). Payload failures — missing files,
-    // cycles, non-mergeable shapes — are hard load errors at scan time,
-    // independent of whether any current document matches the trigger.
-    let mut payloads = Vec::with_capacity(triggers.len());
-    for (trigger, path) in triggers.iter().zip(&trigger_paths) {
-        let payload = super::assemble::resolve_trigger_payload(trigger, roots.search_paths(), context).map_err(
-            |source| SchemaError::TriggerLoad {
-                path: path.clone(),
-                source: Box::new(source),
-            },
-        )?;
-        payloads.push(payload);
     }
 
     let mut registry = TriggerRegistry {
@@ -647,6 +693,7 @@ pub fn scan_with_source(
         triggers,
         payloads,
         shadowed,
+        findings,
         claimed_names: first_by_name.into_keys().collect(),
         context: context.clone(),
     };
@@ -992,8 +1039,17 @@ mod tests {
             .ends_with("trigger.trigger.yaml"));
     }
 
+    /// The one finding of `registry`, for the trigger file `name`.
+    fn only_finding<'a>(registry: &'a TriggerRegistry, name: &str) -> &'a InvalidTriggerFinding {
+        let [finding] = registry.findings() else {
+            panic!("one finding expected: {:?}", registry.findings());
+        };
+        assert_eq!(finding.source().file_name(), Some(name));
+        finding
+    }
+
     #[test]
-    fn malformed_trigger_is_hard_error() {
+    fn malformed_trigger_is_skipped_with_a_finding() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1005,12 +1061,16 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan_for(&doc, root).unwrap_err();
-        assert!(matches!(err, SchemaError::TriggerLoad { .. }));
+        let registry = scan_for(&doc, root).unwrap();
+        assert!(registry.is_empty());
+        let finding = only_finding(&registry, "bad.trigger.yaml");
+        assert!(matches!(finding.cause(), SchemaError::TriggerMatch { .. }), "{:?}", finding.cause());
+        // The skipped envelope is a dependency, so repairing it refreshes.
+        assert!(registry.dependencies().any(|path| path.ends_with("bad.trigger.yaml")));
     }
 
     #[test]
-    fn malformed_trigger_atomic_no_registry() {
+    fn malformed_trigger_beside_a_valid_one_installs_the_valid_one() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1028,12 +1088,14 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let result = scan_for(&doc, root);
-        assert!(result.is_err(), "transactional: no registry on any failure");
+        let registry = scan_for(&doc, root).unwrap();
+        assert_eq!(registry.triggers.len(), 1);
+        assert!(registry.triggers[0].source.path().unwrap().ends_with("good.trigger.yaml"));
+        only_finding(&registry, "bad.trigger.yaml");
     }
 
     #[test]
-    fn vacuous_trigger_is_hard_error() {
+    fn vacuous_trigger_is_skipped_with_a_finding() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1044,12 +1106,10 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan_for(&doc, root).unwrap_err();
-        assert!(matches!(
-            err,
-            SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerVacuousMatch)
-        ));
+        let registry = scan_for(&doc, root).unwrap();
+        assert!(registry.is_empty());
+        let finding = only_finding(&registry, "vacuous.trigger.yaml");
+        assert!(matches!(finding.cause(), SchemaError::TriggerVacuousMatch));
     }
 
     // ── Full scan integration ───────────────────────────────────────────
@@ -1186,10 +1246,10 @@ mod tests {
         assert_eq!(registry.triggers.len(), 1);
     }
 
-    // ── Payload resolution is transactional at scan time ───────────────
+    // ── Payload failures skip their trigger at scan time ────────────────
 
     #[test]
-    fn unmatched_trigger_with_missing_payload_is_hard_error() {
+    fn unmatched_trigger_with_missing_payload_is_skipped() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1204,15 +1264,16 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan_for(&doc, root).unwrap_err();
-        assert!(
-            matches!(err, SchemaError::TriggerLoad { .. }),
-            "missing payload must be a hard load error: {err:?}"
-        );
+        let registry = scan_for(&doc, root).unwrap();
+        assert!(registry.is_empty(), "a missing payload is never installed");
+        only_finding(&registry, "lonely.trigger.yaml");
+        // The missing payload is a searched location, never a dependency.
+        assert!(registry.searched_locations().any(|path| path.ends_with("does-not-exist.yaml")));
+        assert!(!registry.dependencies().any(|path| path.ends_with("does-not-exist.yaml")));
     }
 
     #[test]
-    fn unmatched_trigger_with_non_mergeable_payload_is_hard_error() {
+    fn unmatched_trigger_with_non_mergeable_payload_is_skipped() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1226,20 +1287,18 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan_for(&doc, root).unwrap_err();
-        match err {
-            SchemaError::TriggerLoad { source, .. } => {
-                assert!(
-                    matches!(*source, SchemaError::TriggerPayloadNotMergeable { .. }),
-                    "inner error must be TriggerPayloadNotMergeable: {source:?}"
-                );
-            }
-            other => panic!("expected TriggerLoad wrapping TriggerPayloadNotMergeable, got {other:?}"),
-        }
+        let registry = scan_for(&doc, root).unwrap();
+        assert!(registry.is_empty());
+        let finding = only_finding(&registry, "union.trigger.yaml");
+        assert!(
+            matches!(finding.cause(), SchemaError::TriggerPayloadNotMergeable { .. }),
+            "cause must be TriggerPayloadNotMergeable: {:?}",
+            finding.cause()
+        );
     }
 
     #[test]
-    fn payload_resolution_failure_is_transactional() {
+    fn payload_resolution_failure_skips_only_its_trigger() {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
@@ -1255,11 +1314,11 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let result = scan_for(&doc, root);
-        assert!(
-            result.is_err(),
-            "a single bad payload must fail the whole scan transactionally"
-        );
+        let registry = scan_for(&doc, root).unwrap();
+        assert_eq!(registry.triggers.len(), 1);
+        assert!(registry.triggers[0].source.path().unwrap().ends_with("good.trigger.yaml"));
+        assert_eq!(registry.payloads.len(), 1, "payloads stay parallel to triggers");
+        only_finding(&registry, "bad.trigger.yaml");
     }
 
     // ── Error display ───────────────────────────────────────────────────

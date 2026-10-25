@@ -363,6 +363,17 @@ fn a_file_added_to_a_schema_root_is_resolved_again() {
     assert_eq!(payload_properties(&registry), ["model"]);
 }
 
+/// The trigger `scan` skipped because its payload failed: the scan itself
+/// succeeds, and the trigger is reported instead of installed.
+fn skipped_by_payload_failure(context: &FileResolutionContext) -> crate::markdown::schemas::InvalidTriggerFinding {
+    let registry = scan(context).expect("a failed payload skips its trigger, not the scan");
+    assert!(registry.triggers.is_empty(), "a failed payload is never installed");
+    let [finding] = registry.findings() else {
+        panic!("one finding expected: {:?}", registry.findings());
+    };
+    finding.clone()
+}
+
 /// A failed resolution counts as a miss and is never kept, so the next
 /// lookup tries again.
 #[test]
@@ -373,7 +384,7 @@ fn a_failed_resolution_is_a_miss_and_is_not_kept() {
 
     for attempt in 0..2 {
         let tally = PayloadMemoTally::start();
-        assert!(scan(&document).is_err(), "attempt {attempt} must fail");
+        skipped_by_payload_failure(&document);
         assert_eq!(tally.counts(), MISS, "attempt {attempt}");
     }
 }
@@ -563,7 +574,8 @@ fn an_explicit_relative_reference_gains_no_fallback() {
 
     for attempt in 0..2 {
         let tally = PayloadMemoTally::start();
-        assert!(scan(&document).is_err(), "attempt {attempt}: `./` must not fall back to the root");
+        // `./` must not fall back to the root.
+        skipped_by_payload_failure(&document);
         assert_eq!(tally.counts(), MISS, "attempt {attempt}");
     }
 

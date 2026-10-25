@@ -316,6 +316,12 @@ fn resolve_file_payload(
 
     // Merge-compatibility gate: must be a simple-object schema.
     enforce_merge_compatible(source, payload, &resolved.json_schema)?;
+    let json_schema = std::sync::Arc::new(resolved.json_schema);
+    let payload_path = match (payload, resolved.referenced_files.as_slice()) {
+        (YamlValue::String(_), [file]) => Some(file.clone()),
+        _ => None,
+    };
+    enforce_compiles(source, payload, payload_path, &json_schema)?;
 
     // Collect dependency edges: the payload file(s) + imports + examples.
     let mut deps: Vec<PathBuf> = resolved
@@ -331,7 +337,7 @@ fn resolve_file_payload(
     Ok(ResolvedPayload {
         shape: payload_shape(resolved.simplified),
         definitions: resolved.definitions,
-        json_schema: std::sync::Arc::new(resolved.json_schema),
+        json_schema,
         dependencies: deps,
         searched: resolved.searched,
         advisories: resolved.advisories,
@@ -775,15 +781,44 @@ fn resolve_embedded_payload(
     })?;
     let (resolved, reads) = resolved;
     enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
+    let json_schema = std::sync::Arc::new(resolved.json_schema);
+    enforce_compiles(&importer_path, payload, None, &json_schema)?;
     let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
         definitions: resolved.definitions,
-        json_schema: std::sync::Arc::new(resolved.json_schema),
+        json_schema,
         dependencies: Vec::new(),
         searched: Vec::new(),
         advisories: resolved.advisories,
     };
     Ok((payload, reads))
+}
+
+/// Rejects a payload whose JSON Schema cannot be compiled into a validator,
+/// before its trigger is installed: a later layer could otherwise hide the bad
+/// property when the merged schema compiles. The structural validator is
+/// built through the shared validator cache, so an unchanged payload is
+/// compiled once per process, not once per document pass.
+fn enforce_compiles(
+    trigger_source: &Path,
+    payload: &YamlValue,
+    payload_path: Option<PathBuf>,
+    json_schema: &std::sync::Arc<Value>,
+) -> Result<(), SchemaError> {
+    let cache = &*crate::markdown::schemas::SHARED_VALIDATOR_CACHE;
+    let hash = cache.shared_schema_hash(json_schema);
+    match cache.structural_validator_hashed(json_schema, hash) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(SchemaError::TriggerPayloadCompile {
+            path: trigger_source.to_path_buf(),
+            payload: describe_payload(payload),
+            payload_path,
+            message: match error {
+                SchemaError::BuildValidator { message } => message,
+                other => other.to_string(),
+            },
+        }),
+    }
 }
 
 /// Rejects payloads that are root unions, non-objects, or otherwise not
@@ -854,15 +889,17 @@ fn check_payload_cycles(
 }
 
 /// Returns `true` when `path`'s contents claim the `kind: schema-trigger`
-/// envelope. I/O errors and malformed YAML return `Ok(false)` — they are not
-/// the cycle detector's concern (the resolver surfaces those separately).
+/// envelope, valid or not: a claimed envelope that discovery skips as invalid
+/// is still a trigger file, never a schema. An unreadable file returns
+/// `Ok(false)` — it is not the cycle detector's concern (the resolver
+/// surfaces it separately) — as does unclaimed YAML, malformed or not.
 fn file_claims_trigger_envelope(path: &Path) -> Result<bool, SchemaError> {
     let Ok(content) = std::fs::read_to_string(path) else {
         return Ok(false);
     };
     match parse_trigger_envelope_from_str(&content) {
-        Ok(Some(_)) => Ok(true),
-        Ok(None) | Err(_) => Ok(false),
+        Ok(Some(_)) | Err(_) => Ok(true),
+        Ok(None) => Ok(false),
     }
 }
 

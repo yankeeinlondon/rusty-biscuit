@@ -148,8 +148,10 @@ impl CleanSchemaConfig {
     ///
     /// ## Errors
     ///
-    /// Propagates [`SchemaError`] from baseline loading/validation and
-    /// trigger-envelope scanning.
+    /// Propagates [`SchemaError`] from baseline loading/validation and from
+    /// trigger discovery's infrastructure failures. An invalid trigger is not
+    /// an error: discovery skips it and the context reports it through
+    /// [`CleanSchemaContext::discovery_findings`].
     pub fn resolve(&self, document_path: Option<&Path>) -> Result<CleanSchemaContext, SchemaError> {
         let mut builder = DarkmatterSchemas::new(self.file_resolution_context.clone());
         builder = match &self.baseline {
@@ -188,6 +190,13 @@ impl CleanSchemaContext {
         &self.schemas
     }
 
+    /// The schema triggers discovery skipped as invalid, in discovery order;
+    /// empty when discovery did not run.
+    #[must_use]
+    pub fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+        self.schemas.discovery_findings()
+    }
+
     /// Resolves the effective schema for `source`, applying the configured
     /// document-`$schema` override when present. Returns `Ok(None)` when no
     /// baseline, no matching trigger, and no document schema constrain the
@@ -219,10 +228,14 @@ impl CleanSchemaContext {
         source: &Markdown,
         yaml_source: &str,
     ) -> Result<SchemaCleanAnalysis, SchemaError> {
-        let Some(effective) = self.effective_schema(source)? else {
-            return Ok(SchemaCleanAnalysis::default());
+        let analysis = match self.effective_schema(source)? {
+            Some(effective) => analyze_frontmatter(&effective, yaml_source).with_effective(effective),
+            None => SchemaCleanAnalysis::default(),
         };
-        Ok(analyze_frontmatter(&effective, yaml_source).with_effective(effective))
+        Ok(SchemaCleanAnalysis {
+            trigger_findings: self.discovery_findings().to_vec(),
+            ..analysis
+        })
     }
 }
 
@@ -233,6 +246,7 @@ impl CleanSchemaContext {
 pub struct SchemaCleanAnalysis {
     effective: Option<EffectiveSchema>,
     diagnostics: Vec<YamlDiagnostic>,
+    trigger_findings: Vec<crate::markdown::schemas::InvalidTriggerFinding>,
 }
 
 impl SchemaCleanAnalysis {
@@ -250,6 +264,13 @@ impl SchemaCleanAnalysis {
     /// The schema-aware diagnostics in stable source order.
     pub fn diagnostics(&self) -> &[YamlDiagnostic] {
         &self.diagnostics
+    }
+
+    /// The schema triggers discovery skipped as invalid, whether or not an
+    /// effective schema constrains the document. Not diagnostics: they
+    /// describe trigger files, not this frontmatter block.
+    pub fn trigger_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+        &self.trigger_findings
     }
 
     /// `true` when no schema-aware findings were produced.
@@ -287,6 +308,7 @@ pub fn analyze_frontmatter(
         return SchemaCleanAnalysis {
             effective: None,
             diagnostics: vec![diagnostic],
+            trigger_findings: Vec::new(),
         };
     }
 
@@ -313,6 +335,7 @@ pub fn analyze_frontmatter(
     SchemaCleanAnalysis {
         effective: None,
         diagnostics,
+        trigger_findings: Vec::new(),
     }
 }
 

@@ -507,12 +507,18 @@ impl Repository {
         Self { _dir: dir, root, home }
     }
 
-    fn effective(&self, document: &str) -> Result<Option<EffectiveSchema>, SchemaError> {
+    /// Trigger discovery for `document`, written as `docs/doc.md`.
+    fn discover(&self, document: &str) -> Result<(DarkmatterSchemas, Markdown), SchemaError> {
         let path = write(&self.root, "docs/doc.md", document);
         let snapshot = RequestSnapshot::new(path.parent().expect("folder")).with_home(Some(self.home.clone()));
         let context = build_resolution_context(&snapshot).expect("fixture context");
         let markdown = Markdown::try_from(path.as_path()).expect("document").with_source(ComposeSource::File(path));
-        DarkmatterSchemas::new(context).with_trigger_discovery()?.effective_for(&markdown)
+        Ok((DarkmatterSchemas::new(context).with_trigger_discovery()?, markdown))
+    }
+
+    fn effective(&self, document: &str) -> Result<Option<EffectiveSchema>, SchemaError> {
+        let (schemas, markdown) = self.discover(document)?;
+        schemas.effective_for(&markdown)
     }
 }
 
@@ -549,7 +555,7 @@ fn a_recursive_trigger_payload_merges_beside_a_recursive_document() {
 }
 
 #[test]
-fn a_raw_trigger_payload_with_an_unresolved_reference_is_not_mergeable() {
+fn a_raw_trigger_payload_with_an_unresolved_reference_is_skipped_as_not_mergeable() {
     let control = json!({"type": "object", "properties": {"tree": {"$ref": "#/$defs/item"}}, "$defs": {"item": {"type": "object"}}});
     let trigger = TRIGGER.replace("payload.yaml", "payload.json");
     let repo = Repository::new(&[("tree.trigger.yaml", &trigger), ("payload.json", &control.to_string())]);
@@ -558,14 +564,17 @@ fn a_raw_trigger_payload_with_an_unresolved_reference_is_not_mergeable() {
     let mut broken = control.clone();
     broken["$defs"] = json!({});
     let repo = Repository::new(&[("tree.trigger.yaml", &trigger), ("payload.json", &broken.to_string())]);
-    match repo.effective("---\nkind: tree\n---\nbody\n") {
-        Err(SchemaError::TriggerLoad { source, .. }) => match *source {
-            SchemaError::TriggerPayloadNotMergeable { reason, .. } => {
-                assert!(reason.contains("#/$defs/item") && reason.contains("/properties/tree"), "{reason}");
-            }
-            other => panic!("expected TriggerPayloadNotMergeable, got {other:?}"),
-        },
-        other => panic!("expected a trigger load error, got {:?}", other.map(|_| ())),
+    let (schemas, markdown) = repo.discover("---\nkind: tree\n---\nbody\n").expect("discovery succeeds");
+    assert!(schemas.effective_for(&markdown).expect("resolves").is_none(), "the trigger is not installed");
+    let [finding] = schemas.discovery_findings() else {
+        panic!("one finding expected: {:?}", schemas.discovery_findings());
+    };
+    assert!(finding.source().to_string().ends_with("tree.trigger.yaml"), "{}", finding.source());
+    match finding.cause() {
+        SchemaError::TriggerPayloadNotMergeable { reason, .. } => {
+            assert!(reason.contains("#/$defs/item") && reason.contains("/properties/tree"), "{reason}");
+        }
+        other => panic!("expected TriggerPayloadNotMergeable, got {other:?}"),
     }
 }
 

@@ -623,6 +623,15 @@ pub(crate) enum WarningSubject {
     /// keeps their key exactly `(source, code, path)`, and so they collapse
     /// across every document that references that schema.
     Path(PathBuf),
+    /// An embedded schema-bundle document, which names no host file and so
+    /// must never become a path, link, or watch. Invalid embedded triggers
+    /// collapse across every document that discovers them.
+    Embedded {
+        /// The bundle's name.
+        bundle: String,
+        /// The document's file name inside the bundle.
+        name: String,
+    },
     /// An unresolved identifier root, once per source document no matter how
     /// many times it is referenced there.
     Root {
@@ -656,7 +665,7 @@ pub(crate) enum ExpressionOrigin {
 impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
-            Self::Path(_) => {}
+            Self::Path(_) | Self::Embedded { .. } => {}
             Self::Root { document, .. } | Self::Expression { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
@@ -724,6 +733,42 @@ impl ComposeWarning {
                 subject: WarningSubject::Path(path.clone()),
             }),
             path: Some(path),
+            consumer: Some(consumer.into()),
+            resolution_failure: None,
+            diagnostic: None,
+        }
+    }
+
+    /// Projects a schema trigger discovery skipped into the compose warning
+    /// model: a coded schema warning about the trigger, never about the
+    /// document `consumer` that discovered it.
+    ///
+    /// A disk trigger's identity and `path` are its normalized path; an
+    /// embedded trigger has no `path`. Either way the warning collapses
+    /// across every document and pass that discovers the same trigger.
+    pub(crate) fn from_invalid_trigger(
+        finding: &crate::markdown::schemas::InvalidTriggerFinding,
+        consumer: impl Into<PathBuf>,
+    ) -> Self {
+        use crate::markdown::schemas::TriggerSource;
+        let (path, subject) = match finding.identity() {
+            TriggerSource::File(path) => (Some(path.clone()), WarningSubject::Path(path.clone())),
+            TriggerSource::Embedded { bundle, name } => (
+                None,
+                WarningSubject::Embedded {
+                    bundle: bundle.clone(),
+                    name: name.clone(),
+                },
+            ),
+        };
+        Self {
+            stage: "schema_validation".to_string(),
+            message: finding.message(),
+            line_number: None,
+            source: Some(finding.source_family().to_string()),
+            code: Some(finding.code().to_string()),
+            identity: Some(WarningIdentity { subject }),
+            path,
             consumer: Some(consumer.into()),
             resolution_failure: None,
             diagnostic: None,

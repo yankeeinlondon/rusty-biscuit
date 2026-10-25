@@ -197,6 +197,12 @@ pub fn effective_schema_for(
 }
 
 impl PreparedSchemas {
+    /// The schema triggers discovery skipped as invalid, in discovery order;
+    /// empty when discovery did not run.
+    pub(crate) fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+        self.schemas.as_ref().map_or(&[], DarkmatterSchemas::discovery_findings)
+    }
+
     /// The effective schema for `markdown` in its current state: document
     /// `$schema`, baseline, and matched triggers. `None` when there is none or
     /// it cannot be resolved; the validation stage owns reporting that.

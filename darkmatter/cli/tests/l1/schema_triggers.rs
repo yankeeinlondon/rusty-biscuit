@@ -470,7 +470,7 @@ fn an_inaccessible_schema_root_fails_validate_and_triggers() {
 }
 
 #[test]
-fn schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern() {
+fn schema_validate_skips_a_trigger_with_a_forbidden_path_prefix() {
     let process = CliProcessFixture::new();
     monorepo(&process);
     write(process.cwd(), "schemas/bad.trigger.yaml", &path_trigger("@prompts/**", "payload.yaml"));
@@ -485,10 +485,11 @@ fn schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern() {
         .arg(&document)
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    let text = format!("{}{}", stdout_of(&output), String::from_utf8_lossy(&output.stderr));
-    assert!(text.contains("bad.trigger.yaml"), "{text}");
-    assert!(text.contains("`@prompts/**`"), "{text}");
+    // The trigger is skipped as invalid, so the document validates without
+    // its payload; the library's `schema_roots::path_field_input_matrix`
+    // proves the finding names the pattern.
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(stdout_of(&output).contains("is valid"), "{output:?}");
 }
 
 #[test]
@@ -639,24 +640,24 @@ fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working
         .stderr(predicate::str::contains("owner"));
 }
 
-/// A schema-root file that claims the envelope but is not valid YAML fails
-/// with the YAML location and the YAML help, never the match-grammar help.
+/// A schema-root file that claims the envelope but is not valid YAML is
+/// skipped: composition succeeds and warns with the file and its YAML
+/// location, never the match-grammar help.
 #[test]
-fn an_unparseable_claimed_schema_root_file_reports_its_yaml_error() {
+fn an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location() {
     let process = CliProcessFixture::new();
     let document = fixture(&process, "kind: prompt\nowner: me");
     write(process.cwd(), "schemas/broken.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
-    for args in [&["compose"][..], &["schema", "triggers"][..]] {
-        let output = process.command().args(args).arg(&document).output().unwrap();
-        assert!(!output.status.success(), "{args:?}: {output:?}");
-        let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
-        for expected in [
-            "is not valid YAML at line 4, column 9",
-            "mapping values are not allowed",
-            "must be quoted",
-        ] {
-            assert!(stderr.contains(&compact(expected)), "{args:?}: `{expected}` not in {stderr}");
-        }
-        assert!(!stderr.contains("combinators"), "{args:?}: {stderr}");
+    let output = process.command().arg("compose").arg(&document).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+    for expected in [
+        "ignoring invalid schema trigger",
+        "broken.yaml",
+        "not valid YAML at line 4, column 9",
+        "mapping values are not allowed",
+    ] {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
     }
+    assert!(!stderr.contains("combinators"), "{stderr}");
 }

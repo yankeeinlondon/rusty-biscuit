@@ -12,8 +12,10 @@
 //! - loads, and the documents [`evaluate_registry`] selects and the payload
 //!   [`DarkmatterSchemas::effective_for`] layers are asserted;
 //! - is not a trigger, so discovery succeeds without it; or
-//! - fails discovery with a [`SchemaError::TriggerLoad`] for the trigger file
-//!   whose message names the field (or, for YAML failures, the line).
+//! - is an invalid trigger: discovery succeeds without it and reports one
+//!   [`InvalidTriggerFinding`](darkmatter::markdown::schemas::InvalidTriggerFinding)
+//!   for the trigger file whose cause names the field (or, for YAML
+//!   failures, the line).
 //!
 //! Duplicate keys and trailing garbage are edits of the source bytes, so the
 //! YAML parser sees them before any mapping could merge them.
@@ -227,16 +229,21 @@ impl Repository {
             .unwrap_or_default()
     }
 
-    /// The trigger-load error discovery reports, rendered.
+    /// The cause of the finding discovery reports for the skipped trigger,
+    /// rendered. Discovery itself succeeds and installs nothing from it.
     fn failure(&self) -> String {
-        match self.schemas_for(&self.document("selected")) {
-            Err(SchemaError::TriggerLoad { path, source }) => {
-                assert!(path.ends_with("matrix.trigger.yaml"), "{}", path.display());
-                source.to_string()
-            }
-            Err(other) => panic!("expected a trigger load error, got {other:?}"),
-            Ok(_) => panic!("discovery loaded the edited trigger"),
-        }
+        let schemas = self.schemas_for(&self.document("selected")).expect("an invalid trigger never fails discovery");
+        let registry = schemas.trigger_registry().expect("registry");
+        assert!(registry.triggers.is_empty(), "the invalid trigger was installed");
+        let [finding] = schemas.discovery_findings() else {
+            panic!("one finding expected: {:?}", schemas.discovery_findings());
+        };
+        let path = finding.source().path().expect("a disk trigger");
+        assert!(path.ends_with("matrix.trigger.yaml"), "{}", path.display());
+        assert_eq!(finding.code(), "dm.schema.invalid_trigger");
+        let cause = finding.cause().to_string();
+        assert!(finding.message().contains("ignoring invalid schema trigger"), "{}", finding.message());
+        cause
     }
 }
 

@@ -150,7 +150,7 @@ pub use roots::{
 };
 pub use embedded::EmbeddedSchemaBundle;
 pub use triggers::{
-    LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
+    InvalidTriggerFinding, LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
     TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
@@ -506,20 +506,21 @@ impl DarkmatterSchemas {
     /// this instance's context, which must be the checked document's own
     /// context.
     ///
-    /// The scan is performed eagerly at configuration time: trigger envelopes
-    /// are loaded transactionally (one malformed trigger aborts the whole
-    /// scan). The resulting [`triggers::TriggerRegistry`] is stored and
-    /// consumed by [`Self::effective_for`], whose bare-name `$schema` lookup
-    /// also searches its roots.
+    /// The scan is performed eagerly at configuration time and recovers per
+    /// trigger: an invalid trigger is skipped and reported by
+    /// [`Self::discovery_findings`] while every valid one is installed. The
+    /// resulting [`triggers::TriggerRegistry`] is stored and consumed by
+    /// [`Self::effective_for`], whose bare-name `$schema` lookup also
+    /// searches its roots.
     ///
     /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in via
     /// this method or [`Self::with_trigger_registry`].
     ///
     /// ## Errors
     ///
-    /// Propagates [`SchemaError::TriggerLoad`] when a trigger file in a
-    /// searched root claims the `kind: schema-trigger` envelope but is
-    /// malformed (bad envelope, bad match grammar, vacuous arm).
+    /// Only discovery's infrastructure failures (see [`triggers::scan`]): an
+    /// unreadable schema root or enumerated file, a case-fold collision, or
+    /// an invalid embedded bundle structure.
     pub fn with_trigger_discovery(self) -> Result<Self, SchemaError> {
         let registry =
             triggers::scan_with_embedded(&self.file_resolution_context, &self.embedded_bundles)?;
@@ -539,9 +540,10 @@ impl DarkmatterSchemas {
     ///
     /// ## Errors
     ///
-    /// [`SchemaError::EmbeddedBundle`] or [`SchemaError::EmbeddedTriggerLoad`]
-    /// (see [`triggers::TriggerRegistry::append_embedded_bundle`]); the
-    /// instance is consumed.
+    /// [`SchemaError::EmbeddedBundle`] (see
+    /// [`triggers::TriggerRegistry::append_embedded_bundle`]); the instance is
+    /// consumed. An invalid trigger in the bundle is a discovery finding, not
+    /// an error.
     pub fn with_embedded_trigger_bundle(
         mut self,
         bundle: EmbeddedSchemaBundle,
@@ -569,6 +571,14 @@ impl DarkmatterSchemas {
     /// Returns the configured trigger registry, when present.
     pub fn trigger_registry(&self) -> Option<&triggers::TriggerRegistry> {
         self.triggers.as_ref()
+    }
+
+    /// The schema triggers discovery skipped as invalid, in discovery order;
+    /// empty without a registry. They belong to the discovery result, so they
+    /// are reported whether or not any effective schema applies.
+    #[must_use]
+    pub fn discovery_findings(&self) -> &[triggers::InvalidTriggerFinding] {
+        self.triggers.as_ref().map_or(&[], |registry| registry.findings())
     }
 
     /// Builds the effective schema for a Markdown document.
@@ -800,18 +810,12 @@ impl DarkmatterSchemas {
     pub fn validate(&self, source: &Markdown) -> Result<ValidationReport, SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
-        match self.effective_for(source)? {
-            Some(effective) => {
-                Ok(effective.validate_with_positions(&frontmatter_value, &positions))
-            }
-            None => Ok(ValidationReport {
-                valid: true,
-                problems: Vec::new(),
-                pending: Vec::new(),
-                deferred: Vec::new(),
-                advisories: Vec::new(),
-            }),
-        }
+        let mut report = match self.effective_for(source)? {
+            Some(effective) => effective.validate_with_positions(&frontmatter_value, &positions),
+            None => ValidationReport::vacuous(),
+        };
+        report.trigger_findings = self.discovery_findings().to_vec();
+        Ok(report)
     }
 
     /// [`Self::validate`], also returning the request's stage timings.
@@ -840,20 +844,16 @@ impl DarkmatterSchemas {
     ) -> Result<ValidationReport, SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
-        match self.effective_for(source)? {
+        let mut report = match self.effective_for(source)? {
             Some(effective) => effective.validate_for_phase_with_positions(
                 &frontmatter_value,
                 &positions,
                 phase,
-            ),
-            None => Ok(ValidationReport {
-                valid: true,
-                problems: Vec::new(),
-                pending: Vec::new(),
-                deferred: Vec::new(),
-                advisories: Vec::new(),
-            }),
-        }
+            )?,
+            None => ValidationReport::vacuous(),
+        };
+        report.trigger_findings = self.discovery_findings().to_vec();
+        Ok(report)
     }
 
     /// Returns a shared reference to the underlying validator cache. Useful
@@ -1438,6 +1438,7 @@ impl EffectiveSchema {
             pending: Vec::new(),
             deferred: templates.pointers(),
             advisories: self.advisories.clone(),
+            trigger_findings: Vec::new(),
         }
     }
 
@@ -1635,6 +1636,25 @@ pub struct ValidationReport {
     pub deferred: Vec<String>,
     /// Non-fatal findings discovered while resolving the effective schema.
     pub advisories: Vec<SchemaAdvisory>,
+    /// The schema triggers automatic discovery skipped as invalid, in
+    /// discovery order. Filled by [`DarkmatterSchemas::validate`] and
+    /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
+    /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
+    pub trigger_findings: Vec<triggers::InvalidTriggerFinding>,
+}
+
+impl ValidationReport {
+    /// The valid report of a document no schema applies to.
+    fn vacuous() -> Self {
+        Self {
+            valid: true,
+            problems: Vec::new(),
+            pending: Vec::new(),
+            deferred: Vec::new(),
+            advisories: Vec::new(),
+            trigger_findings: Vec::new(),
+        }
+    }
 }
 
 /// Coarse classification of a validation problem.
@@ -1751,6 +1771,9 @@ pub const SCHEMA_UNKNOWN_KEY_CODE: &str = "dm.schema.unknown_key";
 pub const SCHEMA_INVALID_FILE_REFERENCE_CODE: &str = "dm.schema.invalid_file_reference";
 /// Code of a schema that could not be resolved, merged, or compiled.
 pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
+/// Code of the warning for a schema trigger automatic discovery skipped
+/// because its envelope or payload failed to load.
+pub const SCHEMA_INVALID_TRIGGER_CODE: &str = "dm.schema.invalid_trigger";
 
 impl ValidationProblemCode {
     /// The shared diagnostic code DMLS and `md compose --output report-json`
@@ -3984,6 +4007,26 @@ mod phase4_trigger_assembly {
 
     // ── Non-mergeable payload rejection ─────────────────────────────────
 
+    /// The one finding of discovery for `doc_path`, whose trigger file is
+    /// `name`; discovery itself succeeds.
+    fn only_finding(root: &Path, doc_path: &Path, name: &str) -> (DarkmatterSchemas, triggers::InvalidTriggerFinding) {
+        let api = DarkmatterSchemas::new(doc_context(root, doc_path))
+            .with_trigger_discovery()
+            .expect("an invalid trigger never fails discovery");
+        let findings: Vec<_> = api.discovery_findings().iter().filter(|finding| {
+            finding.source().file_name() == Some(name)
+        }).cloned().collect();
+        let [finding] = findings.as_slice() else {
+            panic!("one finding for {name} expected: {:?}", api.discovery_findings());
+        };
+        assert!(
+            api.trigger_registry().unwrap().triggers.iter().all(|trigger| trigger.source.file_name() != Some(name)),
+            "{name} must not be installed"
+        );
+        let finding = finding.clone();
+        (api, finding)
+    }
+
     #[test]
     fn non_mergeable_root_union_payload_rejected() {
         let repo = repo_fixture();
@@ -3999,14 +4042,10 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("non-mergeable payload must fail at scan time");
+        let (_, finding) = only_finding(root, &doc_path, "bad.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadNotMergeable { .. })),
-            "root union payload must be rejected at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadNotMergeable { .. }),
+            "root union payload must be rejected at scan time: {finding:?}"
         );
     }
 
@@ -4058,14 +4097,10 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("self-referencing payload must fail at scan time");
+        let (_, finding) = only_finding(root, &doc_path, "self.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
-            "self-referencing payload must fail at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }),
+            "self-referencing payload must be skipped at scan time: {finding:?}"
         );
     }
 
@@ -4090,14 +4125,35 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("payload referencing a trigger must fail at scan time");
+        let (api, finding) = only_finding(root, &doc_path, "a.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
-            "payload referencing another trigger must fail at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }),
+            "payload referencing another trigger must be skipped at scan time: {finding:?}"
+        );
+        // The referenced trigger is valid and still applies.
+        let effective = api.effective_for(&md_from_file(&doc_path)).unwrap().unwrap();
+        assert!(effective.json_schema["properties"].as_object().unwrap().contains_key("model"));
+    }
+
+    /// Discovery skipping a trigger does not make it a schema: a document
+    /// `$schema` naming the same ignored envelope still fails.
+    #[test]
+    fn document_schema_referencing_an_ignored_trigger_file_still_fails() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(
+            &root.join("schemas/memory.trigger.yaml"),
+            "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n",
+        );
+        let doc_path = root.join("doc.md");
+        write(&doc_path, "---\n$schema: ./schemas/memory.trigger.yaml\n---\nbody\n");
+
+        let (api, _) = only_finding(root, &doc_path, "memory.trigger.yaml");
+        let error = api.validate(&md_from_file(&doc_path)).expect_err("an authored trigger reference fails");
+        assert!(
+            matches!(error, SchemaError::TriggerSchemaReferenced { .. }),
+            "{error:?}"
         );
     }
 

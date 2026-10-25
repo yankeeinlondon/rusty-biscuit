@@ -435,6 +435,22 @@ pub enum SchemaError {
         reason: String,
     },
 
+    /// A schema-trigger payload passed the merge-compatibility gate but its
+    /// JSON Schema could not be compiled into a validator. `path` is the
+    /// trigger envelope; `payload` is the authored `$schema:` reference (or
+    /// `<inline>`); `payload_path` is the payload file when the payload is a
+    /// file reference; `message` is the compiler's reason.
+    #[error(
+        "schema-trigger payload in `{}` failed to compile: {message}",
+        path.display()
+    )]
+    TriggerPayloadCompile {
+        path: PathBuf,
+        payload: String,
+        payload_path: Option<PathBuf>,
+        message: String,
+    },
+
     /// A schema-trigger payload resolved to a trigger envelope file (directly
     /// or through an import cycle), rather than to an ordinary schema file.
     /// `trigger` is the originating envelope; `payload_path` is the file the
@@ -1171,6 +1187,29 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "A trigger payload must not resolve to a schema-trigger envelope, directly or \
                      through an import cycle. Reference an ordinary schema file instead.",
                 ),
+
+            SchemaError::TriggerPayloadCompile {
+                path,
+                payload,
+                message,
+                ..
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "SchemaError",
+                    "schema-trigger payload failed to compile",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "Trigger file <cyan>{}</cyan> payload <cyan>{}</cyan> could not be \
+                         compiled into a validator:",
+                        Prose::escape_text(&path.display().to_string()),
+                        Prose::escape_text(payload)
+                    )),
+                    Prose::new(format!(
+                        "<dim>Reason:</dim> {}",
+                        Prose::escape_text_outside_code_spans(message)
+                    )),
+                ]),
 
             SchemaError::TriggerSchemaReferenced {
                 reference,

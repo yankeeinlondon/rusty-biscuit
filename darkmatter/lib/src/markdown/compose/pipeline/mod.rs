@@ -384,6 +384,14 @@ impl Markdown {
         let mut trigger_registry = None;
         let prepared_schemas =
             schema_validation::prepare_schemas(self, options, &mut trigger_registry)?;
+        // A skipped schema trigger is reported before anything can fail or
+        // run, so a later failure still carries it, and a policy denying it
+        // stops the document before its first effect.
+        let consumer = schema_validation::source_path(self, options);
+        for finding in prepared_schemas.discovery_findings() {
+            report.add_warning(ComposeWarning::from_invalid_trigger(finding, consumer.clone()));
+        }
+        stop_if_blocked(report, options, None)?;
         let caller_projection = schema_validation::prepare_caller_projection(
             self,
             options,
