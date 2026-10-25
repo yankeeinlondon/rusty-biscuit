@@ -88,6 +88,8 @@ mod imp {
         if unsafe { libc::fstat(fd.as_raw_fd(), &mut stat) } != 0 {
             return Err(io::Error::last_os_error());
         }
+        // Native stat fields can be narrower than u64 on other Linux targets.
+        #[allow(clippy::useless_conversion)]
         if u64::from(stat.st_dev) != metadata.dev() || u64::from(stat.st_ino) != metadata.ino() {
             return Err(io::Error::other(super::super::Replaced));
         }

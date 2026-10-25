@@ -1245,10 +1245,13 @@ fn assert_changed(refusal: &Refusal, path: &Path) {
     assert!(sentence.contains(&named) && sentence.contains("after the question"), "{sentence}");
 }
 
-/// Removes the link at `path` (a junction on Windows) and puts a file there.
+/// Replaces the link at `path` (a junction on Windows) with a distinct file.
 fn replace_link_with_file(path: &Path) {
+    // Allocate before unlinking: Linux can immediately reuse a freed inode.
+    let replacement = path.with_file_name("replacement");
+    fs::write(&replacement, "a file that was never shown").unwrap();
     remove_link(path).unwrap();
-    fs::write(path, "a file that was never shown").unwrap();
+    fs::rename(replacement, path).unwrap();
 }
 
 /// R2-F1.1, and the handoff consumer: a checkout directory swapped for
@@ -1704,8 +1707,11 @@ fn a_file_replaced_before_a_saved_removal_resumes_is_kept() {
     let doubles = Doubles::default();
     crash_at(&f, &facts, &[], &doubles, Boundary::Unlocked);
     let id = f.pending_id();
+    // Keep both objects live until the replacement has its own identity.
+    let replacement = f.gone.with_file_name("replacement");
+    fs::write(&replacement, "never shown").unwrap();
     fs::remove_file(&f.gone).unwrap();
-    fs::write(&f.gone, "never shown").unwrap();
+    fs::rename(replacement, &f.gone).unwrap();
 
     let refusal = refused(finish_pending(&f.base(), &id, &doubles.env()));
 

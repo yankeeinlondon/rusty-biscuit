@@ -43,6 +43,15 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
   leaf-marker layers, normalized in `normalized_any` in
   `sniff/lib/tests/l1/lockfile_provenance.rs`).
 
+## Replacement fixtures can reuse an inode immediately
+
+Linux can reuse an inode as soon as a file or symlink is unlinked. A test
+that deletes an object and then creates its replacement can therefore give
+both the same device/inode identity. Allocate the replacement while the
+original still exists, then unlink the original and rename the replacement
+into place. Worktree's removal lifecycle fixtures use this order to test
+replacement refusal independently of the filesystem allocator.
+
 ## `LANG=C` on the `BUILD_LINUX` host: ASCII where a glyph was expected
 
 - Symptom: an ASCII `>` where the test expects `▶`, red only on that host.
