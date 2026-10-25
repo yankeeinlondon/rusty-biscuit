@@ -228,8 +228,8 @@ administrator can restart it with `sudo killall fseventsd`; launchd restarts
 it at once. **That is system-wide:** every FSEvents client (Spotlight, Time
 Machine, editors, file watchers, build tools) may miss events from around the
 restart or rescan. It is a manual troubleshooting step only: never script it,
-never run it from a test or recipe, and never have `wt` do it. The user-facing
-version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
+never run it from a test or recipe, and never have `wt` do it. `wt remove`
+no longer watches files, so its user docs no longer describe fseventsd.
 
 ### Reading other processes' descriptors and cwd
 

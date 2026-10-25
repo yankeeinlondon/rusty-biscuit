@@ -100,6 +100,7 @@ Outside a repository, `wt` explains where to run it and exits with code 1.
     - **the local branch** is deleted when it is *Safe* (on the default branch, or the head of an open or merged PR) or *Pretty safe* (on another branch, a tag, or a live `origin/*` copy); a *Not safe* branch is offered for deletion interactively (default keep), kept with a warning otherwise, and deleted by `--force-branch`. A branch that moved after it was checked is kept and the run exits 1
     - **the branch on origin** is deleted only with `--force-remote` (which also closes any open PR), through origin's push URL and under a lease on the head the report showed
     - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks, then moves your shell out and the wrapper finishes the removal; without it, macOS and Linux warn and delete, and Windows refuses (exit 4)
+    - **a file in use** on Windows (or a folder a program keeps refilling) is waited on in the same run, naming the program, until it is released or you press Ctrl-C; a read-only disk or a permission `wt` cannot change ends the run with exit 1 and one sentence naming the path
     - **an interrupted removal** (Ctrl-C, a crash, a file that could not be deleted) is finished by the next `wt remove <name>` without asking again
     - the main checkout is never removed, even with `--force`
 

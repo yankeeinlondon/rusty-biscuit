@@ -7,7 +7,8 @@ to compare against.
 ## Shape
 
 `delete_tree(Target { root, identity }, &Env { clock, faults, mounts,
-holders, cancelled }, &mut dyn Progress) -> Deletion`:
+holders, cancelled }, &mut dyn Progress) -> Deletion` (`mounts` is the live
+`&dyn MountInfo`, never a list read ahead of time):
 
 | Result | Meaning |
 | --- | --- |
@@ -28,11 +29,22 @@ is left, so a rerun after a crash just runs it again.
   changing"). A failed open re-looks *before* any permission fix: a link
   swapped in makes cap-std refuse (escape), and that must become
   `Step::Changed` → removed as a link, never `make_traversable`.
-- **Mount boundary = table entry by path OR a different device/volume than
-  the root**, checked before each descent. The table catches same-device
-  bind mounts; the device check catches a tree mounted mid-deletion. Native
-  tables (`mounts::NativeMounts`) report real paths (`/private/var/…` on
-  macOS): the caller must pass a root resolved the same way.
+- **Mount boundary = `MountInfo::mount_at(spelled, real)` asked afresh
+  before every open below the root (each refill reopen too) OR a different
+  device/volume than the root** (live, in `entry`). Never snapshot the table
+  at engine start: a same-device bind mount published mid-deletion has no
+  other sign (R2-F3). The engine resolves the root once (`real_root`) and
+  joins each relative path to it, since native tables spell real paths
+  (`/private/var/…` on macOS); the default `mount_at` matches either
+  spelling in a fresh `mounts()`. An unreadable answer is no mount.
+- **Native `mount_at` is per-directory, not a table read:** macOS one
+  `statfs` (`f_mntonname == real`); glibc Linux `statx`
+  `STATX_ATTR_MOUNT_ROOT` via `libc::syscall` (no glibc 2.28 symbol; musl
+  and kernels before 5.8 fall back to the table); Windows `None`, since a
+  mounted folder is a reparse point `entry` already keeps (`is_volume_mount`)
+  and listing every volume per directory costs milliseconds. A 100,000-entry,
+  20,000-directory tree on macOS: +3% with `statfs`, +13% re-reading the
+  table per directory.
 - **`Mount` carries `fs_type`** (every OS; empty when Windows cannot read
   it) **and `super_options`** (Linux mountinfo only; empty elsewhere). WSL2 lists `/mnt/c` as `9p` with `aname=drvfs` in the
   superblock options (`,` and `;` both separate them), so `Mount::is_drvfs`
@@ -77,4 +89,6 @@ is left, so a rerun after a crash just runs it again.
 `MakeWritable` (path = the directory being made writable). A fault that
 mutates the tree from `inject` is how tests stage races (`SwapForLink`,
 `Refill` in `delete/tests.rs`). `ScriptedHolders` in `test_support.rs` scripts
-holder reports and records what each query asked.
+holder reports and records what each query asked. `LiveMounts` (a shared,
+changing table) plus `MountDuringDeletion` (publishes a same-device mount
+under the root at its first `ReadDir`) stage a mount made mid-deletion.

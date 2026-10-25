@@ -302,9 +302,10 @@
   SHAs (target and branch). The fork-origin records
   (`<repo hash>.fork-origins.json`) share that directory and key, as do
   `wt list`'s 60-second open-PR store (`<repo hash>.prs.json`, fetched through
-  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s one-minute handoff
-  records (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
-  `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
+  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s ten-minute handoff
+  records (`<repo hash>.handoff-<token>.json`, which name the saved removal's
+  operation id). The handoff token is 128 bits from `getrandom` 0.4, and the
+  removal store's per-worktree lock file name is BLAKE3 through
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
   and uses `biscuit-file` (no default features, `file-reference` only) for

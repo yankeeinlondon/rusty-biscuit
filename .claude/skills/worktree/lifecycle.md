@@ -13,7 +13,8 @@ free-space gate, and `report.json` are gone (2026-10-23).
 | `lifecycle::finish_pending(base, &id, &Env)` | a pending operation a name resolved to (R19); asks nothing |
 | `lifecycle::save_approval(&Request, &Env)` | the shell wrapper's first run (R18): saves the approval, changes nothing else, returns the operation id for the `OperationHandoff` |
 | `lifecycle::finish_handoff(base, &OperationHandoff, cwd, &Env)` | the shell wrapper's second run (R18) |
-| `lifecycle::resolve(base, name)` | `Live`, `Pending(id)`, or `Ambiguous`, over compact **and** legacy records. An unreadable record matches no name, so a name that matches nothing while one exists is `ResolveError::Store` with that record's explanation, never a bare not-found |
+| `lifecycle::resolve(base, name)` | `Live`, `Pending(id)`, or `Ambiguous`, over compact **and** legacy records. An unreadable record matches no name, so a name that matches nothing while one exists is `ResolveError::Store` with that record's explanation, never a bare not-found. A legacy record whose `completed_phase` is `completed` is deleted on sight (`RecoveryStore::discard_completed`, under that worktree's lock) and matches nothing |
+| `lifecycle::PendingRemovals::read(base, &entries)` | which listed entries a stored operation is removing (`is_checkout_of`, as resolution matches), with its requested name. `wt list` skips `git status` for them and `--ff` refuses a holder among them (`FfRefusal::RemovingHolder`). It goes through the same store read, so `wt list` also discards finished legacy operations |
 
 `Env` injects the usage source (only to name holders in a deletion wait),
 the mount table, the clock, `FsFaults`, cancellation, `Revalidate` (rechecks
@@ -25,8 +26,9 @@ running", R22 waits). `Removal::exit_class()` is N5.
 - `run`: `resolve_in` → `Pending(id)` is `finish_pending` with no report;
   `Live` → `facts::gather` → report → `policy::decide` → `remove`, or for a
   wrapper caller inside a checkout directory `save_approval` +
-  `OperationHandoff` (only a `Target::Checkout` is handed off; an own link
-  is deleted at once and the run prints a bare `cd:`).
+  `OperationHandoff` (only a `Target::Checkout` is handed off, since a shell
+  can stand only in a checkout directory; an own link is deleted at once,
+  with its own saved record, and the run prints a bare `cd:`).
 - `Env` in the CLI: `SniffUsage`, `NativeMounts`, `HostClock`, `NoFaults`,
   the Ctrl-C `interrupt::Window`, `Reconfirm` (the first run's
   `reconfirm` proof) and `Stderr` (`Notify`).
@@ -38,16 +40,38 @@ running", R22 waits). `Removal::exit_class()` is N5.
 
 ## Order (do not reorder)
 
-save approval (`store.approve`) → `git worktree unlock` (only when the
+bind (`bind`: compare what is there with `Facts::identities`) → save
+approval (`store.approve`) → `git worktree unlock` (only when the
 question showed the lock) → place (`placement::place_with`: move, or
 `mark_in_place`) → R14 `git status` (`late::unseen`) → `delete::delete_tree`
 → `git worktree remove <absent registered path>` + copy record → branch steps
 → `PendingRemoval::finish`.
 
+- **Only two routes carry a question's list to `late::unseen`.** A fresh
+  `run_with` passes `late::shown(facts.inventory)`, and `finish_handoff`
+  passes the handoff's `shown_dirty`; `finish_pending` and a waiter's
+  `Approval::Earlier` pass `None` and name nothing. It runs only for a
+  target with a checkout directory (`Checkout`, `OwnLink`, on the
+  `deletion_path`: the quarantine after a move, the resolved checkout for an
+  own link) and only before `ContentRemoved`. A new route that deletes an
+  approved checkout must decide which it is.
+
 - **A checkout Git cannot read is deleted in place.** When the question
   warned `GitUnreadable` or `Unchecked` (R10, R13), a move refusal about the
   `.git` link (`Unsupported`, `Uninspectable`, `Association`) binds through
   the admin record's back-reference (`bind_in_place`) instead of refusing.
+- **Identities are read before the question, never after.**
+  `facts::gather` fills `Facts::identities`: the entry at the path (no
+  follow: the checkout, the link, or the file), an own link's resolved
+  checkout, and the `RepositoryBinding` of `Facts::admin`. `bind` refuses
+  with `Refusal::Replaced` ("… changed after the question") when anything
+  differs, and when the facts hold no identity for what the target needs
+  ("… could not be identified before the question"), before the store is
+  opened. The record saves the gathered identities, so every later check
+  (the move's `check`, `delete_tree`'s root, `remove_bound`) is against
+  what the question saw. `save_approval` uses the same `bind`.
+- **A store that cannot be opened is `NotSaved`** (exit 1), like a failed
+  save.
 - **`plan_move` skips the lock check at planning** (the unlock comes after
   the save) and never refuses submodules; the move itself (`move_with`)
   still refuses a lock, so a lock added after the question is never
@@ -56,8 +80,10 @@ question showed the lock) → place (`placement::place_with`: move, or
   `modules/` included** (R2's module data). Never `prune`, never `--force`.
 - **Nested mounts are re-spelled.** Native tables spell real paths
   (`/private/var` on macOS); `nested_mounts` resolves the checkout and maps
-  each nested mount back under the spelled root before placement and
-  deletion compare paths.
+  each nested mount back under the spelled root for the move-or-in-place
+  choice (`bind_checkout`, `place`). Deletion gets `env.mounts` itself and
+  asks it before every descent, so a mount made after placement (even
+  inside a moved quarantine) is kept and the record waits for the unmount.
 - **`Operation::run(from, …)` takes the start step from inspection**, not the
   record's marker; only the unlock uses the marker (it is idempotent).
 
@@ -79,20 +105,43 @@ otherwise a crash between rename and association reads as ambiguous.
 
 ## Targets without a checkout directory
 
-`Missing`, `Vanished`, `NotADirectory`, `Uninspectable`, and both `Link`
-kinds run `without_record`: unlock if approved, delete the entry (an own
-link's real checkout first, in place), `git worktree remove`, branch steps.
-No compact record is saved: its `checkout_identity` would have nothing to
-bind, and each step is idempotent, so an interrupted run leaves a state the
-next question describes.
+Every target saves a record and takes the lock first; the record's
+`target` (`ApprovedTarget`) says what to act on, and placement is skipped:
 
-## Compact record and store (`record_version` 2)
+| `Target` | `ApprovedTarget` | Content step (`Progress::ContentRemoved`) |
+| -------- | ---------------- | ----------------------------------------- |
+| `Link { own: true, Resolved }` | `OwnLink { link, checkout }`, `deletion_path` = resolved checkout | `delete_tree` of the checkout, then `remove_bound(link)` |
+| other `Link`, `NotADirectory`, `Uninspectable` | `Entry { identity }` | `remove_bound(identity)` at `original` |
+| `Missing`, `Vanished` | `Absent` (`bind` refuses if something appeared) | none; result `AlreadyRemoved` |
+
+- `remove_bound` unlinks only an entry with the recorded identity; another
+  one closes the operation (`Deleted::Replaced`), a missing one is done.
+- A real `Uninspectable` path never has an identity (`availability::inspect`
+  and `rename::identity` both stop at `symlink_metadata`), so it is refused
+  at `bind`; the question's warning says nothing there can be removed.
+- These targets are always `InPlace`; Git's record names `original`, and
+  `unregister` removes the registration at `original` for every `InPlace`
+  record.
+- Resume (`inspect`) starts these at `Unlocked` while Git still records the
+  worktree, since every content step is identity-checked and idempotent,
+  and at `Unregistered` once it does not. `registered()` compares their
+  path with `same_entry` (final component not followed): `same_location`
+  would follow an own link to its checkout, and fails on a file component.
+- The resolver's `is_checkout_of` compares the no-follow identity at the
+  original with `ApprovedTarget::original_identity()`, so a pending link or
+  file record is found by its name, not reported as ambiguous.
+
+## Compact record and store (`record_version` 3)
 
 - **`recovery::compact::CompactRecord`** is the approval. It has no expiry,
   and `progress` (`Approved` → `Unlocked` → `Placed` → `ContentRemoved` →
   `Unregistered`) is a hint, never proof. Branch steps carry their own
   `StepState` and may finish only at `Unregistered`. `deletion_mode: in_place`
-  requires `deletion_path == original`. `compact::record_version(bytes)` is
+  requires `deletion_path == original`, except for `own_link`, whose
+  `deletion_path` is its checkout and never the link; only `checkout` may be
+  `moved`. Version 3 replaced version 2's `checkout_identity` with `target`;
+  a version 2 record is refused as an unknown version (pre-release, no
+  migration). `compact::record_version(bytes)` is
   read first, so an unknown version is refused before any other field.
 - **`recovery::legacy`** reads a v1 record and, separately, its optional
   report (≤ v6). A report never changes what migration authorizes.
@@ -121,7 +170,17 @@ next question describes.
 ## Tests (`lifecycle/tests.rs`)
 
 - Crash with `Seams { hook, moves }` (`run_with`); `Boundary` is in
-  flowchart order. `DeletionBatch` is passed but cannot crash in process:
+  flowchart order. A target that is not a checkout passes `Begun`,
+  `Unlocked`, `ContentRemoved`, `Unregistered`, and the branch boundaries
+  only.
+- A replacement during the question is reproduced by gathering
+  `f.facts()`, swapping the object, then calling `remove`/`save_approval`
+  with those facts. To rebuild Git's record at the same path, move the old
+  one outside `worktrees/`, or the duplicate-record refusal fires instead.
+- An unusable store: write a file at `<common>/wt-removal` (the CLI's name
+  resolver opens the store too, so a CLI test of a store failure exits
+  before the lifecycle; use an interrupt instead,
+  `remove_recovery.rs`'s `UNLOCK` condition). `DeletionBatch` is passed but cannot crash in process:
   a crash during deletion is reproduced as a crash at `Moved` plus files
   removed from the placed checkout
   (`a_crash_part_way_through_deleting_a_built_checkout_is_finished_by_the_next_run`).

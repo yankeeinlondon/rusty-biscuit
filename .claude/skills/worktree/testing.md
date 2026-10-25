@@ -56,7 +56,9 @@ The variable turns a missing-backend skip into a failure.
     - `remove::clock::Clock`: `ManualClock` records each sleep and can cancel
       after N; `Backoff` is tested through it;
     - `remove::mounts::MountInfo`: `FixedMounts`, including same-device bind
-      mounts. `mounts_within` matches by mount point, never device ID;
+      mounts. `mounts_within` matches by mount point, never device ID.
+      `LiveMounts` + `MountDuringDeletion` (as `FsFaults`) publish a mount
+      once deletion has begun, for the mid-deletion boundary;
     - `remove::faults::FsFaults`: `ScriptedFaults::times` fails an operation
       on a path N times (temporary), `::always` fails it every time
       (permanent).

@@ -81,14 +81,14 @@ code touches the network.
 
 ## Concurrent writers during removal
 
-A GitNexus watcher can recreate `.gitnexus/` while Git deletes the checkout.
-Git then failed with `Directory not empty` after unregistering the worktree
-(the behavior before the removal lifecycle); the CLI stopped before deleting
-the branch. Observed on macOS with a recipe-started
-`gitnexus analyze <target> --watch`: only regenerated index files remained.
+A GitNexus watcher (`gitnexus analyze <target> --watch`) can recreate
+`.gitnexus/` while the checkout is deleted. Before the removal lifecycle, Git
+then failed with `Directory not empty` after unregistering the worktree. Now
+`remove::delete` relists and empties a refilled directory up to
+`REFILL_PASSES` (3) times, then names the writer through one usage query and
+waits until it stops or the user presses Ctrl-C (R24, [deletion.md](deletion.md)).
 The registry sweep in `just gitnexus` runs on its next invocation, so it does
-not prevent this race. Stop the target's verified watcher process group before
-removal; recovery must inspect leftovers rather than blindly retry deletion.
+not end such a watcher.
 
 ## Git facts about broken worktree records
 
@@ -223,7 +223,7 @@ a warning and a `facts::Target` (a link, an occupied path, an unreadable
 - `facts::gather` runs `prepare` after the main-checkout guard and
   `set_current_dir(base)`. A `Repaired` checkout is a note in the report; a
   `Missing` one shows its staged entries (`StagedChanges`, or `StagedUnknown`) as warnings and is
-  removed record-only by the lifecycle (`without_record`,
+  removed record-only by the lifecycle (`ApprovedTarget::Absent`,
   [lifecycle.md](lifecycle.md#targets-without-a-checkout-directory)).
 - `remove_local_branch(base, branch, expected_tip)` refuses with
   `WorktreeError::BranchMoved` when the tip is no longer the one the tier
@@ -235,22 +235,32 @@ a warning and a `facts::Target` (a link, an occupied path, an unreadable
   `not a git repository` before `prepare`. Handoff-after-repair tests nest
   the worktree in the base checkout for this reason.
 - **Trap: a locked record is never `prunable`.** A locked worktree whose
-  directory is gone reads as `Healthy` to `availability`; `facts` sees the
-  directory is missing and shows the lock.
+  path is gone, holds a file, or cannot be inspected reads as `Healthy` to
+  `availability`. `facts::gather` marks any unmarked entry whose path is not
+  a directory or link as prunable before `prepare`, so it is gathered as
+  `Missing`, `NotADirectory`, or `Uninspectable` with the lock warning;
+  never infer a directory from the missing marker.
 
 ## Move-first handoff
 
 Inside the target with `WT_SHELL_WRAPPER=1`, the first run saves the
 approval (`lifecycle::save_approval`) and writes
 `handoff::OperationHandoff` (`<repo hash>.handoff-<token>.json`, 10 min,
-format version 5) carrying only the operation id, the repository, and the
-target. `--handoff` **consumes the file before judging it**;
+format version 6) carrying only the operation id, the repository, the
+target, and `shown_dirty`: the dirty paths the question listed
+(`lifecycle::late::shown`), so the second run's `late::unseen` can name
+the rest (R14). `shown_dirty` is required (absent, another type, or a
+non-path element reads as missing); `null` means the question showed no
+inventory and names nothing, `[]` that it showed no dirty files. Paths are
+`NativeString`, so non-UTF-8 names survive. `--handoff` **consumes the file
+before judging it**;
 `verify_operation` checks only that the caller left the target and that the
 repository is the same, then `lifecycle::finish_handoff` finishes the
 operation from its compact record, whose identities bind the checkout and
 the worktree record. No content is compared (R18); a branch or endpoint
 that changed between the runs keeps the branch and exits 1. An earlier
-`wt`'s content-comparing handoff (version 4) reads as missing.
+`wt`'s content-comparing handoff (version 4) and a version 5 handoff
+without `shown_dirty` read as missing.
 
 ## `--force-remote` endpoint rules
 
@@ -284,7 +294,7 @@ that changed between the runs keeps the branch and exits 1. An earlier
 ## Recovery store (`remove::recovery`)
 
 The compact record and the store API are in
-[lifecycle.md](lifecycle.md#compact-record-and-store-record_version-2); the
+[lifecycle.md](lifecycle.md#compact-record-and-store-record_version-3); the
 module docs of `recovery` state the crash guarantees. The facts below are
 the ones that cost time.
 
@@ -398,7 +408,7 @@ unlocks between the two calls ([lifecycle.md](lifecycle.md)).
 
 A clean removal starts 7 (10 before 2026-10-22): see
 `worktree/docs/performance-testing.md#git-processes` for what each one is
-and the two tests that pin them. The tips `wt remove` compares
+and the CLI test that pins them (`remove::a_clean_removal_starts_7_git_processes`). The tips `wt remove` compares
 (`remove::branch_tip`, `missing::recorded_head`, `default_target`), origin's
 URL (`remote::origin_url`), and `branch.<name>.*` are read in-process and
 fresh on every call, so a recheck still sees a concurrent change; Git runs
