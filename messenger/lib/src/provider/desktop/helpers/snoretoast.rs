@@ -33,6 +33,7 @@ const NOTICE_TIMEOUT_MS: u64 = 5_000;
 /// Helper backend that delivers via the Windows `snoretoast` CLI.
 pub(crate) struct SnoreToastHelper {
     pub(crate) path: PathBuf,
+    pub(crate) notice_timeout_ms: u64,
     pub(crate) app_id: String,
     app_id_registered: OnceLock<()>,
 }
@@ -43,6 +44,7 @@ impl SnoreToastHelper {
         Self {
             path,
             app_id,
+            notice_timeout_ms: NOTICE_TIMEOUT_MS,
             app_id_registered: OnceLock::new(),
         }
     }
@@ -76,7 +78,7 @@ impl SnoreToastHelper {
             return Ok(());
         }
         let args = self.build_register_args();
-        let output = spawn_helper(&self.path, &args, None, Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = spawn_helper(&self.path, &args, None, Some(self.notice_timeout_ms)).await?;
         if output.status != 0 {
             return Err(HelperError::Exited {
                 status: output.status,
@@ -250,7 +252,7 @@ impl HelperBackend for SnoreToastHelper {
         let timeout_ms = if interactive {
             None
         } else {
-            Some(NOTICE_TIMEOUT_MS)
+            Some(self.notice_timeout_ms)
         };
         let output = spawn_helper(&self.path, &args, None, timeout_ms).await?;
         Self::parse_output(request, &output.stdout, output.status, image_dropped)
@@ -265,7 +267,7 @@ impl HelperBackend for SnoreToastHelper {
         let mut request = request.clone();
         request.replace_id = Some(id.to_string());
         let (args, image_dropped) = self.build_args(&request);
-        let output = spawn_helper(&self.path, &args, None, Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = spawn_helper(&self.path, &args, None, Some(self.notice_timeout_ms)).await?;
         let mut receipt =
             Self::parse_output(&request, &output.stdout, output.status, image_dropped)?;
         receipt
