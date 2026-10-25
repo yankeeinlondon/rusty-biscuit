@@ -2241,6 +2241,83 @@ mod tests {
         assert_eq!(fixture.audio_files(), 0);
     }
 
+    struct InterruptedSpeech {
+        fail: bool,
+        started: tokio::sync::Notify,
+        dropped: std::sync::atomic::AtomicBool,
+    }
+
+    impl ElevenLabsTransport for InterruptedSpeech {
+        fn list_voices(&self) -> TransportFuture<'_, Result<ListVoicesResponse, TtsError>> {
+            panic!("an explicit voice must not list voices");
+        }
+
+        fn create_speech(
+            &self,
+            _request: CreateSpeechRequest,
+        ) -> TransportFuture<'_, Result<Vec<u8>, TtsError>> {
+            Box::pin(async move {
+                if self.fail {
+                    return Err(TtsError::HttpError {
+                        provider: "elevenlabs".into(),
+                        message: "scripted synthesis failure".into(),
+                    });
+                }
+                struct OnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+                impl Drop for OnDrop<'_> {
+                    fn drop(&mut self) {
+                        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                let _pending = OnDrop(&self.dropped);
+                self.started.notify_one();
+                std::future::pending().await
+            })
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_failed_synthesis_prepares_and_records_nothing() {
+        let fixture = RecordFixture::new();
+        let transport = Arc::new(InterruptedSpeech {
+            fail: true,
+            started: tokio::sync::Notify::new(),
+            dropped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let provider = ElevenLabsProvider::with_transport(transport, Arc::new(fake::FakeClock::at(NOW)))
+            .with_account_context(Some(ACCOUNT.into()));
+        let result = provider.prepare(TEXT, &female().with_voice("f1")).await;
+        assert!(matches!(result, Err(TtsError::HttpError { message, .. }) if message == "scripted synthesis failure"));
+        assert_eq!(fixture.audio_files(), 0);
+        assert!(fixture.records().is_empty());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cancelling_synthesis_drops_the_request_without_publishing_audio() {
+        let fixture = RecordFixture::new();
+        let transport = Arc::new(InterruptedSpeech {
+            fail: false,
+            started: tokio::sync::Notify::new(),
+            dropped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let provider = ElevenLabsProvider::with_transport(
+            Arc::clone(&transport) as Arc<dyn ElevenLabsTransport>,
+            Arc::new(fake::FakeClock::at(NOW)),
+        )
+        .with_account_context(Some(ACCOUNT.into()));
+        let task = tokio::spawn(async move { provider.prepare(TEXT, &female().with_voice("f1")).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), transport.started.notified())
+            .await
+            .expect("the synthesis request starts");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(transport.dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(fixture.audio_files(), 0);
+        assert!(fixture.records().is_empty());
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn a_requested_voice_prepares_without_listing_or_recording() {
