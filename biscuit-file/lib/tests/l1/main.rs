@@ -23,6 +23,7 @@ mod repository_scope_catalog;
 mod resolution_context;
 mod round_trip;
 mod span_compat;
+mod structural_validation;
 mod test_layout;
 mod yaml_corpus;
 mod yaml_mutation;

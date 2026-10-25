@@ -44,7 +44,10 @@ Rust but nothing about this library.
 
 1. **Parsing is pure.** `FileReference::new()` only classifies the string. It
    never reads the filesystem, environment variables, or the process working
-   directory. A `FileReference` is just "what the author wrote," typed.
+   directory. A `FileReference` is just "what the author wrote," typed. That
+   makes it the passive structural validator: `FileReference::new(s).is_ok()`
+   answers "is this a well-formed reference?" identically on every OS (see
+   [Structural validation](#structural-validation)).
 
 2. **Resolution needs state, and you choose how to supply it.** There are two
    API families:
@@ -434,6 +437,10 @@ If neither `add_vault()` nor `$VAULT` provides any roots, resolution fails
 with `FileReferenceError::VaultNotConfigured` — a configuration problem, not
 a miss.
 
+The path after the prefix must be non-empty and relative: `vault:`,
+`vault::`, and `vault:/etc/hosts` are `InvalidSyntax` when parsed, because a
+rooted path would replace the vault root.
+
 ### Remote URLs (`http://`, `https://`)
 
 A URL parses into a typed remote reference. It never becomes a local
@@ -445,6 +452,33 @@ remote references to the separate fetching API (whose failures are
 URL is filled from the context's environment, so
 `https://{{DOCS_HOST}}/guide.md` names the host the request was given, not
 whatever the process has. `resolve_target()` is the ambient twin.
+
+A URL must name a host: `https://`, `https:///x`, and `https://exa mple.com`
+are `InvalidSyntax` when parsed. A host that is a `{{NAME}}` template is
+accepted without reading the variable. The `%` recursive modifier does not
+apply to a URL (`%https://…` is `InvalidSyntax`).
+
+## Structural Validation
+
+Because parsing reads nothing, `FileReference::new` doubles as a validator a
+caller can run anywhere, with no context. Its verdict depends only on the
+text:
+
+```rust
+use biscuit_file::FileReference;
+
+for ok in ["./docs/spec.md", r"C:\x\y.md", "vault:notes/x.md", "https://example.com/x", "hello world"] {
+    assert!(FileReference::new(ok).is_ok(), "{ok}");
+}
+for bad in ["", "https://", "vault:", "%https://example.com/x", "a\0b", "ftp://x/y", "~bob/x"] {
+    assert!(FileReference::new(bad).is_err(), "{bad:?}");
+}
+```
+
+`Ok` means well-formed, not that the file exists or even that it could
+resolve on this host: a Windows path parses on macOS, and an unset
+`{{NAME}}` fails only at resolution. A string holding a NUL character is
+always malformed.
 
 ## Modifiers
 
@@ -1016,7 +1050,7 @@ The complete `FileReferenceError` vocabulary:
 
 | Variant | Trigger |
 |---------|---------|
-| `InvalidSyntax(message)` | Empty/malformed syntax, a rooted magic payload, invalid interpolation, or an injected grammar sigil |
+| `InvalidSyntax(message)` | Empty/malformed syntax, a NUL character, a rooted magic or vault payload, an empty vault path, a URL without a host, a recursive URL, invalid interpolation, or an injected grammar sigil |
 | `ForeignAbsolutePath { path }` | An absolute path (authored or interpolated) is not absolute on this host — a drive or UNC path on macOS/Linux, a `/` path on Windows |
 | `MissingEnvironmentVariable { name }` | `{{NAME}}` is absent from the selected environment snapshot |
 | `CurrentDirectory(source)` | An ambient operation could not read the CWD |
