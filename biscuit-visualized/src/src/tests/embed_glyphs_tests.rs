@@ -77,7 +77,7 @@ fn without_spaces(glyphs: &WeightGlyphs) -> WeightGlyphs {
 }
 
 #[test]
-fn real_merman_output_matches_what_usvg_draws() {
+fn merman_output_matches_what_usvg_draws() {
     for source in [FLOWCHART, CLASS, SEQUENCE] {
         let svg = html_static_svg(source);
         let used = collect(&svg);
@@ -93,7 +93,7 @@ fn real_merman_output_matches_what_usvg_draws() {
 }
 
 #[test]
-fn real_class_diagram_title_is_bold_through_the_stylesheet() {
+fn class_diagram_title_is_bold_through_the_stylesheet() {
     // Load-bearing: Merman sets the class title's weight in a class rule of
     // its `<style>`, not on the `<text>`.
     let svg = html_static_svg(CLASS);

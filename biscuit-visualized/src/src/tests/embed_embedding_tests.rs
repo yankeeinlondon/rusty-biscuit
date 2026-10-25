@@ -122,7 +122,7 @@ fn a_page_drawing_no_text_embeds_nothing() {
 }
 
 #[test]
-fn real_diagrams_on_one_page_are_covered_by_the_subset() {
+fn diagrams_on_one_page_are_covered_by_the_subset() {
     // Two real diagrams through Merman and the HTML static post-process, over
     // the bundled-faces chain where `sans-serif` is Inter.
     let chain = postprocess_tests::chain();
