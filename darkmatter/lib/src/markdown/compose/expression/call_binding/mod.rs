@@ -7,7 +7,7 @@
 //! - A [`FunctionRegistration`] holds a function's overloads, each compiled
 //!   once into a [`CompiledSignature`], plus the facts a signature cannot
 //!   express: [`EvaluationMode`], registered source exclusions, and
-//!   [`NumericRecovery`].
+//!   [`NumericRecovery`], and a [`NarrowingFact`] for a predicate.
 //! - [`FunctionRegistration::bind_call`] checks arity and every argument and
 //!   selects one overload, or reports a [`CallBindingError`]; the handler
 //!   reads the result through [`BoundArgs`], whose accessors never parse or
@@ -47,7 +47,10 @@ pub use bind::{BoundArgs, BoundCall, LazyCall, OverloadSelection, Recovery};
 pub use error::{
     ArgumentError, ArgumentProblem, CallBindingError, CallErrorKind, CandidateFailure, ContractViolation, SignatureProblem,
 };
-pub use registration::{EvaluationMode, FunctionRegistration, NumericRecovery, RegistrationBuilder, RegistrationError};
+pub use registration::{
+    EvaluationMode, FactKind, FactType, FunctionRegistration, NarrowingFact, NumericRecovery, RegistrationBuilder,
+    RegistrationError,
+};
 pub use signature::{CompiledParameter, CompiledSignature};
 pub use translate::{
     NoNamedTypes, PropertyShape, TranslateError, TypeResolver, property_shape_from_def,

@@ -1,6 +1,9 @@
 //! Function registrations: compiled overloads plus the Rust-side facts a
 //! signature cannot express (evaluation mode, source exclusions, numeric
-//! recovery), validated once when the registration is built.
+//! recovery, a narrowing fact), validated once when the registration is
+//! built.
+
+use std::borrow::Cow;
 
 use super::signature::CompiledSignature;
 use super::translate::{NoNamedTypes, TranslateError, TypeResolver};
@@ -26,6 +29,73 @@ pub enum EvaluationMode {
 pub struct NumericRecovery {
     pub subject: String,
     pub fallback: String,
+}
+
+/// When a predicate's result proves its [`NarrowingFact`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FactKind {
+    /// A `true` result proves the argument suitable for the fact's type; a
+    /// `false` one proves nothing.
+    TrueImplies,
+    /// The result is `true` exactly when the argument is of the fact's type:
+    /// the true side narrows to it, and the false side removes it.
+    TrueIff,
+    /// A `false` result proves the argument suitable for the fact's type; a
+    /// `true` one proves nothing (`is_empty` is false only for a present
+    /// value).
+    FalseImplies,
+}
+
+/// What a [`NarrowingFact`] proves about its argument.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FactType {
+    /// The value is not `null`. Presence only: an internal fact with no
+    /// schema type, never compatibility with a concrete type.
+    NonNull,
+    /// A type in the signature grammar (`string`, `file`, `null`,
+    /// `unknown[]`). For [`FactKind::TrueIff`] it is `null` or the bare type
+    /// of one runtime family, since only a family has a decidable
+    /// complement.
+    Type(Cow<'static, str>),
+}
+
+/// A registered narrowing fact: what a call's boolean result proves about
+/// the original value of the argument bound to `parameter`.
+///
+/// Analysis reads it from the registration (built-ins and test or host
+/// functions alike); no predicate runs to narrow a type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NarrowingFact {
+    parameter: String,
+    index: usize,
+    kind: FactKind,
+    ty: FactType,
+    target: Option<PropertyAtom>,
+}
+
+#[allow(missing_docs)]
+impl NarrowingFact {
+    pub fn parameter(&self) -> &str {
+        &self.parameter
+    }
+
+    /// The parameter's position, the same in every overload.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn kind(&self) -> FactKind {
+        self.kind
+    }
+
+    pub fn fact_type(&self) -> &FactType {
+        &self.ty
+    }
+
+    /// The compiled [`FactType::Type`]; `None` for [`FactType::NonNull`].
+    pub fn target(&self) -> Option<&PropertyAtom> {
+        self.target.as_ref()
+    }
 }
 
 /// Why a registration cannot be served.
@@ -59,6 +129,10 @@ pub enum RegistrationError {
     InvalidLazy { function: String },
     #[error("{function}: overloads {} and {} have the same binding contract", first + 1, second + 1)]
     DuplicateOverload { function: String, first: usize, second: usize },
+    #[error("{function}: invalid narrowing fact: {message}")]
+    InvalidFact { function: String, message: String },
+    #[error("{function}: invalid malformed-reference rule: {message}")]
+    InvalidReferenceRule { function: String, message: String },
 }
 
 /// A callable function: its overloads compiled once, with its registered
@@ -69,6 +143,8 @@ pub struct FunctionRegistration {
     pub(super) overloads: Vec<CompiledSignature>,
     pub(super) evaluation: EvaluationMode,
     pub(super) recovery: Option<NumericRecovery>,
+    pub(super) fact: Option<NarrowingFact>,
+    pub(super) malformed_reference: Option<usize>,
 }
 
 impl FunctionRegistration {
@@ -98,6 +174,30 @@ impl FunctionRegistration {
     pub fn numeric_recovery(&self) -> Option<&NumericRecovery> {
         self.recovery.as_ref()
     }
+
+    pub fn narrowing_fact(&self) -> Option<&NarrowingFact> {
+        self.fact.as_ref()
+    }
+
+    /// The position of the parameter registered with
+    /// [`RegistrationBuilder::false_for_malformed_reference`]: a text argument
+    /// there that is not a well-formed file reference makes the call `false`.
+    pub fn malformed_reference_parameter(&self) -> Option<usize> {
+        self.malformed_reference
+    }
+
+    /// The fact a call with `count` arguments proves: present when an
+    /// overload taking `count` arguments declares the fact's parameter.
+    pub fn narrowing_fact_for(&self, count: usize) -> Option<&NarrowingFact> {
+        let fact = self.fact.as_ref()?;
+        self.overloads
+            .iter()
+            .any(|signature| {
+                signature.accepts_count(count)
+                    && signature.parameter(&fact.parameter).is_some_and(|parameter| parameter.index() < count)
+            })
+            .then_some(fact)
+    }
 }
 
 enum Source {
@@ -113,6 +213,8 @@ pub struct RegistrationBuilder {
     evaluation: EvaluationMode,
     exclusions: Vec<(String, Vec<ValueKind>)>,
     recovery: Option<NumericRecovery>,
+    fact: Option<(String, FactKind, FactType)>,
+    malformed_reference: Option<String>,
 }
 
 impl RegistrationBuilder {
@@ -123,6 +225,8 @@ impl RegistrationBuilder {
             evaluation: EvaluationMode::Eager,
             exclusions: Vec::new(),
             recovery: None,
+            fact: None,
+            malformed_reference: None,
         }
     }
 
@@ -146,6 +250,22 @@ impl RegistrationBuilder {
         self
     }
 
+    /// Registers the narrowing fact the function's boolean result proves
+    /// about the argument bound to `parameter`; a later call replaces it.
+    pub fn narrows(mut self, parameter: impl Into<String>, kind: FactKind, ty: FactType) -> Self {
+        self.fact = Some((parameter.into(), kind, ty));
+        self
+    }
+
+    /// Declares that text bound to `parameter` which is not a well-formed
+    /// file reference makes the call return `false` without any access, so
+    /// analysis can report an authored literal of that kind as always false.
+    /// The handler must honor it.
+    pub fn false_for_malformed_reference(mut self, parameter: impl Into<String>) -> Self {
+        self.malformed_reference = Some(parameter.into());
+        self
+    }
+
     /// Builds with no named types available.
     ///
     /// ## Errors
@@ -163,7 +283,10 @@ impl RegistrationBuilder {
     /// A [`RegistrationError`]: unparseable or non-function signatures,
     /// function-valued parameters or results, untranslatable types, rules
     /// naming unknown parameters, conflicting rules, an invalid recovery or
-    /// lazy registration, or two overloads with one binding contract.
+    /// lazy registration, two overloads with one binding contract, or an
+    /// invalid narrowing fact (on a function that does not return
+    /// `boolean`, on a parameter at different positions, or of a type its
+    /// kind cannot prove).
     pub fn build_with(self, resolver: &dyn TypeResolver) -> Result<FunctionRegistration, RegistrationError> {
         let name = self.name;
         let types = match self.source {
@@ -244,13 +367,109 @@ impl RegistrationBuilder {
             }
         }
 
+        let fact = match self.fact {
+            Some((parameter, kind, ty)) => Some(compile_fact(&name, &overloads, parameter, kind, ty)?),
+            None => None,
+        };
+
+        let malformed_reference = match self.malformed_reference {
+            Some(parameter) => Some(reference_rule_index(&name, &overloads, parameter)?),
+            None => None,
+        };
+
         Ok(FunctionRegistration {
             name,
             overloads,
             evaluation: self.evaluation,
             recovery: self.recovery,
+            fact,
+            malformed_reference,
         })
     }
+}
+
+/// The malformed-reference rule's parameter position: a boolean function
+/// whose every overload declares `parameter` as one argument at one position.
+fn reference_rule_index(
+    function: &str,
+    overloads: &[CompiledSignature],
+    parameter: String,
+) -> Result<usize, RegistrationError> {
+    let fail = |message: String| RegistrationError::InvalidReferenceRule {
+        function: function.to_string(),
+        message,
+    };
+    if overloads.iter().any(|signature| !matches!(signature.returns(), Shape::Boolean { .. })) {
+        return Err(fail("only a function returning `boolean` can be false for a malformed reference".to_string()));
+    }
+    let positions: Vec<_> = overloads.iter().map(|signature| signature.parameter(&parameter)).collect();
+    let Some(Some(first)) = positions.first() else {
+        return Err(RegistrationError::UnknownParameter {
+            function: function.to_string(),
+            rule: "false_for_malformed_reference",
+            parameter,
+        });
+    };
+    let index = first.index();
+    if positions.iter().any(|position| position.is_none_or(|other| other.index() != index || other.is_rest())) {
+        return Err(fail(format!("parameter `{parameter}` must be a single argument at one position in every overload")));
+    }
+    Ok(index)
+}
+
+/// Validates a narrowing fact against the compiled overloads.
+fn compile_fact(
+    function: &str,
+    overloads: &[CompiledSignature],
+    parameter: String,
+    kind: FactKind,
+    ty: FactType,
+) -> Result<NarrowingFact, RegistrationError> {
+    let fail = |message: String| RegistrationError::InvalidFact {
+        function: function.to_string(),
+        message,
+    };
+    if overloads.iter().any(|signature| !matches!(signature.returns(), Shape::Boolean { .. })) {
+        return Err(fail("only a function returning `boolean` can narrow".to_string()));
+    }
+    let mut positions = overloads.iter().filter_map(|signature| signature.parameter(&parameter));
+    let Some(first) = positions.next() else {
+        return Err(RegistrationError::UnknownParameter {
+            function: function.to_string(),
+            rule: "narrows",
+            parameter,
+        });
+    };
+    let index = first.index();
+    if first.is_rest() || positions.any(|other| other.index() != index || other.is_rest()) {
+        return Err(fail(format!("parameter `{parameter}` must be a single argument at one position in every overload")));
+    }
+    let target = match &ty {
+        FactType::NonNull => None,
+        FactType::Type(text) => {
+            let def = parse_type_definition(function, text)
+                .map_err(|error| fail(format!("`{text}` does not parse: {error}")))?;
+            let PropertyDef::Single(atom) = def else {
+                return Err(fail(format!("`{text}` must be a single type, not a union")));
+            };
+            if matches!(atom.ty, TypeExpr::Union(_)) {
+                return Err(fail(format!("`{text}` must be a single type, not a union")));
+            }
+            if kind == FactKind::TrueIff && !crate::markdown::compose::expression::scope::is_exact_fact_type(&atom) {
+                return Err(fail(format!(
+                    "a true-iff fact needs `null` or the bare type of one value family, not `{text}`"
+                )));
+            }
+            Some(atom)
+        }
+    };
+    Ok(NarrowingFact {
+        parameter,
+        index,
+        kind,
+        ty,
+        target,
+    })
 }
 
 /// Recovery needs a required subject, an optional numeric fallback, and a

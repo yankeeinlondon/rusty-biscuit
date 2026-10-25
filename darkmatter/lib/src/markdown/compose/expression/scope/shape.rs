@@ -364,12 +364,18 @@ impl Shape {
     }
 
     /// The true side of a family predicate: the alternatives that may be of
-    /// `family`, without `null`. From unknown, the bare family type.
-    pub(super) fn of_family(&self, family: Family) -> Self {
+    /// `family`, without `null`. From unknown, the bare family type. A
+    /// recursive reference is classified by its definition in `definitions`
+    /// ([`arm_families`]) and kept as a reference.
+    pub(super) fn of_family(&self, family: Family, definitions: &DefinitionTable) -> Self {
         match self {
             Self::Unknown { .. } => Self::Arms { arms: vec![family.bare_atom()], nullable: false },
             Self::Arms { arms, .. } => Self::Arms {
-                arms: arms.iter().filter(|arm| families(arm).contains(&family)).cloned().collect(),
+                arms: arms
+                    .iter()
+                    .filter(|arm| arm_families(arm, definitions).contains(&family))
+                    .cloned()
+                    .collect(),
                 nullable: false,
             },
         }
@@ -378,13 +384,52 @@ impl Shape {
     /// The false side of a family predicate: alternatives that must be of
     /// `family` removed. Unknown stays unknown, since "not a string" has no
     /// representation.
-    pub(super) fn without_family(&self, family: Family) -> Self {
+    pub(super) fn without_family(&self, family: Family, definitions: &DefinitionTable) -> Self {
         match self {
             Self::Unknown { .. } => self.clone(),
             Self::Arms { arms, nullable } => Self::Arms {
-                arms: arms.iter().filter(|arm| families(arm) != [family].as_slice()).cloned().collect(),
+                arms: arms
+                    .iter()
+                    .filter(|arm| arm_families(arm, definitions) != [family])
+                    .cloned()
+                    .collect(),
                 nullable: *nullable,
             },
+        }
+    }
+
+    /// The proven side of a true-implies fact: the values suitable for
+    /// `target`, without `null`.
+    ///
+    /// For the bare type of one family this is [`Self::of_family`]. Otherwise
+    /// an alternative already within `target` stays, one that shares a family
+    /// with it becomes `target` (the guard proves the value suitable; it never
+    /// invents members, item types, or existence), and the rest are removed.
+    /// From unknown, `target`.
+    pub(super) fn suitable_for(&self, target: &PropertyAtom, definitions: &DefinitionTable) -> Self {
+        if is_null_type(target) {
+            return self.only_null();
+        }
+        if let Some(family) = exact_family(target) {
+            return self.of_family(family, definitions);
+        }
+        let target = type_identity(target.clone());
+        match self {
+            Self::Unknown { .. } => Self::Arms { arms: vec![target], nullable: false },
+            Self::Arms { arms, .. } => {
+                let reach = families(&target);
+                let kept = arms.iter().filter_map(|arm| {
+                    if crate::markdown::schemas::is_subtype_with_definitions(arm, &target, definitions)
+                    {
+                        Some(arm.clone())
+                    } else if arm_families(arm, definitions).iter().any(|family| reach.contains(family)) {
+                        Some(target.clone())
+                    } else {
+                        None
+                    }
+                });
+                Self::normalized(kept.collect(), false)
+            }
         }
     }
 
@@ -501,6 +546,57 @@ fn families(atom: &PropertyAtom) -> &'static [Family] {
             ALL_FAMILIES
         }
     }
+}
+
+/// [`families`], with a recursive reference classified by the top level of
+/// its definition body in `definitions`: one level, never expanded, so a
+/// reference inside the body keeps every family. A reference `definitions`
+/// cannot resolve keeps every family, which never proves a call valid or
+/// invalid falsely.
+fn arm_families(atom: &PropertyAtom, definitions: &DefinitionTable) -> Vec<Family> {
+    let TypeExpr::Ref(key) = &atom.ty else {
+        return families(atom).to_vec();
+    };
+    if atom.is_array {
+        return vec![Family::Array];
+    }
+    let Some(definition) = definitions.get(key) else {
+        return ALL_FAMILIES.to_vec();
+    };
+    let mut found: Vec<Family> = Vec::new();
+    for alternative in flattened_alternatives(&definition.body) {
+        let mut arm = alternative.atom.clone();
+        arm.is_array |= alternative.is_array;
+        if is_null_type(&arm) {
+            continue;
+        }
+        for family in families(&arm) {
+            if !found.contains(family) {
+                found.push(*family);
+            }
+        }
+    }
+    found
+}
+
+fn is_null_type(atom: &PropertyAtom) -> bool {
+    !atom.is_array && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Null))
+}
+
+/// The family whose bare type `atom` is (`string`, `number`, `boolean`,
+/// `object`, `unknown[]`), with no constraints beyond markers.
+pub(super) fn exact_family(atom: &PropertyAtom) -> Option<Family> {
+    let [family] = families(atom) else {
+        return None;
+    };
+    (type_identity(atom.clone()) == type_identity(family.bare_atom()) && !has_ordinary_constraints(atom)).then_some(*family)
+}
+
+/// Whether `atom` can be a true-iff fact's type: `null` or the bare type of
+/// one family ([`exact_family`]). Only those have a complement narrowing
+/// can represent.
+pub(crate) fn is_exact_fact_type(atom: &PropertyAtom) -> bool {
+    is_null_type(atom) || exact_family(atom).is_some()
 }
 
 /// Whether `atom` is or contains a recursive reference.

@@ -497,6 +497,10 @@ registry_rows! {
         rejects_type("find_first_index([])"), converts(ok("find_first_index(2026)", json!("2026"))));
     find_last_index => row(ok(r#"find_last_index("review-1.md")"#, json!("review-2.md")),
         rejects_type("find_last_index([])"), converts(ok("find_last_index(2026)", json!("2026"))));
+    is_file_type => preservation(ok(r#"is_file_type("./docs/spec.md")"#, json!(true)), "is_file_type()", vec![
+        ok("is_file_type(42)", json!(false)), ok(r#"is_file_type("42")"#, json!(true)), ok("is_file_type(null)", json!(false)),
+        ok(r#"is_file_type("https://")"#, json!(false)),
+    ]);
     is_indexed_file => row(ok(r#"is_indexed_file("review-1.md")"#, json!(true)), rejects_type("is_indexed_file([])"),
         converts(ok("is_indexed_file(2026)", json!(false))));
     join => row(ok(r#"join("sub", "note.md")"#, json!("sub/note.md")), rejects_type(r#"join([], "a")"#),

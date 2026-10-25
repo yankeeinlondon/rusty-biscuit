@@ -7,12 +7,15 @@
 //! exactly the calls composition rejects.
 //!
 //! Every site's [`TypeScope`] is built over the declaration-only layer
-//! ([`DeclaredTypes::new`]) of the document's `EffectiveSchema.simplified`:
-//! a frontmatter value is a runtime value (setters, caller inputs, and
+//! ([`DeclaredTypes::for_schema`]) of the document's effective schema: a
+//! frontmatter value is a runtime value (setters, caller inputs, and
 //! interpolation can replace it), so it never narrows a design-time type.
+//! Guards narrow it through the library alone: body `::block when`
+//! conditions through `BodyGuards`, and lifecycle `when` items through
+//! [`darkmatter::lifecycle::lifecycle_call_checks`].
 
 use darkmatter::markdown::compose::expression::{
-    ArgumentCategory, DeclaredTypes, SpannedExpr, TypeScope, check_expression_calls,
+    ArgumentCategory, CallCheck, DeclaredTypes, SpannedExpr, TypeScope, check_expression_calls,
 };
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::DiagnosticSeverity;
@@ -54,17 +57,32 @@ pub(crate) fn declared_types<'a>(ctx: &DocumentContext<'a>) -> DeclaredTypes<'a>
 /// Every shown finding of every call in `expr`, in every branch, with
 /// each argument typed at its own site under `site`.
 pub(crate) fn call_diagnostics(expr: &SpannedExpr, site: &TypeScope<'_>, strict: bool) -> Vec<CallDiagnostic> {
-    check_expression_calls(expr, site)
+    check_diagnostics(&check_expression_calls(expr, site), strict)
+}
+
+/// The shown findings of checks Darkmatter already made, such as the
+/// lifecycle surfaces' ([`darkmatter::lifecycle::lifecycle_call_checks`]),
+/// plus each always-false call as a warning under both settings.
+pub(crate) fn check_diagnostics(checks: &[CallCheck], strict: bool) -> Vec<CallDiagnostic> {
+    checks
         .iter()
-        .flat_map(|check| check.findings())
-        .filter_map(|finding| {
-            let severity = severity(finding.category, strict)?;
-            let code = if finding.category == ArgumentCategory::Incompatible {
-                code::EXPRESSION_INCOMPATIBLE_CALL
-            } else {
-                code::EXPRESSION_UNCERTAIN_CALL
-            };
-            Some(CallDiagnostic { span: finding.span, severity, code, message: finding.message })
+        .flat_map(|check| {
+            let categories = check.findings().into_iter().filter_map(|finding| {
+                let severity = severity(finding.category, strict)?;
+                let code = if finding.category == ArgumentCategory::Incompatible {
+                    code::EXPRESSION_INCOMPATIBLE_CALL
+                } else {
+                    code::EXPRESSION_UNCERTAIN_CALL
+                };
+                Some(CallDiagnostic { span: finding.span, severity, code, message: finding.message })
+            });
+            let always_false = check.always_false_finding().map(|finding| CallDiagnostic {
+                span: finding.span,
+                severity: DiagnosticSeverity::WARNING,
+                code: code::EXPRESSION_ALWAYS_FALSE_CALL,
+                message: finding.message,
+            });
+            categories.chain(always_false).collect::<Vec<_>>()
         })
         .collect()
 }

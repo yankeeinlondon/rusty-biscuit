@@ -34,6 +34,14 @@ pub enum AuthoredValue {
     NonText,
 }
 
+/// One step from the frontmatter root to an authored scalar: a mapping key
+/// or a list position, exactly as the YAML holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AuthoredSegment {
+    Key(String),
+    Index(usize),
+}
+
 /// One segment of a [`LifecyclePath`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum LifecyclePathSegment {
@@ -134,6 +142,9 @@ impl fmt::Display for LifecyclePath {
 #[derive(Debug, Default)]
 pub struct LifecycleSourceMap {
     entries: HashMap<LifecyclePath, AuthoredValue>,
+    /// Where each recorded scalar sits in the frontmatter, so an editor can
+    /// range a surface's findings on its authored bytes.
+    locations: HashMap<LifecyclePath, Vec<AuthoredSegment>>,
 }
 
 impl LifecycleSourceMap {
@@ -159,9 +170,10 @@ impl LifecycleSourceMap {
                 continue;
             };
             let path = LifecyclePath::root(event);
+            let at = vec![AuthoredSegment::Key(event.to_string())];
             if signal != LifecycleSignal::Loop {
                 if let Some(stack) = root.get(event) {
-                    map.record_stack(&path, stack);
+                    map.record_stack(&path, stack, &at);
                 }
                 continue;
             }
@@ -169,17 +181,17 @@ impl LifecycleSourceMap {
                 continue;
             };
             for predicate in ["while", "until"] {
-                map.record(path.field(predicate), block.get(predicate));
+                map.record(path.field(predicate), block.get(predicate), &child_key(&at, predicate));
             }
             match block.get("gate") {
-                Some(gate) => map.record_stack(&path.field("gate"), gate),
+                Some(gate) => map.record_stack(&path.field("gate"), gate, &child_key(&at, "gate")),
                 None => {
                     let concerns: serde_json::Map<String, Value> = block
                         .iter()
                         .filter(|(key, _)| !LOOP_ITERATION_KEYS.contains(&key.as_str()))
                         .map(|(key, value)| (key.clone(), value.clone()))
                         .collect();
-                    map.record_dictionary(&path, &concerns);
+                    map.record_dictionary(&path, &concerns, &at);
                 }
             }
         }
@@ -191,70 +203,83 @@ impl LifecycleSourceMap {
         self.entries.get(path)
     }
 
-    fn record(&mut self, path: LifecyclePath, value: Option<&Value>) {
+    /// Where the authored scalar at `path` sits in the frontmatter, or
+    /// `None` when nothing was recorded there.
+    pub fn location(&self, path: &LifecyclePath) -> Option<&[AuthoredSegment]> {
+        self.locations.get(path).map(Vec::as_slice)
+    }
+
+    fn record(&mut self, path: LifecyclePath, value: Option<&Value>, at: &[AuthoredSegment]) {
         let authored = match value {
             Some(Value::String(text)) => AuthoredValue::Text(text.clone()),
             Some(Value::Number(_) | Value::Bool(_)) => AuthoredValue::NonText,
             _ => return,
         };
+        self.locations.insert(path.clone(), at.to_vec());
         self.entries.insert(path, authored);
     }
 
     /// A stack or `then`/`else` body: a list of items or a dictionary.
-    fn record_stack(&mut self, path: &LifecyclePath, value: &Value) {
+    fn record_stack(&mut self, path: &LifecyclePath, value: &Value, at: &[AuthoredSegment]) {
         match value {
             Value::Array(items) => {
                 for (index, item) in items.iter().enumerate() {
                     if let Value::Object(item) = item {
-                        self.record_item(&path.index(index), item);
+                        self.record_item(&path.index(index), item, &child_index(at, index));
                     }
                 }
             }
-            Value::Object(map) => self.record_dictionary(path, map),
+            Value::Object(map) => self.record_dictionary(path, map, at),
             _ => {}
         }
     }
 
     /// One list item: an optional guard and branches, then its verbs.
-    fn record_item(&mut self, path: &LifecyclePath, item: &serde_json::Map<String, Value>) {
-        self.record(path.field("when"), item.get("when"));
+    fn record_item(&mut self, path: &LifecyclePath, item: &serde_json::Map<String, Value>, at: &[AuthoredSegment]) {
+        self.record(path.field("when"), item.get("when"), &child_key(at, "when"));
         for branch in ["then", "else"] {
             if let Some(body) = item.get(branch) {
-                self.record_stack(&path.field(branch), body);
+                self.record_stack(&path.field(branch), body, &child_key(at, branch));
             }
         }
-        self.record_dictionary(path, item);
+        self.record_dictionary(path, item, at);
     }
 
     /// Every verb of a dictionary, each at `{path}.{verb}`.
-    fn record_dictionary(&mut self, path: &LifecyclePath, map: &serde_json::Map<String, Value>) {
+    fn record_dictionary(
+        &mut self,
+        path: &LifecyclePath,
+        map: &serde_json::Map<String, Value>,
+        at: &[AuthoredSegment],
+    ) {
         for (verb, value) in map {
             if matches!(verb.as_str(), "when" | "then" | "else" | "no_error") {
                 continue;
             }
             let verb_path = path.field(verb.as_str());
+            let at = child_key(at, verb);
             match value {
-                _ if verb == "set" => self.record_with_value(&verb_path, value),
-                Value::Object(params) => self.record_long_form(&verb_path, verb, params),
-                _ => self.record_short_form(&verb_path, verb, value),
+                _ if verb == "set" => self.record_with_value(&verb_path, value, &at),
+                Value::Object(params) => self.record_long_form(&verb_path, verb, params, &at),
+                _ => self.record_short_form(&verb_path, verb, value, &at),
             }
         }
     }
 
     /// `verb: value` or `verb: [values…]`: argument `k` is the scalar or the
     /// array's `k`th element, named the way the walker names the operand.
-    fn record_short_form(&mut self, prefix: &LifecyclePath, verb: &str, value: &Value) {
-        let args: Vec<&Value> = match value {
-            Value::Array(items) => items.iter().collect(),
-            scalar => vec![scalar],
+    fn record_short_form(&mut self, prefix: &LifecyclePath, verb: &str, value: &Value, at: &[AuthoredSegment]) {
+        let args: Vec<(&Value, Vec<AuthoredSegment>)> = match value {
+            Value::Array(items) => items.iter().enumerate().map(|(k, item)| (item, child_index(at, k))).collect(),
+            scalar => vec![(scalar, at.to_vec())],
         };
         let single_field = positional_operand_field(verb);
-        for (k, arg) in args.into_iter().enumerate() {
+        for (k, (arg, arg_at)) in args.into_iter().enumerate() {
             let path = match single_field {
                 Some(field) => prefix.field(field),
                 None => prefix.field("arg").index(k),
             };
-            self.record(path, Some(arg));
+            self.record(path, Some(arg), &arg_at);
         }
     }
 
@@ -265,23 +290,24 @@ impl LifecycleSourceMap {
         prefix: &LifecyclePath,
         verb: &str,
         obj: &serde_json::Map<String, Value>,
+        at: &[AuthoredSegment],
     ) {
         let params: Vec<(&String, &Value)> = obj
             .iter()
             .filter(|(key, _)| !matches!(key.as_str(), "no_error" | "with"))
             .collect();
         if let Some(with) = obj.get("with") {
-            self.record_with_value(&prefix.field("with"), with);
+            self.record_with_value(&prefix.field("with"), with, &child_key(at, "with"));
         }
 
         if is_lifecycle_control_verb(verb) || verb == "shell" {
             for (key, value) in params {
-                self.record(prefix.field(key.as_str()), Some(value));
+                self.record(prefix.field(key.as_str()), Some(value), &child_key(at, key));
             }
             return;
         }
         if CommunicationChannel::from_verb(verb).is_some() {
-            self.record(prefix.field("text"), obj.get("text"));
+            self.record(prefix.field("text"), obj.get("text"), &child_key(at, "text"));
             return;
         }
 
@@ -290,35 +316,47 @@ impl LifecycleSourceMap {
             .filter(|signature| !signature.is_variadic())
             .or_else(|| side_effect_signature(verb))
             .and_then(|signature| signature.select_named(&keys).ok());
-        let ordered: Vec<&Value> = match overload {
+        let ordered: Vec<(&str, &Value)> = match overload {
             // The overload the parser selects orders the arguments; absent
             // optional parameters are skipped, so an argument's index counts
             // only the parameters actually present.
-            Some(overload) => overload.names().filter_map(|name| obj.get(name)).collect(),
+            Some(overload) => overload.names().filter_map(|name| obj.get(name).map(|value| (name, value))).collect(),
             None => {
                 let mut sorted = params;
                 sorted.sort_by(|a, b| a.0.cmp(b.0));
-                sorted.into_iter().map(|(_, value)| value).collect()
+                sorted.into_iter().map(|(key, value)| (key.as_str(), value)).collect()
             }
         };
-        for (k, value) in ordered.into_iter().enumerate() {
-            self.record(prefix.field("arg").index(k), Some(value));
+        for (k, (key, value)) in ordered.into_iter().enumerate() {
+            self.record(prefix.field("arg").index(k), Some(value), &child_key(at, key));
         }
     }
 
-    fn record_with_value(&mut self, path: &LifecyclePath, value: &Value) {
+    fn record_with_value(&mut self, path: &LifecyclePath, value: &Value, at: &[AuthoredSegment]) {
         match value {
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
-                    self.record_with_value(&path.index(i), item);
+                    self.record_with_value(&path.index(i), item, &child_index(at, i));
                 }
             }
             Value::Object(map) => {
                 for (key, item) in map {
-                    self.record_with_value(&path.map_key(key.as_str()), item);
+                    self.record_with_value(&path.map_key(key.as_str()), item, &child_key(at, key));
                 }
             }
-            scalar => self.record(path.clone(), Some(scalar)),
+            scalar => self.record(path.clone(), Some(scalar), at),
         }
     }
+}
+
+fn child_key(at: &[AuthoredSegment], key: &str) -> Vec<AuthoredSegment> {
+    let mut path = at.to_vec();
+    path.push(AuthoredSegment::Key(key.to_string()));
+    path
+}
+
+fn child_index(at: &[AuthoredSegment], index: usize) -> Vec<AuthoredSegment> {
+    let mut path = at.to_vec();
+    path.push(AuthoredSegment::Index(index));
+    path
 }

@@ -1,14 +1,25 @@
-use super::facts::PREDICATE_FACTS;
 use super::*;
-use crate::markdown::compose::expression::functions::{accepts_call_arity, canonical_function_name};
+use crate::markdown::compose::expression::functions::{
+    accepts_call_arity, canonical_function_name, dispatchable_canonical_names, inspect_registration,
+};
 
-/// The fact table names only registered canonical bindings that accept one
-/// argument; it is not a second registry.
+/// The built-in narrowing facts live on their registrations: exactly the
+/// inspecting predicates declare one, each on its one argument.
 #[test]
-fn every_predicate_fact_names_a_registered_one_argument_binding() {
-    for (name, _) in PREDICATE_FACTS {
-        assert_eq!(canonical_function_name(name), Some(*name), "{name} is a canonical binding");
+fn the_built_in_narrowing_facts_are_registered_on_one_argument_predicates() {
+    let mut narrowing: Vec<&str> = dispatchable_canonical_names()
+        .into_iter()
+        .filter(|name| inspect_registration(name, |registration| registration.narrowing_fact().is_some()) == Some(true))
+        .collect();
+    narrowing.sort_unstable();
+    assert_eq!(
+        narrowing,
+        ["file_exists", "is_array", "is_empty", "is_file_type", "is_null", "is_number", "is_object", "is_string"]
+    );
+    for name in narrowing {
         assert!(accepts_call_arity(name, 1), "{name} accepts one argument");
+        let index = inspect_registration(name, |registration| registration.narrowing_fact_for(1).map(|fact| fact.index()));
+        assert_eq!(index, Some(Some(0)), "{name}");
     }
 }
 

@@ -65,9 +65,9 @@ const UNGUARDED: &[Unguarded] = &[
     },
     Unguarded {
         path: "lifecycle/validate.rs",
-        item: "reject_incompatible_calls",
+        item: "lifecycle_call_checks",
         count: 1,
-        reason: "a category 5 verdict holds under every guard (narrowing only removes alternatives), so the rejection reads each event's declarations alone",
+        reason: "each lifecycle event's call check starts from its declarations alone; `walk_stack_scoped` adds its guards",
     },
 ];
 
@@ -111,10 +111,19 @@ const DECISION_SITES: &[DecisionSite] = &[
     },
 ];
 
-const RETIRED: &[&str] = &["narrowed_expression_paths", "collect_narrowed_paths", "RootGuard", "condition_guard"];
+const RETIRED: &[&str] = &[
+    "narrowed_expression_paths",
+    "collect_narrowed_paths",
+    "RootGuard",
+    "condition_guard",
+    // The static predicate-fact table; facts live on registrations now.
+    "PREDICATE_FACTS",
+    "PredicateFact",
+];
 
 const SCOPE: &str = "markdown/compose/expression/scope/mod.rs";
 const FACTS: &str = "markdown/compose/expression/scope/facts.rs";
+const REGISTRATION: &str = "markdown/compose/expression/call_binding/registration.rs";
 
 const OWNED: &[Owned] = &[
     Owned {
@@ -122,8 +131,12 @@ const OWNED: &[Owned] = &[
         owners: &[SCOPE, FACTS, "markdown/compose/page_blocks/guards.rs"],
         why: "guard facts come from `TypeScope::assume` (a body guard delegates to it)",
     },
-    Owned { name: "PREDICATE_FACTS", owners: &[FACTS], why: "the one predicate-fact table" },
-    Owned { name: "PredicateFact", owners: &[FACTS], why: "the one predicate-fact table" },
+    Owned {
+        name: "NarrowingFact",
+        owners: &[REGISTRATION],
+        why: "a predicate's fact is part of its registration, for built-ins and host functions alike",
+    },
+    Owned { name: "FactKind", owners: &[REGISTRATION], why: "the one narrowing-fact vocabulary" },
     Owned { name: "TypeScope", owners: &[SCOPE], why: "the one type scope" },
     Owned { name: "Polarity", owners: &[SCOPE], why: "the one type scope" },
     Owned {
@@ -136,8 +149,6 @@ const OWNED: &[Owned] = &[
 const PREDICATE_LITERAL_OWNERS: &[&str] = &[
     // The registry: canonical names and aliases.
     "markdown/compose/expression/functions/",
-    // The fact table, keyed by canonical name.
-    FACTS,
     // Remote egress classification, not a presence decision.
     "markdown/compose/remote.rs",
 ];
@@ -198,7 +209,7 @@ fn baseline() -> Vec<(&'static str, String)> {
         ),
         (
             "lifecycle/validate.rs",
-            "pub fn reject_incompatible_calls() { let site = TypeScope::unguarded(&event); }".to_string(),
+            "pub fn lifecycle_call_checks() { let site = TypeScope::unguarded(&event); }".to_string(),
         ),
     ];
     for entry in UNGUARDED {
@@ -276,7 +287,12 @@ fn a_competing_static_classifier_is_rejected() {
         (
             "markdown/compose/preflight/collect.rs",
             "const PREDICATE_FACTS: &[&str] = &[];",
-            "defines `PREDICATE_FACTS` outside its owner",
+            "`PREDICATE_FACTS` is a retired",
+        ),
+        (
+            "markdown/compose/preflight/collect.rs",
+            "pub(crate) struct NarrowingFact { kind: u8 }",
+            "defines `NarrowingFact` outside its owner",
         ),
         (
             "markdown/compose/shell_expansion/site.rs",

@@ -118,19 +118,86 @@ fn reject_nested_span(
     })
 }
 
-/// Rejects the first lifecycle call the design-time check proves wrong
-/// (category 5), exactly as composition rejects the same call in the body.
+/// One lifecycle expression surface and what the design-time call check
+/// finds in it at its site.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LifecycleSurfaceCalls {
+    pub signal: LifecycleSignal,
+    /// The surface's authored path (`success[1].then[0].info.text`).
+    pub property: LifecyclePath,
+    /// Where the surface's authored scalar sits in the frontmatter.
+    pub location: Vec<AuthoredSegment>,
+    /// Every call whose category is not 1, with spans relative to the
+    /// authored scalar.
+    pub checks: Vec<PreparedCallCheck>,
+}
+
+/// The design-time call check of every lifecycle expression surface, each
+/// typed at its own site, for composition and the editor alike.
 ///
 /// Every surface [`walk_stack`] yields is checked, `when` predicates and
 /// operands alike, in both branches of every conditional, from its authored
 /// text. Its expressions are typed by the declared layer
 /// [`lifecycle_declared_types`](super::shell_template::lifecycle_declared_types)
 /// builds from `schema` and `registry`, with each event's globals as the
-/// event declares them: an unavailable global has no type. Passive: nothing
-/// is evaluated and no handler runs.
+/// event declares them (an unavailable global has no type), narrowed by
+/// every enclosing `when` on the side the surface is on.
 ///
-/// Guards are not applied. A guard only removes alternatives from a type, so
-/// it never turns a call no value can satisfy into one some value can.
+/// A guard fact lives only inside its event's walk: it never reaches another
+/// event, and an action that may write a subject
+/// ([`action_writes`](super::actions::action_writes)) ends
+/// every fact about that subject, its aliases, ancestors, and descendants
+/// for the actions after it. A conditional's own `when` is typed before its
+/// guard applies. Passive: nothing is evaluated and no handler runs.
+///
+/// Surfaces are returned in [`LifecycleSignal::ALL`] order, then authored
+/// order; a surface with no authored text, or whose text does not parse
+/// (the parser's to report), is omitted.
+pub fn lifecycle_call_checks(
+    frontmatter: &serde_json::Value,
+    lifecycle: &LifecycleConfig,
+    registry: &super::registry::EventRegistry,
+    schema: Option<&crate::markdown::schemas::EffectiveSchema>,
+) -> Vec<LifecycleSurfaceCalls> {
+    let sources = LifecycleSourceMap::from_frontmatter_in(frontmatter, registry);
+    let declared = super::shell_template::lifecycle_declared_types(schema, registry);
+    let mut found = Vec::new();
+    for signal in LifecycleSignal::ALL {
+        let event = match registry.id_of(signal) {
+            Some(id) => declared.with_binding_view(registry.globals(id)),
+            None => declared,
+        };
+        // Each event starts from its declarations alone; guards narrow
+        // inside the walk.
+        let site = TypeScope::unguarded(&event);
+        walk_stack_scoped(lifecycle.stack(signal), site, &mut |path, surface, scope| {
+            let Some(AuthoredValue::Text(text)) = sources.get(path) else {
+                return;
+            };
+            let mode = if surface.predicate {
+                AuthoredMode::Expression(ParseMode::Condition)
+            } else {
+                AuthoredMode::InterpolatedValue
+            };
+            let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode) else {
+                return;
+            };
+            found.push(LifecycleSurfaceCalls {
+                signal,
+                property: path.clone(),
+                location: sources.location(path).unwrap_or_default().to_vec(),
+                checks: check_prepared_calls(&prepared, scope),
+            });
+        });
+    }
+    found
+}
+
+/// Rejects the first lifecycle call the design-time check proves wrong
+/// (category 5) at its site ([`lifecycle_call_checks`]), exactly as
+/// composition rejects the same call in the body under its `::block`
+/// guards. An impossible branch keeps its incoming types, so a call no
+/// value can satisfy is rejected even where its guard can never hold.
 ///
 /// ## Errors
 ///
@@ -143,38 +210,21 @@ pub fn reject_incompatible_calls(
     registry: &super::registry::EventRegistry,
     schema: Option<&crate::markdown::schemas::EffectiveSchema>,
 ) -> Result<(), LifecycleError> {
-    let sources = LifecycleSourceMap::from_frontmatter_in(frontmatter, registry);
-    let declared = super::shell_template::lifecycle_declared_types(schema, registry);
-    for (signal, path, surface) in event_surfaces(lifecycle) {
-        let Some(AuthoredValue::Text(text)) = sources.get(&path) else {
-            continue;
-        };
-        let mode = if surface.predicate {
-            AuthoredMode::Expression(ParseMode::Condition)
-        } else {
-            AuthoredMode::InterpolatedValue
-        };
-        // A surface that does not parse is the parser's to report.
-        let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode) else {
-            continue;
-        };
-        let event = match registry.id_of(signal) {
-            Some(id) => declared.with_binding_view(registry.globals(id)),
-            None => declared,
-        };
-        let rejected = check_prepared_calls(&prepared, &TypeScope::unguarded(&event))
-            .into_iter()
-            .find(|found| found.check.is_rejected());
-        if let Some(found) = rejected {
-            return Err(LifecycleError::LifecycleCallRejected {
-                source_path: source_path.to_path_buf(),
-                property: path.to_string(),
-                expression: found.expression,
-                source: Box::new(ExpressionError::CallCheck(Box::new(found.check))),
-            });
-        }
+    let rejected = lifecycle_call_checks(frontmatter, lifecycle, registry, schema)
+        .into_iter()
+        .find_map(|surface| {
+            let property = surface.property;
+            surface.checks.into_iter().find(|found| found.check.is_rejected()).map(|found| (property, found))
+        });
+    match rejected {
+        Some((property, found)) => Err(LifecycleError::LifecycleCallRejected {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            expression: found.expression,
+            source: Box::new(ExpressionError::CallCheck(Box::new(found.check))),
+        }),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// One expression surface [`walk_stack`] reaches.
@@ -217,6 +267,42 @@ pub fn walk_stack<'a>(
             }
         }
     }
+}
+
+/// [`walk_stack`] with the type scope at each surface: a conditional's
+/// `when` under the scope that reaches it, its bodies under each side of
+/// that guard ([`branch_scopes`]), and every action's surfaces before its own
+/// writes end the facts they touch ([`scope_after_action`]). Returns the
+/// scope that continues after `nodes`.
+///
+/// The fact rules are [`walk_scoped`](super::actions::walk_scoped)'s; this
+/// walk reads the stack without changing it.
+pub fn walk_stack_scoped<'a, 'd>(
+    nodes: &'a [LifecycleNode],
+    scope: TypeScope<'d>,
+    visit: &mut impl FnMut(&LifecyclePath, Surface<'a>, &TypeScope<'d>),
+) -> TypeScope<'d> {
+    let mut scope = scope;
+    for node in nodes {
+        match node {
+            LifecycleNode::Action(action) => {
+                walk_action(&action.kind, &action.path, &mut |path, surface| visit(path, surface, &scope));
+                scope = scope_after_action(&scope, action);
+            }
+            LifecycleNode::Conditional(conditional) => {
+                let when = Surface {
+                    expr: &conditional.when,
+                    predicate: true,
+                };
+                visit(&conditional.path.field("when"), when, &scope);
+                let (then_scope, else_scope) = branch_scopes(&scope, conditional);
+                let then_end = walk_stack_scoped(&conditional.then, then_scope, visit);
+                let else_end = walk_stack_scoped(&conditional.otherwise, else_scope, visit);
+                scope = TypeScope::join(&then_end, &else_end);
+            }
+        }
+    }
+    scope
 }
 
 /// Visit every operand of one action body under its verb path `prefix`.
@@ -427,9 +513,9 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 }
 
 use super::*;
-use super::actions::{WithValue, for_each_action};
-use super::source_map::{AuthoredValue, LifecycleSourceMap};
+use super::actions::{WithValue, branch_scopes, for_each_action, scope_after_action};
+use super::source_map::{AuthoredSegment, AuthoredValue, LifecycleSourceMap};
 use crate::markdown::compose::expression::{
-    AuthoredMode, ExpressionError, ExpressionLintKind, ParseMode, TypeScope, check_prepared_calls,
+    AuthoredMode, ExpressionError, ExpressionLintKind, ParseMode, PreparedCallCheck, TypeScope, check_prepared_calls,
     is_whole_value_span, lint_expression, prepare_value,
 };

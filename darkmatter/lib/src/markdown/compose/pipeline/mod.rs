@@ -223,7 +223,7 @@ impl Markdown {
             // A call the design-time check proves wrong rejects the document
             // before any of its expressions (and so any sibling effect) runs.
             let effective = prepared_schemas.effective_for(self);
-            super::call_precheck::check_document(
+            let always_false = super::call_precheck::check_document(
                 self,
                 &provenance,
                 &options,
@@ -238,6 +238,7 @@ impl Markdown {
                 ),
                 super::call_precheck::PrecheckFailure::Body(error) => error,
             })?;
+            report.add_warnings(always_false);
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);

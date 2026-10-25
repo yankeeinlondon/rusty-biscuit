@@ -628,7 +628,7 @@ types:
             category(Filesystem);
             fallible;
             example(file_exists("fixture.md") => true);
-        ) -> Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false. An invalid reference, a missing context, a probe failure, or a failed remote fetch is an error.
+        ) -> Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`""`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error.
     file_index: |-
         function(
             parameters(file: file | null);
@@ -708,6 +708,16 @@ types:
             fallible;
             example(increment_file_index("review-1.md") => "review-2.md");
         ) -> Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through.
+    is_file_type: |-
+        function(
+            parameters(value: unknown | null);
+            returns(boolean);
+            category(Filesystem);
+            example(is_file_type("./docs/spec.md") => true);
+            example(is_file_type("hello world") => true);
+            example(is_file_type("https://") => false);
+            example(is_file_type(42) => false);
+        ) -> Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false.
     is_indexed_file: |-
         function(
             parameters(file: file | null);

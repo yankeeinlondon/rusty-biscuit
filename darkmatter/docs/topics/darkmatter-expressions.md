@@ -235,16 +235,28 @@ interchangeable (see [Equality and Inequality](#equality-and-inequality)).
 ## What a Guard Proves
 
 A condition that guards a region tells Darkmatter something about the values
-read inside that region. Shell pre-flight, transclusion-target warnings,
-absence warnings, and DMLS hover all use this, without running the condition.
-The guarded regions are:
+read inside that region. Function-argument checks, shell pre-flight,
+transclusion-target warnings, absence warnings, and DMLS diagnostics and hover
+all use this, without running the condition. Composition and DMLS compute it
+with the same library code, so they always agree. The guarded regions are:
 
 - the body of a `::block when="…"` (nested blocks combine);
 - the branches of a ternary `c ? a : b`, and the right operand of `&&`, `||`,
   `and(…)`, and `or(…)`;
-- a host's own guards, such as Claudine's lifecycle `when:` items and
-  sequence task `when:` (see Claudine's
+- the `then:` and `else:` bodies of a lifecycle `when:` item, in `md`'s
+  events and in a host's (Claudine's lifecycle stacks and sequence task
+  `when:`; see Claudine's
   [Pre-flight Checks](../../../claudine/docs/topics/pre-flight-checks.md)).
+
+A guard changes which function calls are proven safe. With `foo` declared
+`string | number` and `x` an optional `number`:
+
+```text
+min(foo, 5)                          foo may be text: a warning in strict DMLS
+is_number(foo) ? min(foo, 5) : 0     foo is a number here: no warning
+x && min(x, 5)                       x is present here: no warning
+is_number(flag) ? min(flag, 5) : 0   flag: boolean(required) can never be a number: still an error
+```
 
 ```md
 ---
@@ -282,10 +294,11 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `!g` | the false side of `g` | the true side of `g` |
 | `a && b`, `and(a, b)` | everything `a` and `b` prove | what every way of failing has in common |
 | `a \|\| b`, `or(a, b)` | what every way of holding has in common | the false sides of both |
-| `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type | `x` does not have that type |
+| `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type; a recursive named type (`node`) counts by the top level of its definition and keeps its name | `x` does not have that type |
 | `is_null(x)` | `x` is missing | `x` is present |
 | `is_empty(x)` | nothing | `x` is present |
 | `file_exists(x)` | `x` is a present string | nothing |
+| `is_file_type(x)` | `x` is suitable for a `file` parameter | nothing |
 | `x == null` | `x` is missing | `x` is present |
 | `x != null` | `x` is present | `x` is missing |
 | `x == 'debug'`, `x == 5`, `x == true` | `x` is present and equals that literal; an enum narrows to that member, and alternatives of another type are dropped | `x` is not that value (it may still be missing) |
@@ -295,7 +308,10 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `<`, `>`, `<=`, `>=`, `!=` against `[]` or `{}`, any other function | nothing | nothing |
 
 Predicate aliases (`isString`, `fileExists`) and case resolve to the same
-function and prove the same facts. Reversed operands (`'' != x`) prove the
+function and prove the same facts. A guard that can never hold
+(`is_number(flag)` with `flag: boolean(required)`) narrows nothing: the
+region is checked with the incoming type, so a call that is wrong there is
+still reported. Reversed operands (`'' != x`) prove the
 same facts as `x != ''`. Equality follows the evaluator exactly (see
 [Equality and Inequality](#equality-and-inequality)): a missing value is
 `null`, `null` equals only `null`, and a value of one type never equals a
@@ -311,13 +327,39 @@ about `x` or about a sibling `x.b`. A guard that contradicts itself
 (`mode == 'a' && mode == 'b'`) is not treated as dead code: every check still
 applies to the region.
 
+### Where a predicate's facts come from
+
+A predicate proves exactly the **narrowing fact** registered with the
+function, never a rule keyed by its name. Built-in predicates, a test
+function, and a host's function (such as a Claudine predicate) register
+facts the same way, and analysis reads them without calling the function.
+There are three kinds:
+
+| Kind | True side | False side | Example |
+| --- | --- | --- | --- |
+| true-iff a type | the argument has that type | that type is removed | `is_string(x)`, `is_null(x)` |
+| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)` (a string), `is_file_type(x)` (a `file`) |
+| false-implies a type | nothing | the argument is suitable for that type | `is_empty(x)` (present) |
+
+"Suitable for a type" keeps an alternative that already fits it, turns an
+alternative of the same kind of value into that type, and drops the rest.
+From `unknown` it is the type itself. So a host predicate registered as
+true-implies `file` lets `is_project_file(source) && frontmatter(source,
+'title')` pass `source` to a file parameter even when `source` is
+`unknown`. A true-iff fact names `null` or one bare kind of value (`string`,
+`number`, `boolean`, `object`, `unknown[]`), because only those have a
+false side Darkmatter can describe. Registration rejects a fact on a
+function that does not return `boolean`, on a parameter it does not
+declare, or of a type its kind cannot prove.
+
 ### How long a fact lasts
 
 - A fact ends where its region ends. After a conditional, only what every
   branch agrees on remains.
-- A write ends the facts about what it writes: a Claudine lifecycle `set` of
-  `x` ends what guards proved about `x`, `fm.x`, every path below `x`, and
-  every path above it, for the actions after it. A write whose destination is
+- A write ends the facts about what it writes: a lifecycle `set` of `x`
+  ends what guards proved about `x`, `fm.x`, every path below `x`, and every
+  path above it, for the actions after it. A write to a sibling (`x.b`)
+  leaves a fact about `x.a` alone. A write whose destination is
   not a constant path ends every fact about document properties. A write
   inside an inner branch still ends the fact after the outer branch joins.
 - Facts never carry across a lifecycle event, a loop pass, a retry, a resume,
@@ -343,10 +385,8 @@ the table above says:
 
 - **planned:** narrowing an object from a guard on one of its members
   (`x.kind == 'a'` narrowing `x`), and nested unions;
-- **planned:** typed host values for `seq`, `loop`, and `group`;
-- **planned:** function arguments checked against the scope;
 - **planned:** DMLS narrowing of Claudine lifecycle `then:`/`else:` actions and
-  sequence task bodies.
+  sequence task bodies (DMLS narrows `md`'s lifecycle stacks today).
 
 ## Literals and Grouping
 
@@ -817,7 +857,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing); empty when there is none. Null passes through. | `dir_leading("sub/note.md")` ⇒ `""` |
 | Filesystem | `dirname(file)` | Returns the directory portion of the display path; an absolute input returns its absolute parent directory. Null passes through. | `dirname("sub/note.md")` ⇒ `"sub"` |
 | Filesystem | `ext(file)` | Returns the final extension without its leading dot, or empty text when there is none; null passes through. | `ext("sub/note.md")` ⇒ `"md"` |
-| Filesystem | `file_exists(value)` | Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false. An invalid reference, a missing context, a probe failure, or a failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `file_exists(value)` | Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`""`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the numeric index suffix of the file's stem, or -1 when it has none; null passes through. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename, or the basename alone when there is no directory; null passes through. | `file_trailing("sub/note.md")` ⇒ `"sub/note.md"` |
 | Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`) as absolute paths, merged across every root of its prefix: the most local root first, then the shallowest, then by path component. A bare pattern searches the document's folder, then the repository root. A matched file symlink whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning, and a directory the search cannot read is an error. A null pattern lists nothing. | `length(find_files("**/note.md"))` ⇒ `2` |
@@ -828,6 +868,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Filesystem | `has_binary(name_or_path)` | Returns true when the command is found on PATH or is an existing executable absolute path; the same check as has_command. The command is never run. | `has_binary("sh")` ⇒ `true` (display only: result is host-dependent) |
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path; it is never run. Null, empty text, and a relative path with a directory part are false. | `has_command("sh")` ⇒ `true` (display only: result is host-dependent) |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through. | `increment_file_index("review-1.md")` ⇒ `"review-2.md"` |
+| Filesystem | `is_file_type(value)` | Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false. | `is_file_type("./docs/spec.md")` ⇒ `true`<br>`is_file_type("hello world")` ⇒ `true`<br>`is_file_type("https://")` ⇒ `false`<br>`is_file_type(42)` ⇒ `false` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the file's stem ends in a numeric index suffix (`base-NNN`); null is false. | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through. | `join("sub", "note.md")` ⇒ `"sub/note.md"` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through. | `link("fixture.md")` ⇒ `"[fixture.md](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
@@ -961,12 +1002,62 @@ that file exists yet, and `increment_file_index(review)` is
 `/r/claudine/features/x/review-2.md`. A relative input keeps the relative
 display form: `dirname("sub/x.md")` is `sub`.
 
-`file_exists(file)` is `false` only when the file is genuinely absent (a
-directory also reads `false`). It fails, rather than answering `false`, when
-it cannot tell: an invalid reference, a relative path that leaves the file
-tree, a `~`, `&`, `^`, or `vault:` reference whose home, repository, or vault
-is not available, a permission error while probing a candidate, or a remote
-URL whose fetch was denied or failed.
+`file_exists(file)` is `false` when the file is genuinely absent (a
+directory also reads `false`) and when the text is not a well-formed
+reference at all (`""`, `https://`, `vault:`), which it never looks up. It
+fails, rather than answering `false`, when it cannot tell: a relative path
+that leaves the file tree, a `~`, `&`, `^`, or `vault:` reference whose home,
+repository, or vault is not available, a permission error while probing a
+candidate, or a remote URL whose fetch was denied or failed (or that is read
+where no remote runtime exists).
+
+#### Checking a reference's syntax: `is_file_type`
+
+`is_file_type(value)` asks whether a value could name a file, without
+looking for it. It is `true` for text that is a well-formed reference of any
+supported kind, on every OS, and `false` for everything else:
+
+| Value | `is_file_type` |
+| --- | --- |
+| `"./docs/spec.md"`, `"/tmp/spec.md"`, `"\Users\ken\data.json"`, `"C:\x\y.md"` | `true` |
+| `"@docs/spec.md"`, `"%@spec.md"`, `"&docs/x.md"`, `"^docs/x.md"`, `"~/x.md"`, `"vault:notes/x.md"` | `true` |
+| `"https://example.com/x.md"`, `"{{HOME}}/x.md"` (never read), `"file://foo/bar"` | `true` |
+| `"42"`, `"hello world"` (plain file names) | `true` |
+| `""`, `"https://"`, `"https:///x"`, `"%https://example.com/x"`, `"vault:"`, `"vault:/etc/hosts"` | `false` |
+| `"ftp://x/y"`, `"~bob/x"`, `"@"`, text holding a NUL, `"{{home}}/x"` | `false` |
+| `42`, `null`, `true`, a list, an object | `false` |
+
+It reads no file, directory, environment variable, configuration, or
+network, so it works where no document context exists, and `true` does not
+mean the file exists or is readable. A `file://` prefix is stripped before
+the check, so `file://foo/bar` is the reference `foo/bar`; every other
+character, separators included, is checked as written.
+
+Its true side proves the argument is suitable for a `file` parameter. With
+`source: unknown`, the call check treats `frontmatter(source, 'title')` as
+category 4 (silent by default, a warning under `expressions.strict`) and
+
+```text
+is_file_type(source) && frontmatter(source, 'title')
+```
+
+as category 1 under both settings. The guard rewrites nothing: the read
+still resolves `source`, applies access policy, and can fail at runtime.
+
+#### Calls that are always false
+
+A `file_exists` (or `fileexists`) call whose argument is literal text that
+is not a well-formed reference can only return `false`:
+
+```text
+{{ file_exists("https://") }}   ← warning: always false
+{{ file_exists(path) }}         ← no warning, even with `path: string`
+```
+
+Composition reports a `dm.expression.always_false_call` warning for it, with
+the file and line, and still composes the document; DMLS shows the same
+warning at the literal. Only an authored literal is judged; a variable of
+type `string` never is. Finding it reads no file and runs no function.
 
 #### Filesystem Helpers
 

@@ -1,9 +1,14 @@
 use super::FunctionBinding;
+use crate::markdown::compose::expression::call_binding::FactKind::TrueImplies;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::context("absolute", &[], super::absolute_fn),
     FunctionBinding::context("relative", &[], super::relative_fn),
-    FunctionBinding::context("file_exists", &["fileexists"], super::file_exists_fn),
+    // The handler returns false for `null`, every non-text value, and
+    // malformed reference text, which it never looks up.
+    FunctionBinding::context("file_exists", &["fileexists"], super::file_exists_fn)
+        .narrowing("value", TrueImplies, Some("string"))
+        .false_for_malformed_reference("value"),
     FunctionBinding::context("find_files", &["findfiles"], super::find_files_fn),
     FunctionBinding::context("has_command", &["hascommand"], super::has_command_fn),
     // `has_binary` is a second documented name for the same probe (R16), not an

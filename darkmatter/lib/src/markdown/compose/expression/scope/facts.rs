@@ -3,43 +3,21 @@
 //!
 //! Every rule reads the AST only. No guard, predicate, or operand is
 //! evaluated, and no function handler runs, so `file_exists(x)` touches no
-//! filesystem or network.
+//! filesystem or network. What a predicate proves is the [`NarrowingFact`]
+//! its registration declares, read through the registry the way dispatch
+//! resolves the name, so a built-in, a test function, and a host function
+//! narrow alike.
 
 use serde_json::Value;
 
-use super::shape::{Family, Shape};
+use super::shape::{Family, Shape, exact_family};
 use super::{GuardOrigin, Polarity, TypeScope};
 use crate::markdown::compose::expression::binding::NULL_ROOT;
-use crate::markdown::compose::expression::functions::{accepts_call_arity, canonical_function_name};
+use crate::markdown::compose::expression::call_binding::{FactKind, NarrowingFact};
+use crate::markdown::compose::expression::functions::{
+    ShortCircuit, accepts_call_arity, canonical_function_name, inspect_registration, lazy_function,
+};
 use crate::markdown::compose::expression::{ComparisonOp, Expr, json_number, number_literal};
-
-/// What a registered one-argument predicate proves about its original
-/// argument. Keyed by canonical registry name; aliases and case resolve
-/// through the registry, never here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PredicateFact {
-    /// True-iff a runtime family: `is_string`, `is_number`, ….
-    Family(Family),
-    /// True-iff `null`.
-    Null,
-    /// True for `null` and empty values, so only the false side learns
-    /// presence.
-    Empty,
-    /// True implies a present string: today's handler rejects every other
-    /// original type, and returns false for `null`.
-    FileExists,
-}
-
-/// The predicates whose handlers justify a fact.
-pub(super) const PREDICATE_FACTS: &[(&str, PredicateFact)] = &[
-    ("is_string", PredicateFact::Family(Family::String)),
-    ("is_number", PredicateFact::Family(Family::Number)),
-    ("is_array", PredicateFact::Family(Family::Array)),
-    ("is_object", PredicateFact::Family(Family::Object)),
-    ("is_null", PredicateFact::Null),
-    ("is_empty", PredicateFact::Empty),
-    ("file_exists", PredicateFact::FileExists),
-];
 
 pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity, origin: &GuardOrigin) -> TypeScope<'d> {
     match guard {
@@ -60,15 +38,18 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
         }
         Expr::Comparison { left, op, right } => comparison(scope, left, *op, right, polarity, origin),
         Expr::FunctionCall { name, args } => {
-            let Some(canonical) = canonical_function_name(name).filter(|canonical| accepts_call_arity(canonical, args.len()))
-            else {
-                return scope.clone();
-            };
             let args: Vec<&Expr> = args.iter().collect();
-            match canonical {
-                "and" => conjunction(scope, &args, polarity, origin),
-                "or" => disjunction(scope, &args, polarity, origin),
-                predicate => predicate_fact(scope, predicate, &args, polarity, origin),
+            if let Some((_, side)) = lazy_function(name)
+                && canonical_function_name(name).is_some_and(|canonical| accepts_call_arity(canonical, args.len()))
+            {
+                return match side {
+                    ShortCircuit::OnFalsy => conjunction(scope, &args, polarity, origin),
+                    ShortCircuit::OnTruthy => disjunction(scope, &args, polarity, origin),
+                };
+            }
+            match inspect_registration(name, |registration| registration.narrowing_fact_for(args.len()).cloned()) {
+                Some(Some(fact)) => predicate_fact(scope, &fact, &args, polarity, origin),
+                _ => scope.clone(),
             }
         }
         subject => match (scope.declared().subject(subject), polarity) {
@@ -119,35 +100,44 @@ fn short_circuit<'d>(
     routes.unwrap_or_else(|| scope.clone())
 }
 
+/// The facts a call to a predicate registering `fact` gives its argument,
+/// when that argument is a stable subject. A call whose argument is itself a
+/// call refines nothing.
 fn predicate_fact<'d>(
     scope: &TypeScope<'d>,
-    canonical: &str,
+    fact: &NarrowingFact,
     args: &[&Expr],
     polarity: Polarity,
     origin: &GuardOrigin,
 ) -> TypeScope<'d> {
-    let Some((_, fact)) = PREDICATE_FACTS.iter().find(|(name, _)| *name == canonical) else {
-        return scope.clone();
-    };
-    let [argument] = args else {
+    let Some(argument) = args.get(fact.index()) else {
         return scope.clone();
     };
     let Some(subject) = scope.declared().subject(argument) else {
         return scope.clone();
     };
-    match (fact, polarity) {
-        (PredicateFact::Family(family), Polarity::True) => scope.refine(&subject, origin, |shape| shape.of_family(*family)),
-        (PredicateFact::Family(family), Polarity::False) => {
-            scope.refine(&subject, origin, |shape| shape.without_family(*family))
-        }
-        (PredicateFact::Null, Polarity::True) => scope.refine(&subject, origin, Shape::only_null),
-        (PredicateFact::Null | PredicateFact::Empty, Polarity::False) => {
-            scope.refine(&subject, origin, Shape::without_null)
-        }
-        (PredicateFact::FileExists, Polarity::True) => {
-            scope.refine(&subject, origin, |shape| shape.of_family(Family::String))
-        }
-        (PredicateFact::Empty, Polarity::True) | (PredicateFact::FileExists, Polarity::False) => scope.clone(),
+    let definitions = scope.declared().definitions();
+    let target = fact.target();
+    match (fact.kind(), polarity) {
+        (FactKind::TrueIff, Polarity::True) => match target {
+            None => scope.refine(&subject, origin, Shape::without_null),
+            Some(target) => match exact_family(target) {
+                Some(family) => scope.refine(&subject, origin, |shape| shape.of_family(family, definitions)),
+                None => scope.refine(&subject, origin, Shape::only_null),
+            },
+        },
+        (FactKind::TrueIff, Polarity::False) => match target {
+            None => scope.refine(&subject, origin, Shape::only_null),
+            Some(target) => match exact_family(target) {
+                Some(family) => scope.refine(&subject, origin, |shape| shape.without_family(family, definitions)),
+                None => scope.refine(&subject, origin, Shape::without_null),
+            },
+        },
+        (FactKind::TrueImplies, Polarity::True) | (FactKind::FalseImplies, Polarity::False) => match target {
+            None => scope.refine(&subject, origin, Shape::without_null),
+            Some(target) => scope.refine(&subject, origin, |shape| shape.suitable_for(target, definitions)),
+        },
+        (FactKind::TrueImplies, Polarity::False) | (FactKind::FalseImplies, Polarity::True) => scope.clone(),
     }
 }
 
@@ -224,7 +214,10 @@ fn against_operand<'d>(
         (Some(Operand::Literal(value)), false) => scope.refine(subject, origin, |shape| shape.differs_from(&value)),
         // Equal to a container is present and of its family; its elements
         // may be computed, so the value itself is not pinned.
-        (Some(Operand::Container(family)), true) => scope.refine(subject, origin, |shape| shape.of_family(family)),
+        (Some(Operand::Container(family)), true) => {
+            let definitions = scope.declared().definitions();
+            scope.refine(subject, origin, |shape| shape.of_family(family, definitions))
+        }
         (Some(Operand::Container(_)), false) | (None, _) => scope.clone(),
     }
 }

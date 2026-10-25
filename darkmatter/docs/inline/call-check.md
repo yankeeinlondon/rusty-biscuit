@@ -220,8 +220,22 @@ Only syntax the composition would evaluate:
 
 A lifecycle stack is checked before its first event runs, each expression
 typed with the globals its event declares (`err` only where a failure is
-handled). The rejection names the lifecycle path and gives the same verdict
-the call would get in the body:
+handled) and narrowed by the `when:` items around it, exactly as a body
+expression is narrowed by its `::block` guards. A `set` ends what a guard
+proved about the property it writes, and no guard reaches another event (see
+[What a Guard Proves](../topics/darkmatter-expressions.md#how-long-a-fact-lasts)):
+
+```yaml
+composed:
+  - when: is_number(foo)          # foo: string | number
+    then:
+      - stdout: "{{ min(foo, 5) }}"   # foo is a number here
+      - set: { foo: pear }
+      - stdout: "{{ min(foo, 6) }}"   # the fact ended at the set
+```
+
+The rejection names the lifecycle path and gives the same verdict the call
+would get in the body:
 
 ```text
 lifecycle `composed[0].when` calls a function with an argument that can never

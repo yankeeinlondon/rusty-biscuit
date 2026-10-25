@@ -22,6 +22,7 @@
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
 //! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
 //! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
+//! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -165,6 +166,10 @@ pub mod code {
     /// A call argument that might not bind: category 3, and with
     /// `expressions.strict` also categories 2 and 4.
     pub const EXPRESSION_UNCERTAIN_CALL: &str = "dm.expression.uncertain_call";
+    /// A call that is always `false`: an authored literal argument is not a
+    /// well-formed file reference. The code is Darkmatter's, which
+    /// composition reports under too.
+    pub const EXPRESSION_ALWAYS_FALSE_CALL: &str = darkmatter::markdown::compose::expression::ALWAYS_FALSE_CALL_CODE;
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

@@ -129,14 +129,10 @@ pub fn walk_scoped<'d, E>(
         match node {
             LifecycleNode::Action(action) => {
                 visit(action, &scope)?;
-                for writes in action_writes(action) {
-                    scope = scope.invalidate(&writes);
-                }
+                scope = scope_after_action(&scope, action);
             }
             LifecycleNode::Conditional(conditional) => {
-                let origin = GuardOrigin::new(conditional.path.field("when").to_string());
-                let then_scope = scope.assume_at(&conditional.when, Polarity::True, origin.clone());
-                let else_scope = scope.assume_at(&conditional.when, Polarity::False, origin);
+                let (then_scope, else_scope) = branch_scopes(&scope, conditional);
                 let then_end = walk_scoped(&mut conditional.then, then_scope, visit)?;
                 let else_end = walk_scoped(&mut conditional.otherwise, else_scope, visit)?;
                 scope = TypeScope::join(&then_end, &else_end);
@@ -144,6 +140,24 @@ pub fn walk_scoped<'d, E>(
         }
     }
     Ok(scope)
+}
+
+/// The scopes of a conditional's `then` and `else` bodies: `scope` assumed on
+/// each side of its `when`, labelled with the guard's authored path. The
+/// one fact-entry rule of every scoped lifecycle walk.
+pub fn branch_scopes<'d>(scope: &TypeScope<'d>, conditional: &LifecycleConditional) -> (TypeScope<'d>, TypeScope<'d>) {
+    let origin = GuardOrigin::new(conditional.path.field("when").to_string());
+    (
+        scope.assume_at(&conditional.when, Polarity::True, origin.clone()),
+        scope.assume_at(&conditional.when, Polarity::False, origin),
+    )
+}
+
+/// The scope that continues after `action`: every fact its writes
+/// ([`action_writes`]) may touch is gone. The one fact-exit rule of every
+/// scoped lifecycle walk.
+pub fn scope_after_action<'d>(scope: &TypeScope<'d>, action: &LifecycleAction) -> TypeScope<'d> {
+    action_writes(action).iter().fold(scope.clone(), |scope, writes| scope.invalidate(writes))
 }
 
 /// The document properties an action may write.

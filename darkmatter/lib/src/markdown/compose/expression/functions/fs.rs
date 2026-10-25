@@ -152,13 +152,17 @@ pub fn absolute_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Valu
 /// name a file called `42`. Only text can be `true`, which is what lets a
 /// `file_exists(x)` guard prove `x` a present string.
 ///
+/// Text that is not a well-formed reference ([`is_well_formed_reference`]:
+/// `""`, `https://`) is `false` before any filesystem or network access; it
+/// can never name a file, so it is never tried as a local path.
+///
 /// ## Errors
 ///
-/// A failure to answer is never reported as absence. An invalid reference, a
-/// tree escape, a missing home/vault/repository anchor, and a candidate probe
-/// I/O failure (a permission error, for example) are typed file-reference
-/// errors. An HTTP(S) URL is `true` once fetched; a denied or failed fetch is
-/// an error, and so is any URL in a local-only context (no remote runtime).
+/// A failure to answer is never reported as absence. A tree escape, a missing
+/// home/vault/repository anchor, and a candidate probe I/O failure (a
+/// permission error, for example) are typed file-reference errors. An HTTP(S)
+/// URL is `true` once fetched; a denied or failed fetch is an error, and so is
+/// any URL in a local-only context (no remote runtime).
 pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     // The parameter is preservation-only (`unknown | null`), so this is the
     // caller's original value: only text names a file (spec decision 82).
@@ -166,8 +170,12 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
         return Ok(Value::Bool(false));
     };
     let raw = raw.as_str();
-    if is_remote_url(raw) {
-        return match ctx.fetch_remote_text(raw) {
+    let normalized = normalize_path_arg(raw);
+    let Ok(file_ref) = biscuit_file::FileReference::new(&normalized) else {
+        return Ok(Value::Bool(false));
+    };
+    if file_ref.class().kind == biscuit_file::FileReferenceKind::Url {
+        return match ctx.fetch_remote_text(&normalized) {
             Ok(Some(_)) => Ok(Value::Bool(true)),
             Ok(None) => Err(expression_other("file_exists", format!(
                 "file_exists() cannot read remote URL {raw:?}: this resolution \
@@ -176,7 +184,9 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
             Err(message) => Err(expression_other("file_exists", message)),
         };
     }
-    Ok(Value::Bool(resolve_arg("file_exists", raw, ctx)?.is_some()))
+    resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+        .map(|found| Value::Bool(found.is_some()))
+        .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))
 }
 
 /// `has_command(cmd: string | null) -> bool` — pure existence/executability

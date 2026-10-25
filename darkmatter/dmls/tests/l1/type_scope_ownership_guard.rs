@@ -73,14 +73,21 @@ const OWNED: &[Owned] = &[
     Owned { name: "Polarity", owners: &[], why: LIBRARY },
     Owned { name: "BodyGuards", owners: &[], why: LIBRARY },
     Owned { name: "DeclaredTypes", owners: &[], why: LIBRARY },
-    Owned { name: "PREDICATE_FACTS", owners: &[], why: LIBRARY },
-    Owned { name: "PredicateFact", owners: &[], why: LIBRARY },
+    Owned { name: "NarrowingFact", owners: &[], why: LIBRARY },
+    Owned { name: "FactKind", owners: &[], why: LIBRARY },
 ];
 
 fn policy() -> Policy<'static> {
     Policy {
         unguarded: UNGUARDED,
-        retired: &["narrowed_expression_paths", "collect_narrowed_paths", "RootGuard", "condition_guard"],
+        retired: &[
+            "narrowed_expression_paths",
+            "collect_narrowed_paths",
+            "RootGuard",
+            "condition_guard",
+            "PREDICATE_FACTS",
+            "PredicateFact",
+        ],
         owned: OWNED,
         predicate_literal_owners: &[],
         decision_sites: DECISION_SITES,

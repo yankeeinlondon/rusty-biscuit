@@ -122,11 +122,13 @@ pub use parse::{
 pub use parse::{action_type, runs_a_shell, with_mapping_shape};
 #[doc(hidden)]
 pub use source_map::{AuthoredValue, LifecycleSourceMap};
+pub use source_map::AuthoredSegment;
 #[doc(hidden)]
-pub use validate::{Surface, event_surfaces, walk_stack};
+pub use validate::{Surface, event_surfaces, walk_stack, walk_stack_scoped};
 pub use validate::{
-    collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
-    reject_incompatible_calls, validate_no_nested_spans_in_literals, validate_no_nested_spans_in_literals_in,
+    LifecycleSurfaceCalls, collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
+    lifecycle_call_checks, reject_incompatible_calls, validate_no_nested_spans_in_literals,
+    validate_no_nested_spans_in_literals_in,
 };
 
 /// Complete lifecycle configuration for a document.

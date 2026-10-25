@@ -146,6 +146,12 @@ impl StackExpression<'_> {
         self.project(range).unwrap_or_else(|| self.projection.scalar_span())
     }
 
+    /// The exact authored range of a range of the whole scalar's analyzed
+    /// text (not of [`text`](Self::text)), else the whole scalar.
+    pub fn scalar_range(&self, range: std::ops::Range<usize>) -> SourceSpan {
+        self.projection.project(range).unwrap_or_else(|| self.projection.scalar_span())
+    }
+
     /// Whether the projection is exact.
     pub fn is_exact(&self) -> bool {
         self.projection.is_exact()

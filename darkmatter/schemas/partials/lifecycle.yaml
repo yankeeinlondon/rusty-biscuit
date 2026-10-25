@@ -500,6 +500,14 @@ types:
     is_empty-long:
         - "{x: unknown | null}(min-keys(1);operands(is_empty-long))"
         - "{x: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_empty-long))"
+    is_file_type-short:
+        - "string(deferred;operands(is_file_type-short))"
+        - "number(deferred;operands(is_file_type-short))"
+        - "boolean(deferred;operands(is_file_type-short))"
+        - "tuple([unknown | null]; operands(is_file_type-short))"
+    is_file_type-long:
+        - "{value: unknown | null}(min-keys(1);operands(is_file_type-long))"
+        - "{value: unknown | null,no_error: boolean(required)}(min-keys(2);operands(is_file_type-long))"
     is_indexed_file-short:
         - "file(deferred;operands(is_indexed_file-short))"
         - "tuple([file(deferred) | null]; operands(is_indexed_file-short))"
@@ -1149,6 +1157,9 @@ types:
         is_empty:
             - is_empty-short
             - is_empty-long
+        is_file_type:
+            - is_file_type-short
+            - is_file_type-long
         is_indexed_file:
             - is_indexed_file-short
             - is_indexed_file-long
@@ -1423,6 +1434,7 @@ types:
         is_date_time_utc: is_date_time_utc-short
         is_date_utc: is_date_utc-short
         is_empty: is_empty-short
+        is_file_type: is_file_type-short
         is_indexed_file: is_indexed_file-short
         is_integer: is_integer-short
         is_negative: is_negative-short
@@ -1576,6 +1588,7 @@ types:
         is_date_time_utc: is_date_time_utc-short
         is_date_utc: is_date_utc-short
         is_empty: is_empty-short
+        is_file_type: is_file_type-short
         is_indexed_file: is_indexed_file-short
         is_integer: is_integer-short
         is_negative: is_negative-short

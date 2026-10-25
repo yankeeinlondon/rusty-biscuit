@@ -130,11 +130,8 @@ mod fn_filesystem {
             file_exists_fn(&[json!("missing.md")], &ctx).unwrap(),
             json!(false)
         );
-        // An invalid reference is an error, never a missing file.
-        assert!(matches!(
-            file_exists_fn(&[json!("\0bad")], &ctx),
-            Err(ExpressionError::FileReference(_))
-        ));
+        // Malformed text names no file, so it is false without a lookup.
+        assert_eq!(file_exists_fn(&[json!("\0bad")], &ctx).unwrap(), json!(false));
     }
 
     #[test]
@@ -1162,12 +1159,8 @@ mod fn_phase5 {
     #[test]
     fn code_link_errors_name_code_link_with_the_link_cause() {
         let ctx = ResolutionContext::at(std::env::temp_dir());
-        let cases: [(Vec<Value>, &str); 3] = [
-            (vec![json!("https://example.com/doc.md")], "one-argument form does not accept HTTP(S) URLs"),
-            // Neither parses as a URL, so both fail as file paths.
-            (vec![json!("http://[::1"), json!("x")], "invalid file path"),
-            (vec![json!("https://exa mple.com"), json!("x")], ""),
-        ];
+        let cases: [(Vec<Value>, &str); 1] =
+            [(vec![json!("https://example.com/doc.md")], "one-argument form does not accept HTTP(S) URLs")];
         for (args, cause) in cases {
             let link_err = link_fn(&args, &ctx).unwrap_err();
             let code_err = code_link_fn(&args, &ctx).unwrap_err();
@@ -1189,6 +1182,18 @@ mod fn_phase5 {
             link_fn(&[json!("https://example.com/doc.md")], &ctx).unwrap_err().to_string(),
             "link(): link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
         );
+        // A malformed URL is not a well-formed reference, so it fails the
+        // `file` parameter at binding, under the called name.
+        for target in ["http://[::1", "https://exa mple.com"] {
+            for (name, error) in [
+                ("code_link:", code_link_fn(&[json!(target), json!("x")], &ctx).unwrap_err()),
+                ("link:", link_fn(&[json!(target), json!("x")], &ctx).unwrap_err()),
+            ] {
+                assert!(matches!(error, ExpressionError::Call(_)), "{error:?}");
+                assert!(error.to_string().starts_with(name), "{error}");
+                assert!(error.to_string().contains("fails file"), "{error}");
+            }
+        }
         // A wrong argument count fails at binding, under the called name.
         for args in [vec![], vec![json!("a"), json!("b"), json!("c")]] {
             let error = code_link_fn(&args, &ctx).unwrap_err();
@@ -1478,6 +1483,40 @@ mod fn_remote_tests {
         let err = file_exists_fn(&[json!(url)], &ctx)
             .expect_err("a denied remote read must not read as a missing file");
         assert!(err.contains("denied"), "unexpected message: {err}");
+    }
+
+    /// Criterion 14: malformed text is `false` before any access. The
+    /// remote runtime denies every host, so a fetch attempt would be an
+    /// error, and the working directory is a regular file, so a local probe
+    /// would fail (armed below on Unix, where probing under a file is an I/O
+    /// error rather than absence). Neither tripwire fires.
+    #[tokio::test]
+    async fn malformed_references_are_false_before_any_access() {
+        let server = MockServer::start().await;
+        let tripwire = tempfile::tempdir().unwrap();
+        let cwd = tripwire.path().join("not-a-directory");
+        std::fs::write(&cwd, "").unwrap();
+        let ctx = ResolutionContext {
+            cwd: cwd.clone(),
+            ..ready_ctx(&format!("{}/never.md", server.uri()), false).await
+        };
+        let ctx = ResolutionContext {
+            file_resolution_context: biscuit_file::FileResolutionContext::new(&cwd),
+            ..ctx
+        };
+        #[cfg(unix)]
+        assert!(file_exists_fn(&[json!("./page.md")], &ctx).is_err(), "the filesystem tripwire is armed");
+        assert!(
+            file_exists_fn(&[json!(format!("{}/never.md", server.uri()))], &ctx).is_err(),
+            "the network tripwire is armed"
+        );
+        let requests = server.received_requests().await.unwrap_or_default().len();
+        for raw in ["", "https://", "http://", "https:///x", "%https://example.com/x", "vault:", "a\0b", "file://"] {
+            for function in ["file_exists", "fileexists"] {
+                assert_eq!(dispatch(function, &[json!(raw)], &ctx).unwrap(), json!(false), "{function}({raw:?})");
+            }
+        }
+        assert_eq!(server.received_requests().await.unwrap_or_default().len(), requests, "no request was made");
     }
 
     #[test]

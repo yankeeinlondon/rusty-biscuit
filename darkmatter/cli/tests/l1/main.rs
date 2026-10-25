@@ -56,6 +56,7 @@ mod compose_shell_template;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;
+mod compose_file_predicates;
 mod compose_unknown_identifiers;
 mod compose_value_provenance;
 mod context_construction_guard;

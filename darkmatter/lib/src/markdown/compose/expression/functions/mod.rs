@@ -21,7 +21,7 @@ use super::{
     scalar_string,
 };
 use super::resolve_ctx::{
-    ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
+    ResolutionContext, is_remote_url, is_well_formed_reference, normalize_path_arg, resolve_document_file_ref,
     resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;
@@ -84,6 +84,12 @@ struct FunctionBinding {
     rejects: &'static [(&'static str, &'static [ValueKind])],
     /// Registered numeric recovery: `(subject, fallback)` parameter names.
     recovery: Option<(&'static str, &'static str)>,
+    /// Registered narrowing fact: parameter name, kind, and type text
+    /// (`None` for the internal non-null fact).
+    fact: Option<(&'static str, call_binding::FactKind, Option<&'static str>)>,
+    /// Registered malformed-reference rule: the parameter whose malformed
+    /// reference text makes the call `false`.
+    malformed_reference: Option<&'static str>,
 }
 
 impl FunctionBinding {
@@ -100,6 +106,8 @@ impl FunctionBinding {
             handler,
             rejects: &[],
             recovery: None,
+            fact: None,
+            malformed_reference: None,
         }
     }
 
@@ -122,6 +130,25 @@ impl FunctionBinding {
     const fn recovering(self, subject: &'static str, fallback: &'static str) -> Self {
         Self {
             recovery: Some((subject, fallback)),
+            ..self
+        }
+    }
+
+    const fn false_for_malformed_reference(self, parameter: &'static str) -> Self {
+        Self {
+            malformed_reference: Some(parameter),
+            ..self
+        }
+    }
+
+    const fn narrowing(
+        self,
+        parameter: &'static str,
+        kind: call_binding::FactKind,
+        ty: Option<&'static str>,
+    ) -> Self {
+        Self {
+            fact: Some((parameter, kind, ty)),
             ..self
         }
     }
@@ -276,6 +303,15 @@ fn compile_binding(
     }
     if let Some((subject, fallback)) = binding.recovery {
         builder = builder.numeric_recovery(subject, fallback);
+    }
+    if let Some((parameter, kind, ty)) = binding.fact {
+        let ty = ty.map_or(call_binding::FactType::NonNull, |text| {
+            call_binding::FactType::Type(std::borrow::Cow::Borrowed(text))
+        });
+        builder = builder.narrows(parameter, kind, ty);
+    }
+    if let Some(parameter) = binding.malformed_reference {
+        builder = builder.false_for_malformed_reference(parameter);
     }
     builder.build_with(resolver).map_err(RegistryError::Registration)
 }

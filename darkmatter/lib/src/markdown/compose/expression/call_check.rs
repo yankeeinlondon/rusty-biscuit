@@ -647,7 +647,18 @@ pub struct CallCheck {
     /// The runtime binder's own error when every argument is a literal and
     /// the call does not bind: the type error composition would report.
     pub binding_error: Option<CallBindingError>,
+    /// The argument whose authored literal text is not a well-formed file
+    /// reference, bound to the parameter its function registers as
+    /// [`false_for_malformed_reference`](super::call_binding::RegistrationBuilder::false_for_malformed_reference):
+    /// the call is always `false`. Never set on a rejected call.
+    pub always_false: Option<usize>,
 }
+
+/// The diagnostic code of a call that is always `false` because an authored
+/// literal argument is not a well-formed file reference
+/// (`file_exists("https://")`). Composition reports it as a warning, and the
+/// editor shows it under the same code.
+pub const ALWAYS_FALSE_CALL_CODE: &str = "dm.expression.always_false_call";
 
 impl CallCheck {
     /// The call's category: 5 for a call problem, otherwise the most
@@ -679,6 +690,21 @@ impl CallCheck {
             .into_iter()
             .find(|finding| finding.category == ArgumentCategory::Incompatible)
             .map_or_else(|| format!("{}: the call cannot bind", self.function), |finding| finding.message)
+    }
+
+    /// The always-false advisory ([`Self::always_false`]), ranged at the
+    /// malformed argument; `None` for any other call.
+    pub fn always_false_finding(&self) -> Option<AlwaysFalseFinding> {
+        let index = self.always_false?;
+        Some(AlwaysFalseFinding {
+            span: self.argument_spans.get(index).cloned().unwrap_or_else(|| self.span.clone()),
+            argument: index,
+            message: format!(
+                "{}: argument {} is not a well-formed file reference, so this call is always false",
+                self.function,
+                index + 1
+            ),
+        })
     }
 
     /// The findings to show: the call problem ranged at the call, else each
@@ -742,6 +768,17 @@ impl CallCheck {
     }
 }
 
+/// A call that can only return `false` ([`CallCheck::always_false_finding`]);
+/// a warning under [`ALWAYS_FALSE_CALL_CODE`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlwaysFalseFinding {
+    /// The malformed argument's span.
+    pub span: SourceSpan,
+    pub argument: usize,
+    /// Names the function and the argument.
+    pub message: String,
+}
+
 /// One finding of a [`CallCheck`], ready to be shown with a severity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallFinding {
@@ -787,8 +824,15 @@ pub fn check_call_with_definitions(
             argument_spans,
             problem: None,
             binding_error: None,
+            always_false: None,
         };
         classify_call(registration, arguments, definitions, &mut check);
+        if !check.is_rejected() {
+            check.always_false = registration.malformed_reference_parameter().filter(|index| {
+                matches!(arguments.get(*index), Some(ArgumentType::Literal(Value::String(text)))
+                    if !super::resolve_ctx::is_well_formed_reference(text))
+            });
+        }
         check
     })
 }
@@ -1029,13 +1073,13 @@ pub struct PreparedCallCheck {
 }
 
 /// [`check_expression_calls`] for every expression of `prepared`, with spans
-/// mapped onto their string leaves. Only checks whose category is not 1 are
-/// returned.
+/// mapped onto their string leaves. Only checks whose category is not 1, or
+/// that are always false, are returned.
 pub fn check_prepared_calls(prepared: &PreparedValue, site: &TypeScope<'_>) -> Vec<PreparedCallCheck> {
     let mut found = Vec::new();
     for expression in prepared.expressions() {
         for mut check in check_expression_calls(expression.expr(), site) {
-            if check.category() == ArgumentCategory::Compatible {
+            if check.category() == ArgumentCategory::Compatible && check.always_false.is_none() {
                 continue;
             }
             check.span = expression.leaf_span(&check.span);

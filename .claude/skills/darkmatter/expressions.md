@@ -36,6 +36,19 @@ and DMLS both read it.
   `MarkdownError::rejected_call()`.
 - DMLS maps categories to `dm.expression.incompatible_call` (5) and
   `dm.expression.uncertain_call` (3; also 2 and 4 under `[expressions] strict`).
+- `CallCheck::always_false` marks a call whose authored literal argument
+  is not a well-formed file reference, at a parameter registered with
+  `RegistrationBuilder::false_for_malformed_reference` (`file_exists` only;
+  `FunctionBinding::false_for_malformed_reference`). Composition's precheck
+  turns each into a `dm.expression.always_false_call` warning
+  (`ALWAYS_FALSE_CALL_CODE`, the one definition DMLS also uses); never key it
+  on a function name.
+- File-reference syntax is `biscuit_file::FileReference::new` alone (the
+  passive validator); Darkmatter's `is_well_formed_reference` only adds the
+  `file://` adapter (`normalize_path_arg`, which strips the prefix and never
+  collapses separators). `is_file_type` (pure, true-implies `file`) and
+  `file_exists` (malformed text is `false` before any lookup) both use it;
+  never add a second reference grammar.
 - Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
   layer: document, triggers, the merged JSON's `RawDeclarations`, layered
   definitions) without static frontmatter: a set value is runtime data.
@@ -49,9 +62,12 @@ and DMLS both read it.
   branches; other operators are unknown. All joins go through
   `Shape::union` (unknown absorbs, canonical order: messages print
   `number | string`, never authored order).
-- Lifecycle surfaces are call-checked by
-  `darkmatter::lifecycle::reject_incompatible_calls` (md: CLI before the run;
-  Claudine: `prepare.rs` after the launch schema), error
+- Lifecycle surfaces are call-checked at their guarded sites by
+  `darkmatter::lifecycle::lifecycle_call_checks` (every surface, with its
+  authored `location`; DMLS ranges md stacks from it) over
+  `walk_stack_scoped`, which shares `branch_scopes`/`scope_after_action` with
+  `walk_scoped`. `reject_incompatible_calls` is its first category 5 (md: CLI
+  before the run; Claudine: `prepare.rs` after the launch schema), error
   `LifecycleError::LifecycleCallRejected` (`rejected_call()`), Claudine twin
   `CompositionError::LifecycleCallRejected`.
 - An all-literal call is classified by the real `bind_call`, which runs no
@@ -147,9 +163,14 @@ from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
 only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
 `FunctionCall`/`Fallback`, matched through the registry), ternaries,
 `==`/`!=` by strict typed equality (`Shape::equal_to`/`differs_from`, and
-`finite_values` for subject-to-subject), and the predicate
-facts in `scope/facts.rs::PREDICATE_FACTS`, which a unit test keeps
-registry-backed. `invalidate(&WriteSet)` (`WriteSet::destination` for a
+`finite_values` for subject-to-subject), and each predicate's
+`NarrowingFact` (`call_binding/registration.rs`: `FactKind::{TrueIff,
+TrueImplies, FalseImplies}` × `FactType::{NonNull, Type(text)}`), read
+through `functions::inspect_registration`, so a built-in (`FunctionBinding::narrowing`),
+a test function, and a host function narrow alike; never key a fact on a
+name. A `Ref` arm is classified by its definition body's top level through
+`DeclaredTypes::definitions()` (one level, never expanded); an impossible
+guard returns the incoming type. `invalidate(&WriteSet)` (`WriteSet::destination` for a
 `set` path) and `TypeScope::join` keep facts from leaking past writes or
 regions. There is no `Default`; an unguarded site calls
 `TypeScope::unguarded`. Only `ScopedType::guard_presence` (not a

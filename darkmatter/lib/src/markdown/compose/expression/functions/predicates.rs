@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use super::{FunctionBinding, bound, json_number, numberlike_value};
 use crate::markdown::compose::expression::call_binding::BoundCall;
+use crate::markdown::compose::expression::call_binding::FactKind::{FalseImplies, TrueIff, TrueImplies};
 
 /// The absence predicates: a direct bare-variable argument to one of these
 /// states that the author expects the value may be missing, so it is not an
@@ -14,15 +15,19 @@ use crate::markdown::compose::expression::call_binding::BoundCall;
 /// Interim (spec Resolved Decision 9): the expression type-system successor
 /// replaces this with "any parameter whose type admits null".
 pub(super) const ABSENCE_PREDICATES: &[FunctionBinding] = &[
-    FunctionBinding::pure("is_null", &["isnull"], is_null),
-    FunctionBinding::pure("is_empty", &["isempty"], is_empty),
+    FunctionBinding::pure("is_null", &["isnull"], is_null).narrowing("x", TrueIff, Some("null")),
+    // True for `null` and empty values, so only the false side learns presence.
+    FunctionBinding::pure("is_empty", &["isempty"], is_empty).narrowing("x", FalseImplies, None),
 ];
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::pure("is_string", &["isstring"], is_string),
-    FunctionBinding::pure("is_number", &["isnumber"], is_number),
-    FunctionBinding::pure("is_array", &["isarray"], is_array),
-    FunctionBinding::pure("is_object", &["isobject"], is_object),
+    FunctionBinding::pure("is_string", &["isstring"], is_string).narrowing("x", TrueIff, Some("string")),
+    FunctionBinding::pure("is_number", &["isnumber"], is_number).narrowing("x", TrueIff, Some("number")),
+    FunctionBinding::pure("is_array", &["isarray"], is_array).narrowing("x", TrueIff, Some("unknown[]")),
+    FunctionBinding::pure("is_object", &["isobject"], is_object).narrowing("x", TrueIff, Some("object")),
+    // True only for text a file parameter can take, so the true side proves
+    // `file`; the false side proves nothing (`"https://"` is still a string).
+    FunctionBinding::pure("is_file_type", &[], is_file_type).narrowing("value", TrueImplies, Some("file")),
     FunctionBinding::pure("is_positive", &["ispositive"], is_positive),
     FunctionBinding::pure("is_negative", &["isnegative"], is_negative),
     FunctionBinding::pure("is_integer", &["isinteger"], is_integer),
@@ -51,6 +56,11 @@ fn is_string(call: &BoundCall<'_>) -> Result<Value, String> {
 
 fn is_number(call: &BoundCall<'_>) -> Result<Value, String> {
     Ok(Value::Bool(inspected(call, "is_number")?.is_number()))
+}
+
+fn is_file_type(call: &BoundCall<'_>) -> Result<Value, String> {
+    let value = inspected(call, "is_file_type")?;
+    Ok(Value::Bool(value.as_str().is_some_and(super::is_well_formed_reference)))
 }
 
 fn is_array(call: &BoundCall<'_>) -> Result<Value, String> {

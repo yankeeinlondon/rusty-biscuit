@@ -439,3 +439,237 @@ amount: \"4\"
         assert_eq!(body_calls(body), vec![]);
     }
 }
+
+/// Flow-sensitive narrowing in the editor: the same library scope
+/// composition builds, so guarded calls are silent exactly where the
+/// library types them category 1, and a lifecycle `when` narrows only until
+/// a write or the end of its event.
+mod narrowing {
+    use super::*;
+    use darkmatter::markdown::compose::expression::{
+        ArgumentCategory, DeclaredTypes, TypeScope, check_expression_calls, parse_spanned,
+    };
+    use darkmatter::markdown::compose::page_blocks::BodyGuards;
+    use darkmatter::markdown::schemas::parse_yaml_schema;
+
+    const SCHEMA: &str = "x: number\nready: boolean\nflag: boolean(required)\nfoo:\n  - string(required)\n  - number(required)\n";
+
+    /// One guard form per line; `::block` lines hold no call.
+    const BODY: &str = "{{ x ? min(x, 5) : 0 }}
+{{ x && min(x, 5) }}
+::block when=\"x\"
+{{ min(x, 5) }}
+::end-block
+{{ min(x, 5) }}
+{{ x ? 0 : min(x, 5) }}
+{{ !x ? 0 : min(x, 5) }}
+{{ is_number(foo) ? min(foo, 5) : 0 }}
+{{ is_string(foo) ? 0 : min(foo, 5) }}
+{{ is_number(foo) || ready ? min(foo, 5) : 0 }}
+{{ is_number(trim(foo)) ? min(foo, 5) : 0 }}
+{{ is_number(flag) ? min(flag, 5) : 0 }}
+";
+
+    fn strict_session(workspace: &LspWorkspace, text: &str) -> Vec<Finding> {
+        std::fs::write(workspace.path().join(".dmls.toml"), "[expressions]\nstrict = true\n").unwrap();
+        let mut session = Session::open(workspace, text);
+        let found = session.calls();
+        session.shutdown();
+        found
+    }
+
+    /// Criteria 9, 10, and 33, and the parity checkpoint: for every body
+    /// line, the editor shows a `min` finding exactly when the library's
+    /// call check, at the site composition types (its `::block` guards
+    /// through `BodyGuards`), is not category 1, at the strict severity of
+    /// that category.
+    #[test]
+    fn the_editor_shows_exactly_the_library_categories_at_each_guarded_site() {
+        let schema = parse_yaml_schema(&serde_yaml_ng::from_str(SCHEMA).unwrap()).unwrap();
+        let declared = DeclaredTypes::new(Some(&schema));
+        let guards = BodyGuards::scan(BODY);
+        let mut expected = Vec::new();
+        let mut offset = 0;
+        for (index, line) in BODY.lines().enumerate() {
+            if let (Some(start), Some(end)) = (line.find("{{"), line.find("}}")) {
+                let site = guards.scope_at(TypeScope::unguarded(&declared), offset + start);
+                let checks = check_expression_calls(&parse_spanned(&line[start + 2..end]).unwrap(), &site);
+                let min = checks.iter().find(|check| check.function == "min").expect("min is checked");
+                match min.category() {
+                    ArgumentCategory::Compatible => {}
+                    ArgumentCategory::Incompatible => expected.push((index, ERROR)),
+                    _ => expected.push((index, WARNING)),
+                }
+            }
+            offset += line.len() + 1;
+        }
+        // The library verdicts this fixture pins: the guarded forms are
+        // silent, and the unguarded, false-branch, non-narrowing, and
+        // impossible ones are not.
+        assert_eq!(expected, [(5, WARNING), (6, WARNING), (10, WARNING), (11, WARNING), (12, ERROR)]);
+
+        let schema_yaml: String = SCHEMA.lines().map(|line| format!("  {line}\n")).collect();
+        let head = format!("---\n$schema:\n{schema_yaml}flag: true\nfoo: 1\n---\n");
+        let workspace = LspWorkspace::new();
+        let first = head.matches('\n').count() as u64;
+        let shown: Vec<(usize, u64)> = strict_session(&workspace, &format!("{head}{BODY}"))
+            .into_iter()
+            .map(|(line, _, _, severity, _)| ((line - first) as usize, severity))
+            .collect();
+        assert_eq!(shown, expected);
+    }
+
+    /// Criterion 34, editor side: a `when` guard narrows its `then` body
+    /// until a `set` writes the subject, and never reaches another event.
+    #[test]
+    fn a_lifecycle_guard_ends_at_a_write_and_its_event() {
+        let text = "---
+$schema:
+  count: number
+count: 1
+composed:
+  - when: count
+    then:
+      - stdout: \"{{ min(count, 5) }}\"
+      - set:
+          count: 7
+      - stdout: \"{{ min(count, 6) }}\"
+finalize:
+  - stdout: \"{{ min(count, 7) }}\"
+---
+Body
+";
+        let line_of = |needle: &str| text.lines().position(|line| line.contains(needle)).unwrap() as u64;
+        let workspace = LspWorkspace::new();
+        let found: Vec<(u64, u64, u64, u64)> = strict_session(&workspace, text)
+            .into_iter()
+            .map(|(line, start, end, severity, _)| (line, start, end, severity))
+            .collect();
+        let at = |needle: &str| {
+            let line = line_of(needle);
+            let (start, end) = columns(text, line, "count, ");
+            (line, start, end - 2, WARNING)
+        };
+        assert_eq!(found, [at("min(count, 6)"), at("min(count, 7)")]);
+    }
+}
+
+mod file_predicates {
+    use super::*;
+
+    const ALWAYS_FALSE: &str = "dm.expression.always_false_call";
+
+    /// `(line, start, end, severity)` of every always-false diagnostic.
+    fn always_false(diagnostics: &[Value]) -> Vec<(u64, u64, u64, u64)> {
+        let mut found: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!(ALWAYS_FALSE))
+            .map(|diagnostic| {
+                let range = &diagnostic["range"];
+                (
+                    range["start"]["line"].as_u64().unwrap(),
+                    range["start"]["character"].as_u64().unwrap(),
+                    range["end"]["character"].as_u64().unwrap(),
+                    diagnostic["severity"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    const TEXT: &str = "---
+$schema:
+  path: string(required)
+path: ./a.md
+composed:
+  - stdout: \"{{ file_exists('https://') }}\"
+---
+{{ file_exists(\"https://\") }}
+{{ fileexists(\"\") }}
+{{ file_exists(path) }}
+{{ file_exists(\"./a.md\") }}
+::block when=\"file_exists('vault:')\"
+inside
+::end-block
+";
+
+    /// Criteria 15 and 35, editor side: each malformed literal argument,
+    /// in the body, a block condition, and a lifecycle action, and through
+    /// the `fileexists` alias, is one warning ranged at the literal under
+    /// both settings, with Darkmatter's code; a `string`-typed variable and a
+    /// well-formed literal get none.
+    #[test]
+    fn a_malformed_literal_reference_warns_and_a_string_variable_does_not() {
+        let line_of = |needle: &str| TEXT.lines().position(|line| line.contains(needle)).unwrap() as u64;
+        let at = |needle: &str, literal: &str| {
+            let line = line_of(needle);
+            let (start, end) = columns(TEXT, line, literal);
+            (line, start, end, WARNING)
+        };
+        let mut expected = vec![
+            at("stdout:", "'https://'"),
+            at("{{ file_exists(\"https://\") }}", "\"https://\""),
+            at("fileexists", "\"\""),
+            at("::block", "'vault:'"),
+        ];
+        expected.sort();
+        for strict in [false, true] {
+            let workspace = LspWorkspace::new();
+            std::fs::write(workspace.path().join(".dmls.toml"), format!("[expressions]\nstrict = {strict}\n")).unwrap();
+            let mut session = Session::open(&workspace, TEXT);
+            let diagnostics = session.diagnostics();
+            session.shutdown();
+            assert_eq!(always_false(&diagnostics), expected, "strict = {strict}: {diagnostics:#?}");
+            assert_eq!(calls(&diagnostics), [], "strict = {strict}: no category finding");
+        }
+    }
+
+    /// Criterion 16, editor side: with `source: unknown`, only the unguarded
+    /// `frontmatter` call warns under `expressions.strict`, and neither does
+    /// by default.
+    #[test]
+    fn under_strict_only_the_unguarded_file_argument_warns() {
+        let text = "---
+$schema:
+  source: unknown
+source: ./a.md
+---
+{{ frontmatter(source, 'title') }}
+{{ is_file_type(source) && frontmatter(source, 'title') }}
+";
+        let unguarded = text.lines().position(|line| line.starts_with("{{ frontmatter")).unwrap() as u64;
+        let (start, end) = columns(text, unguarded, "source");
+        for (strict, expected) in [
+            (false, vec![]),
+            (true, vec![(unguarded, start, end, WARNING, UNCERTAIN.to_string())]),
+        ] {
+            let workspace = LspWorkspace::new();
+            std::fs::write(workspace.path().join(".dmls.toml"), format!("[expressions]\nstrict = {strict}\n")).unwrap();
+            let mut session = Session::open(&workspace, text);
+            assert_eq!(session.calls(), expected, "strict = {strict}");
+            session.shutdown();
+        }
+    }
+
+    /// Criterion 18: the configuration model has no `file_exists`-specific
+    /// setting; `expressions` holds `strict` alone.
+    #[test]
+    fn the_configuration_has_no_file_exists_setting() {
+        fn keys(value: &Value, prefix: &str, out: &mut Vec<String>) {
+            if let Value::Object(map) = value {
+                for (key, child) in map {
+                    let path = format!("{prefix}{key}");
+                    keys(child, &format!("{path}."), out);
+                    out.push(path);
+                }
+            }
+        }
+        let config = serde_json::to_value(dmls::config::DmlsConfig::default()).unwrap();
+        let mut all = Vec::new();
+        keys(&config, "", &mut all);
+        let named: Vec<_> = all.iter().filter(|key| key.contains("file_exists") || key.contains("fileexists")).collect();
+        assert!(named.is_empty(), "{named:?}");
+        assert_eq!(config["expressions"], json!({ "strict": false }));
+    }
+}

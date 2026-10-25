@@ -844,14 +844,30 @@ fn stack_expression_diagnostics(
     let stacks = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index));
     let declared = crate::diagnostics::call_check::declared_types(ctx);
     let calls = FrontmatterCalls::new(ctx, &declared);
+    let guarded = GuardedStackCalls::for_document(ctx);
+    let mut checked_entries = std::collections::HashSet::new();
     let mut views = std::collections::HashMap::new();
     for expression in stacks {
         let Ok(parsed) = expression.parse() else {
             continue;
         };
-        for found in calls.check(&parsed) {
-            let doc_span = expression.range(found.span.clone());
-            calls.push(ctx, doc_span, found, out);
+        match guarded.surface(ast, expression.index) {
+            // The library checked the whole scalar at its site; report it once.
+            Some(surface) => {
+                if checked_entries.insert(expression.index) {
+                    let checks: Vec<_> = surface.checks.iter().map(|found| found.check.clone()).collect();
+                    for found in crate::diagnostics::call_check::check_diagnostics(&checks, calls.strict) {
+                        let doc_span = expression.scalar_range(found.span.clone());
+                        calls.push(ctx, doc_span, found, out);
+                    }
+                }
+            }
+            None => {
+                for found in calls.check(&parsed) {
+                    let doc_span = expression.range(found.span.clone());
+                    calls.push(ctx, doc_span, found, out);
+                }
+            }
         }
         let view = views.entry(expression.event).or_insert_with(|| known_roots.view(Some(expression.event)));
         let mut push = |span: std::ops::Range<usize>, severity, code_value: &str, message: String| {
@@ -893,6 +909,52 @@ fn stack_expression_diagnostics(
     }
 }
 
+/// The library's call check of every surface of the document's `md`
+/// lifecycle ([`darkmatter::lifecycle::lifecycle_call_checks`]): each typed at
+/// its own site, narrowed by the `when` items around it, with facts ended by
+/// writes and never carried across events, exactly as composition types it.
+///
+/// Empty when the lifecycle does not parse (the parser's error to report);
+/// a stack scalar the library does not check (a `set` shell value) keeps the
+/// unguarded per-expression check.
+struct GuardedStackCalls {
+    surfaces: std::collections::HashMap<Vec<darkmatter::lifecycle::AuthoredSegment>, darkmatter::lifecycle::LifecycleSurfaceCalls>,
+}
+
+impl GuardedStackCalls {
+    fn for_document(ctx: &DocumentContext) -> Self {
+        use darkmatter::lifecycle::md_host;
+        let mut surfaces = std::collections::HashMap::new();
+        if let Some(bundle) = ctx.overlay.and_then(|overlay| overlay.bundle())
+            && let Ok(lifecycle) = md_host::parse_lifecycle(&bundle.frontmatter_json, ctx.path, None)
+        {
+            let found = darkmatter::lifecycle::lifecycle_call_checks(
+                &bundle.frontmatter_json,
+                &lifecycle,
+                md_host::registry(),
+                Some(&bundle.effective),
+            );
+            for surface in found {
+                surfaces.insert(surface.location.clone(), surface);
+            }
+        }
+        Self { surfaces }
+    }
+
+    /// The library's surface at the frontmatter entry `index`.
+    fn surface(&self, ast: &FrontmatterAst, index: usize) -> Option<&darkmatter::lifecycle::LifecycleSurfaceCalls> {
+        let location: Vec<darkmatter::lifecycle::AuthoredSegment> = ast
+            .path_at(index)
+            .into_iter()
+            .map(|segment| match segment {
+                crate::overlay::FmPathSegment::Key(key) => darkmatter::lifecycle::AuthoredSegment::Key(key.to_string()),
+                crate::overlay::FmPathSegment::Index(index) => darkmatter::lifecycle::AuthoredSegment::Index(index),
+            })
+            .collect();
+        self.surfaces.get(&location)
+    }
+}
+
 /// The design-time call check over the `{{ … }}` spans of frontmatter values
 /// outside lifecycle stacks (those are [`stack_expression_diagnostics`]'),
 /// which frontmatter interpolation evaluates. `$schema` declarations are not
@@ -921,8 +983,9 @@ fn interpolation_call_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, o
     }
 }
 
-/// The frontmatter's call-check site: unguarded (a lifecycle or task `when`
-/// is not applied to the actions it selects) over the declaration-only types.
+/// The frontmatter's call-check site: unguarded over the declaration-only
+/// types. A lifecycle stack's own surfaces are narrowed by its `when` items
+/// through [`GuardedStackCalls`]; this site serves the rest.
 struct FrontmatterCalls<'d> {
     site: darkmatter::markdown::compose::expression::TypeScope<'d>,
     strict: bool,
