@@ -216,6 +216,17 @@ pub struct RestApi {
     /// GraphQL surface.
     #[serde(default, deserialize_with = "crate::serde_presence::non_null", skip_serializing_if = "Option::is_none")]
     pub graphql: Option<crate::GraphQlSurface>,
+    /// Whether the author accepts that a generated client leaves unchecked
+    /// the request rules beneath a generic composition (`anyOf` other than an
+    /// `Option`, `oneOf`, an `allOf` of more than one member, or `not`).
+    ///
+    /// `false` (the default, omitted when serialized) makes each such rule a
+    /// generation error; `true` makes it a warning, disclosed in the request
+    /// type's rustdoc. Rules beside an unresolved reference or beneath another
+    /// keyword the client does not traverse stay errors either way. Set it
+    /// with `RestApiBuilder::accept_unchecked_compositions`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchecked_compositions: bool,
     /// Every schema component of this API's definition context, in
     /// registration order. JSON body references name these; see
     /// [`RestApi::validate_references`].
@@ -663,6 +674,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -698,6 +710,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -739,6 +752,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -775,6 +789,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -812,6 +827,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -862,6 +878,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -905,6 +922,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
             };
 
@@ -941,6 +959,7 @@ mod tests {
             retry_guidance: None,
             errors: vec![],
             graphql: None,
+            unchecked_compositions: false,
             schemas: vec![],
         }
     }

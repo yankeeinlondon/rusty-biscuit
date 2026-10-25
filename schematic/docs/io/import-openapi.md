@@ -548,17 +548,19 @@ pub quantity: i64,
 ```
 
 The Rust type decides where a rule is written. Whether the rule is kept
-does not depend on it, except beneath a free-form value, where most
-compositions are not rebuilt (see below):
+does not depend on it, and neither do the compositions above a rule (see
+below):
 
 | Source position | Emitted Rust | Rebuilt as |
 |---|---|---|
 | a property's own rules, any type | the field | `extend("maxLength" = 3u64)` on the field |
 | `format` | the field | `extend("format" = "uuid")`, replacing the format Schemars writes for the Rust type; still an annotation, never checked |
 | a primitive or model array's items | `Vec<T>` | `extend("items" = {..})`, the item schema Schemars would write plus the rules |
-| an inline object, a map, or an untyped value | `serde_json::Value` | the rules at every `properties`, `items`, and `additionalProperties` level, without `type`; each applies to a value of its kind, so `maxLength` checks a string value. Beside a kept `additionalProperties` rule, every declared property is kept, as `{}` when it has no rules, so its value is never checked as an extra one. A `$ref` to a model with rules is kept too, and so are a nullable alternative and a one-member `allOf` around rules or such a reference; any other `allOf`/`anyOf`/`oneOf`/`not` is not (see below) |
+| an inline object, a map, or an untyped value | `serde_json::Value` | the rules at every `properties`, `items`, and `additionalProperties` level, without `type`; each applies to a value of its kind, so `maxLength` checks a string value. Beside a kept `additionalProperties` rule, every declared property is kept, as `{}` when it has no rules, so its value is never checked as an extra one. A `$ref` to a model with rules is kept too, and so is every `allOf`/`anyOf`/`oneOf`/`not` with a rule or such a reference beneath it (see below) |
 | a rule beside a model reference | `Owner` | `extend("const" = {..})` on that field; the `Owner` component is unchanged |
 | a model's root, or its extra properties | the struct or enum | a container `extend` |
+| a member of a component-root `oneOf`/`anyOf` | an enum variant | `extend` (or `schema_with`) on the variant |
+| a member of a component-root `allOf` | a struct flattening its members | the source `allOf` as a container `extend` (see below) |
 
 A rule beside a model reference reaches the registered schema as a
 one-member `allOf` holding the `$ref` (Schemars' OpenAPI 3.0 form); the
@@ -573,8 +575,8 @@ pub struct Extras {
 }
 ```
 
-Beneath a free-form value, references and the two transparent wrappers
-around them are rebuilt, and other compositions are not:
+Beneath a free-form value, references and every composition around a rule
+or such a reference are rebuilt:
 
 - **References.** A `$ref` to a model whose schema holds a rule (directly
   or through its own references) stays a reference. The Rust type of a
@@ -627,18 +629,93 @@ around them are rebuilt, and other compositions are not:
   The same holds for a property whose own schema is such a wrapper, since
   import types an inline composition as `serde_json::Value`.
 - **Other compositions.** Any other `allOf`, `anyOf`, `oneOf`, or `not`
-  beneath a free-form value (an `anyOf` without exactly one null-only
-  member, any `oneOf`, an `allOf` of two or more members, a `not`) is left
-  out of the rebuilt definition with everything beneath it, including a
-  `$ref` inside a member. Its rules are not carried into the rebuilt
-  definition, so a client generated from it does not check them, and
-  generation does not report them.
+  (an `anyOf` without exactly one null-only member, any `oneOf`, an `allOf`
+  of two or more members, a `not`) is kept when a rule or a reference to a
+  model with rules sits beneath it. Every member is kept, in source order,
+  so a rule keeps its location (`/anyOf/1/maxLength`). Each member is
+  rebuilt like any other free-form schema and also keeps its `type` and
+  `nullable`, and a `$ref` member stays a reference even to a model without
+  rules, so a member such as `{type: integer}` does not become `{}`. A
+  null-only member is copied as written. A composition with no rule beneath
+  it is left out: it adds nothing to check.
 
-  A client generated straight from the OpenAPI document keeps them: there,
-  a rule beneath such a composition is a generation error. For example, OpenAI's fine-tuning `learning_rate_multiplier` (a `oneOf` of
-  `"auto"` and a number above 0, inside an inline object) is reported when a
-  client is generated straight from the OpenAPI document, but the client
-  generated from the rebuilt definition neither checks nor reports it.
+  ```yaml
+  details:                 # typed serde_json::Value in the rebuilt definition
+    anyOf:                 # kept as written, members in order
+      - {type: string, maxLength: 11}
+      - {type: integer}
+  ```
+
+  Generated checks do not enter these compositions, so the rebuilt
+  definition is decided as the OpenAPI document is: a rule beneath one is a
+  generation error, or, for an API that accepts unchecked compositions, a
+  warning and a "Not checked" line in the request's rustdoc (see
+  [Accepting unchecked compositions](../generation/request-side.md#accepting-unchecked-compositions)).
+  For example, OpenAI's fine-tuning `learning_rate_multiplier` (a `oneOf`
+  of `"auto"` and a number above 0, inside an inline object) is disclosed
+  the same way whether the client is generated from the OpenAPI document or
+  from the rebuilt definition.
+
+A composition at a component's root becomes a Rust type of its own, and its
+members' rules are rebuilt there too:
+
+- **A `oneOf` or `anyOf` component** is an untagged enum with one variant
+  per member, in order. Each variant carries its member's rules as a field
+  carries a property's: `extend` on the variant, or `schema_with` when the
+  member reaches a model through a free-form value. Beside a variant with
+  rules, a null-only member's variant is written as the source spells it,
+  so the union still reads as a nullable alternative. Schemars writes the
+  variants as `anyOf`, so a rule beneath a `oneOf` component is reported at
+  `/anyOf/0` rather than `/oneOf/0`; it is refused or disclosed the same
+  way.
+
+  ```rust
+  #[serde(untagged)]
+  pub enum Stop {
+      Text(String),
+      #[schemars(extend("maxItems" = 4u64, "minItems" = 1u64))]
+      TextList(Vec<String>),
+  }
+  ```
+
+- **An `allOf` component** is a struct that flattens its members, and
+  Schemars merges the members' properties into the struct, which no longer
+  shows the composition. When a rule or a reference to a model with rules
+  sits beneath the `allOf`, the struct also carries the source `allOf` as a
+  container `extend`, each member rebuilt as above and a model member as a
+  `$ref` to its component (every nominal model is registered). The merged
+  properties stay as Schemars writes them, so a rule a member brings in is
+  also checked there, where the composition no longer shows; the same rule
+  beneath the kept `allOf` is refused or disclosed as in the OpenAPI
+  document.
+
+  ```rust
+  #[schemars(extend("allOf" = [{"$ref": "#/components/schemas/Owner"},
+      {"properties": {"code": {"maxLength": 11u64}}, "type": "object"}]))]
+  pub struct Combined {
+      #[serde(flatten)]
+      pub owner: Owner,
+      #[serde(flatten)]
+      pub json: serde_json::Value,
+  }
+  ```
+
+  Because a member's rule is in two places, the rebuilt definition can
+  report more findings than the OpenAPI document does: the rule's finding
+  beneath the kept `allOf`, as the direct import reports it, and a second
+  one at the merged property when that property is itself beneath a
+  composition the checks do not enter. In an API that accepts unchecked
+  compositions this shows as an extra warning and an extra "Not checked"
+  line for the same rule. Where the checks reach the merged property, the
+  rebuilt client checks the rule there instead, which is correct because
+  every `allOf` member applies to the whole value; such a request is
+  refused by the rebuilt client and sent unchecked by one generated from
+  the OpenAPI document. Every finding of the direct import is still
+  reported, so the rebuilt definition never hides a rule. For example,
+  OpenAI's chat-completion and response-creation request bodies
+  (`CreateChatCompletionRequest2` and `CreateResponse`) flatten
+  `CreateModelResponseProperties`, whose `temperature`, `top_p`, and
+  `top_logprobs` rules add eight warnings to each endpoint.
 
 Two plain-alias shapes hold rules the rebuilt Rust form has nowhere to put.
 A plain alias is emitted as `pub type` and registers no component, so
@@ -654,8 +731,8 @@ location:
 - **A JSON request body typed as a plain alias** whose rules reach past the
   body's own keywords and its items' own rules: a rule on a property
   beneath the items (`pub type Forest = Vec<serde_json::Value>;` with a
-  `maxLength` on each item's `label`), beneath `additionalProperties`, or a
-  reference to a model with rules. The body's rules become the endpoint's
+  `maxLength` on each item's `label`), beneath `additionalProperties` or a
+  composition, or a reference to a model with rules. The body's rules become the endpoint's
   `Constraints`, which cannot hold them. A body alias over constrained
   scalars, such as an array of strings with `maxLength`, imports normally.
 

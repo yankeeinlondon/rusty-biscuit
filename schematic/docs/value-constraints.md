@@ -157,6 +157,13 @@ OpenAPI 3.0's Boolean `exclusiveMinimum`/`exclusiveMaximum` flags.
 Only direct contradictions are errors; Schematic does not try to prove that
 some value satisfies every rule at once.
 
+These definition errors apply wherever the rule sits, including beneath a
+`oneOf` or `anyOf`. An API that
+[accepts unchecked compositions](generation/request-side.md#accepting-unchecked-compositions)
+relaxes only whether a valid rule beneath a composition must be enforced
+by the generated client; a malformed or contradictory rule there is still
+an error.
+
 ## Patterns
 
 JSON Schema patterns are ECMAScript regular expressions, but generated

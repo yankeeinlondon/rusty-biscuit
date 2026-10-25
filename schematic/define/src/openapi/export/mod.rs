@@ -176,7 +176,7 @@ mod tests {
     }
 
     fn create_test_api() -> RestApi {
-        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -202,7 +202,7 @@ mod tests {
     }
 
     fn create_test_api_with_endpoints() -> RestApi {
-        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_request_schema_ref() {
-        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_response_schema_ref() {
-        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn export_strips_reserved_marker_from_path_and_params() {
-        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com".to_string(),
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn export_succeeds_when_all_refs_are_resolved() {
-        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),

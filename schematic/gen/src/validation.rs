@@ -237,10 +237,11 @@ fn check_constraints(api: &RestApi, output: Output, diagnostics: &mut Vec<Valida
 }
 
 /// Reports every request value rule the Rust client does not enforce: an
-/// error for a supported rule beneath a composition or beside an unresolved
-/// reference, which the client would otherwise claim to check; a warning
-/// for a format (an annotation only), a pattern outside the enforced
-/// subset, and a rule inside a member of a union component.
+/// error for a supported rule beneath a composition, beneath another
+/// untraversed keyword, or beside an unresolved reference, which the client
+/// would otherwise claim to check; a warning for a format (an annotation
+/// only), a pattern outside the enforced subset, and, when the API sets
+/// `unchecked_compositions`, a rule whose only blocker is a composition.
 fn check_value_rules(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     let view = crate::codegen::pagination::api_pager_view(api);
     for (endpoint, finding) in crate::codegen::value_rules::api_findings(&view) {

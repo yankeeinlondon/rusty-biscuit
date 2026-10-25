@@ -16,8 +16,13 @@
 # Each of those objects also declares `owner`, a reference to `Owner`, whose
 # rule is reached through the free-form value, and `nullable_probe` and
 # `allof_probe`, which reach `Owner` through a nullable alternative and a
-# one-member `allOf`; `linked_value` references `Owner` as a free-form
-# value's items and extra values, and beside a rule.
+# one-member `allOf`, and `any_of_probe`, `one_of_probe`, `all_of_probe`,
+# and `not_probe`, which hold a `maxLength` beneath a generic `anyOf`,
+# `oneOf`, two-member `allOf`, and `not`; `linked_value` references `Owner`
+# as a free-form value's items and extra values, and beside a rule.
+# `MixedUnion` is a component-root `anyOf` with a constrained member and
+# `MixedAll` a component-root `allOf` of `Owner` and a constrained inline
+# object.
 openapi: 3.0.3
 info:
   title: Constraint Preservation
@@ -246,6 +251,10 @@ components:
                 - {type: string, nullable: true, enum: [null]}
             allof_probe:
               allOf: [{$ref: "#/components/schemas/Owner"}]
+            any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+            one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+            all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+            not_probe: {not: {type: string, maxLength: 11}}
             inner:
               properties:
                 label: {type: string}
@@ -257,6 +266,10 @@ components:
                     - {type: string, nullable: true, enum: [null]}
                 allof_probe:
                   allOf: [{$ref: "#/components/schemas/Owner"}]
+                any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+                one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+                all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+                not_probe: {not: {type: string, maxLength: 11}}
               additionalProperties: {type: string, maxLength: 3}
           items:
             properties:
@@ -269,6 +282,10 @@ components:
                   - {type: string, nullable: true, enum: [null]}
               allof_probe:
                 allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
             additionalProperties: {type: string, maxLength: 3}
           additionalProperties: {type: string, maxLength: 3}
         mixed_map:
@@ -283,6 +300,10 @@ components:
                   - {type: string, nullable: true, enum: [null]}
               allof_probe:
                 allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
             additionalProperties: {type: string, maxLength: 3}
         mixed_attributes:
           type: object
@@ -297,6 +318,10 @@ components:
                   - {type: string, nullable: true, enum: [null]}
               allof_probe:
                 allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
             additionalProperties: {type: string, maxLength: 3}
         mixed_entries:
           type: array
@@ -312,9 +337,17 @@ components:
                   - {type: string, nullable: true, enum: [null]}
               allof_probe:
                 allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
             additionalProperties: {type: string, maxLength: 3}
         mixed_extras:
           $ref: "#/components/schemas/MixedExtras"
+        mixed_union:
+          $ref: "#/components/schemas/MixedUnion"
+        mixed_all:
+          $ref: "#/components/schemas/MixedAll"
         linked_value:
           properties:
             pinned:
@@ -360,7 +393,21 @@ components:
               - {type: string, nullable: true, enum: [null]}
           allof_probe:
             allOf: [{$ref: "#/components/schemas/Owner"}]
+          any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+          one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+          all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+          not_probe: {not: {type: string, maxLength: 11}}
         additionalProperties: {type: string, maxLength: 3}
+    MixedUnion:
+      anyOf:
+        - {type: string, maxLength: 11}
+        - {type: integer}
+    MixedAll:
+      allOf:
+        - {$ref: "#/components/schemas/Owner"}
+        - type: object
+          properties:
+            code: {type: string, maxLength: 11}
     Node:
       type: object
       required: [name]

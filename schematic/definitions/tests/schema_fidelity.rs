@@ -65,10 +65,13 @@ struct Slot {
 }
 
 /// Whether `source` admits any value: `true`, `{}`, or annotations only.
+/// A `nullable` without a `type` counts as an annotation: OpenAPI 3.0.3
+/// gives `nullable` effect only beside an explicit `type`, so the export
+/// writes the `{"nullable": true}` member of an `allOf` as `{}`.
 fn is_free_form(source: &Value) -> bool {
     match source {
         Value::Bool(admits) => *admits,
-        Value::Object(object) => object.keys().all(|key| ANNOTATIONS.contains(&key.as_str())),
+        Value::Object(object) => object.keys().all(|key| ANNOTATIONS.contains(&key.as_str()) || key == "nullable"),
         _ => false,
     }
 }
@@ -130,12 +133,15 @@ fn output_nullable(output: &Map<String, Value>) -> bool {
 }
 
 /// The sole non-null member of a source `anyOf`/`oneOf` that the export
-/// folded into `output` (a null member removed, one member left).
-fn folded_member<'a>(source: &'a Map<String, Value>, output: &Map<String, Value>) -> Option<&'a Value> {
+/// folded into `output` (a null member removed, one member left), with the
+/// keyword it was folded out of. A member that is itself a composition of
+/// the same keyword leaves its members in `output`'s.
+fn folded_member<'a>(source: &'a Map<String, Value>, output: &Map<String, Value>) -> Option<(&'static str, &'a Value)> {
     ["anyOf", "oneOf"].into_iter().find_map(|keyword| {
         let remaining = members(source, keyword);
         let removed_null = source.get(keyword).and_then(Value::as_array).is_some_and(|all| all.len() > remaining.len());
-        (removed_null && remaining.len() == 1 && !output.contains_key(keyword)).then(|| remaining[0])
+        let folded = removed_null && remaining.len() == 1 && (!output.contains_key(keyword) || remaining[0].get(keyword).is_some());
+        folded.then(|| (keyword, remaining[0]))
     })
 }
 
@@ -245,10 +251,15 @@ fn walk(source: &Value, output: &Value, path: String, position: Position, slots:
     if let (Some(child), Some(kept)) = (source.get("items"), output.get("items")) {
         walk(child, kept, format!("{path}[]"), Position::Item, slots);
     }
-    if let Some(member) = folded_member(source, output) {
+    let folded = folded_member(source, output);
+    if let Some((_, member)) = folded {
         walk(member, &Value::Object(output.clone()), format!("{path}|folded"), Position::Member, slots);
     }
     for keyword in COMPOSITIONS {
+        // The folded member was walked against this keyword's members.
+        if folded.is_some_and(|(folded_keyword, _)| folded_keyword == keyword) {
+            continue;
+        }
         // Null members are the position's nullability, checked above.
         for (index, (member, kept)) in members(source, keyword).into_iter().zip(members(output, keyword)).enumerate() {
             walk(member, kept, format!("{path}|{keyword}[{index}]"), Position::Member, slots);
@@ -438,6 +449,34 @@ fn a_typed_output_that_drops_a_constraint_is_a_typed_loss() {
     assert_eq!(classify(&source, &serde_json::json!({"type": "string"})), Fidelity::TypedLoss(vec!["enum", "format"]));
     assert_eq!(classify(&source, &source), Fidelity::Kept);
     assert_eq!(classify(&serde_json::json!(true), &serde_json::json!({})), Fidelity::Deliberate);
+}
+
+#[test]
+fn a_typeless_nullable_member_exported_as_empty_is_deliberate() {
+    assert_eq!(classify(&serde_json::json!({"nullable": true}), &serde_json::json!({})), Fidelity::Deliberate);
+    assert_eq!(
+        classify(&serde_json::json!({"type": "string", "nullable": true}), &serde_json::json!({})),
+        Fidelity::Lost(vec!["type"])
+    );
+}
+
+#[test]
+fn a_nullable_union_of_one_union_spliced_into_the_export_loses_nothing() {
+    let source = serde_json::json!({"anyOf": [
+        {"anyOf": [{"type": "string", "enum": ["auto"]}, {"type": "integer", "minimum": 1}]},
+        {"type": "null"},
+    ]});
+    let null_member = serde_json::json!({"type": "object", "nullable": true, "enum": [null]});
+    let spliced = serde_json::json!({"anyOf": [{"type": "string", "enum": ["auto"]}, {"type": "integer", "minimum": 1}, null_member]});
+    let mut slots = Vec::new();
+    walk(&source, &spliced, "Root".into(), Position::Component, &mut slots);
+    assert!(slots.iter().all(|slot| slot.fidelity == Fidelity::Kept), "{slots:#?}");
+    assert!(slots.iter().any(|slot| slot.path == "Root|folded|anyOf[1]"), "{slots:#?}");
+
+    let dropped = serde_json::json!({"anyOf": [{"type": "string", "enum": ["auto"]}, {"type": "integer"}, null_member]});
+    let mut slots = Vec::new();
+    walk(&source, &dropped, "Root".into(), Position::Component, &mut slots);
+    assert!(slots.iter().any(|slot| slot.fidelity == Fidelity::TypedLoss(vec!["minimum"])), "{slots:#?}");
 }
 
 

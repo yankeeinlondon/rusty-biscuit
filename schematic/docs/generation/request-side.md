@@ -485,10 +485,43 @@ individual violations use `validate()`, which returns them as
 | --- | --- |
 | `format` | an annotation only; labeled in rustdoc and reported as a `type-constraint` warning |
 | a pattern outside the [enforced subset](../value-constraints.md#patterns) | labeled in rustdoc and reported as a `type-constraint` warning |
-| a rule inside a member of a union component (an `anyOf`/`oneOf` that is a component's whole schema, as a Rust enum of structs is) | the serialized body does not say which member it is, so the rule is labeled and reported as a `type-constraint` warning |
-| a rule beneath any other `oneOf`, `anyOf`, `allOf` (other than a one-member `allOf`), or `not`, or beside a `$ref` that names no component | a `type-constraint` **error**: the Rust client is not generated |
+| a rule beneath a `oneOf`, an `anyOf` (other than an `Option`), an `allOf` of more than one member, or a `not`, wherever it sits (a component's whole schema, as a Rust enum of structs is, or nested inside one) | a `type-constraint` **error**: the Rust client is not generated. The message names both remedies: remove the rule or the composition, or opt in (below) |
+| the same rule when the API accepts unchecked compositions | a `type-constraint` warning; the rule is listed under "Not checked" in the request's rustdoc and nothing checks it before sending |
+| a rule beside a `$ref` that names no component | a `type-constraint` **error**, with or without the opt-in |
 | a rule beneath a keyword the checks do not enter: a positional `items` list or `prefixItems` (a tuple's members), `additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema form of `dependencies`, or `if`/`then`/`else` | a `type-constraint` **error**, for example ``body (component `Pair` at `#/prefixItems/0`) `maxLength` is not enforced: beneath the `prefixItems` at `#` of component `Pair`, which the client does not traverse; ...``; only an `items` object is checked as an array's item schema |
 | a Rust enum's own variant values (a unit enum's `enum`, a tagged enum's tag `const`) and the bounds Schemars writes for an integer width (`minimum: 0` on a `u32`) | the Rust type already guarantees them; neither checked nor reported |
+
+#### Accepting unchecked compositions
+
+The client checks no `oneOf`, `anyOf`, multi-member `allOf`, or `not`, so it
+cannot tell which member a value matched. By default a rule beneath one fails
+generation. When an API's request models put rules inside unions you cannot
+restructure (OpenAI's tool and response-format unions, for example), opt in
+for that API:
+
+```rust,ignore
+let api = RestApi::builder(ctx, "Shapes", "https://api.example.com")
+    .describes("Shapes")
+    .no_auth()
+    .accept_unchecked_compositions()
+    .endpoints(endpoints)
+    .build()?;
+```
+
+The choice is stored on the definition (`unchecked_compositions: true` in
+its JSON, omitted when false), so bundles and emitted definitions keep it.
+With it, each covered rule is a `type-constraint` warning naming the API,
+endpoint, schema location, keyword, and composition, for example
+``body (component `Item` at `#/properties/value/anyOf/0`) `maxLength` is not enforced: beneath the `anyOf` at `#/properties/value` of component `Item`, a composition whose members are not checked; the API accepts unchecked compositions``,
+and the request type's `## Value rules` rustdoc lists it under "Not
+checked". The opt-in covers nothing else: a rule beneath an untraversed
+keyword (even one inside a composition) or beside an unresolved reference is
+still an error, and so is a malformed or contradictory rule.
+
+A definition rebuilt by `import --definitions-out` can report one source
+rule twice, once beneath a component's `allOf` and once at the property its
+flattened member brings in, so its warning count can exceed the OpenAPI
+document's (see [`allOf` components](../io/import-openapi.md#value-constraints)).
 
 Responses are never checked: a reply that decodes is returned even when it
 breaks a declared rule.

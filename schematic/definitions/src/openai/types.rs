@@ -59,6 +59,9 @@ impl schematic_define::Registration for AdminApiKey {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend("allOf" = [{"$ref":"#/components/schemas/AdminApiKey"}, {"type":"object"}])
+)]
 pub struct AdminApiKeyCreateResponse {
     #[serde(flatten)]
     pub admin_api_key: AdminApiKey,
@@ -155,7 +158,7 @@ pub struct AssistantObject {
     #[schemars(extend("anyOf" = [{"maxLength":256000u64}, {"type":"null"}]))]
     pub instructions: serde_json::Value,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
-    #[schemars(extend("maxItems" = 128u64))]
+    #[schemars(schema_with = "AssistantObject::field_rules_schema_tools")]
     pub tools: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -179,6 +182,21 @@ pub struct AssistantObject {
     pub response_format: Option<serde_json::Value>,
 }
 impl AssistantObject {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(128u64));
+        schema
+    }
     fn field_rules_schema_response_format(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -448,6 +466,7 @@ Setting to `{ "type": "json_object" }` enables JSON mode, which ensures the mess
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum AssistantsApiResponseFormatOption {
+    #[schemars(extend("enum" = ["auto"]))]
     Text(String),
     ResponseFormatText(ResponseFormatText),
     ResponseFormatJsonObject(ResponseFormatJsonObject),
@@ -478,6 +497,7 @@ Specifying a particular tool like `{"type": "file_search"}` or `{"type": "functi
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum AssistantsApiToolChoiceOption {
+    #[schemars(extend("enum" = ["none", "auto", "required"]))]
     Text(String),
     AssistantsNamedToolChoice(AssistantsNamedToolChoice),
 }
@@ -548,6 +568,20 @@ impl schematic_define::Registration for AudioResponseFormat {
 pub struct AudioTranscription {
     ///The model to use for transcription. Current options are `whisper-1`, `gpt-transcribe`, `gpt-live-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, and `gpt-realtime-whisper`. Use `gpt-4o-transcribe-diarize` when you need diarization with speaker labels.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["whisper-1",
+            "gpt-transcribe",
+            "gpt-live-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-transcribe-2025-12-15",
+            "gpt-4o-transcribe",
+            "gpt-4o-transcribe-diarize",
+            "gpt-realtime-whisper"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The language of the input audio. Supplying the input language in
 [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) (e.g. `en`) format
@@ -588,6 +622,20 @@ impl schematic_define::Registration for AudioTranscription {
 pub struct AudioTranscriptionResponse {
     ///The model used for transcription. Current options are `whisper-1`, `gpt-transcribe`, `gpt-live-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, and `gpt-realtime-whisper`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["whisper-1",
+            "gpt-transcribe",
+            "gpt-live-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-transcribe-2025-12-15",
+            "gpt-4o-transcribe",
+            "gpt-4o-transcribe-diarize",
+            "gpt-realtime-whisper"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     ///The language of the input audio.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1676,6 +1724,7 @@ pub struct ChatCompletionMessageList {
     #[schemars(extend("enum" = ["list"]))]
     pub object: String,
     ///An array of chat completion message objects.
+    #[schemars(schema_with = "ChatCompletionMessageList::field_rules_schema_data")]
     pub data: Vec<serde_json::Value>,
     ///The identifier of the first chat message in the data array.
     pub first_id: String,
@@ -1683,6 +1732,28 @@ pub struct ChatCompletionMessageList {
     pub last_id: String,
     ///Indicates whether there are more chat messages available.
     pub has_more: bool,
+}
+impl ChatCompletionMessageList {
+    fn field_rules_schema_data(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionResponseMessage>();
+        let reference_1 = generator
+            .subschema_for::<ChatCompletionRequestMessageContentPartText>();
+        let reference_2 = generator
+            .subschema_for::<ChatCompletionRequestMessageContentPartImage>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "allOf" : [reference_0, { "properties" : { "content_parts" : {
+                    "anyOf" : [{ "items" : { "oneOf" : [reference_1, reference_2] } }, {
+                    "type" : "null" }] } }, "type" : "object" }] }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionMessageList {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -1749,7 +1820,9 @@ pub type ChatCompletionMessageToolCalls = Vec<serde_json::Value>;
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ChatCompletionModalities {
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     TextList(Vec<String>),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for ChatCompletionModalities {
@@ -1772,9 +1845,31 @@ impl schematic_define::Registration for ChatCompletionModalities {
 #[derive(JsonSchema)]
 pub struct ChatCompletionModeration {
     ///Moderation for the request input.
+    #[schemars(schema_with = "ChatCompletionModeration::field_rules_schema_input")]
     pub input: serde_json::Value,
     ///Moderation for the generated output.
+    #[schemars(schema_with = "ChatCompletionModeration::field_rules_schema_output")]
     pub output: serde_json::Value,
+}
+impl ChatCompletionModeration {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionModerationResults>();
+        let reference_1 = generator.subschema_for::<ChatCompletionModerationError>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionModerationResults>();
+        let reference_1 = generator.subschema_for::<ChatCompletionModerationError>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionModeration {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -1877,6 +1972,10 @@ impl schematic_define::Registration for ChatCompletionNamedToolChoiceCustom {
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "ChatCompletionRequestAssistantMessage::field_rules_schema_content"
+    )]
     pub content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<serde_json::Value>,
@@ -1889,9 +1988,46 @@ pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "ChatCompletionRequestAssistantMessage::field_rules_schema_tool_calls"
+    )]
     pub tool_calls: Option<ChatCompletionMessageToolCalls>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<serde_json::Value>,
+}
+impl ChatCompletionRequestAssistantMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestAssistantMessageContentPart>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [{ "type" : "string" }, { "items" : reference_0,
+                    "minItems" : 1u64, "type" : "array" }] }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_calls(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionMessageToolCall>();
+        let reference_1 = generator
+            .subschema_for::<ChatCompletionMessageCustomToolCall>();
+        let mut schema = generator
+            .subschema_for::<Option<ChatCompletionMessageToolCalls>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionRequestAssistantMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -1985,6 +2121,9 @@ replace the previous `system` messages.*/
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestDeveloperMessage {
     ///The contents of the developer message.
+    #[schemars(
+        schema_with = "ChatCompletionRequestDeveloperMessage::field_rules_schema_content"
+    )]
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `developer`.
     #[schemars(extend("enum" = ["developer"]))]
@@ -1992,6 +2131,24 @@ pub struct ChatCompletionRequestDeveloperMessage {
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+impl ChatCompletionRequestDeveloperMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestMessageContentPartText>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "minItems" : 1u64,
+                    "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionRequestDeveloperMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2235,6 +2392,9 @@ for this purpose instead.*/
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestSystemMessage {
     ///The contents of the system message.
+    #[schemars(
+        schema_with = "ChatCompletionRequestSystemMessage::field_rules_schema_content"
+    )]
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `system`.
     #[schemars(extend("enum" = ["system"]))]
@@ -2242,6 +2402,24 @@ pub struct ChatCompletionRequestSystemMessage {
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+impl ChatCompletionRequestSystemMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestSystemMessageContentPart>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "minItems" : 1u64,
+                    "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionRequestSystemMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2284,9 +2462,30 @@ pub struct ChatCompletionRequestToolMessage {
     #[schemars(extend("enum" = ["tool"]))]
     pub role: String,
     ///The contents of the tool message.
+    #[schemars(
+        schema_with = "ChatCompletionRequestToolMessage::field_rules_schema_content"
+    )]
     pub content: serde_json::Value,
     ///Tool call that this message is responding to.
     pub tool_call_id: String,
+}
+impl ChatCompletionRequestToolMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestToolMessageContentPart>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "minItems" : 1u64,
+                    "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionRequestToolMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2328,6 +2527,9 @@ information.*/
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestUserMessage {
     ///The contents of the user message.
+    #[schemars(
+        schema_with = "ChatCompletionRequestUserMessage::field_rules_schema_content"
+    )]
     pub content: serde_json::Value,
     ///The role of the messages author, in this case `user`.
     #[schemars(extend("enum" = ["user"]))]
@@ -2335,6 +2537,24 @@ pub struct ChatCompletionRequestUserMessage {
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+impl ChatCompletionRequestUserMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestUserMessageContentPart>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "minItems" : 1u64,
+                    "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionRequestUserMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2386,6 +2606,10 @@ pub struct ChatCompletionResponseMessage {
     pub content: serde_json::Value,
     pub refusal: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "ChatCompletionResponseMessage::field_rules_schema_tool_calls"
+    )]
     pub tool_calls: Option<ChatCompletionMessageToolCalls>,
     /**Annotations for the message, when applicable, as when using the
 [web search tool](/docs/guides/tools-web-search?api-mode=chat).*/
@@ -2411,6 +2635,23 @@ pub struct ChatCompletionResponseMessage {
         )
     )]
     pub audio: Option<serde_json::Value>,
+}
+impl ChatCompletionResponseMessage {
+    fn field_rules_schema_tool_calls(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ChatCompletionMessageToolCall>();
+        let reference_1 = generator
+            .subschema_for::<ChatCompletionMessageCustomToolCall>();
+        let mut schema = generator
+            .subschema_for::<Option<ChatCompletionMessageToolCalls>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ChatCompletionResponseMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2550,6 +2791,7 @@ Specifying a particular tool via `{"type": "function", "function": {"name": "my_
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ChatCompletionToolChoiceOption {
+    #[schemars(extend("enum" = ["none", "auto", "required"]))]
     Text(String),
     ChatCompletionAllowedToolsChoice(ChatCompletionAllowedToolsChoice),
     ChatCompletionNamedToolChoice(ChatCompletionNamedToolChoice),
@@ -2624,6 +2866,7 @@ pub struct CodeInterpreterTool {
     /**The code interpreter container. Can be a container ID or an object that
 specifies uploaded file IDs to make available to your code, along with an
 optional `memory_limit` setting.*/
+    #[schemars(schema_with = "CodeInterpreterTool::field_rules_schema_container")]
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -2631,6 +2874,18 @@ optional `memory_limit` setting.*/
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl CodeInterpreterTool {
+    fn field_rules_schema_container(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AutoCodeInterpreterToolParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -2678,7 +2933,26 @@ pub struct CodeInterpreterToolCall {
     ///The ID of the container used to run the code.
     pub container_id: String,
     pub code: serde_json::Value,
+    #[schemars(schema_with = "CodeInterpreterToolCall::field_rules_schema_outputs")]
     pub outputs: serde_json::Value,
+}
+impl CodeInterpreterToolCall {
+    fn field_rules_schema_outputs(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CodeInterpreterOutputLogs>();
+        let reference_1 = generator.subschema_for::<CodeInterpreterOutputImage>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "oneOf" : [reference_0, reference_1] } }, { "type" :
+                    "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CodeInterpreterToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -2772,7 +3046,22 @@ pub struct CompoundFilter {
     #[schemars(extend("enum" = ["and", "or"]))]
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
+    #[schemars(schema_with = "CompoundFilter::field_rules_schema_filters")]
     pub filters: Vec<serde_json::Value>,
+}
+impl CompoundFilter {
+    fn field_rules_schema_filters(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ComparisonFilter>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, {}] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CompoundFilter {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CompoundFilter));
@@ -2952,6 +3241,13 @@ impl schematic_define::Registration for ComputerToolCallOutput {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/ComputerToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/ComputerCallOutputStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct ComputerToolCallOutputResource {
     #[serde(flatten)]
     pub computer_tool_call_output: ComputerToolCallOutput,
@@ -3332,6 +3628,7 @@ impl schematic_define::Registration for CostsResult {
 #[derive(JsonSchema)]
 pub struct CreateAssistantRequest2 {
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
+    #[schemars(schema_with = "CreateAssistantRequest2::field_rules_schema_model")]
     pub model: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("anyOf" = [{"maxLength":256u64}, {"type":"null"}]))]
@@ -3346,14 +3643,21 @@ pub struct CreateAssistantRequest2 {
     pub reasoning_effort: Option<ReasoningEffort>,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 128u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateAssistantRequest2::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         extend(
             "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
             "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64},
-            "vector_stores":{"items":{"properties":{"file_ids":{"maxItems":100000000u64}}},
+            "vector_stores":{"items":{"properties":{"chunking_strategy":{"oneOf":[{"properties":{"type":{"enum":["auto"]}},
+            "type":"object"},
+            {"properties":{"static":{"properties":{"max_chunk_size_tokens":{"maximum":4096u64,
+            "minimum":100u64}}},
+            "type":{"enum":["static"]}},
+            "type":"object"}]},
+            "file_ids":{"maxItems":100000000u64}}},
             "maxItems":1u64}}}}},
             {"type":"null"}]
         )
@@ -3375,6 +3679,33 @@ pub struct CreateAssistantRequest2 {
     pub response_format: Option<serde_json::Value>,
 }
 impl CreateAssistantRequest2 {
+    fn field_rules_schema_model(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantSupportedModels>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(128u64));
+        schema
+    }
     fn field_rules_schema_response_format(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -3439,6 +3770,53 @@ impl schematic_define::Registration for CreateBatchRequest2 {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/CreateModelResponseProperties"},
+        {"properties":{"audio":{"properties":{"format":{"enum":["wav",
+        "aac",
+        "mp3",
+        "flac",
+        "opus",
+        "pcm16"]},
+        "voice":{"$ref":"#/components/schemas/VoiceIdsOrCustomVoice"}}},
+        "frequency_penalty":{"maximum":2u64,
+        "minimum":-2i64},
+        "function_call":{"oneOf":[{"enum":["none",
+        "auto"],
+        "type":"string"},
+        {"$ref":"#/components/schemas/ChatCompletionFunctionCallOption"}]},
+        "functions":{"maxItems":128u64,
+        "minItems":1u64},
+        "messages":{"items":{"$ref":"#/components/schemas/ChatCompletionRequestMessage"},
+        "minItems":1u64},
+        "modalities":{"$ref":"#/components/schemas/ResponseModalities"},
+        "model":{"$ref":"#/components/schemas/ModelIdsShared"},
+        "moderation":{"anyOf":[{"$ref":"#/components/schemas/ModerationParam"},
+        {"type":"null"}]},
+        "n":{"maximum":128u64,
+        "minimum":1u64},
+        "prediction":{"oneOf":[{"$ref":"#/components/schemas/PredictionContent"}]},
+        "presence_penalty":{"maximum":2u64,
+        "minimum":-2i64},
+        "reasoning_effort":{"$ref":"#/components/schemas/ReasoningEffort"},
+        "response_format":{"oneOf":[{"$ref":"#/components/schemas/ResponseFormatText"},
+        {"$ref":"#/components/schemas/ResponseFormatJsonSchema"},
+        {"$ref":"#/components/schemas/ResponseFormatJsonObject"}]},
+        "seed":{"maximum":9223372036854776000u64,
+        "minimum":-9223372036854776000f64},
+        "stop":{"$ref":"#/components/schemas/StopConfiguration"},
+        "tool_choice":{"$ref":"#/components/schemas/ChatCompletionToolChoiceOption"},
+        "tools":{"items":{"oneOf":[{"$ref":"#/components/schemas/ChatCompletionTool"},
+        {"$ref":"#/components/schemas/CustomToolChatCompletions"}]}},
+        "top_logprobs":{"maximum":20u64,
+        "minimum":0u64},
+        "verbosity":{"$ref":"#/components/schemas/Verbosity"},
+        "web_search_options":{"properties":{"search_context_size":{"$ref":"#/components/schemas/WebSearchContextSize"},
+        "user_location":{"properties":{"type":{"enum":["approximate"]}}}}}},
+        "type":"object"}]
+    )
+)]
 pub struct CreateChatCompletionRequest2 {
     #[serde(flatten)]
     pub create_model_response_properties: CreateModelResponseProperties,
@@ -3609,10 +3987,30 @@ impl schematic_define::Registration for CreateChatCompletionStreamResponse {
 #[derive(JsonSchema)]
 pub struct CreateCompletionRequest2 {
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-3.5-turbo-instruct",
+            "davinci-002",
+            "babbage-002"],
+            "type":"string"}]
+        )
+    )]
     pub model: serde_json::Value,
     /**The prompt(s) to generate completions for, encoded as a string, array of strings, array of tokens, or array of token arrays.
 
 Note that <|endoftext|> is the document separator that the model sees during training, so if a prompt is not specified the model will generate as if from the beginning of a new document.*/
+    #[schemars(
+        extend(
+            "oneOf" = [{"type":"string"},
+            {"type":"array"},
+            {"minItems":1u64,
+            "type":"array"},
+            {"items":{"minItems":1u64},
+            "minItems":1u64,
+            "type":"array"}]
+        )
+    )]
     pub prompt: serde_json::Value,
     /**Generates `best_of` completions server-side and returns the "best" (the one with the highest log probability per token). Results cannot be streamed.
 
@@ -3761,6 +4159,8 @@ pub struct CreateContainerBody {
     pub expires_after: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateContainerBody::field_rules_schema_skills")]
     pub skills: Option<Vec<serde_json::Value>>,
     ///Optional memory limit for the container. Defaults to "1g".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3768,7 +4168,35 @@ pub struct CreateContainerBody {
     pub memory_limit: Option<String>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateContainerBody::field_rules_schema_network_policy")]
     pub network_policy: Option<serde_json::Value>,
+}
+impl CreateContainerBody {
+    fn field_rules_schema_skills(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<SkillReferenceParam>();
+        let reference_1 = generator.subschema_for::<InlineSkillParam>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
+    fn field_rules_schema_network_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ContainerNetworkPolicyDisabledParam>();
+        let reference_1 = generator
+            .subschema_for::<ContainerNetworkPolicyAllowlistParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateContainerBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateContainerBody));
@@ -3803,8 +4231,32 @@ impl schematic_define::Registration for CreateContainerFileBody {
 #[derive(JsonSchema)]
 pub struct CreateEmbeddingRequest2 {
     ///Input text to embed, encoded as a string or array of tokens. To embed multiple inputs in a single request, pass an array of strings or array of token arrays. The input must not exceed the max input tokens for the model (8192 tokens for all embedding models), cannot be an empty string, and any array must be 2048 dimensions or less. [Example Python code](https://cookbook.openai.com/examples/how_to_count_tokens_with_tiktoken) for counting tokens. In addition to the per-input token limit, all embedding  models enforce a maximum of 300,000 tokens summed across all inputs in a  single request.
+    #[schemars(
+        extend(
+            "oneOf" = [{"type":"string"},
+            {"maxItems":2048u64,
+            "minItems":1u64,
+            "type":"array"},
+            {"maxItems":2048u64,
+            "minItems":1u64,
+            "type":"array"},
+            {"items":{"minItems":1u64},
+            "maxItems":2048u64,
+            "minItems":1u64,
+            "type":"array"}]
+        )
+    )]
     pub input: serde_json::Value,
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["text-embedding-ada-002",
+            "text-embedding-3-small",
+            "text-embedding-3-large"],
+            "type":"string"}]
+        )
+    )]
     pub model: serde_json::Value,
     ///The format to return the embeddings in. Can be either `float` or [`base64`](https://pypi.org/project/pybase64/).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3861,6 +4313,10 @@ pub struct CreateEvalCompletionsRunDataSource {
     pub type_: String,
     ///Used when sampling from a model. Dictates the structure of the messages passed into the model. Can either be a reference to a prebuilt trajectory (ie, `item.input_trajectory`), or a template with variable references to the `item` namespace.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateEvalCompletionsRunDataSource::field_rules_schema_input_messages"
+    )]
     pub input_messages: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -3872,22 +4328,61 @@ pub struct CreateEvalCompletionsRunDataSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     ///Determines what populates the `item` namespace in this run's data source.
+    #[schemars(
+        schema_with = "CreateEvalCompletionsRunDataSource::field_rules_schema_source"
+    )]
     pub source: serde_json::Value,
 }
 impl CreateEvalCompletionsRunDataSource {
+    fn field_rules_schema_input_messages(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EasyInputMessage>();
+        let reference_1 = generator.subschema_for::<EvalItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "properties" : { "template" : { "items" : { "oneOf" :
+                    [reference_0, reference_1] } }, "type" : { "enum" : ["template"] } },
+                    "type" : "object" }, { "properties" : { "type" : { "enum" :
+                    ["item_reference"] } }, "type" : "object" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_sampling_params(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
         let reference_0 = generator.subschema_for::<ReasoningEffort>();
-        let reference_1 = generator.subschema_for::<ChatCompletionTool>();
+        let reference_1 = generator.subschema_for::<ResponseFormatText>();
+        let reference_2 = generator.subschema_for::<ResponseFormatJsonSchema>();
+        let reference_3 = generator.subschema_for::<ResponseFormatJsonObject>();
+        let reference_4 = generator.subschema_for::<ChatCompletionTool>();
         let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
         schema
             .insert(
                 "properties".to_owned(),
                 serde_json::json!(
-                    { "reasoning_effort" : reference_0, "tools" : { "items" : reference_1
-                    } }
+                    { "reasoning_effort" : reference_0, "response_format" : { "oneOf" :
+                    [reference_1, reference_2, reference_3] }, "tools" : { "items" :
+                    reference_4 } }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_source(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalJsonlFileContentSource>();
+        let reference_1 = generator.subschema_for::<EvalJsonlFileIdSource>();
+        let reference_2 = generator.subschema_for::<EvalStoredCompletionsSource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -3940,7 +4435,19 @@ pub struct CreateEvalJsonlRunDataSource {
     #[schemars(extend("enum" = ["jsonl"]))]
     pub type_: String,
     ///Determines what populates the `item` namespace in the data source.
+    #[schemars(schema_with = "CreateEvalJsonlRunDataSource::field_rules_schema_source")]
     pub source: serde_json::Value,
+}
+impl CreateEvalJsonlRunDataSource {
+    fn field_rules_schema_source(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalJsonlFileContentSource>();
+        let reference_1 = generator.subschema_for::<EvalJsonlFileIdSource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalJsonlRunDataSource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -3966,11 +4473,26 @@ pub struct CreateEvalLabelModelGrader {
     ///The model to use for the evaluation. Must support structured outputs.
     pub model: String,
     ///A list of chat messages forming the prompt or context. May include variable references to the `item` namespace, ie {{item.name}}.
+    #[schemars(schema_with = "CreateEvalLabelModelGrader::field_rules_schema_input")]
     pub input: Vec<CreateEvalItem>,
     ///The labels to classify to each item in the evaluation.
     pub labels: Vec<String>,
     ///The labels that indicate a passing result. Must be a subset of labels.
     pub passing_labels: Vec<String>,
+}
+impl CreateEvalLabelModelGrader {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalItem>();
+        let mut schema = generator.subschema_for::<Vec<CreateEvalItem>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [{ "type" : "object" }, reference_0] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalLabelModelGrader {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4014,9 +4536,69 @@ pub struct CreateEvalRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     ///The configuration for the data source used for the evaluation runs. Dictates the schema of the data used in the evaluation.
+    #[schemars(
+        schema_with = "CreateEvalRequest2::field_rules_schema_data_source_config"
+    )]
     pub data_source_config: serde_json::Value,
     ///A list of graders for all eval runs in this group. Graders can reference variables in the data source using double curly braces notation, like `{{item.variable_name}}`. To reference the model's output, use the `sample` namespace (ie, `{{sample.output_text}}`).
+    #[schemars(schema_with = "CreateEvalRequest2::field_rules_schema_testing_criteria")]
     pub testing_criteria: Vec<serde_json::Value>,
+}
+impl CreateEvalRequest2 {
+    fn field_rules_schema_data_source_config(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CreateEvalCustomDataSourceConfig>();
+        let reference_1 = generator.subschema_for::<CreateEvalLogsDataSourceConfig>();
+        let reference_2 = generator
+            .subschema_for::<CreateEvalStoredCompletionsDataSourceConfig>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
+    fn field_rules_schema_testing_criteria(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CreateEvalLabelModelGrader>();
+        let reference_1 = generator.subschema_for::<GraderStringCheck>();
+        let mut reference_2 = generator.subschema_for::<EvalGraderStringCheck>();
+        reference_2.insert("allOf".to_owned(), serde_json::json!([reference_1]));
+        let reference_3 = generator.subschema_for::<GraderTextSimilarity>();
+        let mut reference_4 = generator.subschema_for::<EvalGraderTextSimilarity>();
+        reference_4
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_3, { "type" : "object" }]),
+            );
+        let reference_5 = generator.subschema_for::<GraderPython>();
+        let mut reference_6 = generator.subschema_for::<EvalGraderPython>();
+        reference_6
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_5, { "type" : "object" }]),
+            );
+        let reference_7 = generator.subschema_for::<GraderScoreModel>();
+        let mut reference_8 = generator.subschema_for::<EvalGraderScoreModel>();
+        reference_8
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_7, { "type" : "object" }]),
+            );
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_2, reference_4, reference_6,
+                    reference_8] }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateEvalRequest2));
@@ -4036,6 +4618,10 @@ pub struct CreateEvalResponsesRunDataSource {
     pub type_: String,
     ///Used when sampling from a model. Dictates the structure of the messages passed into the model. Can either be a reference to a prebuilt trajectory (ie, `item.input_trajectory`), or a template with variable references to the `item` namespace.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateEvalResponsesRunDataSource::field_rules_schema_input_messages"
+    )]
     pub input_messages: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -4047,9 +4633,29 @@ pub struct CreateEvalResponsesRunDataSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     ///Determines what populates the `item` namespace in this run's data source.
+    #[schemars(
+        schema_with = "CreateEvalResponsesRunDataSource::field_rules_schema_source"
+    )]
     pub source: serde_json::Value,
 }
 impl CreateEvalResponsesRunDataSource {
+    fn field_rules_schema_input_messages(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "properties" : { "template" : { "items" : { "oneOf" : [{ "type" :
+                    "object" }, reference_0] } }, "type" : { "enum" : ["template"] } },
+                    "type" : "object" }, { "properties" : { "type" : { "enum" :
+                    ["item_reference"] } }, "type" : "object" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_sampling_params(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -4064,6 +4670,20 @@ impl CreateEvalResponsesRunDataSource {
                     { "reasoning_effort" : reference_0, "text" : { "properties" : {
                     "format" : reference_1 } }, "tools" : { "items" : reference_2 } }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_source(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalJsonlFileContentSource>();
+        let reference_1 = generator.subschema_for::<EvalJsonlFileIdSource>();
+        let reference_2 = generator.subschema_for::<EvalResponsesSource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -4087,7 +4707,25 @@ pub struct CreateEvalRunRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
     ///Details about the run's data source.
+    #[schemars(schema_with = "CreateEvalRunRequest2::field_rules_schema_data_source")]
     pub data_source: serde_json::Value,
+}
+impl CreateEvalRunRequest2 {
+    fn field_rules_schema_data_source(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CreateEvalJsonlRunDataSource>();
+        let reference_1 = generator
+            .subschema_for::<CreateEvalCompletionsRunDataSource>();
+        let reference_2 = generator.subschema_for::<CreateEvalResponsesRunDataSource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateEvalRunRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4177,6 +4815,16 @@ impl schematic_define::Registration for CreateFineTuningCheckpointPermissionRequ
 pub struct CreateFineTuningJobRequest2 {
     /**The name of the model to fine-tune. You can select one of the
 [supported models](/docs/guides/fine-tuning#which-models-can-be-fine-tuned).*/
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["babbage-002",
+            "davinci-002",
+            "gpt-3.5-turbo",
+            "gpt-4o-mini"],
+            "type":"string"}]
+        )
+    )]
     pub model: serde_json::Value,
     /**The ID of an uploaded file that contains training data.
 
@@ -4191,6 +4839,24 @@ See the [fine-tuning guide](/docs/guides/model-optimization) for more details.*/
     /**The hyperparameters used for the fine-tuning job.
 This value is now deprecated in favor of `method`, and should be passed in under the `method` parameter.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "properties" = {"batch_size":{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"maximum":256u64,
+            "minimum":1u64,
+            "type":"integer"}]},
+            "learning_rate_multiplier":{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "type":"number"}]},
+            "n_epochs":{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"maximum":50u64,
+            "minimum":1u64,
+            "type":"integer"}]}}
+        )
+    )]
     pub hyperparameters: Option<serde_json::Value>,
     /**A string of up to 64 characters that will be added to your fine-tuned model name.
 
@@ -4212,6 +4878,12 @@ See the [fine-tuning guide](/docs/guides/model-optimization) for more details.*/
     pub validation_file: Option<String>,
     ///A list of integrations to enable for your fine-tuning job.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "items" = {"properties":{"type":{"oneOf":[{"enum":["wandb"],
+            "type":"string"}]}}}
+        )
+    )]
     pub integrations: Option<Vec<serde_json::Value>>,
     /**The seed controls the reproducibility of the job. Passing in the same seed and job parameters should produce the same results, but may differ in rare cases.
 If a seed is not specified, one will be generated for you.*/
@@ -4275,6 +4947,15 @@ file less than 50MB. You can provide up to 16 images.
 
 For `dall-e-2`, you can only provide one image, and it should be a square
 `png` file less than 4MB.*/
+    #[schemars(
+        extend(
+            "anyOf" = [{"format":"binary",
+            "type":"string"},
+            {"items":{"format":"binary"},
+            "maxItems":16u64,
+            "type":"array"}]
+        )
+    )]
     pub image: serde_json::Value,
     ///A text description of the desired image(s). The maximum length is 1000 characters for `dall-e-2`, and 32000 characters for the GPT image models.
     pub prompt: String,
@@ -4294,6 +4975,17 @@ should be set to either `png` (default value) or `webp`.*/
     pub background: Option<String>,
     ///The model to use for image generation. Defaults to `gpt-image-1.5`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-image-1.5",
+            "dall-e-2",
+            "gpt-image-1",
+            "gpt-image-1-mini",
+            "chatgpt-image-latest"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4301,6 +4993,18 @@ should be set to either `png` (default value) or `webp`.*/
     pub n: Option<i64>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["256x256",
+            "512x512",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536",
+            "auto"],
+            "type":"string"}]
+        )
+    )]
     pub size: Option<serde_json::Value>,
     ///The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated. This parameter is only supported for `dall-e-2` (default is `url` for `dall-e-2`), as GPT image models always return base64-encoded images.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4368,6 +5072,17 @@ pub struct CreateImageRequest2 {
     pub prompt: String,
     ///The model to use for image generation. One of `dall-e-2`, `dall-e-3`, or a GPT image model (`gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`). Defaults to `dall-e-2` unless a parameter specific to the GPT image models is used.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-image-1.5",
+            "dall-e-2",
+            "dall-e-3",
+            "gpt-image-1",
+            "gpt-image-1-mini"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10. For `dall-e-3`, only `n=1` is supported.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4402,6 +5117,20 @@ This parameter is only supported for the GPT image models.*/
     pub partial_images: Option<PartialImages>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["auto",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536",
+            "256x256",
+            "512x512",
+            "1792x1024",
+            "1024x1792"],
+            "type":"string"}]
+        )
+    )]
     pub size: Option<serde_json::Value>,
     ///Control the content-moderation level for images generated by the GPT image models. Must be either `low` for less restrictive filtering or `auto` (default value).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4441,6 +5170,9 @@ pub struct CreateImageVariationRequest2 {
     pub image: String,
     ///The model to use for image generation. Only `dall-e-2` is supported at this time.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("anyOf" = [{"type":"string"}, {"enum":["dall-e-2"], "type":"string"}])
+    )]
     pub model: Option<serde_json::Value>,
     ///The number of images to generate. Must be between 1 and 10.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4476,11 +5208,49 @@ pub struct CreateMessageRequest2 {
 - `assistant`: Indicates the message is generated by the assistant. Use this value to insert messages from the assistant into the conversation.*/
     #[schemars(extend("enum" = ["user", "assistant"]))]
     pub role: String,
+    #[schemars(schema_with = "CreateMessageRequest2::field_rules_schema_content")]
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateMessageRequest2::field_rules_schema_attachments")]
     pub attachments: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl CreateMessageRequest2 {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageContentImageFileObject>();
+        let reference_1 = generator.subschema_for::<MessageContentImageUrlObject>();
+        let reference_2 = generator.subschema_for::<MessageRequestContentTextObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : { "oneOf" : [reference_0,
+                    reference_1, reference_2] }, "minItems" : 1u64, "type" : "array" }]
+                ),
+            );
+        schema
+    }
+    fn field_rules_schema_attachments(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearchTypeOnly>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "properties" : { "tools" : { "items" : { "oneOf" :
+                    [reference_0, reference_1] } } } } }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateMessageRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4494,6 +5264,15 @@ impl schematic_define::Registration for CreateMessageRequest2 {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/ModelResponseProperties"},
+        {"properties":{"prompt_cache_options":{"$ref":"#/components/schemas/PromptCacheOptionsParam"},
+        "top_logprobs":{"maximum":20u64,
+        "minimum":0u64}},
+        "type":"object"}]
+    )
+)]
 pub struct CreateModelResponseProperties {
     #[serde(flatten)]
     pub model_response_properties: ModelResponseProperties,
@@ -4515,11 +5294,33 @@ impl schematic_define::Registration for CreateModelResponseProperties {
 pub struct CreateModerationRequest2 {
     /**Input (or inputs) to classify. Can be a single string, an array of strings, or
 an array of multi-modal input objects similar to other models.*/
+    #[schemars(
+        extend(
+            "oneOf" = [{"type":"string"},
+            {"type":"array"},
+            {"items":{"oneOf":[{"properties":{"image_url":{"properties":{"url":{"format":"uri"}}},
+            "type":{"enum":["image_url"]}},
+            "type":"object"},
+            {"properties":{"type":{"enum":["text"]}},
+            "type":"object"}]},
+            "type":"array"}]
+        )
+    )]
     pub input: serde_json::Value,
     /**The content moderation model you would like to use. Learn more in
 [the moderation guide](/docs/guides/moderation), and learn about
 available models [here](/docs/models#moderation).*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["omni-moderation-latest",
+            "omni-moderation-2024-09-26",
+            "text-moderation-latest",
+            "text-moderation-stable"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for CreateModerationRequest2 {
@@ -4578,6 +5379,28 @@ impl schematic_define::Registration for CreateModerationResponse {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/CreateModelResponseProperties"},
+        {"$ref":"#/components/schemas/ResponseProperties"},
+        {"properties":{"context_management":{"anyOf":[{"items":{"$ref":"#/components/schemas/ContextManagementParam"},
+        "minItems":1u64},
+        {"type":"null"}]},
+        "include":{"anyOf":[{"items":{"$ref":"#/components/schemas/IncludeEnum"}},
+        {"type":"null"}]},
+        "input":{"$ref":"#/components/schemas/InputParam"},
+        "max_output_tokens":{"anyOf":[{"minimum":16u64},
+        {"type":"null"}]},
+        "moderation":{"anyOf":[{"$ref":"#/components/schemas/ModerationParam"},
+        {"type":"null"}]},
+        "reasoning":{"anyOf":[{"$ref":"#/components/schemas/Reasoning"},
+        {"type":"null"}]},
+        "truncation":{"anyOf":[{"enum":["auto",
+        "disabled"]},
+        {"type":"null"}]}},
+        "type":"object"}]
+    )
+)]
 pub struct CreateResponse {
     #[serde(flatten)]
     pub create_model_response_properties: CreateModelResponseProperties,
@@ -4601,6 +5424,8 @@ pub struct CreateRunRequest2 {
     pub assistant_id: String,
     ///The ID of the [Model](/docs/api-reference/models) to be used to execute this run. If a value is provided here, it will override the model associated with the assistant. If not, the model associated with the assistant will be used.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateRunRequest2::field_rules_schema_model")]
     pub model: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -4615,7 +5440,8 @@ pub struct CreateRunRequest2 {
     pub additional_messages: Option<Vec<CreateMessageRequest2>>,
     ///Override the tools the assistant can use for this run. This is useful for modifying the behavior on a per-run basis.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 20u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateRunRequest2::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -4641,13 +5467,72 @@ We generally recommend altering this or temperature but not both.*/
     #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateRunRequest2::field_rules_schema_truncation_strategy"
+    )]
     pub truncation_strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateRunRequest2::field_rules_schema_tool_choice")]
     pub tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<ParallelToolCalls>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<AssistantsApiResponseFormatOption>,
+}
+impl CreateRunRequest2 {
+    fn field_rules_schema_model(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantSupportedModels>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(20u64));
+        schema
+    }
+    fn field_rules_schema_truncation_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TruncationObject>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiToolChoiceOption>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateRunRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateRunRequest2));
@@ -4661,6 +5546,16 @@ impl schematic_define::Registration for CreateRunRequest2 {
 #[derive(JsonSchema)]
 pub struct CreateSpeechRequest2 {
     ///One of the available [TTS models](/docs/models#tts): `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, or `gpt-4o-mini-tts-2025-12-15`.
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["tts-1",
+            "tts-1-hd",
+            "gpt-4o-mini-tts",
+            "gpt-4o-mini-tts-2025-12-15"],
+            "type":"string"}]
+        )
+    )]
     pub model: serde_json::Value,
     ///The text to generate audio for. The maximum length is 4096 characters.
     #[schemars(extend("maxLength" = 4096u64))]
@@ -4790,13 +5685,58 @@ pub struct CreateThreadAndRunRequest2 {
     pub thread: Option<CreateThreadRequest2>,
     ///The ID of the [Model](/docs/api-reference/models) to be used to execute this run. If a value is provided here, it will override the model associated with the assistant. If not, the model associated with the assistant will be used.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-2025-08-07",
+            "gpt-5-mini-2025-08-07",
+            "gpt-5-nano-2025-08-07",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4.1-2025-04-14",
+            "gpt-4.1-mini-2025-04-14",
+            "gpt-4.1-nano-2025-04-14",
+            "gpt-4o",
+            "gpt-4o-2024-11-20",
+            "gpt-4o-2024-08-06",
+            "gpt-4o-2024-05-13",
+            "gpt-4o-mini",
+            "gpt-4o-mini-2024-07-18",
+            "gpt-4.5-preview",
+            "gpt-4.5-preview-2025-02-27",
+            "gpt-4-turbo",
+            "gpt-4-turbo-2024-04-09",
+            "gpt-4-0125-preview",
+            "gpt-4-turbo-preview",
+            "gpt-4-1106-preview",
+            "gpt-4-vision-preview",
+            "gpt-4",
+            "gpt-4-0314",
+            "gpt-4-0613",
+            "gpt-4-32k",
+            "gpt-4-32k-0314",
+            "gpt-4-32k-0613",
+            "gpt-3.5-turbo",
+            "gpt-3.5-turbo-16k",
+            "gpt-3.5-turbo-0613",
+            "gpt-3.5-turbo-1106",
+            "gpt-3.5-turbo-0125",
+            "gpt-3.5-turbo-16k-0613"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     ///Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     ///Override the tools the assistant can use for this run. This is useful for modifying the behavior on a per-run basis.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 20u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "CreateThreadAndRunRequest2::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     ///A set of resources that are used by the assistant's tools. The resources are specific to the type of tool. For example, the `code_interpreter` tool requires a list of file IDs, while the `file_search` tool requires a list of vector store IDs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4831,13 +5771,62 @@ We generally recommend altering this or temperature but not both.*/
     #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateThreadAndRunRequest2::field_rules_schema_truncation_strategy"
+    )]
     pub truncation_strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateThreadAndRunRequest2::field_rules_schema_tool_choice"
+    )]
     pub tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<ParallelToolCalls>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<AssistantsApiResponseFormatOption>,
+}
+impl CreateThreadAndRunRequest2 {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(20u64));
+        schema
+    }
+    fn field_rules_schema_truncation_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TruncationObject>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiToolChoiceOption>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateThreadAndRunRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4862,7 +5851,13 @@ pub struct CreateThreadRequest2 {
         extend(
             "anyOf" = [{"properties":{"code_interpreter":{"properties":{"file_ids":{"maxItems":20u64}}},
             "file_search":{"properties":{"vector_store_ids":{"maxItems":1u64},
-            "vector_stores":{"items":{"properties":{"file_ids":{"maxItems":100000000u64}}},
+            "vector_stores":{"items":{"properties":{"chunking_strategy":{"oneOf":[{"properties":{"type":{"enum":["auto"]}},
+            "type":"object"},
+            {"properties":{"static":{"properties":{"max_chunk_size_tokens":{"maximum":4096u64,
+            "minimum":100u64}}},
+            "type":{"enum":["static"]}},
+            "type":"object"}]},
+            "file_ids":{"maxItems":100000000u64}}},
             "maxItems":1u64}}}}},
             {"type":"null"}]
         )
@@ -4886,6 +5881,18 @@ pub struct CreateTranscriptionRequest2 {
     #[schemars(extend("format" = "binary"))]
     pub file: String,
     ///ID of the model to use. The options are `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `whisper-1` (which is powered by our open source Whisper V2 model), and `gpt-4o-transcribe-diarize`.
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["whisper-1",
+            "gpt-transcribe",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-transcribe-2025-12-15",
+            "gpt-4o-transcribe-diarize"],
+            "type":"string"}]
+        )
+    )]
     pub model: serde_json::Value,
     ///The language of the input audio. Supplying the input language in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) (e.g. `en`) format will improve accuracy and latency.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4920,6 +5927,10 @@ This option is not available for `gpt-4o-transcribe-diarize`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateTranscriptionRequest2::field_rules_schema_chunking_strategy"
+    )]
     pub chunking_strategy: Option<serde_json::Value>,
     ///Optional list of speaker names that correspond to the audio samples provided in `known_speaker_references[]`. Each entry should be a short identifier (for example `customer` or `agent`). Up to 4 speakers are supported.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4929,6 +5940,23 @@ This option is not available for `gpt-4o-transcribe-diarize`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("maxItems" = 4u64))]
     pub known_speaker_references: Option<Vec<String>>,
+}
+impl CreateTranscriptionRequest2 {
+    fn field_rules_schema_chunking_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<VadConfig>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "anyOf" : [{ "enum" : ["auto"], "type" : "string" }, reference_0]
+                    }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateTranscriptionRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4956,7 +5984,22 @@ pub struct CreateTranscriptionResponseDiarizedJson {
     pub segments: Vec<TranscriptionDiarizedSegment>,
     ///Token or duration usage statistics for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateTranscriptionResponseDiarizedJson::field_rules_schema_usage"
+    )]
     pub usage: Option<serde_json::Value>,
+}
+impl CreateTranscriptionResponseDiarizedJson {
+    fn field_rules_schema_usage(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TranscriptTextUsageTokens>();
+        let reference_1 = generator.subschema_for::<TranscriptTextUsageDuration>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateTranscriptionResponseDiarizedJson {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -4982,7 +6025,22 @@ pub struct CreateTranscriptionResponseJson {
     pub logprobs: Option<Vec<serde_json::Value>>,
     ///Token usage statistics for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateTranscriptionResponseJson::field_rules_schema_usage"
+    )]
     pub usage: Option<serde_json::Value>,
+}
+impl CreateTranscriptionResponseJson {
+    fn field_rules_schema_usage(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TranscriptTextUsageTokens>();
+        let reference_1 = generator.subschema_for::<TranscriptTextUsageDuration>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateTranscriptionResponseJson {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -5103,6 +6161,9 @@ pub struct CreateTranslationRequest2 {
     #[schemars(extend("format" = "binary"))]
     pub file: String,
     ///ID of the model to use. Only `whisper-1` (which is powered by our open source Whisper V2 model) is currently available.
+    #[schemars(
+        extend("anyOf" = [{"type":"string"}, {"enum":["whisper-1"], "type":"string"}])
+    )]
     pub model: serde_json::Value,
     ///An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should be in English.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5206,9 +6267,26 @@ pub struct CreateVectorStoreFileBatchRequest2 {
     #[schemars(extend("maxItems" = 2000u64, "minItems" = 1u64))]
     pub files: Option<Vec<CreateVectorStoreFileRequest2>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateVectorStoreFileBatchRequest2::field_rules_schema_chunking_strategy"
+    )]
     pub chunking_strategy: Option<ChunkingStrategyRequestParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
+}
+impl CreateVectorStoreFileBatchRequest2 {
+    fn field_rules_schema_chunking_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AutoChunkingStrategyRequestParam>();
+        let reference_1 = generator
+            .subschema_for::<StaticChunkingStrategyRequestParam>();
+        let mut schema = generator
+            .subschema_for::<Option<ChunkingStrategyRequestParam>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVectorStoreFileBatchRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -5226,9 +6304,26 @@ pub struct CreateVectorStoreFileRequest2 {
     ///A [File](/docs/api-reference/files) ID that the vector store should use. Useful for tools like `file_search` that can access files. For multi-file ingestion, we recommend [`file_batches`](/docs/api-reference/vector-stores-file-batches/createBatch) to minimize per-vector-store write requests.
     pub file_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateVectorStoreFileRequest2::field_rules_schema_chunking_strategy"
+    )]
     pub chunking_strategy: Option<ChunkingStrategyRequestParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
+}
+impl CreateVectorStoreFileRequest2 {
+    fn field_rules_schema_chunking_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AutoChunkingStrategyRequestParam>();
+        let reference_1 = generator
+            .subschema_for::<StaticChunkingStrategyRequestParam>();
+        let mut schema = generator
+            .subschema_for::<Option<ChunkingStrategyRequestParam>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVectorStoreFileRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -5257,9 +6352,25 @@ pub struct CreateVectorStoreRequest2 {
     pub expires_after: Option<VectorStoreExpirationAfter>,
     ///The chunking strategy used to chunk the file(s). If not set, will use the `auto` strategy. Only applicable if `file_ids` is non-empty.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateVectorStoreRequest2::field_rules_schema_chunking_strategy"
+    )]
     pub chunking_strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl CreateVectorStoreRequest2 {
+    fn field_rules_schema_chunking_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AutoChunkingStrategyRequestParam>();
+        let reference_1 = generator
+            .subschema_for::<StaticChunkingStrategyRequestParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVectorStoreRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -5383,6 +6494,7 @@ pub struct CustomToolCallOutput {
     pub caller: Option<serde_json::Value>,
     /**The output from the custom tool call generated by your code.
 Can be a string or an list of output content.*/
+    #[schemars(schema_with = "CustomToolCallOutput::field_rules_schema_output")]
     pub output: serde_json::Value,
 }
 impl CustomToolCallOutput {
@@ -5398,6 +6510,20 @@ impl CustomToolCallOutput {
             );
         schema
     }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionAndCustomToolCallOutput>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CustomToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolCallOutput));
@@ -5409,6 +6535,13 @@ impl schematic_define::Registration for CustomToolCallOutput {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/CustomToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/FunctionCallOutputStatusEnum"}},
+        "type":"object"}]
+    )
+)]
 pub struct CustomToolCallOutputResource {
     #[serde(flatten)]
     pub custom_tool_call_output: CustomToolCallOutput,
@@ -5427,6 +6560,13 @@ impl schematic_define::Registration for CustomToolCallOutputResource {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/CustomToolCall"},
+        {"properties":{"status":{"$ref":"#/components/schemas/FunctionCallStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct CustomToolCallResource {
     #[serde(flatten)]
     pub custom_tool_call: CustomToolCall,
@@ -5452,6 +6592,16 @@ pub struct CustomToolChatCompletions {
     #[schemars(extend("enum" = ["custom"]))]
     pub type_: String,
     ///Properties of the custom tool.
+    #[schemars(
+        extend(
+            "properties" = {"format":{"oneOf":[{"properties":{"type":{"enum":["text"]}},
+            "type":"object"},
+            {"properties":{"grammar":{"properties":{"syntax":{"enum":["lark",
+            "regex"]}}},
+            "type":{"enum":["grammar"]}},
+            "type":"object"}]}}
+        )
+    )]
     pub custom: serde_json::Value,
 }
 impl schematic_define::Registration for CustomToolChatCompletions {
@@ -5625,6 +6775,9 @@ impl schematic_define::Registration for DeleteVectorStoreResponse {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend("allOf" = [{"$ref":"#/components/schemas/DeletedConversationResource"}])
+)]
 pub struct DeletedConversation {
     #[serde(flatten)]
     pub deleted_conversation_resource: DeletedConversationResource,
@@ -5687,6 +6840,7 @@ pub struct EasyInputMessage {
     pub role: String,
     /**Text, image, or audio input to the model, used to generate a response.
 Can also contain previous assistant responses.*/
+    #[schemars(schema_with = "EasyInputMessage::field_rules_schema_content")]
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -5699,6 +6853,18 @@ Can also contain previous assistant responses.*/
     pub type_: Option<String>,
 }
 impl EasyInputMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputMessageContentList>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
     fn field_rules_schema_phase(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -5730,6 +6896,17 @@ JSON edits support GPT image models only; DALL-E edits require multipart (`dall-
 pub struct EditImageBodyJsonParam {
     ///The model to use for image editing.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-image-1.5",
+            "gpt-image-1",
+            "gpt-image-1-mini",
+            "chatgpt-image-latest"],
+            "type":"string"},
+            {"type":"null"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**Input image references to edit.
 For GPT image models, you can provide up to 16 images.*/
@@ -5888,13 +7065,73 @@ pub struct Eval {
     ///The name of the evaluation.
     pub name: String,
     ///Configuration of data sources used in runs of the evaluation.
+    #[schemars(schema_with = "Eval::field_rules_schema_data_source_config")]
     pub data_source_config: serde_json::Value,
     ///A list of testing criteria.
+    #[schemars(schema_with = "Eval::field_rules_schema_testing_criteria")]
     pub testing_criteria: Vec<serde_json::Value>,
     ///The Unix timestamp (in seconds) for when the eval was created.
     #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     pub metadata: Metadata,
+}
+impl Eval {
+    fn field_rules_schema_data_source_config(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<EvalCustomDataSourceConfig>();
+        let reference_1 = generator.subschema_for::<EvalLogsDataSourceConfig>();
+        let reference_2 = generator
+            .subschema_for::<EvalStoredCompletionsDataSourceConfig>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
+    fn field_rules_schema_testing_criteria(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderLabelModel>();
+        let mut reference_1 = generator.subschema_for::<EvalGraderLabelModel>();
+        reference_1.insert("allOf".to_owned(), serde_json::json!([reference_0]));
+        let reference_2 = generator.subschema_for::<GraderStringCheck>();
+        let mut reference_3 = generator.subschema_for::<EvalGraderStringCheck>();
+        reference_3.insert("allOf".to_owned(), serde_json::json!([reference_2]));
+        let reference_4 = generator.subschema_for::<GraderTextSimilarity>();
+        let mut reference_5 = generator.subschema_for::<EvalGraderTextSimilarity>();
+        reference_5
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_4, { "type" : "object" }]),
+            );
+        let reference_6 = generator.subschema_for::<GraderPython>();
+        let mut reference_7 = generator.subschema_for::<EvalGraderPython>();
+        reference_7
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_6, { "type" : "object" }]),
+            );
+        let reference_8 = generator.subschema_for::<GraderScoreModel>();
+        let mut reference_9 = generator.subschema_for::<EvalGraderScoreModel>();
+        reference_9
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_8, { "type" : "object" }]),
+            );
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_1, reference_3, reference_5, reference_7,
+                    reference_9] }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for Eval {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Eval));
@@ -6250,9 +7487,27 @@ pub struct EvalRun {
     ///Results per testing criteria applied during the evaluation run.
     pub per_testing_criteria_results: Vec<serde_json::Value>,
     ///Information about the run's data source.
+    #[schemars(schema_with = "EvalRun::field_rules_schema_data_source")]
     pub data_source: serde_json::Value,
     pub metadata: Metadata,
     pub error: EvalApiError,
+}
+impl EvalRun {
+    fn field_rules_schema_data_source(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CreateEvalJsonlRunDataSource>();
+        let reference_1 = generator
+            .subschema_for::<CreateEvalCompletionsRunDataSource>();
+        let reference_2 = generator.subschema_for::<CreateEvalResponsesRunDataSource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for EvalRun {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalRun));
@@ -6573,15 +7828,50 @@ pub type FineTuneChatCompletionRequestAssistantMessage = serde_json::Value;
 pub struct FineTuneDPOHyperparameters {
     ///The beta value for the DPO method. A higher beta value will increase the weight of the penalty between the policy and reference model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "maximum":2u64,
+            "type":"number"}]
+        )
+    )]
     pub beta: Option<serde_json::Value>,
     ///Number of examples in each batch. A larger batch size means that model parameters are updated less frequently, but with lower variance.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":256u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub batch_size: Option<serde_json::Value>,
     ///Scaling factor for the learning rate. A smaller learning rate may be useful to avoid overfitting.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "type":"number"}]
+        )
+    )]
     pub learning_rate_multiplier: Option<serde_json::Value>,
     ///The number of epochs to train the model for. An epoch refers to one full cycle through the training dataset.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":50u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub n_epochs: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for FineTuneDPOHyperparameters {
@@ -6638,12 +7928,38 @@ impl schematic_define::Registration for FineTuneMethod {
 pub struct FineTuneReinforcementHyperparameters {
     ///Number of examples in each batch. A larger batch size means that model parameters are updated less frequently, but with lower variance.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":256u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub batch_size: Option<serde_json::Value>,
     ///Scaling factor for the learning rate. A smaller learning rate may be useful to avoid overfitting.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "type":"number"}]
+        )
+    )]
     pub learning_rate_multiplier: Option<serde_json::Value>,
     ///The number of epochs to train the model for. An epoch refers to one full cycle through the training dataset.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":50u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub n_epochs: Option<serde_json::Value>,
     ///Level of reasoning effort.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -6651,12 +7967,37 @@ pub struct FineTuneReinforcementHyperparameters {
     pub reasoning_effort: Option<String>,
     ///Multiplier on amount of compute used for exploring search space during training.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0.00001f64,
+            "maximum":10u64,
+            "type":"number"}]
+        )
+    )]
     pub compute_multiplier: Option<serde_json::Value>,
     ///The number of training steps between evaluation runs.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub eval_interval: Option<serde_json::Value>,
     ///Number of evaluation samples to generate per training step.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub eval_samples: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for FineTuneReinforcementHyperparameters {
@@ -6674,9 +8015,30 @@ impl schematic_define::Registration for FineTuneReinforcementHyperparameters {
 #[derive(JsonSchema)]
 pub struct FineTuneReinforcementMethod {
     ///The grader used for the fine-tuning job.
+    #[schemars(schema_with = "FineTuneReinforcementMethod::field_rules_schema_grader")]
     pub grader: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hyperparameters: Option<FineTuneReinforcementHyperparameters>,
+}
+impl FineTuneReinforcementMethod {
+    fn field_rules_schema_grader(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderStringCheck>();
+        let reference_1 = generator.subschema_for::<GraderTextSimilarity>();
+        let reference_2 = generator.subschema_for::<GraderPython>();
+        let reference_3 = generator.subschema_for::<GraderScoreModel>();
+        let reference_4 = generator.subschema_for::<GraderMulti>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FineTuneReinforcementMethod {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -6694,12 +8056,38 @@ impl schematic_define::Registration for FineTuneReinforcementMethod {
 pub struct FineTuneSupervisedHyperparameters {
     ///Number of examples in each batch. A larger batch size means that model parameters are updated less frequently, but with lower variance.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":256u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub batch_size: Option<serde_json::Value>,
     ///Scaling factor for the learning rate. A smaller learning rate may be useful to avoid overfitting.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "type":"number"}]
+        )
+    )]
     pub learning_rate_multiplier: Option<serde_json::Value>,
     ///The number of epochs to train the model for. An epoch refers to one full cycle through the training dataset.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "oneOf" = [{"enum":["auto"],
+            "type":"string"},
+            {"maximum":50u64,
+            "minimum":1u64,
+            "type":"integer"}]
+        )
+    )]
     pub n_epochs: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for FineTuneSupervisedHyperparameters {
@@ -6790,6 +8178,25 @@ pub struct FineTuningJob {
     #[schemars(extend("anyOf" = [{"format":"unixtime"}, {"type":"null"}]))]
     pub finished_at: serde_json::Value,
     ///The hyperparameters used for the fine-tuning job. This value will only be returned when running `supervised` jobs.
+    #[schemars(
+        extend(
+            "properties" = {"batch_size":{"anyOf":[{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"maximum":256u64,
+            "minimum":1u64,
+            "type":"integer"}]},
+            {"type":"null"}]},
+            "learning_rate_multiplier":{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"exclusiveMinimum":0u64,
+            "type":"number"}]},
+            "n_epochs":{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"maximum":50u64,
+            "minimum":1u64,
+            "type":"integer"}]}}
+        )
+    )]
     pub hyperparameters: serde_json::Value,
     ///The base model that is being fine-tuned.
     pub model: String,
@@ -6817,7 +8224,8 @@ pub struct FineTuningJob {
     pub training_file: String,
     pub validation_file: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("anyOf" = [{"maxItems":5u64}, {"type":"null"}]))]
+    #[serde(default)]
+    #[schemars(schema_with = "FineTuningJob::field_rules_schema_integrations")]
     pub integrations: Option<serde_json::Value>,
     ///The seed used for the fine-tuning job.
     pub seed: i64,
@@ -6828,6 +8236,23 @@ pub struct FineTuningJob {
     pub method: Option<FineTuneMethod>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl FineTuningJob {
+    fn field_rules_schema_integrations(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FineTuningIntegration>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "oneOf" : [reference_0] }, "maxItems" : 5u64 }, {
+                    "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FineTuningJob {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FineTuningJob));
@@ -7085,6 +8510,7 @@ is returned via API.*/
     pub caller: Option<serde_json::Value>,
     /**The output from the function call generated by your code.
 Can be a string or an list of output content.*/
+    #[schemars(schema_with = "FunctionToolCallOutput::field_rules_schema_output")]
     pub output: serde_json::Value,
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
@@ -7105,6 +8531,20 @@ impl FunctionToolCallOutput {
             );
         schema
     }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionAndCustomToolCallOutput>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -7118,6 +8558,13 @@ impl schematic_define::Registration for FunctionToolCallOutput {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/FunctionToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/FunctionCallOutputStatusEnum"}},
+        "type":"object"}]
+    )
+)]
 pub struct FunctionToolCallOutputResource {
     #[serde(flatten)]
     pub function_tool_call_output: FunctionToolCallOutput,
@@ -7136,6 +8583,13 @@ impl schematic_define::Registration for FunctionToolCallOutputResource {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/FunctionToolCall"},
+        {"properties":{"status":{"$ref":"#/components/schemas/FunctionCallStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct FunctionToolCallResource {
     #[serde(flatten)]
     pub function_tool_call: FunctionToolCall,
@@ -7189,9 +8643,30 @@ pub struct GraderMulti {
     pub type_: String,
     ///The name of the grader.
     pub name: String,
+    #[schemars(schema_with = "GraderMulti::field_rules_schema_graders")]
     pub graders: serde_json::Value,
     ///A formula to calculate the output based on grader results.
     pub calculate_output: String,
+}
+impl GraderMulti {
+    fn field_rules_schema_graders(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderStringCheck>();
+        let reference_1 = generator.subschema_for::<GraderTextSimilarity>();
+        let reference_2 = generator.subschema_for::<GraderPython>();
+        let reference_3 = generator.subschema_for::<GraderScoreModel>();
+        let reference_4 = generator.subschema_for::<GraderLabelModel>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for GraderMulti {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderMulti));
@@ -7897,6 +9372,15 @@ pub struct ImageGenTool {
     #[schemars(extend("enum" = ["image_generation"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-image-1",
+            "gpt-image-1-mini",
+            "gpt-image-1.5"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
@@ -7905,6 +9389,16 @@ or `auto`. Default: `auto`.*/
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["1024x1024",
+            "1024x1536",
+            "1536x1024",
+            "auto"],
+            "type":"string"}]
+        )
+    )]
     pub size: Option<serde_json::Value>,
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
@@ -8146,11 +9640,60 @@ impl schematic_define::Registration for InputContent {
 #[serde(untagged)]
 pub enum InputItem {
     EasyInputMessage(EasyInputMessage),
+    #[schemars(schema_with = "InputItem::variant_rules_schema_1")]
     Item(Item),
     CompactionTriggerItemParam(CompactionTriggerItemParam),
     ItemReferenceParam(ItemReferenceParam),
     ProgramItemParam(ProgramItemParam),
     ProgramOutputItemParam(ProgramOutputItemParam),
+}
+impl InputItem {
+    fn variant_rules_schema_1(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputMessage>();
+        let reference_1 = generator.subschema_for::<OutputMessage>();
+        let reference_2 = generator.subschema_for::<FileSearchToolCall>();
+        let reference_3 = generator.subschema_for::<ComputerToolCall>();
+        let reference_4 = generator.subschema_for::<ComputerCallOutputItemParam>();
+        let reference_5 = generator.subschema_for::<WebSearchToolCall>();
+        let reference_6 = generator.subschema_for::<FunctionToolCall>();
+        let reference_7 = generator.subschema_for::<FunctionCallOutputItemParam>();
+        let reference_8 = generator.subschema_for::<ToolSearchCallItemParam>();
+        let reference_9 = generator.subschema_for::<ToolSearchOutputItemParam>();
+        let reference_10 = generator.subschema_for::<AdditionalToolsItemParam>();
+        let reference_11 = generator.subschema_for::<ReasoningItem>();
+        let reference_12 = generator.subschema_for::<CompactionSummaryItemParam>();
+        let reference_13 = generator.subschema_for::<ImageGenToolCall>();
+        let reference_14 = generator.subschema_for::<CodeInterpreterToolCall>();
+        let reference_15 = generator.subschema_for::<LocalShellToolCall>();
+        let reference_16 = generator.subschema_for::<LocalShellToolCallOutput>();
+        let reference_17 = generator.subschema_for::<FunctionShellCallItemParam>();
+        let reference_18 = generator.subschema_for::<FunctionShellCallOutputItemParam>();
+        let reference_19 = generator.subschema_for::<ApplyPatchToolCallItemParam>();
+        let reference_20 = generator
+            .subschema_for::<ApplyPatchToolCallOutputItemParam>();
+        let reference_21 = generator.subschema_for::<MCPListTools>();
+        let reference_22 = generator.subschema_for::<MCPApprovalRequest>();
+        let reference_23 = generator.subschema_for::<MCPApprovalResponse>();
+        let reference_24 = generator.subschema_for::<MCPToolCall>();
+        let reference_25 = generator.subschema_for::<CustomToolCallOutput>();
+        let reference_26 = generator.subschema_for::<CustomToolCall>();
+        let mut schema = generator.subschema_for::<Item>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4,
+                    reference_5, reference_6, reference_7, reference_8, reference_9,
+                    reference_10, reference_11, reference_12, reference_13, reference_14,
+                    reference_15, reference_16, reference_17, reference_18, reference_19,
+                    reference_20, reference_21, reference_22, reference_23, reference_24,
+                    reference_25, reference_26]
+                ),
+            );
+        schema
+    }
 }
 impl Default for InputItem {
     fn default() -> Self {
@@ -8199,6 +9742,9 @@ types.*/
 pub type InputMessageContentList = Vec<InputContent>;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend("allOf" = [{"$ref":"#/components/schemas/InputMessage"}, {"type":"object"}])
+)]
 pub struct InputMessageResource {
     #[serde(flatten)]
     pub input_message: InputMessage,
@@ -9084,6 +10630,15 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[schemars(schema_with = "MCPTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"oneOf":[{"type":"object"},
+            {"enum":["always",
+            "never"],
+            "type":"string"}]},
+            {"type":"null"}]
+        )
+    )]
     pub require_approval: Option<serde_json::Value>,
     ///Whether this MCP tool is deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9296,7 +10851,28 @@ pub struct MessageContentTextObject {
     #[serde(rename = "type")]
     #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
+    #[schemars(schema_with = "MessageContentTextObject::field_rules_schema_text")]
     pub text: serde_json::Value,
+}
+impl MessageContentTextObject {
+    fn field_rules_schema_text(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<MessageContentTextAnnotationsFileCitationObject>();
+        let reference_1 = generator
+            .subschema_for::<MessageContentTextAnnotationsFilePathObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "annotations" : { "items" : { "oneOf" : [reference_0, reference_1]
+                    } } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for MessageContentTextObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -9463,7 +11039,29 @@ pub struct MessageDeltaContentTextObject {
     #[schemars(extend("enum" = ["text"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "MessageDeltaContentTextObject::field_rules_schema_text")]
     pub text: Option<serde_json::Value>,
+}
+impl MessageDeltaContentTextObject {
+    fn field_rules_schema_text(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<MessageDeltaContentTextAnnotationsFileCitationObject>();
+        let reference_1 = generator
+            .subschema_for::<MessageDeltaContentTextAnnotationsFilePathObject>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "annotations" : { "items" : { "oneOf" : [reference_0, reference_1]
+                    } } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for MessageDeltaContentTextObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -9485,8 +11083,30 @@ pub struct MessageDeltaObject {
     #[schemars(extend("enum" = ["thread.message.delta"]))]
     pub object: String,
     ///The delta containing the fields that have changed on the Message.
-    #[schemars(extend("properties" = {"role":{"enum":["user", "assistant"]}}))]
+    #[schemars(schema_with = "MessageDeltaObject::field_rules_schema_delta")]
     pub delta: serde_json::Value,
+}
+impl MessageDeltaObject {
+    fn field_rules_schema_delta(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<MessageDeltaContentImageFileObject>();
+        let reference_1 = generator.subschema_for::<MessageDeltaContentTextObject>();
+        let reference_2 = generator.subschema_for::<MessageDeltaContentRefusalObject>();
+        let reference_3 = generator.subschema_for::<MessageDeltaContentImageUrlObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "content" : { "items" : { "oneOf" : [reference_0, reference_1,
+                    reference_2, reference_3] } }, "role" : { "enum" : ["user",
+                    "assistant"] } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for MessageDeltaObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageDeltaObject));
@@ -9532,11 +11152,48 @@ pub struct MessageObject {
     #[schemars(extend("enum" = ["user", "assistant"]))]
     pub role: String,
     ///The content of the message in array of text and/or images.
+    #[schemars(schema_with = "MessageObject::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
     pub assistant_id: serde_json::Value,
     pub run_id: serde_json::Value,
+    #[schemars(schema_with = "MessageObject::field_rules_schema_attachments")]
     pub attachments: serde_json::Value,
     pub metadata: Metadata,
+}
+impl MessageObject {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageContentImageFileObject>();
+        let reference_1 = generator.subschema_for::<MessageContentImageUrlObject>();
+        let reference_2 = generator.subschema_for::<MessageContentTextObject>();
+        let reference_3 = generator.subschema_for::<MessageContentRefusalObject>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_1, reference_2, reference_3] }
+                ),
+            );
+        schema
+    }
+    fn field_rules_schema_attachments(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearchTypeOnly>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "properties" : { "tools" : { "items" : { "oneOf" :
+                    [reference_0, reference_1] } } } } }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for MessageObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageObject));
@@ -9592,11 +11249,93 @@ impl schematic_define::Registration for MessageRequestContentTextObject {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum MessageStreamEvent {
+    #[schemars(schema_with = "MessageStreamEvent::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(schema_with = "MessageStreamEvent::variant_rules_schema_1")]
     Json1(serde_json::Value),
+    #[schemars(schema_with = "MessageStreamEvent::variant_rules_schema_2")]
     Json2(serde_json::Value),
+    #[schemars(schema_with = "MessageStreamEvent::variant_rules_schema_3")]
     Json3(serde_json::Value),
+    #[schemars(schema_with = "MessageStreamEvent::variant_rules_schema_4")]
     Json4(serde_json::Value),
+}
+impl MessageStreamEvent {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.message.created"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_1(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.message.in_progress"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_2(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageDeltaObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.message.delta"]
+                    } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_3(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.message.completed"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_4(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<MessageObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.message.incomplete"] } }
+                ),
+            );
+        schema
+    }
 }
 impl Default for MessageStreamEvent {
     fn default() -> Self {
@@ -9705,6 +11444,24 @@ impl schematic_define::Registration for ModelIdsCompaction {
 #[serde(untagged)]
 pub enum ModelIdsResponses {
     ModelIdsShared(ModelIdsShared),
+    #[schemars(
+        extend(
+            "enum" = ["o1-pro",
+            "o1-pro-2025-03-19",
+            "o3-pro",
+            "o3-pro-2025-06-10",
+            "o3-deep-research",
+            "o3-deep-research-2025-06-26",
+            "o4-mini-deep-research",
+            "o4-mini-deep-research-2025-06-26",
+            "computer-use-preview",
+            "computer-use-preview-2025-03-11",
+            "gpt-5-codex",
+            "gpt-5-pro",
+            "gpt-5-pro-2025-10-06",
+            "gpt-5.1-codex-max"]
+        )
+    )]
     Text(String),
 }
 impl Default for ModelIdsResponses {
@@ -9726,6 +11483,91 @@ impl schematic_define::Registration for ModelIdsResponses {
 #[serde(untagged)]
 pub enum ModelIdsShared {
     Text(String),
+    #[schemars(
+        extend(
+            "enum" = ["gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-mini-2026-03-17",
+            "gpt-5.4-nano-2026-03-17",
+            "gpt-5.3-chat-latest",
+            "gpt-5.2",
+            "gpt-5.2-2025-12-11",
+            "gpt-5.2-chat-latest",
+            "gpt-5.2-pro",
+            "gpt-5.2-pro-2025-12-11",
+            "gpt-5.1",
+            "gpt-5.1-2025-11-13",
+            "gpt-5.1-codex",
+            "gpt-5.1-mini",
+            "gpt-5.1-chat-latest",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-2025-08-07",
+            "gpt-5-mini-2025-08-07",
+            "gpt-5-nano-2025-08-07",
+            "gpt-5-chat-latest",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4.1-2025-04-14",
+            "gpt-4.1-mini-2025-04-14",
+            "gpt-4.1-nano-2025-04-14",
+            "o4-mini",
+            "o4-mini-2025-04-16",
+            "o3",
+            "o3-2025-04-16",
+            "o3-mini",
+            "o3-mini-2025-01-31",
+            "o1",
+            "o1-2024-12-17",
+            "o1-preview",
+            "o1-preview-2024-09-12",
+            "o1-mini",
+            "o1-mini-2024-09-12",
+            "gpt-4o",
+            "gpt-4o-2024-11-20",
+            "gpt-4o-2024-08-06",
+            "gpt-4o-2024-05-13",
+            "gpt-4o-audio-preview",
+            "gpt-4o-audio-preview-2024-10-01",
+            "gpt-4o-audio-preview-2024-12-17",
+            "gpt-4o-audio-preview-2025-06-03",
+            "gpt-4o-mini-audio-preview",
+            "gpt-4o-mini-audio-preview-2024-12-17",
+            "gpt-4o-search-preview",
+            "gpt-4o-mini-search-preview",
+            "gpt-4o-search-preview-2025-03-11",
+            "gpt-4o-mini-search-preview-2025-03-11",
+            "chatgpt-4o-latest",
+            "codex-mini-latest",
+            "gpt-4o-mini",
+            "gpt-4o-mini-2024-07-18",
+            "gpt-4-turbo",
+            "gpt-4-turbo-2024-04-09",
+            "gpt-4-0125-preview",
+            "gpt-4-turbo-preview",
+            "gpt-4-1106-preview",
+            "gpt-4-vision-preview",
+            "gpt-4",
+            "gpt-4-0314",
+            "gpt-4-0613",
+            "gpt-4-32k",
+            "gpt-4-32k-0314",
+            "gpt-4-32k-0613",
+            "gpt-3.5-turbo",
+            "gpt-3.5-turbo-16k",
+            "gpt-3.5-turbo-0301",
+            "gpt-3.5-turbo-0613",
+            "gpt-3.5-turbo-1106",
+            "gpt-3.5-turbo-0125",
+            "gpt-3.5-turbo-16k-0613"]
+        )
+    )]
     Text1(String),
 }
 impl Default for ModelIdsShared {
@@ -9786,6 +11628,8 @@ impl schematic_define::Registration for ModelResponseProperties {
 pub struct ModifyAssistantRequest2 {
     ///ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ModifyAssistantRequest2::field_rules_schema_model")]
     pub model: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -9800,7 +11644,8 @@ pub struct ModifyAssistantRequest2 {
     pub instructions: Option<serde_json::Value>,
     ///A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 128u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "ModifyAssistantRequest2::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -9827,6 +11672,33 @@ pub struct ModifyAssistantRequest2 {
     pub response_format: Option<serde_json::Value>,
 }
 impl ModifyAssistantRequest2 {
+    fn field_rules_schema_model(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantSupportedModels>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(128u64));
+        schema
+    }
     fn field_rules_schema_response_format(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -10586,7 +12458,9 @@ pub type ParallelToolCalls = bool;
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum PartialImages {
+    #[schemars(extend("maximum" = 3u64, "minimum" = 0u64))]
     Integer(i64),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for PartialImages {
@@ -10615,7 +12489,26 @@ currently always `content`.*/
     /**The content that should be matched when generating a model response.
 If generated tokens would match this content, the entire model response
 can be returned much more quickly.*/
+    #[schemars(schema_with = "PredictionContent::field_rules_schema_content")]
     pub content: serde_json::Value,
+}
+impl PredictionContent {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ChatCompletionRequestMessageContentPartText>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "minItems" : 1u64,
+                    "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for PredictionContent {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PredictionContent));
@@ -11480,8 +13373,24 @@ impl schematic_define::Registration for ProjectUserUpdateRequest {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum Prompt {
+    #[schemars(schema_with = "Prompt::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl Prompt {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ResponsePromptVariables>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "variables" : reference_0 }),
+            );
+        schema
+    }
 }
 impl Default for Prompt {
     fn default() -> Self {
@@ -11588,8 +13497,16 @@ impl schematic_define::Registration for PublicUpdateOrganizationRoleBody {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeAudioFormats {
+    #[schemars(
+        extend(
+            "properties" = {"rate":{"enum":[24000u64]},
+            "type":{"enum":["audio/pcm"]}}
+        )
+    )]
     Json(serde_json::Value),
+    #[schemars(extend("properties" = {"type":{"enum":["audio/pcmu"]}}))]
     Json1(serde_json::Value),
+    #[schemars(extend("properties" = {"type":{"enum":["audio/pcma"]}}))]
     Json2(serde_json::Value),
 }
 impl Default for RealtimeAudioFormats {
@@ -12055,6 +13972,9 @@ could be responding in either text or audio.*/
     /**Maximum number of output tokens for a single assistant response,
 inclusive of tool calls, that was used in this response.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
 }
 impl schematic_define::Registration for RealtimeBetaResponse {
@@ -12101,6 +14021,10 @@ start of the session.*/
     /**How the model chooses tools. Provide one of the string modes or force a specific
 function/MCP tool.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeBetaResponseCreateParams::field_rules_schema_tool_choice"
+    )]
     pub tool_choice: Option<serde_json::Value>,
     ///Sampling temperature for the model, limited to [0.6, 1.2]. Defaults to 0.8.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -12110,6 +14034,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
     /**Controls which conversation the response is added to. Currently supports
 `auto` and `none`, with `auto` as the default value. The `auto` value
@@ -12117,6 +14044,9 @@ means that the contents of the response will be added to the default
 conversation. Set this to `none` to create an out-of-band response which
 will not add items to default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"string"}, {"enum":["auto", "none"], "type":"string"}])
+    )]
     pub conversation: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -12128,6 +14058,22 @@ conversation. An empty array `[]` will clear the context for this Response.
 Note that this can include references to items from the default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Vec<RealtimeConversationItem>>,
+}
+impl RealtimeBetaResponseCreateParams {
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolChoiceOptions>();
+        let reference_1 = generator.subschema_for::<ToolChoiceFunction>();
+        let reference_2 = generator.subschema_for::<ToolChoiceMCP>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeBetaResponseCreateParams {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -12230,7 +14176,21 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionComplet
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<serde_json::Value>,
     ///Usage statistics for the transcription.
+    #[schemars(
+        schema_with = "RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted::field_rules_schema_usage"
+    )]
     pub usage: serde_json::Value,
+}
+impl RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted {
+    fn field_rules_schema_usage(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TranscriptTextUsageTokens>();
+        let reference_1 = generator.subschema_for::<TranscriptTextUsageDuration>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration
 for RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted {
@@ -13832,7 +15792,22 @@ pub struct RealtimeClientEventSessionUpdate {
     pub type_: String,
     /**Update the Realtime session. Choose either a realtime
 session or a transcription session.*/
+    #[schemars(
+        schema_with = "RealtimeClientEventSessionUpdate::field_rules_schema_session"
+    )]
     pub session: serde_json::Value,
+}
+impl RealtimeClientEventSessionUpdate {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateRequestGA>();
+        let reference_1 = generator
+            .subschema_for::<RealtimeTranscriptionSessionCreateRequestGA>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeClientEventSessionUpdate {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -14256,7 +16231,23 @@ until it expires.*/
     /**Session configuration to use for the client secret. Choose either a realtime
 session or a transcription session.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeCreateClientSecretRequest::field_rules_schema_session"
+    )]
     pub session: Option<serde_json::Value>,
+}
+impl RealtimeCreateClientSecretRequest {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateRequestGA>();
+        let reference_1 = generator
+            .subschema_for::<RealtimeTranscriptionSessionCreateRequestGA>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeCreateClientSecretRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -14278,7 +16269,22 @@ pub struct RealtimeCreateClientSecretResponse {
     #[schemars(extend("format" = "unixtime"))]
     pub expires_at: i64,
     ///The session configuration for either a realtime or transcription session.
+    #[schemars(
+        schema_with = "RealtimeCreateClientSecretResponse::field_rules_schema_session"
+    )]
     pub session: serde_json::Value,
+}
+impl RealtimeCreateClientSecretResponse {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateResponseGA>();
+        let reference_1 = generator
+            .subschema_for::<RealtimeTranscriptionSessionCreateResponseGA>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeCreateClientSecretResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -14453,7 +16459,28 @@ pub struct RealtimeMCPToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeMCPToolCall::field_rules_schema_error")]
     pub error: Option<serde_json::Value>,
+}
+impl RealtimeMCPToolCall {
+    fn field_rules_schema_error(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeMCPProtocolError>();
+        let reference_1 = generator.subschema_for::<RealtimeMCPToolExecutionError>();
+        let reference_2 = generator.subschema_for::<RealtimeMCPHTTPError>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1, reference_2] }, { "type" :
+                    "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeMCPToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeMCPToolCall));
@@ -14595,6 +16622,9 @@ output to mode `text` will disable audio output from the model.*/
     /**Maximum number of output tokens for a single assistant response,
 inclusive of tool calls, that was used in this response.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
 }
 impl RealtimeResponse {
@@ -14644,10 +16674,16 @@ Note that the server sets default instructions which will be used if this field 
     pub audio: Option<serde_json::Value>,
     ///Tools available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeResponseCreateParams::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     /**How the model chooses tools. Provide one of the string modes or force a specific
 function/MCP tool.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeResponseCreateParams::field_rules_schema_tool_choice"
+    )]
     pub tool_choice: Option<serde_json::Value>,
     /**Whether the model may call multiple tools in parallel. Only supported by
 reasoning Realtime models such as `gpt-realtime-2`.*/
@@ -14660,6 +16696,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
     /**Controls which conversation the response is added to. Currently supports
 `auto` and `none`, with `auto` as the default value. The `auto` value
@@ -14667,6 +16706,9 @@ means that the contents of the response will be added to the default
 conversation. Set this to `none` to create an out-of-band response which
 will not add items to default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"string"}, {"enum":["auto", "none"], "type":"string"}])
+    )]
     pub conversation: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -14694,6 +16736,33 @@ impl RealtimeResponseCreateParams {
                     { "output" : { "properties" : { "format" : reference_0, "voice" :
                     reference_1 } } }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeFunctionTool>();
+        let reference_1 = generator.subschema_for::<MCPTool>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolChoiceOptions>();
+        let reference_1 = generator.subschema_for::<ToolChoiceFunction>();
+        let reference_2 = generator.subschema_for::<ToolChoiceMCP>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -15222,7 +17291,21 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<serde_json::Value>,
     ///Usage statistics for the transcription, this is billed according to the ASR model's pricing rather than the realtime model's pricing.
+    #[schemars(
+        schema_with = "RealtimeServerEventConversationItemInputAudioTranscriptionCompleted::field_rules_schema_usage"
+    )]
     pub usage: serde_json::Value,
+}
+impl RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
+    fn field_rules_schema_usage(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TranscriptTextUsageTokens>();
+        let reference_1 = generator.subschema_for::<TranscriptTextUsageDuration>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration
 for RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
@@ -16340,7 +18423,22 @@ pub struct RealtimeServerEventSessionCreated {
     #[schemars(extend("enum" = ["session.created"]))]
     pub type_: String,
     ///The session configuration.
+    #[schemars(
+        schema_with = "RealtimeServerEventSessionCreated::field_rules_schema_session"
+    )]
     pub session: serde_json::Value,
+}
+impl RealtimeServerEventSessionCreated {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateResponseGA>();
+        let reference_1 = generator
+            .subschema_for::<RealtimeTranscriptionSessionCreateResponseGA>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeServerEventSessionCreated {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16364,7 +18462,22 @@ pub struct RealtimeServerEventSessionUpdated {
     #[schemars(extend("enum" = ["session.updated"]))]
     pub type_: String,
     ///The session configuration.
+    #[schemars(
+        schema_with = "RealtimeServerEventSessionUpdated::field_rules_schema_session"
+    )]
     pub session: serde_json::Value,
+}
+impl RealtimeServerEventSessionUpdated {
+    fn field_rules_schema_session(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeSessionCreateResponseGA>();
+        let reference_1 = generator
+            .subschema_for::<RealtimeTranscriptionSessionCreateResponseGA>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for RealtimeServerEventSessionUpdated {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -16417,6 +18530,28 @@ set this to ["text"].*/
     pub modalities: Option<serde_json::Value>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-realtime",
+            "gpt-realtime-1.5",
+            "gpt-realtime-2025-08-28",
+            "gpt-4o-realtime-preview",
+            "gpt-4o-realtime-preview-2024-10-01",
+            "gpt-4o-realtime-preview-2024-12-17",
+            "gpt-4o-realtime-preview-2025-06-03",
+            "gpt-4o-mini-realtime-preview",
+            "gpt-4o-mini-realtime-preview-2024-12-17",
+            "gpt-realtime-mini",
+            "gpt-realtime-mini-2025-10-06",
+            "gpt-realtime-mini-2025-12-15",
+            "gpt-audio-1.5",
+            "gpt-audio-mini",
+            "gpt-audio-mini-2025-10-06",
+            "gpt-audio-mini-2025-12-15"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The default system instructions (i.e. system message) prepended to model
 calls. This field allows the client to guide the model on desired
@@ -16470,6 +18605,14 @@ in between model turns, not while a response is in progress.*/
     #[schemars(extend("maximum" = 1.5f64, "minimum" = 0.25f64))]
     pub speed: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"type":"object"}]},
+            {"type":"null"}]
+        )
+    )]
     pub tracing: Option<serde_json::Value>,
     ///Tools (functions) available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16486,6 +18629,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_response_output_tokens: Option<serde_json::Value>,
     ///Expiration timestamp for the session, in seconds since epoch.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16594,6 +18740,9 @@ tracing is enabled for a session, the configuration cannot be modified.
 `auto` will create a trace for the session with default values for the
 workflow name, group id, and metadata.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"enum":["auto"], "type":"string"}, {"type":"object"}])
+    )]
     pub tracing: Option<serde_json::Value>,
     /**Configuration for turn detection. Can be set to `null` to turn off. Server
 VAD means that the model will detect the start and end of speech based on
@@ -16616,6 +18765,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_response_output_tokens: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<RealtimeTruncation>,
@@ -16648,6 +18800,31 @@ the model respond with text only. It is not possible to request both `text` and 
     pub output_modalities: Option<Vec<String>>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-realtime",
+            "gpt-realtime-1.5",
+            "gpt-realtime-2",
+            "gpt-realtime-2.1",
+            "gpt-realtime-2.1-mini",
+            "gpt-realtime-2025-08-28",
+            "gpt-4o-realtime-preview",
+            "gpt-4o-realtime-preview-2024-10-01",
+            "gpt-4o-realtime-preview-2024-12-17",
+            "gpt-4o-realtime-preview-2025-06-03",
+            "gpt-4o-mini-realtime-preview",
+            "gpt-4o-mini-realtime-preview-2024-12-17",
+            "gpt-realtime-mini",
+            "gpt-realtime-mini-2025-10-06",
+            "gpt-realtime-mini-2025-12-15",
+            "gpt-audio-1.5",
+            "gpt-audio-mini",
+            "gpt-audio-mini-2025-10-06",
+            "gpt-audio-mini-2025-12-15"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The default system instructions (i.e. system message) prepended to model calls. This field allows the client to guide the model on desired responses. The model can be instructed on response content and format, (e.g. "be extremely succinct", "act friendly", "here are examples of good responses") and on audio behavior (e.g. "talk quickly", "inject emotion into your voice", "laugh frequently"). The instructions are not guaranteed to be followed by the model, but they provide guidance to the model on the desired behavior.
 
@@ -16676,13 +18853,22 @@ tracing is enabled for a session, the configuration cannot be modified.
 `auto` will create a trace for the session with default values for the
 workflow name, group id, and metadata.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"enum":["auto"], "type":"string"}, {"type":"object"}])
+    )]
     pub tracing: Option<serde_json::Value>,
     ///Tools available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "RealtimeSessionCreateRequestGA::field_rules_schema_tools")]
     pub tools: Option<Vec<serde_json::Value>>,
     /**How the model chooses tools. Provide one of the string modes or force a specific
 function/MCP tool.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSessionCreateRequestGA::field_rules_schema_tool_choice"
+    )]
     pub tool_choice: Option<serde_json::Value>,
     /**Whether the model may call multiple tools in parallel. Only supported by
 reasoning Realtime models such as `gpt-realtime-2`.*/
@@ -16695,6 +18881,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<RealtimeTruncation>,
@@ -16723,6 +18912,33 @@ impl RealtimeSessionCreateRequestGA {
                     "maximum" : 1.5f64, "minimum" : 0.25f64 }, "voice" : reference_5 } }
                     }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeFunctionTool>();
+        let reference_1 = generator.subschema_for::<MCPTool>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolChoiceOptions>();
+        let reference_1 = generator.subschema_for::<ToolChoiceFunction>();
+        let reference_2 = generator.subschema_for::<ToolChoiceMCP>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -16794,6 +19010,9 @@ tracing is enabled for a session, the configuration cannot be modified.
 `auto` will create a trace for the session with default values for the
 workflow name, group id, and metadata.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"enum":["auto"], "type":"string"}, {"type":"object"}])
+    )]
     pub tracing: Option<serde_json::Value>,
     /**Configuration for turn detection. Can be set to `null` to turn off. Server
 VAD means that the model will detect the start and end of speech based on
@@ -16812,6 +19031,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
 }
 impl RealtimeSessionCreateResponse {
@@ -16872,6 +19094,31 @@ the model respond with text only. It is not possible to request both `text` and 
     pub output_modalities: Option<Vec<String>>,
     ///The Realtime model used for this session.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-realtime",
+            "gpt-realtime-1.5",
+            "gpt-realtime-2",
+            "gpt-realtime-2.1",
+            "gpt-realtime-2.1-mini",
+            "gpt-realtime-2025-08-28",
+            "gpt-4o-realtime-preview",
+            "gpt-4o-realtime-preview-2024-10-01",
+            "gpt-4o-realtime-preview-2024-12-17",
+            "gpt-4o-realtime-preview-2025-06-03",
+            "gpt-4o-mini-realtime-preview",
+            "gpt-4o-mini-realtime-preview-2024-12-17",
+            "gpt-realtime-mini",
+            "gpt-realtime-mini-2025-10-06",
+            "gpt-realtime-mini-2025-12-15",
+            "gpt-audio-1.5",
+            "gpt-audio-mini",
+            "gpt-audio-mini-2025-10-06",
+            "gpt-audio-mini-2025-12-15"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The default system instructions (i.e. system message) prepended to model calls. This field allows the client to guide the model on desired responses. The model can be instructed on response content and format, (e.g. "be extremely succinct", "act friendly", "here are examples of good responses") and on audio behavior (e.g. "talk quickly", "inject emotion into your voice", "laugh frequently"). The instructions are not guaranteed to be followed by the model, but they provide guidance to the model on the desired behavior.
 
@@ -16897,13 +19144,29 @@ Note that the server sets default instructions which will be used if this field 
     )]
     pub include: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"oneOf":[{"enum":["auto"],
+            "type":"string"},
+            {"type":"object"}]},
+            {"type":"null"}]
+        )
+    )]
     pub tracing: Option<serde_json::Value>,
     ///Tools available to the model.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSessionCreateResponseGA::field_rules_schema_tools"
+    )]
     pub tools: Option<Vec<serde_json::Value>>,
     /**How the model chooses tools. Provide one of the string modes or force a specific
 function/MCP tool.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RealtimeSessionCreateResponseGA::field_rules_schema_tool_choice"
+    )]
     pub tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<RealtimeReasoning>,
@@ -16912,6 +19175,9 @@ inclusive of tool calls. Provide an integer between 1 and 4096 to
 limit output tokens, or `inf` for the maximum available tokens for a
 given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend("oneOf" = [{"type":"integer"}, {"enum":["inf"], "type":"string"}])
+    )]
     pub max_output_tokens: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<RealtimeTruncation>,
@@ -16940,6 +19206,33 @@ impl RealtimeSessionCreateResponseGA {
                     "maximum" : 1.5f64, "minimum" : 0.25f64 }, "voice" : reference_5 } }
                     }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RealtimeFunctionTool>();
+        let reference_1 = generator.subschema_for::<MCPTool>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ToolChoiceOptions>();
+        let reference_1 = generator.subschema_for::<ToolChoiceFunction>();
+        let reference_2 = generator.subschema_for::<ToolChoiceMCP>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -17811,7 +20104,16 @@ Truncation can be disabled entirely, which means the server will never truncate 
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeTruncation {
+    #[schemars(extend("enum" = ["auto", "disabled"]))]
     Text(String),
+    #[schemars(
+        extend(
+            "properties" = {"retention_ratio":{"maximum":1u64,
+            "minimum":0u64},
+            "token_limits":{"properties":{"post_instructions":{"minimum":0u64}}},
+            "type":{"enum":["retention_ratio"]}}
+        )
+    )]
     Json(serde_json::Value),
 }
 impl Default for RealtimeTruncation {
@@ -17832,7 +20134,23 @@ impl schematic_define::Registration for RealtimeTruncation {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RealtimeTurnDetection {
+    #[schemars(
+        extend(
+            "oneOf" = [{"properties":{"idle_timeout_ms":{"anyOf":[{"maximum":30000u64,
+            "minimum":5000u64},
+            {"type":"null"}]},
+            "type":{"const":"server_vad"}},
+            "type":"object"},
+            {"properties":{"eagerness":{"enum":["low",
+            "medium",
+            "high",
+            "auto"]},
+            "type":{"const":"semantic_vad"}},
+            "type":"object"}]
+        )
+    )]
     Variant0(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for RealtimeTurnDetection {
@@ -17892,7 +20210,11 @@ impl schematic_define::Registration for Reasoning {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ReasoningEffort {
+    #[schemars(
+        extend("enum" = ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    )]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for ReasoningEffort {
@@ -17944,6 +20266,40 @@ impl schematic_define::Registration for ReasoningItem {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/ModelResponseProperties"},
+        {"$ref":"#/components/schemas/ResponseProperties"},
+        {"properties":{"completed_at":{"anyOf":[{"format":"unixtime"},
+        {"type":"null"}]},
+        "created_at":{"format":"unixtime"},
+        "error":{"$ref":"#/components/schemas/ResponseError"},
+        "incomplete_details":{"anyOf":[{"properties":{"reason":{"enum":["max_output_tokens",
+        "content_filter"]}}},
+        {"type":"null"}]},
+        "instructions":{"anyOf":[{"oneOf":[{"type":"string"},
+        {"items":{"$ref":"#/components/schemas/InputItem"},
+        "type":"array"}]},
+        {"type":"null"}]},
+        "moderation":{"anyOf":[{"$ref":"#/components/schemas/Moderation"},
+        {"type":"null"}]},
+        "object":{"enum":["response"]},
+        "output":{"items":{"$ref":"#/components/schemas/OutputItem"}},
+        "prompt_cache_options":{"$ref":"#/components/schemas/PromptCacheOptions"},
+        "reasoning":{"anyOf":[{"$ref":"#/components/schemas/Reasoning"},
+        {"type":"null"}]},
+        "status":{"enum":["completed",
+        "failed",
+        "in_progress",
+        "cancelled",
+        "queued",
+        "incomplete"]},
+        "truncation":{"anyOf":[{"enum":["auto",
+        "disabled"]},
+        {"type":"null"}]}},
+        "type":"object"}]
+    )
+)]
 pub struct Response {
     #[serde(flatten)]
     pub model_response_properties: ModelResponseProperties,
@@ -18334,8 +20690,24 @@ impl schematic_define::Registration for ResponseCustomToolCallInputDoneEvent {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponseError {
+    #[schemars(schema_with = "ResponseError::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl ResponseError {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ResponseErrorCode>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "code" : reference_0 }),
+            );
+        schema
+    }
 }
 impl Default for ResponseError {
     fn default() -> Self {
@@ -19102,7 +21474,9 @@ impl schematic_define::Registration for ResponseMCPListToolsInProgressEvent {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponseModalities {
+    #[schemars(extend("items" = {"enum":["text", "audio"], "type":"string"}))]
     TextList(Vec<String>),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for ResponseModalities {
@@ -19202,8 +21576,29 @@ impl schematic_define::Registration for ResponseOutputTextAnnotationAddedEvent {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ResponsePromptVariables {
+    #[schemars(schema_with = "ResponsePromptVariables::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl ResponsePromptVariables {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputTextContent>();
+        let reference_1 = generator.subschema_for::<InputImageContent>();
+        let reference_2 = generator.subschema_for::<InputFileContent>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "additionalProperties".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [{ "type" : "string" }, reference_0, reference_1,
+                    reference_2] }
+                ),
+            );
+        schema
+    }
 }
 impl Default for ResponsePromptVariables {
     fn default() -> Self {
@@ -20076,6 +22471,13 @@ Notes:
 - `background` is not supported over WebSocket.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"properties":{"type":{"enum":["response.create"]}},
+        "type":"object"},
+        {"$ref":"#/components/schemas/CreateResponse"}]
+    )
+)]
 pub struct ResponsesClientEventResponseCreate {
     #[serde(flatten)]
     pub json: serde_json::Value,
@@ -20279,6 +22681,7 @@ impl schematic_define::Registration for RunCompletionUsage {
 #[derive(JsonSchema)]
 pub struct RunGraderRequest2 {
     ///The grader used for the fine-tuning job.
+    #[schemars(schema_with = "RunGraderRequest2::field_rules_schema_grader")]
     pub grader: serde_json::Value,
     /**The dataset item provided to the grader. This will be used to populate
 the `item` namespace. See [the guide](/docs/guides/graders) for more details.*/
@@ -20289,6 +22692,26 @@ the `sample` namespace. See [the guide](/docs/guides/graders) for more details.
 The `output_json` variable will be populated if the model sample is a
 valid JSON string.*/
     pub model_sample: String,
+}
+impl RunGraderRequest2 {
+    fn field_rules_schema_grader(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderStringCheck>();
+        let reference_1 = generator.subschema_for::<GraderTextSimilarity>();
+        let reference_2 = generator.subschema_for::<GraderPython>();
+        let reference_3 = generator.subschema_for::<GraderScoreModel>();
+        let reference_4 = generator.subschema_for::<GraderMulti>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunGraderRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunGraderRequest2));
@@ -20385,7 +22808,7 @@ pub struct RunObject {
     ///The instructions that the [assistant](/docs/api-reference/assistants) used for this run.
     pub instructions: String,
     ///The list of tools that the [assistant](/docs/api-reference/assistants) used for this run.
-    #[schemars(extend("maxItems" = 20u64))]
+    #[schemars(schema_with = "RunObject::field_rules_schema_tools")]
     pub tools: Vec<serde_json::Value>,
     pub metadata: Metadata,
     pub usage: RunCompletionUsage,
@@ -20401,7 +22824,9 @@ pub struct RunObject {
     ///The maximum number of completion tokens specified to have been used over the course of the run.
     #[schemars(extend("minimum" = 256u64))]
     pub max_completion_tokens: i64,
+    #[schemars(schema_with = "RunObject::field_rules_schema_truncation_strategy")]
     pub truncation_strategy: serde_json::Value,
+    #[schemars(schema_with = "RunObject::field_rules_schema_tool_choice")]
     pub tool_choice: serde_json::Value,
     pub parallel_tool_calls: ParallelToolCalls,
     pub response_format: AssistantsApiResponseFormatOption,
@@ -20419,6 +22844,45 @@ impl RunObject {
                     { "submit_tool_outputs" : { "properties" : { "tool_calls" : { "items"
                     : reference_0 } } }, "type" : { "enum" : ["submit_tool_outputs"] } }
                 ),
+            );
+        schema
+    }
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantToolsCode>();
+        let reference_1 = generator.subschema_for::<AssistantToolsFileSearch>();
+        let reference_2 = generator.subschema_for::<AssistantToolsFunction>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(20u64));
+        schema
+    }
+    fn field_rules_schema_truncation_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<TruncationObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
+    fn field_rules_schema_tool_choice(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<AssistantsApiToolChoiceOption>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
             );
         schema
     }
@@ -20464,7 +22928,27 @@ pub struct RunStepDeltaObject {
     #[schemars(extend("enum" = ["thread.run.step.delta"]))]
     pub object: String,
     ///The delta containing the fields that have changed on the run step.
+    #[schemars(schema_with = "RunStepDeltaObject::field_rules_schema_delta")]
     pub delta: serde_json::Value,
+}
+impl RunStepDeltaObject {
+    fn field_rules_schema_delta(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDeltaStepDetailsMessageCreationObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "step_details" : { "oneOf" : [reference_0, reference_1] } }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDeltaObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStepDeltaObject));
@@ -20510,7 +22994,31 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeObject {
     pub type_: String,
     ///The Code Interpreter tool call definition.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RunStepDeltaStepDetailsToolCallsCodeObject::field_rules_schema_code_interpreter"
+    )]
     pub code_interpreter: Option<serde_json::Value>,
+}
+impl RunStepDeltaStepDetailsToolCallsCodeObject {
+    fn field_rules_schema_code_interpreter(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsCodeOutputImageObject>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "outputs" : { "items" : { "oneOf" : [reference_0, reference_1] } }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsCodeObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -20632,7 +23140,30 @@ pub struct RunStepDeltaStepDetailsToolCallsObject {
     pub type_: String,
     ///An array of tool calls the run step was involved in. These can be associated with one of three types of tools: `code_interpreter`, `file_search`, or `function`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "RunStepDeltaStepDetailsToolCallsObject::field_rules_schema_tool_calls"
+    )]
     pub tool_calls: Option<Vec<serde_json::Value>>,
+}
+impl RunStepDeltaStepDetailsToolCallsObject {
+    fn field_rules_schema_tool_calls(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsCodeObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsFileSearchObject>();
+        let reference_2 = generator
+            .subschema_for::<RunStepDeltaStepDetailsToolCallsFunctionObject>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -20675,7 +23206,30 @@ pub struct RunStepDetailsToolCallsCodeObject {
     #[schemars(extend("enum" = ["code_interpreter"]))]
     pub type_: String,
     ///The Code Interpreter tool call definition.
+    #[schemars(
+        schema_with = "RunStepDetailsToolCallsCodeObject::field_rules_schema_code_interpreter"
+    )]
     pub code_interpreter: serde_json::Value,
+}
+impl RunStepDetailsToolCallsCodeObject {
+    fn field_rules_schema_code_interpreter(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDetailsToolCallsCodeOutputLogsObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDetailsToolCallsCodeOutputImageObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "outputs" : { "items" : { "oneOf" : [reference_0, reference_1] } }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDetailsToolCallsCodeObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -20849,7 +23403,28 @@ pub struct RunStepDetailsToolCallsObject {
     #[schemars(extend("enum" = ["tool_calls"]))]
     pub type_: String,
     ///An array of tool calls the run step was involved in. These can be associated with one of three types of tools: `code_interpreter`, `file_search`, or `function`.
+    #[schemars(
+        schema_with = "RunStepDetailsToolCallsObject::field_rules_schema_tool_calls"
+    )]
     pub tool_calls: Vec<serde_json::Value>,
+}
+impl RunStepDetailsToolCallsObject {
+    fn field_rules_schema_tool_calls(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepDetailsToolCallsCodeObject>();
+        let reference_1 = generator
+            .subschema_for::<RunStepDetailsToolCallsFileSearchObject>();
+        let reference_2 = generator
+            .subschema_for::<RunStepDetailsToolCallsFunctionObject>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for RunStepDetailsToolCallsObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -20889,6 +23464,7 @@ pub struct RunStepObject {
     )]
     pub status: String,
     ///The details of the run step.
+    #[schemars(schema_with = "RunStepObject::field_rules_schema_step_details")]
     pub step_details: serde_json::Value,
     #[schemars(
         extend(
@@ -20909,6 +23485,18 @@ pub struct RunStepObject {
     pub metadata: Metadata,
     pub usage: RunStepCompletionUsage,
 }
+impl RunStepObject {
+    fn field_rules_schema_step_details(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<RunStepDetailsMessageCreationObject>();
+        let reference_1 = generator.subschema_for::<RunStepDetailsToolCallsObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+}
 impl schematic_define::Registration for RunStepObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStepObject));
     fn register(
@@ -20922,13 +23510,127 @@ impl schematic_define::Registration for RunStepObject {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RunStepStreamEvent {
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_1")]
     Json1(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_2")]
     Json2(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_3")]
     Json3(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_4")]
     Json4(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_5")]
     Json5(serde_json::Value),
+    #[schemars(schema_with = "RunStepStreamEvent::variant_rules_schema_6")]
     Json6(serde_json::Value),
+}
+impl RunStepStreamEvent {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.created"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_1(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.in_progress"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_2(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepDeltaObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.delta"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_3(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.completed"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_4(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.failed"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_5(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.cancelled"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_6(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunStepObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.step.expired"] } }
+                ),
+            );
+        schema
+    }
 }
 impl Default for RunStepStreamEvent {
     fn default() -> Self {
@@ -20948,16 +23650,178 @@ impl schematic_define::Registration for RunStepStreamEvent {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum RunStreamEvent {
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_1")]
     Json1(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_2")]
     Json2(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_3")]
     Json3(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_4")]
     Json4(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_5")]
     Json5(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_6")]
     Json6(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_7")]
     Json7(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_8")]
     Json8(serde_json::Value),
+    #[schemars(schema_with = "RunStreamEvent::variant_rules_schema_9")]
     Json9(serde_json::Value),
+}
+impl RunStreamEvent {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.created"] }
+                    }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_1(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.queued"] }
+                    }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_2(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.in_progress"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_3(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.requires_action"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_4(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.completed"]
+                    } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_5(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.incomplete"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_6(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.failed"] }
+                    }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_7(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" :
+                    ["thread.run.cancelling"] } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_8(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.cancelled"]
+                    } }
+                ),
+            );
+        schema
+    }
+    fn variant_rules_schema_9(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<RunObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.run.expired"] }
+                    }
+                ),
+            );
+        schema
+    }
 }
 impl Default for RunStreamEvent {
     fn default() -> Self {
@@ -20998,7 +23862,11 @@ impl schematic_define::Registration for RunToolCallObject {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ServiceTier {
+    #[schemars(
+        extend("enum" = ["auto", "default", "flex", "scale", "priority", "fast"])
+    )]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for ServiceTier {
@@ -21150,6 +24018,7 @@ returned text will not contain the stop sequence.*/
 #[serde(untagged)]
 pub enum StopConfiguration {
     Text(String),
+    #[schemars(extend("maxItems" = 4u64, "minItems" = 1u64))]
     TextList(Vec<String>),
 }
 impl Default for StopConfiguration {
@@ -21285,7 +24154,24 @@ impl schematic_define::Registration for ThreadObject {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum ThreadStreamEvent {
+    #[schemars(schema_with = "ThreadStreamEvent::variant_rules_schema_0")]
     Json(serde_json::Value),
+}
+impl ThreadStreamEvent {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ThreadObject>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!(
+                    { "data" : reference_0, "event" : { "enum" : ["thread.created"] } }
+                ),
+            );
+        schema
+    }
 }
 impl Default for ThreadStreamEvent {
     fn default() -> Self {
@@ -22013,9 +24899,27 @@ pub struct UpdateVectorStoreRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "UpdateVectorStoreRequest::field_rules_schema_expires_after"
+    )]
     pub expires_after: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl UpdateVectorStoreRequest {
+    fn field_rules_schema_expires_after(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<VectorStoreExpirationAfter>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for UpdateVectorStoreRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22069,7 +24973,23 @@ pub struct Upload {
     #[schemars(extend("enum" = ["upload"]))]
     pub object: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "Upload::field_rules_schema_file")]
     pub file: Option<serde_json::Value>,
+}
+impl Upload {
+    fn field_rules_schema_file(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<OpenAIFile>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "allOf".to_owned(),
+                serde_json::json!([reference_0, { "nullable" : true }]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for Upload {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Upload));
@@ -22412,7 +25332,37 @@ pub struct UsageTimeBucket {
     pub object: String,
     pub start_time: i64,
     pub end_time: i64,
+    #[schemars(schema_with = "UsageTimeBucket::field_rules_schema_results")]
     pub results: Vec<serde_json::Value>,
+}
+impl UsageTimeBucket {
+    fn field_rules_schema_results(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<UsageCompletionsResult>();
+        let reference_1 = generator.subschema_for::<UsageEmbeddingsResult>();
+        let reference_2 = generator.subschema_for::<UsageModerationsResult>();
+        let reference_3 = generator.subschema_for::<UsageImagesResult>();
+        let reference_4 = generator.subschema_for::<UsageAudioSpeechesResult>();
+        let reference_5 = generator.subschema_for::<UsageAudioTranscriptionsResult>();
+        let reference_6 = generator.subschema_for::<UsageVectorStoresResult>();
+        let reference_7 = generator
+            .subschema_for::<UsageCodeInterpreterSessionsResult>();
+        let reference_8 = generator.subschema_for::<UsageFileSearchCallsResult>();
+        let reference_9 = generator.subschema_for::<UsageWebSearchCallsResult>();
+        let reference_10 = generator.subschema_for::<CostsResult>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_1, reference_2, reference_3,
+                    reference_4, reference_5, reference_6, reference_7, reference_8,
+                    reference_9, reference_10] }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for UsageTimeBucket {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UsageTimeBucket));
@@ -22682,7 +25632,28 @@ impl schematic_define::Registration for VadConfig {
 #[derive(JsonSchema)]
 pub struct ValidateGraderRequest2 {
     ///The grader used for the fine-tuning job.
+    #[schemars(schema_with = "ValidateGraderRequest2::field_rules_schema_grader")]
     pub grader: serde_json::Value,
+}
+impl ValidateGraderRequest2 {
+    fn field_rules_schema_grader(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderStringCheck>();
+        let reference_1 = generator.subschema_for::<GraderTextSimilarity>();
+        let reference_2 = generator.subschema_for::<GraderPython>();
+        let reference_3 = generator.subschema_for::<GraderScoreModel>();
+        let reference_4 = generator.subschema_for::<GraderMulti>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ValidateGraderRequest2 {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22699,7 +25670,29 @@ impl schematic_define::Registration for ValidateGraderRequest2 {
 pub struct ValidateGraderResponse {
     ///The grader used for the fine-tuning job.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ValidateGraderResponse::field_rules_schema_grader")]
     pub grader: Option<serde_json::Value>,
+}
+impl ValidateGraderResponse {
+    fn field_rules_schema_grader(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<GraderStringCheck>();
+        let reference_1 = generator.subschema_for::<GraderTextSimilarity>();
+        let reference_2 = generator.subschema_for::<GraderPython>();
+        let reference_3 = generator.subschema_for::<GraderScoreModel>();
+        let reference_4 = generator.subschema_for::<GraderMulti>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ValidateGraderResponse {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22737,7 +25730,16 @@ impl schematic_define::Registration for VectorStoreExpirationAfter {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum VectorStoreFileAttributes {
+    #[schemars(
+        extend(
+            "additionalProperties" = {"oneOf":[{"maxLength":512u64,
+            "type":"string"},
+            {"type":"number"},
+            {"type":"boolean"}]}
+        )
+    )]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
 }
 impl Default for VectorStoreFileAttributes {
@@ -22837,9 +25839,26 @@ pub struct VectorStoreFileObject {
     pub last_error: serde_json::Value,
     ///The strategy used to chunk the file.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "VectorStoreFileObject::field_rules_schema_chunking_strategy"
+    )]
     pub chunking_strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
+}
+impl VectorStoreFileObject {
+    fn field_rules_schema_chunking_strategy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<StaticChunkingStrategyResponseParam>();
+        let reference_1 = generator
+            .subschema_for::<OtherChunkingStrategyResponseParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for VectorStoreFileObject {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22902,6 +25921,8 @@ pub struct VectorStoreSearchRequest {
     pub max_num_results: Option<i64>,
     ///A filter to apply based on file attributes.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "VectorStoreSearchRequest::field_rules_schema_filters")]
     pub filters: Option<serde_json::Value>,
     ///Ranking options for search.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -22915,6 +25936,17 @@ pub struct VectorStoreSearchRequest {
         )
     )]
     pub ranking_options: Option<serde_json::Value>,
+}
+impl VectorStoreSearchRequest {
+    fn field_rules_schema_filters(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ComparisonFilter>();
+        let reference_1 = generator.subschema_for::<CompoundFilter>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for VectorStoreSearchRequest {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -22998,7 +26030,9 @@ impl schematic_define::Registration for VectorStoreSearchResultsPage {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum Verbosity {
+    #[schemars(extend("enum" = ["low", "medium", "high"]))]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for Verbosity {
@@ -23110,6 +26144,20 @@ impl schematic_define::Registration for VoiceIdsOrCustomVoice {
 #[serde(untagged)]
 pub enum VoiceIdsShared {
     Text(String),
+    #[schemars(
+        extend(
+            "enum" = ["alloy",
+            "ash",
+            "ballad",
+            "coral",
+            "echo",
+            "sage",
+            "shimmer",
+            "verse",
+            "marin",
+            "cedar"]
+        )
+    )]
     Text1(String),
 }
 impl Default for VoiceIdsShared {
@@ -23232,7 +26280,9 @@ impl schematic_define::Registration for WebSearchActionSearch {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum WebSearchApproximateLocation {
+    #[schemars(extend("properties" = {"type":{"enum":["approximate"]}}))]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
 }
 impl Default for WebSearchApproximateLocation {
@@ -23341,7 +26391,24 @@ pub struct WebSearchToolCall {
     pub status: String,
     /**An object describing the specific action taken in this web search call.
 Includes details on how the model used the web (search, open_page, find_in_page).*/
+    #[schemars(schema_with = "WebSearchToolCall::field_rules_schema_action")]
     pub action: serde_json::Value,
+}
+impl WebSearchToolCall {
+    fn field_rules_schema_action(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<WebSearchActionSearch>();
+        let reference_1 = generator.subschema_for::<WebSearchActionOpenPage>();
+        let reference_2 = generator.subschema_for::<WebSearchActionFind>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for WebSearchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchToolCall));
@@ -24754,6 +27821,7 @@ pub struct Message {
     pub status: MessageStatus,
     pub role: MessageRole,
     ///The content of the message
+    #[schemars(schema_with = "Message::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -24761,6 +27829,29 @@ pub struct Message {
     pub phase: Option<serde_json::Value>,
 }
 impl Message {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputTextContent>();
+        let reference_1 = generator.subschema_for::<OutputTextContent>();
+        let reference_2 = generator.subschema_for::<TextContent>();
+        let reference_3 = generator.subschema_for::<SummaryTextContent>();
+        let reference_4 = generator.subschema_for::<ReasoningTextContent>();
+        let reference_5 = generator.subschema_for::<RefusalContent>();
+        let reference_6 = generator.subschema_for::<InputImageContent>();
+        let reference_7 = generator.subschema_for::<ComputerScreenshotContent>();
+        let reference_8 = generator.subschema_for::<InputFileContent>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_1, reference_2, reference_3,
+                    reference_4, reference_5, reference_6, reference_7, reference_8] }
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_phase(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -25624,6 +28715,10 @@ pub struct AutoCodeInterpreterToolParam {
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "AutoCodeInterpreterToolParam::field_rules_schema_network_policy"
+    )]
     pub network_policy: Option<serde_json::Value>,
 }
 impl AutoCodeInterpreterToolParam {
@@ -25637,6 +28732,17 @@ impl AutoCodeInterpreterToolParam {
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
             );
+        schema
+    }
+    fn field_rules_schema_network_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ContainerNetworkPolicyDisabledParam>();
+        let reference_1 = generator
+            .subschema_for::<ContainerNetworkPolicyAllowlistParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
         schema
     }
 }
@@ -25739,10 +28845,13 @@ pub struct ContainerAutoParam {
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "ContainerAutoParam::field_rules_schema_network_policy")]
     pub network_policy: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 200u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "ContainerAutoParam::field_rules_schema_skills")]
     pub skills: Option<Vec<serde_json::Value>>,
 }
 impl ContainerAutoParam {
@@ -25756,6 +28865,31 @@ impl ContainerAutoParam {
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
             );
+        schema
+    }
+    fn field_rules_schema_network_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<ContainerNetworkPolicyDisabledParam>();
+        let reference_1 = generator
+            .subschema_for::<ContainerNetworkPolicyAllowlistParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+    fn field_rules_schema_skills(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<SkillReferenceParam>();
+        let reference_1 = generator.subschema_for::<InlineSkillParam>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(200u64));
         schema
     }
 }
@@ -25836,6 +28970,8 @@ pub struct FunctionShellToolParam {
     #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "FunctionShellToolParam::field_rules_schema_environment")]
     pub environment: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -25845,6 +28981,23 @@ pub struct FunctionShellToolParam {
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl FunctionShellToolParam {
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ContainerAutoParam>();
+        let reference_1 = generator.subschema_for::<LocalEnvironmentParam>();
+        let reference_2 = generator.subschema_for::<ContainerReferenceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1, reference_2] }, { "type" :
+                    "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -25943,6 +29096,8 @@ pub struct CustomToolParam {
     pub description: Option<String>,
     ///The input format for the custom tool. Default is unconstrained text.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "CustomToolParam::field_rules_schema_format")]
     pub format: Option<serde_json::Value>,
     ///Whether this tool should be deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25953,6 +29108,15 @@ pub struct CustomToolParam {
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl CustomToolParam {
+    fn field_rules_schema_format(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<CustomTextFormatParam>();
+        let reference_1 = generator.subschema_for::<CustomGrammarFormatParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -26052,8 +29216,24 @@ pub struct NamespaceToolParam {
     #[schemars(extend("minLength" = 1u64))]
     pub description: String,
     ///The function/custom tools available inside this namespace.
-    #[schemars(extend("minItems" = 1u64))]
+    #[schemars(schema_with = "NamespaceToolParam::field_rules_schema_tools")]
     pub tools: Vec<serde_json::Value>,
+}
+impl NamespaceToolParam {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FunctionToolParam>();
+        let reference_1 = generator.subschema_for::<CustomToolParam>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema.insert("minItems".to_owned(), serde_json::json!(1u64));
+        schema
+    }
 }
 impl schematic_define::Registration for NamespaceToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(NamespaceToolParam));
@@ -26521,6 +29701,7 @@ pub struct FunctionShellCall {
     pub caller: Option<serde_json::Value>,
     pub action: FunctionShellAction,
     pub status: FunctionShellCallStatus,
+    #[schemars(schema_with = "FunctionShellCall::field_rules_schema_environment")]
     pub environment: serde_json::Value,
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -26536,6 +29717,21 @@ impl FunctionShellCall {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<LocalEnvironmentResource>();
+        let reference_1 = generator.subschema_for::<ContainerReferenceResource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1] }, { "type" : "null" }]
+                ),
             );
         schema
     }
@@ -26618,10 +29814,26 @@ pub struct FunctionShellCallOutputContent {
     ///The standard error output that was captured.
     pub stderr: String,
     ///Represents either an exit outcome (with an exit code) or a timeout outcome for a shell call output chunk.
+    #[schemars(
+        schema_with = "FunctionShellCallOutputContent::field_rules_schema_outcome"
+    )]
     pub outcome: serde_json::Value,
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl FunctionShellCallOutputContent {
+    fn field_rules_schema_outcome(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<FunctionShellCallOutputTimeoutOutcome>();
+        let reference_1 = generator
+            .subschema_for::<FunctionShellCallOutputExitOutcome>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for FunctionShellCallOutputContent {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -26783,6 +29995,7 @@ pub struct ApplyPatchToolCall {
     pub caller: Option<serde_json::Value>,
     pub status: ApplyPatchCallStatus,
     ///One of the create_file, delete_file, or update_file operations applied via apply_patch.
+    #[schemars(schema_with = "ApplyPatchToolCall::field_rules_schema_operation")]
     pub operation: serde_json::Value,
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -26798,6 +30011,20 @@ impl ApplyPatchToolCall {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_operation(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ApplyPatchCreateFileOperation>();
+        let reference_1 = generator.subschema_for::<ApplyPatchDeleteFileOperation>();
+        let reference_2 = generator.subschema_for::<ApplyPatchUpdateFileOperation>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -27176,6 +30403,7 @@ pub struct FunctionCallOutputItemParam {
     #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///Text, image, or file output of the function tool call.
+    #[schemars(schema_with = "FunctionCallOutputItemParam::field_rules_schema_output")]
     pub output: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -27202,6 +30430,24 @@ pub struct FunctionCallOutputItemParam {
     pub status: Option<serde_json::Value>,
 }
 impl FunctionCallOutputItemParam {
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputTextContentParam>();
+        let reference_1 = generator.subschema_for::<InputImageContentParamAutoParam>();
+        let reference_2 = generator.subschema_for::<InputFileContentParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "maxLength" : 10485760u64, "type" : "string" }, { "items" : {
+                    "oneOf" : [reference_0, reference_1, reference_2] }, "type" : "array"
+                    }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_caller(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -27525,6 +30771,10 @@ pub struct FunctionShellCallItemParam {
     #[schemars(schema_with = "FunctionShellCallItemParam::field_rules_schema_status")]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "FunctionShellCallItemParam::field_rules_schema_environment"
+    )]
     pub environment: Option<serde_json::Value>,
 }
 impl FunctionShellCallItemParam {
@@ -27549,6 +30799,21 @@ impl FunctionShellCallItemParam {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<LocalEnvironmentParam>();
+        let reference_1 = generator.subschema_for::<ContainerReferenceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1] }, { "type" : "null" }]
+                ),
             );
         schema
     }
@@ -28299,6 +31564,7 @@ impl schematic_define::Registration for SpecificFunctionShellParam {
 #[serde(untagged)]
 pub enum ReasoningModeEnum {
     Text(String),
+    #[schemars(extend("enum" = ["standard", "pro"]))]
     Text1(String),
 }
 impl Default for ReasoningModeEnum {
@@ -28390,9 +31656,31 @@ impl schematic_define::Registration for ModerationErrorBody {
 #[derive(JsonSchema)]
 pub struct Moderation {
     ///Moderation for the response input.
+    #[schemars(schema_with = "Moderation::field_rules_schema_input")]
     pub input: serde_json::Value,
     ///Moderation for the response output.
+    #[schemars(schema_with = "Moderation::field_rules_schema_output")]
     pub output: serde_json::Value,
+}
+impl Moderation {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationResultBody>();
+        let reference_1 = generator.subschema_for::<ModerationErrorBody>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ModerationResultBody>();
+        let reference_1 = generator.subschema_for::<ModerationErrorBody>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for Moderation {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Moderation));
@@ -28492,6 +31780,7 @@ impl schematic_define::Registration for DeletedConversationResource {
 #[serde(untagged)]
 pub enum SpendLimitCurrency {
     Text(String),
+    #[schemars(extend("enum" = ["USD"]))]
     Text1(String),
 }
 impl Default for SpendLimitCurrency {
@@ -28513,6 +31802,7 @@ impl schematic_define::Registration for SpendLimitCurrency {
 #[serde(untagged)]
 pub enum SpendLimitInterval {
     Text(String),
+    #[schemars(extend("enum" = ["month"]))]
     Text1(String),
 }
 impl Default for SpendLimitInterval {
@@ -28534,6 +31824,7 @@ impl schematic_define::Registration for SpendLimitInterval {
 #[serde(untagged)]
 pub enum SpendLimitEnforcementStatus {
     Text(String),
+    #[schemars(extend("enum" = ["inactive", "enforcing"]))]
     Text1(String),
 }
 impl Default for SpendLimitEnforcementStatus {
@@ -28874,7 +32165,23 @@ pub struct ProvenanceResource {
     #[schemars(extend("format" = "unixtime"))]
     pub created_at: i64,
     ///The provenance results that apply to the uploaded file. Image results include C2PA and SynthID; audio results include SynthID.
+    #[schemars(schema_with = "ProvenanceResource::field_rules_schema_results")]
     pub results: Vec<serde_json::Value>,
+}
+impl ProvenanceResource {
+    fn field_rules_schema_results(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<C2PAProvenanceResult>();
+        let reference_1 = generator.subschema_for::<SynthIDProvenanceResult>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ProvenanceResource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProvenanceResource));
@@ -28907,6 +32214,15 @@ impl schematic_define::Registration for OrderEnum {
 #[serde(untagged)]
 pub enum VideoModel {
     Text(String),
+    #[schemars(
+        extend(
+            "enum" = ["sora-2",
+            "sora-2-pro",
+            "sora-2-2025-10-06",
+            "sora-2-pro-2025-10-06",
+            "sora-2-2025-12-08"]
+        )
+    )]
     Text1(String),
 }
 impl Default for VideoModel {
@@ -29084,11 +32400,31 @@ pub struct CreateVideoMultipartBody {
     #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CreateVideoMultipartBody::field_rules_schema_input_reference"
+    )]
     pub input_reference: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds: Option<VideoSeconds>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<VideoSize>,
+}
+impl CreateVideoMultipartBody {
+    fn field_rules_schema_input_reference(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ImageRefParam2>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "format" : "binary", "type" : "string" }, reference_0]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVideoMultipartBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29185,10 +32521,27 @@ impl schematic_define::Registration for VideoReferenceInputParam {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVideoEditMultipartBody {
+    #[schemars(schema_with = "CreateVideoEditMultipartBody::field_rules_schema_video")]
     pub video: serde_json::Value,
     ///Text prompt that describes how to edit the source video.
     #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
+}
+impl CreateVideoEditMultipartBody {
+    fn field_rules_schema_video(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<VideoReferenceInputParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "format" : "binary", "type" : "string" }, reference_0]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVideoEditMultipartBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29223,11 +32576,28 @@ impl schematic_define::Registration for CreateVideoEditJsonBody {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVideoExtendMultipartBody {
+    #[schemars(schema_with = "CreateVideoExtendMultipartBody::field_rules_schema_video")]
     pub video: serde_json::Value,
     ///Updated text prompt that directs the extension generation.
     #[schemars(extend("maxLength" = 32000u64, "minLength" = 1u64))]
     pub prompt: String,
     pub seconds: VideoSeconds,
+}
+impl CreateVideoExtendMultipartBody {
+    fn field_rules_schema_video(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<VideoReferenceInputParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, { "format" : "binary", "type" : "string" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for CreateVideoExtendMultipartBody {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -29337,6 +32707,7 @@ impl schematic_define::Registration for TruncationEnum {
 #[serde(untagged)]
 pub enum PersonalityEnum {
     Text(String),
+    #[schemars(extend("enum" = ["friendly", "pragmatic"]))]
     Text1(String),
 }
 impl Default for PersonalityEnum {
@@ -29358,6 +32729,8 @@ pub struct TokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "TokenCountsBody::field_rules_schema_input")]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
@@ -29389,6 +32762,21 @@ pub struct TokenCountsBody {
     pub parallel_tool_calls: Option<serde_json::Value>,
 }
 impl TokenCountsBody {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [{ "maxLength" : 10485760u64, "type" : "string" }, {
+                    "items" : reference_0, "type" : "array" }] }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_tools(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -29508,6 +32896,10 @@ impl schematic_define::Registration for ServiceTierEnum {
 pub struct CompactResponseMethodPublicBody {
     pub model: ModelIdsCompaction,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "CompactResponseMethodPublicBody::field_rules_schema_input"
+    )]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
@@ -29536,6 +32928,21 @@ pub struct CompactResponseMethodPublicBody {
     pub service_tier: Option<serde_json::Value>,
 }
 impl CompactResponseMethodPublicBody {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<InputItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [{ "maxLength" : 10485760u64, "type" : "string" }, {
+                    "items" : reference_0, "type" : "array" }] }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_prompt_cache_retention(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -29798,6 +33205,15 @@ impl schematic_define::Registration for SkillListResource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateSkillBody {
+    #[schemars(
+        extend(
+            "oneOf" = [{"items":{"format":"binary"},
+            "maxItems":500u64,
+            "type":"array"},
+            {"format":"binary",
+            "type":"string"}]
+        )
+    )]
     pub files: serde_json::Value,
 }
 impl schematic_define::Registration for CreateSkillBody {
@@ -29896,6 +33312,15 @@ impl schematic_define::Registration for SkillVersionListResource {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateSkillVersionBody {
+    #[schemars(
+        extend(
+            "oneOf" = [{"items":{"format":"binary"},
+            "maxItems":500u64,
+            "type":"array"},
+            {"format":"binary",
+            "type":"string"}]
+        )
+    )]
     pub files: serde_json::Value,
     ///Whether to set this version as the default.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30130,6 +33555,15 @@ pub struct WorkflowParam {
     pub version: Option<String>,
     ///State variables forwarded to the workflow. Keys may be up to 64 characters, values must be primitive types, and the map defaults to an empty object.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "additionalProperties" = {"oneOf":[{"maxLength":10485760u64,
+            "type":"string"},
+            {"type":"integer"},
+            {"type":"boolean"},
+            {"type":"number"}]}
+        )
+    )]
     pub state_variables: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tracing: Option<WorkflowTracingParam>,
@@ -30414,10 +33848,26 @@ pub struct UserMessageItem {
     #[schemars(extend("enum" = ["chatkit.user_message"]))]
     pub type_: String,
     ///Ordered content elements supplied by the user.
+    #[schemars(schema_with = "UserMessageItem::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
     ///Attachments associated with the user message. Defaults to an empty list.
     pub attachments: Vec<Attachment>,
     pub inference_options: serde_json::Value,
+}
+impl UserMessageItem {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<UserMessageInputText>();
+        let reference_1 = generator.subschema_for::<UserMessageQuotedText>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for UserMessageItem {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserMessageItem));
@@ -30513,7 +33963,23 @@ pub struct ResponseOutputText {
     ///Assistant generated text.
     pub text: String,
     ///Ordered list of annotations attached to the response text.
+    #[schemars(schema_with = "ResponseOutputText::field_rules_schema_annotations")]
     pub annotations: Vec<serde_json::Value>,
+}
+impl ResponseOutputText {
+    fn field_rules_schema_annotations(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<FileAnnotation>();
+        let reference_1 = generator.subschema_for::<UrlAnnotation>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ResponseOutputText {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseOutputText));
@@ -30889,9 +34355,26 @@ pub struct ThreadResource {
     pub created_at: i64,
     pub title: serde_json::Value,
     ///Current status for the thread. Defaults to `active` for newly created threads.
+    #[schemars(schema_with = "ThreadResource::field_rules_schema_status")]
     pub status: serde_json::Value,
     ///Free-form string that identifies your end user who owns the thread.
     pub user: String,
+}
+impl ThreadResource {
+    fn field_rules_schema_status(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<ActiveStatus>();
+        let reference_1 = generator.subschema_for::<LockedStatus>();
+        let reference_2 = generator.subschema_for::<ClosedStatus>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for ThreadResource {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadResource));
@@ -30985,6 +34468,8 @@ pub struct BetaTokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaTokenCountsBody::field_rules_schema_input")]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
@@ -31016,6 +34501,21 @@ pub struct BetaTokenCountsBody {
     pub parallel_tool_calls: Option<serde_json::Value>,
 }
 impl BetaTokenCountsBody {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [{ "maxLength" : 10485760u64, "type" : "string" }, {
+                    "items" : reference_0, "type" : "array" }] }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_tools(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -31375,6 +34875,7 @@ impl schematic_define::Registration for BetaConversationParam2 {
 #[serde(untagged)]
 pub enum BetaPersonalityEnum {
     Text(String),
+    #[schemars(extend("enum" = ["friendly", "pragmatic"]))]
     Text1(String),
 }
 impl Default for BetaPersonalityEnum {
@@ -31449,7 +34950,11 @@ impl schematic_define::Registration for BetaReasoning {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaReasoningEffort {
+    #[schemars(
+        extend("enum" = ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    )]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for BetaReasoningEffort {
@@ -31471,6 +34976,7 @@ impl schematic_define::Registration for BetaReasoningEffort {
 #[serde(untagged)]
 pub enum BetaReasoningModeEnum {
     Text(String),
+    #[schemars(extend("enum" = ["standard", "pro"]))]
     Text1(String),
 }
 impl Default for BetaReasoningModeEnum {
@@ -31515,7 +35021,9 @@ impl schematic_define::Registration for BetaResponseTextParam {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaVerbosity {
+    #[schemars(extend("enum" = ["low", "medium", "high"]))]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for BetaVerbosity {
@@ -32002,8 +35510,24 @@ pub struct BetaNamespaceToolParam {
     #[schemars(extend("minLength" = 1u64))]
     pub description: String,
     ///The function/custom tools available inside this namespace.
-    #[schemars(extend("minItems" = 1u64))]
+    #[schemars(schema_with = "BetaNamespaceToolParam::field_rules_schema_tools")]
     pub tools: Vec<serde_json::Value>,
+}
+impl BetaNamespaceToolParam {
+    fn field_rules_schema_tools(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFunctionToolParam>();
+        let reference_1 = generator.subschema_for::<BetaCustomToolParam>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema.insert("minItems".to_owned(), serde_json::json!(1u64));
+        schema
+    }
 }
 impl schematic_define::Registration for BetaNamespaceToolParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -32030,6 +35554,8 @@ pub struct BetaCustomToolParam {
     pub description: Option<String>,
     ///The input format for the custom tool. Default is unconstrained text.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaCustomToolParam::field_rules_schema_format")]
     pub format: Option<serde_json::Value>,
     ///Whether this tool should be deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32040,6 +35566,15 @@ pub struct BetaCustomToolParam {
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl BetaCustomToolParam {
+    fn field_rules_schema_format(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCustomTextFormatParam>();
+        let reference_1 = generator.subschema_for::<BetaCustomGrammarFormatParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -32184,6 +35719,10 @@ pub struct BetaFunctionShellToolParam {
     #[schemars(extend("enum" = ["shell"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellToolParam::field_rules_schema_environment"
+    )]
     pub environment: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -32193,6 +35732,23 @@ pub struct BetaFunctionShellToolParam {
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl BetaFunctionShellToolParam {
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaContainerAutoParam>();
+        let reference_1 = generator.subschema_for::<BetaLocalEnvironmentParam>();
+        let reference_2 = generator.subschema_for::<BetaContainerReferenceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1, reference_2] }, { "type" :
+                    "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -32295,10 +35851,15 @@ pub struct BetaContainerAutoParam {
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaContainerAutoParam::field_rules_schema_network_policy"
+    )]
     pub network_policy: Option<serde_json::Value>,
     ///An optional list of skills referenced by id or inline data.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("maxItems" = 200u64))]
+    #[serde(default)]
+    #[schemars(schema_with = "BetaContainerAutoParam::field_rules_schema_skills")]
     pub skills: Option<Vec<serde_json::Value>>,
 }
 impl BetaContainerAutoParam {
@@ -32312,6 +35873,31 @@ impl BetaContainerAutoParam {
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
             );
+        schema
+    }
+    fn field_rules_schema_network_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<BetaContainerNetworkPolicyDisabledParam>();
+        let reference_1 = generator
+            .subschema_for::<BetaContainerNetworkPolicyAllowlistParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+    fn field_rules_schema_skills(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaSkillReferenceParam>();
+        let reference_1 = generator.subschema_for::<BetaInlineSkillParam>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1] }),
+            );
+        schema.insert("maxItems".to_owned(), serde_json::json!(200u64));
         schema
     }
 }
@@ -32512,6 +36098,15 @@ pub struct BetaImageGenTool {
     #[schemars(extend("enum" = ["image_generation"]))]
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["gpt-image-1",
+            "gpt-image-1-mini",
+            "gpt-image-1.5"],
+            "type":"string"}]
+        )
+    )]
     pub model: Option<serde_json::Value>,
     /**The quality of the generated image. One of `low`, `medium`, `high`,
 or `auto`. Default: `auto`.*/
@@ -32520,6 +36115,16 @@ or `auto`. Default: `auto`.*/
     pub quality: Option<String>,
     ///The size of the generated images. For `gpt-image-2` and `gpt-image-2-2026-04-21`, arbitrary resolutions are supported as `WIDTHxHEIGHT` strings, for example `1536x864`. Width and height must both be divisible by 16 and the requested aspect ratio must be between 1:3 and 3:1. Resolutions above `2560x1440` are experimental, and the maximum supported resolution is `3840x2160`. The requested size must also satisfy the model's current pixel and edge limits. The standard sizes `1024x1024`, `1536x1024`, and `1024x1536` are supported by the GPT image models; `auto` is supported for models that allow automatic sizing. For `dall-e-2`, use one of `256x256`, `512x512`, or `1024x1024`. For `dall-e-3`, use one of `1024x1024`, `1792x1024`, or `1024x1792`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"type":"string"},
+            {"enum":["1024x1024",
+            "1024x1536",
+            "1536x1024",
+            "auto"],
+            "type":"string"}]
+        )
+    )]
     pub size: Option<serde_json::Value>,
     /**The output format of the generated image. One of `png`, `webp`, or
 `jpeg`. Default: `png`.*/
@@ -32644,6 +36249,7 @@ pub struct BetaCodeInterpreterTool {
     /**The code interpreter container. Can be a container ID or an object that
 specifies uploaded file IDs to make available to your code, along with an
 optional `memory_limit` setting.*/
+    #[schemars(schema_with = "BetaCodeInterpreterTool::field_rules_schema_container")]
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -32653,6 +36259,18 @@ optional `memory_limit` setting.*/
     pub allowed_callers: Option<serde_json::Value>,
 }
 impl BetaCodeInterpreterTool {
+    fn field_rules_schema_container(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaAutoCodeInterpreterToolParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
     fn field_rules_schema_allowed_callers(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -32698,6 +36316,10 @@ pub struct BetaAutoCodeInterpreterToolParam {
     pub memory_limit: Option<serde_json::Value>,
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaAutoCodeInterpreterToolParam::field_rules_schema_network_policy"
+    )]
     pub network_policy: Option<serde_json::Value>,
 }
 impl BetaAutoCodeInterpreterToolParam {
@@ -32711,6 +36333,17 @@ impl BetaAutoCodeInterpreterToolParam {
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
             );
+        schema
+    }
+    fn field_rules_schema_network_policy(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<BetaContainerNetworkPolicyDisabledParam>();
+        let reference_1 = generator
+            .subschema_for::<BetaContainerNetworkPolicyAllowlistParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
         schema
     }
 }
@@ -32790,6 +36423,15 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[schemars(schema_with = "BetaMCPTool::field_rules_schema_allowed_callers")]
     pub allowed_callers: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        extend(
+            "anyOf" = [{"oneOf":[{"type":"object"},
+            {"enum":["always",
+            "never"],
+            "type":"string"}]},
+            {"type":"null"}]
+        )
+    )]
     pub require_approval: Option<serde_json::Value>,
     ///Whether this MCP tool is deferred and discovered via tool search.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32871,7 +36513,9 @@ impl schematic_define::Registration for BetaWebSearchTool {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaWebSearchApproximateLocation {
+    #[schemars(extend("properties" = {"type":{"enum":["approximate"]}}))]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
 }
 impl Default for BetaWebSearchApproximateLocation {
@@ -33027,7 +36671,22 @@ pub struct BetaCompoundFilter {
     #[schemars(extend("enum" = ["and", "or"]))]
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
+    #[schemars(schema_with = "BetaCompoundFilter::field_rules_schema_filters")]
     pub filters: Vec<serde_json::Value>,
+}
+impl BetaCompoundFilter {
+    fn field_rules_schema_filters(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaComparisonFilter>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, {}] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCompoundFilter {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCompoundFilter));
@@ -33174,11 +36833,65 @@ impl schematic_define::Registration for BetaFunctionTool {
 #[serde(untagged)]
 pub enum BetaInputItem {
     BetaEasyInputMessage(BetaEasyInputMessage),
+    #[schemars(schema_with = "BetaInputItem::variant_rules_schema_1")]
     BetaItem(BetaItem),
     BetaCompactionTriggerItemParam(BetaCompactionTriggerItemParam),
     BetaItemReferenceParam(BetaItemReferenceParam),
     BetaProgramItemParam(BetaProgramItemParam),
     BetaProgramOutputItemParam(BetaProgramOutputItemParam),
+}
+impl BetaInputItem {
+    fn variant_rules_schema_1(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputMessage>();
+        let reference_1 = generator.subschema_for::<BetaOutputMessage>();
+        let reference_2 = generator.subschema_for::<BetaFileSearchToolCall>();
+        let reference_3 = generator.subschema_for::<BetaComputerToolCall>();
+        let reference_4 = generator.subschema_for::<BetaComputerCallOutputItemParam>();
+        let reference_5 = generator.subschema_for::<BetaWebSearchToolCall>();
+        let reference_6 = generator.subschema_for::<BetaFunctionToolCall>();
+        let reference_7 = generator.subschema_for::<BetaFunctionCallOutputItemParam>();
+        let reference_8 = generator.subschema_for::<BetaAgentMessageItemParam>();
+        let reference_9 = generator.subschema_for::<BetaMultiAgentCallItemParam>();
+        let reference_10 = generator
+            .subschema_for::<BetaMultiAgentCallOutputItemParam>();
+        let reference_11 = generator.subschema_for::<BetaToolSearchCallItemParam>();
+        let reference_12 = generator.subschema_for::<BetaToolSearchOutputItemParam>();
+        let reference_13 = generator.subschema_for::<BetaAdditionalToolsItemParam>();
+        let reference_14 = generator.subschema_for::<BetaReasoningItem>();
+        let reference_15 = generator.subschema_for::<BetaCompactionSummaryItemParam>();
+        let reference_16 = generator.subschema_for::<BetaImageGenToolCall>();
+        let reference_17 = generator.subschema_for::<BetaCodeInterpreterToolCall>();
+        let reference_18 = generator.subschema_for::<BetaLocalShellToolCall>();
+        let reference_19 = generator.subschema_for::<BetaLocalShellToolCallOutput>();
+        let reference_20 = generator.subschema_for::<BetaFunctionShellCallItemParam>();
+        let reference_21 = generator
+            .subschema_for::<BetaFunctionShellCallOutputItemParam>();
+        let reference_22 = generator.subschema_for::<BetaApplyPatchToolCallItemParam>();
+        let reference_23 = generator
+            .subschema_for::<BetaApplyPatchToolCallOutputItemParam>();
+        let reference_24 = generator.subschema_for::<BetaMCPListTools>();
+        let reference_25 = generator.subschema_for::<BetaMCPApprovalRequest>();
+        let reference_26 = generator.subschema_for::<BetaMCPApprovalResponse>();
+        let reference_27 = generator.subschema_for::<BetaMCPToolCall>();
+        let reference_28 = generator.subschema_for::<BetaCustomToolCallOutput>();
+        let reference_29 = generator.subschema_for::<BetaCustomToolCall>();
+        let mut schema = generator.subschema_for::<BetaItem>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [reference_0, reference_1, reference_2, reference_3, reference_4,
+                    reference_5, reference_6, reference_7, reference_8, reference_9,
+                    reference_10, reference_11, reference_12, reference_13, reference_14,
+                    reference_15, reference_16, reference_17, reference_18, reference_19,
+                    reference_20, reference_21, reference_22, reference_23, reference_24,
+                    reference_25, reference_26, reference_27, reference_28, reference_29]
+                ),
+            );
+        schema
+    }
 }
 impl Default for BetaInputItem {
     fn default() -> Self {
@@ -33514,6 +37227,7 @@ pub struct BetaCustomToolCallOutput {
     pub caller: Option<serde_json::Value>,
     /**The output from the custom tool call generated by your code.
 Can be a string or an list of output content.*/
+    #[schemars(schema_with = "BetaCustomToolCallOutput::field_rules_schema_output")]
     pub output: serde_json::Value,
 }
 impl BetaCustomToolCallOutput {
@@ -33526,6 +37240,21 @@ impl BetaCustomToolCallOutput {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<BetaFunctionAndCustomToolCallOutput>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "type" : "array" }]
+                ),
             );
         schema
     }
@@ -34565,6 +38294,10 @@ pub struct BetaFunctionShellCallItemParam {
     )]
     pub status: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaFunctionShellCallItemParam::field_rules_schema_environment"
+    )]
     pub environment: Option<serde_json::Value>,
 }
 impl BetaFunctionShellCallItemParam {
@@ -34589,6 +38322,21 @@ impl BetaFunctionShellCallItemParam {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaLocalEnvironmentParam>();
+        let reference_1 = generator.subschema_for::<BetaContainerReferenceParam>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1] }, { "type" : "null" }]
+                ),
             );
         schema
     }
@@ -34746,7 +38494,26 @@ pub struct BetaCodeInterpreterToolCall {
     ///The ID of the container used to run the code.
     pub container_id: String,
     pub code: serde_json::Value,
+    #[schemars(schema_with = "BetaCodeInterpreterToolCall::field_rules_schema_outputs")]
     pub outputs: serde_json::Value,
+}
+impl BetaCodeInterpreterToolCall {
+    fn field_rules_schema_outputs(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaCodeInterpreterOutputLogs>();
+        let reference_1 = generator.subschema_for::<BetaCodeInterpreterOutputImage>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "items" : { "oneOf" : [reference_0, reference_1] } }, { "type" :
+                    "null" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaCodeInterpreterToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -35117,7 +38884,27 @@ pub struct BetaOutputTextContentParam {
     pub text: String,
     ///Citations associated with the text content.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaOutputTextContentParam::field_rules_schema_annotations"
+    )]
     pub annotations: Option<Vec<serde_json::Value>>,
+}
+impl BetaOutputTextContentParam {
+    fn field_rules_schema_annotations(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaFileCitationParam>();
+        let reference_1 = generator.subschema_for::<BetaUrlCitationParam>();
+        let reference_2 = generator.subschema_for::<BetaContainerFileCitationParam>();
+        let mut schema = generator.subschema_for::<Option<Vec<serde_json::Value>>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaOutputTextContentParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -35283,7 +39070,25 @@ pub struct BetaAgentMessageItemParam {
     ///The destination agent identity.
     pub recipient: String,
     ///Plaintext, image, or encrypted content sent between agents.
+    #[schemars(schema_with = "BetaAgentMessageItemParam::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
+}
+impl BetaAgentMessageItemParam {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputTextContentParam>();
+        let reference_1 = generator
+            .subschema_for::<BetaInputImageContentParamAutoParam>();
+        let reference_2 = generator.subschema_for::<BetaEncryptedContentParam>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!({ "oneOf" : [reference_0, reference_1, reference_2] }),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaAgentMessageItemParam {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -35478,6 +39283,9 @@ pub struct BetaFunctionCallOutputItemParam {
     #[schemars(extend("enum" = ["function_call_output"]))]
     pub type_: String,
     ///Text, image, or file output of the function tool call.
+    #[schemars(
+        schema_with = "BetaFunctionCallOutputItemParam::field_rules_schema_output"
+    )]
     pub output: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -35508,6 +39316,25 @@ pub struct BetaFunctionCallOutputItemParam {
     pub status: Option<serde_json::Value>,
 }
 impl BetaFunctionCallOutputItemParam {
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputTextContentParam>();
+        let reference_1 = generator
+            .subschema_for::<BetaInputImageContentParamAutoParam>();
+        let reference_2 = generator.subschema_for::<BetaInputFileContentParam>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "maxLength" : 10485760u64, "type" : "string" }, { "items" : {
+                    "oneOf" : [reference_0, reference_1, reference_2] }, "type" : "array"
+                    }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_caller(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -35688,7 +39515,24 @@ pub struct BetaWebSearchToolCall {
     pub status: String,
     /**An object describing the specific action taken in this web search call.
 Includes details on how the model used the web (search, open_page, find_in_page).*/
+    #[schemars(schema_with = "BetaWebSearchToolCall::field_rules_schema_action")]
     pub action: serde_json::Value,
+}
+impl BetaWebSearchToolCall {
+    fn field_rules_schema_action(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaWebSearchActionSearch>();
+        let reference_1 = generator.subschema_for::<BetaWebSearchActionOpenPage>();
+        let reference_2 = generator.subschema_for::<BetaWebSearchActionFind>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaWebSearchToolCall {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -36292,7 +40136,16 @@ impl schematic_define::Registration for BetaFileSearchToolCall {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaVectorStoreFileAttributes {
+    #[schemars(
+        extend(
+            "additionalProperties" = {"oneOf":[{"maxLength":512u64,
+            "type":"string"},
+            {"type":"number"},
+            {"type":"boolean"}]}
+        )
+    )]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
 }
 impl Default for BetaVectorStoreFileAttributes {
@@ -36799,6 +40652,7 @@ pub struct BetaEasyInputMessage {
     pub role: String,
     /**Text, image, or audio input to the model, used to generate a response.
 Can also contain previous assistant responses.*/
+    #[schemars(schema_with = "BetaEasyInputMessage::field_rules_schema_content")]
     pub content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -36811,6 +40665,18 @@ Can also contain previous assistant responses.*/
     pub type_: Option<String>,
 }
 impl BetaEasyInputMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputMessageContentList>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([{ "type" : "string" }, reference_0]),
+            );
+        schema
+    }
     fn field_rules_schema_phase(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -36837,6 +40703,10 @@ impl schematic_define::Registration for BetaEasyInputMessage {
 pub struct BetaCompactResponseMethodPublicBody {
     pub model: BetaModelIdsCompaction,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[schemars(
+        schema_with = "BetaCompactResponseMethodPublicBody::field_rules_schema_input"
+    )]
     pub input: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<serde_json::Value>,
@@ -36865,6 +40735,21 @@ pub struct BetaCompactResponseMethodPublicBody {
     pub service_tier: Option<serde_json::Value>,
 }
 impl BetaCompactResponseMethodPublicBody {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputItem>();
+        let mut schema = generator.subschema_for::<Option<serde_json::Value>>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [{ "maxLength" : 10485760u64, "type" : "string" }, {
+                    "items" : reference_0, "type" : "array" }] }, { "type" : "null" }]
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_prompt_cache_retention(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -37040,6 +40925,24 @@ impl schematic_define::Registration for BetaModelIdsCompaction {
 #[serde(untagged)]
 pub enum BetaModelIdsResponses {
     BetaModelIdsShared(BetaModelIdsShared),
+    #[schemars(
+        extend(
+            "enum" = ["o1-pro",
+            "o1-pro-2025-03-19",
+            "o3-pro",
+            "o3-pro-2025-06-10",
+            "o3-deep-research",
+            "o3-deep-research-2025-06-26",
+            "o4-mini-deep-research",
+            "o4-mini-deep-research-2025-06-26",
+            "computer-use-preview",
+            "computer-use-preview-2025-03-11",
+            "gpt-5-codex",
+            "gpt-5-pro",
+            "gpt-5-pro-2025-10-06",
+            "gpt-5.1-codex-max"]
+        )
+    )]
     Text(String),
 }
 impl Default for BetaModelIdsResponses {
@@ -37063,6 +40966,91 @@ impl schematic_define::Registration for BetaModelIdsResponses {
 #[serde(untagged)]
 pub enum BetaModelIdsShared {
     Text(String),
+    #[schemars(
+        extend(
+            "enum" = ["gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-mini-2026-03-17",
+            "gpt-5.4-nano-2026-03-17",
+            "gpt-5.3-chat-latest",
+            "gpt-5.2",
+            "gpt-5.2-2025-12-11",
+            "gpt-5.2-chat-latest",
+            "gpt-5.2-pro",
+            "gpt-5.2-pro-2025-12-11",
+            "gpt-5.1",
+            "gpt-5.1-2025-11-13",
+            "gpt-5.1-codex",
+            "gpt-5.1-mini",
+            "gpt-5.1-chat-latest",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-2025-08-07",
+            "gpt-5-mini-2025-08-07",
+            "gpt-5-nano-2025-08-07",
+            "gpt-5-chat-latest",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4.1-2025-04-14",
+            "gpt-4.1-mini-2025-04-14",
+            "gpt-4.1-nano-2025-04-14",
+            "o4-mini",
+            "o4-mini-2025-04-16",
+            "o3",
+            "o3-2025-04-16",
+            "o3-mini",
+            "o3-mini-2025-01-31",
+            "o1",
+            "o1-2024-12-17",
+            "o1-preview",
+            "o1-preview-2024-09-12",
+            "o1-mini",
+            "o1-mini-2024-09-12",
+            "gpt-4o",
+            "gpt-4o-2024-11-20",
+            "gpt-4o-2024-08-06",
+            "gpt-4o-2024-05-13",
+            "gpt-4o-audio-preview",
+            "gpt-4o-audio-preview-2024-10-01",
+            "gpt-4o-audio-preview-2024-12-17",
+            "gpt-4o-audio-preview-2025-06-03",
+            "gpt-4o-mini-audio-preview",
+            "gpt-4o-mini-audio-preview-2024-12-17",
+            "gpt-4o-search-preview",
+            "gpt-4o-mini-search-preview",
+            "gpt-4o-search-preview-2025-03-11",
+            "gpt-4o-mini-search-preview-2025-03-11",
+            "chatgpt-4o-latest",
+            "codex-mini-latest",
+            "gpt-4o-mini",
+            "gpt-4o-mini-2024-07-18",
+            "gpt-4-turbo",
+            "gpt-4-turbo-2024-04-09",
+            "gpt-4-0125-preview",
+            "gpt-4-turbo-preview",
+            "gpt-4-1106-preview",
+            "gpt-4-vision-preview",
+            "gpt-4",
+            "gpt-4-0314",
+            "gpt-4-0613",
+            "gpt-4-32k",
+            "gpt-4-32k-0314",
+            "gpt-4-32k-0613",
+            "gpt-3.5-turbo",
+            "gpt-3.5-turbo-16k",
+            "gpt-3.5-turbo-0301",
+            "gpt-3.5-turbo-0613",
+            "gpt-3.5-turbo-1106",
+            "gpt-3.5-turbo-0125",
+            "gpt-3.5-turbo-16k-0613"]
+        )
+    )]
     Text1(String),
 }
 impl Default for BetaModelIdsShared {
@@ -37294,6 +41282,13 @@ impl schematic_define::Registration for BetaItemResource {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaCustomToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/BetaFunctionCallOutputStatusEnum"}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaCustomToolCallOutputResource {
     #[serde(flatten)]
     pub beta_custom_tool_call_output: BetaCustomToolCallOutput,
@@ -37333,6 +41328,13 @@ impl schematic_define::Registration for BetaFunctionCallOutputStatusEnum {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaCustomToolCall"},
+        {"properties":{"status":{"$ref":"#/components/schemas/BetaFunctionCallStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaCustomToolCallResource {
     #[serde(flatten)]
     pub beta_custom_tool_call: BetaCustomToolCall,
@@ -37488,6 +41490,7 @@ pub struct BetaApplyPatchToolCall {
     pub caller: Option<serde_json::Value>,
     pub status: BetaApplyPatchCallStatus,
     ///One of the create_file, delete_file, or update_file operations applied via apply_patch.
+    #[schemars(schema_with = "BetaApplyPatchToolCall::field_rules_schema_operation")]
     pub operation: serde_json::Value,
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37503,6 +41506,20 @@ impl BetaApplyPatchToolCall {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_operation(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaApplyPatchCreateFileOperation>();
+        let reference_1 = generator.subschema_for::<BetaApplyPatchDeleteFileOperation>();
+        let reference_2 = generator.subschema_for::<BetaApplyPatchUpdateFileOperation>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!([reference_0, reference_1, reference_2]),
             );
         schema
     }
@@ -37662,10 +41679,26 @@ pub struct BetaFunctionShellCallOutputContent {
     ///The standard error output that was captured.
     pub stderr: String,
     ///Represents either an exit outcome (with an exit code) or a timeout outcome for a shell call output chunk.
+    #[schemars(
+        schema_with = "BetaFunctionShellCallOutputContent::field_rules_schema_outcome"
+    )]
     pub outcome: serde_json::Value,
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl BetaFunctionShellCallOutputContent {
+    fn field_rules_schema_outcome(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<BetaFunctionShellCallOutputTimeoutOutcome>();
+        let reference_1 = generator
+            .subschema_for::<BetaFunctionShellCallOutputExitOutcome>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionShellCallOutputContent {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -37758,6 +41791,7 @@ pub struct BetaFunctionShellCall {
     pub caller: Option<serde_json::Value>,
     pub action: BetaFunctionShellAction,
     pub status: BetaFunctionShellCallStatus,
+    #[schemars(schema_with = "BetaFunctionShellCall::field_rules_schema_environment")]
     pub environment: serde_json::Value,
     ///The ID of the entity that created this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37773,6 +41807,21 @@ impl BetaFunctionShellCall {
             .insert(
                 "anyOf".to_owned(),
                 serde_json::json!([reference_0, { "type" : "null" }]),
+            );
+        schema
+    }
+    fn field_rules_schema_environment(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaLocalEnvironmentResource>();
+        let reference_1 = generator.subschema_for::<BetaContainerReferenceResource>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "anyOf".to_owned(),
+                serde_json::json!(
+                    [{ "oneOf" : [reference_0, reference_1] }, { "type" : "null" }]
+                ),
             );
         schema
     }
@@ -38162,7 +42211,35 @@ pub struct BetaAgentMessage {
     ///The destination agent identity.
     pub recipient: String,
     ///Encrypted content sent between agents.
+    #[schemars(schema_with = "BetaAgentMessage::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
+}
+impl BetaAgentMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputTextContent>();
+        let reference_1 = generator.subschema_for::<BetaOutputTextContent>();
+        let reference_2 = generator.subschema_for::<BetaTextContent>();
+        let reference_3 = generator.subschema_for::<BetaSummaryTextContent>();
+        let reference_4 = generator.subschema_for::<BetaReasoningTextContent>();
+        let reference_5 = generator.subschema_for::<BetaRefusalContent>();
+        let reference_6 = generator.subschema_for::<BetaInputImageContent>();
+        let reference_7 = generator.subschema_for::<BetaComputerScreenshotContent>();
+        let reference_8 = generator.subschema_for::<BetaInputFileContent>();
+        let reference_9 = generator.subschema_for::<BetaEncryptedContent>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_1, reference_2, reference_3,
+                    reference_4, reference_5, reference_6, reference_7, reference_8,
+                    reference_9] }
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaAgentMessage {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAgentMessage));
@@ -38235,6 +42312,13 @@ impl schematic_define::Registration for BetaTextContent {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaFunctionToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/BetaFunctionCallOutputStatusEnum"}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaFunctionToolCallOutputResource {
     #[serde(flatten)]
     pub beta_function_tool_call_output: BetaFunctionToolCallOutput,
@@ -38280,6 +42364,7 @@ is returned via API.*/
     pub caller: Option<serde_json::Value>,
     /**The output from the function call generated by your code.
 Can be a string or an list of output content.*/
+    #[schemars(schema_with = "BetaFunctionToolCallOutput::field_rules_schema_output")]
     pub output: serde_json::Value,
     /**The status of the item. One of `in_progress`, `completed`, or
 `incomplete`. Populated when items are returned via API.*/
@@ -38300,6 +42385,21 @@ impl BetaFunctionToolCallOutput {
             );
         schema
     }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator
+            .subschema_for::<BetaFunctionAndCustomToolCallOutput>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "oneOf".to_owned(),
+                serde_json::json!(
+                    [{ "type" : "string" }, { "items" : reference_0, "type" : "array" }]
+                ),
+            );
+        schema
+    }
 }
 impl schematic_define::Registration for BetaFunctionToolCallOutput {
     const RUST_IDENTIFIER: Option<&'static str> = Some(
@@ -38313,6 +42413,13 @@ impl schematic_define::Registration for BetaFunctionToolCallOutput {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaFunctionToolCall"},
+        {"properties":{"status":{"$ref":"#/components/schemas/BetaFunctionCallStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaFunctionToolCallResource {
     #[serde(flatten)]
     pub beta_function_tool_call: BetaFunctionToolCall,
@@ -38331,6 +42438,13 @@ impl schematic_define::Registration for BetaFunctionToolCallResource {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaComputerToolCallOutput"},
+        {"properties":{"status":{"$ref":"#/components/schemas/BetaComputerCallOutputStatus"}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaComputerToolCallOutputResource {
     #[serde(flatten)]
     pub beta_computer_tool_call_output: BetaComputerToolCallOutput,
@@ -38407,6 +42521,12 @@ impl schematic_define::Registration for BetaComputerToolCallOutput {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaInputMessage"},
+        {"type":"object"}]
+    )
+)]
 pub struct BetaInputMessageResource {
     #[serde(flatten)]
     pub beta_input_message: BetaInputMessage,
@@ -38651,6 +42771,7 @@ pub struct BetaMessage {
     pub status: BetaMessageStatus,
     pub role: BetaMessageRole,
     ///The content of the message
+    #[schemars(schema_with = "BetaMessage::field_rules_schema_content")]
     pub content: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -38658,6 +42779,31 @@ pub struct BetaMessage {
     pub phase: Option<serde_json::Value>,
 }
 impl BetaMessage {
+    fn field_rules_schema_content(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputTextContent>();
+        let reference_1 = generator.subschema_for::<BetaOutputTextContent>();
+        let reference_2 = generator.subschema_for::<BetaTextContent>();
+        let reference_3 = generator.subschema_for::<BetaSummaryTextContent>();
+        let reference_4 = generator.subschema_for::<BetaReasoningTextContent>();
+        let reference_5 = generator.subschema_for::<BetaRefusalContent>();
+        let reference_6 = generator.subschema_for::<BetaInputImageContent>();
+        let reference_7 = generator.subschema_for::<BetaComputerScreenshotContent>();
+        let reference_8 = generator.subschema_for::<BetaInputFileContent>();
+        let reference_9 = generator.subschema_for::<BetaEncryptedContent>();
+        let mut schema = generator.subschema_for::<Vec<serde_json::Value>>();
+        schema
+            .insert(
+                "items".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [reference_0, reference_1, reference_2, reference_3,
+                    reference_4, reference_5, reference_6, reference_7, reference_8,
+                    reference_9] }
+                ),
+            );
+        schema
+    }
     fn field_rules_schema_phase(
         generator: &mut schemars::SchemaGenerator,
     ) -> schemars::Schema {
@@ -38802,6 +42948,40 @@ impl schematic_define::Registration for BetaResponseQueuedEvent {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaModelResponseProperties"},
+        {"$ref":"#/components/schemas/BetaResponseProperties"},
+        {"properties":{"completed_at":{"anyOf":[{"format":"unixtime"},
+        {"type":"null"}]},
+        "created_at":{"format":"unixtime"},
+        "error":{"$ref":"#/components/schemas/BetaResponseError"},
+        "incomplete_details":{"anyOf":[{"properties":{"reason":{"enum":["max_output_tokens",
+        "content_filter"]}}},
+        {"type":"null"}]},
+        "instructions":{"anyOf":[{"oneOf":[{"type":"string"},
+        {"items":{"$ref":"#/components/schemas/BetaInputItem"},
+        "type":"array"}]},
+        {"type":"null"}]},
+        "moderation":{"anyOf":[{"$ref":"#/components/schemas/BetaModeration"},
+        {"type":"null"}]},
+        "object":{"enum":["response"]},
+        "output":{"items":{"$ref":"#/components/schemas/BetaOutputItem"}},
+        "prompt_cache_options":{"$ref":"#/components/schemas/BetaPromptCacheOptions"},
+        "reasoning":{"anyOf":[{"$ref":"#/components/schemas/BetaReasoning"},
+        {"type":"null"}]},
+        "status":{"enum":["completed",
+        "failed",
+        "in_progress",
+        "cancelled",
+        "queued",
+        "incomplete"]},
+        "truncation":{"anyOf":[{"enum":["auto",
+        "disabled"]},
+        {"type":"null"}]}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaResponse {
     #[serde(flatten)]
     pub beta_model_response_properties: BetaModelResponseProperties,
@@ -38840,9 +43020,31 @@ impl schematic_define::Registration for BetaResponseConversation {
 #[derive(JsonSchema)]
 pub struct BetaModeration {
     ///Moderation for the response input.
+    #[schemars(schema_with = "BetaModeration::field_rules_schema_input")]
     pub input: serde_json::Value,
     ///Moderation for the response output.
+    #[schemars(schema_with = "BetaModeration::field_rules_schema_output")]
     pub output: serde_json::Value,
+}
+impl BetaModeration {
+    fn field_rules_schema_input(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationResultBody>();
+        let reference_1 = generator.subschema_for::<BetaModerationErrorBody>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
+    fn field_rules_schema_output(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaModerationResultBody>();
+        let reference_1 = generator.subschema_for::<BetaModerationErrorBody>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema.insert("oneOf".to_owned(), serde_json::json!([reference_0, reference_1]));
+        schema
+    }
 }
 impl schematic_define::Registration for BetaModeration {
     const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModeration));
@@ -39128,8 +43330,24 @@ impl schematic_define::Registration for BetaOutputItem {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaResponseError {
+    #[schemars(schema_with = "BetaResponseError::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl BetaResponseError {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaResponseErrorCode>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "code" : reference_0 }),
+            );
+        schema
+    }
 }
 impl Default for BetaResponseError {
     fn default() -> Self {
@@ -39235,8 +43453,24 @@ impl schematic_define::Registration for BetaResponseProperties {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaPrompt {
+    #[schemars(schema_with = "BetaPrompt::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl BetaPrompt {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaResponsePromptVariables>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "properties".to_owned(),
+                serde_json::json!({ "variables" : reference_0 }),
+            );
+        schema
+    }
 }
 impl Default for BetaPrompt {
     fn default() -> Self {
@@ -39256,8 +43490,29 @@ impl schematic_define::Registration for BetaPrompt {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaResponsePromptVariables {
+    #[schemars(schema_with = "BetaResponsePromptVariables::variant_rules_schema_0")]
     Json(serde_json::Value),
+    #[schemars(extend("type" = "null"))]
     Json1(serde_json::Value),
+}
+impl BetaResponsePromptVariables {
+    fn variant_rules_schema_0(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::Schema {
+        let reference_0 = generator.subschema_for::<BetaInputTextContent>();
+        let reference_1 = generator.subschema_for::<BetaInputImageContent>();
+        let reference_2 = generator.subschema_for::<BetaInputFileContent>();
+        let mut schema = generator.subschema_for::<serde_json::Value>();
+        schema
+            .insert(
+                "additionalProperties".to_owned(),
+                serde_json::json!(
+                    { "oneOf" : [{ "type" : "string" }, reference_0, reference_1,
+                    reference_2] }
+                ),
+            );
+        schema
+    }
 }
 impl Default for BetaResponsePromptVariables {
     fn default() -> Self {
@@ -39336,7 +43591,11 @@ impl schematic_define::Registration for BetaModelResponseProperties {
 #[derive(JsonSchema)]
 #[serde(untagged)]
 pub enum BetaServiceTier {
+    #[schemars(
+        extend("enum" = ["auto", "default", "flex", "scale", "priority", "fast"])
+    )]
     Text(String),
+    #[schemars(extend("type" = "null"))]
     Json(serde_json::Value),
 }
 impl Default for BetaServiceTier {
@@ -41640,6 +45899,13 @@ Notes:
 - `background` is not supported over WebSocket.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"properties":{"type":{"enum":["response.create"]}},
+        "type":"object"},
+        {"$ref":"#/components/schemas/BetaCreateResponse"}]
+    )
+)]
 pub struct BetaResponsesClientEventResponseCreate {
     #[serde(flatten)]
     pub json: serde_json::Value,
@@ -41658,6 +45924,30 @@ impl schematic_define::Registration for BetaResponsesClientEventResponseCreate {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaCreateModelResponseProperties"},
+        {"$ref":"#/components/schemas/BetaResponseProperties"},
+        {"properties":{"context_management":{"anyOf":[{"items":{"$ref":"#/components/schemas/BetaContextManagementParam"},
+        "minItems":1u64},
+        {"type":"null"}]},
+        "include":{"anyOf":[{"items":{"$ref":"#/components/schemas/BetaIncludeEnum"}},
+        {"type":"null"}]},
+        "input":{"$ref":"#/components/schemas/BetaInputParam"},
+        "max_output_tokens":{"anyOf":[{"minimum":16u64},
+        {"type":"null"}]},
+        "moderation":{"anyOf":[{"$ref":"#/components/schemas/BetaModerationParam"},
+        {"type":"null"}]},
+        "multi_agent":{"anyOf":[{"$ref":"#/components/schemas/BetaMultiAgentParam"},
+        {"type":"null"}]},
+        "reasoning":{"anyOf":[{"$ref":"#/components/schemas/BetaReasoning"},
+        {"type":"null"}]},
+        "truncation":{"anyOf":[{"enum":["auto",
+        "disabled"]},
+        {"type":"null"}]}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaCreateResponse {
     #[serde(flatten)]
     pub beta_create_model_response_properties: BetaCreateModelResponseProperties,
@@ -41854,6 +46144,15 @@ impl schematic_define::Registration for BetaModerationMode {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
+#[schemars(
+    extend(
+        "allOf" = [{"$ref":"#/components/schemas/BetaModelResponseProperties"},
+        {"properties":{"prompt_cache_options":{"$ref":"#/components/schemas/BetaPromptCacheOptionsParam"},
+        "top_logprobs":{"maximum":20u64,
+        "minimum":0u64}},
+        "type":"object"}]
+    )
+)]
 pub struct BetaCreateModelResponseProperties {
     #[serde(flatten)]
     pub beta_model_response_properties: BetaModelResponseProperties,

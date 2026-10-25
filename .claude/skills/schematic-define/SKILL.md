@@ -134,7 +134,9 @@ adopted page-size param takes `minimum`/`maximum` from the strategy
 other rules are `page-size-constraint-conflict`. `unenforceable_rules` finds
 model rules beneath unsupported composition, untraversed keywords (a tuple's
 `prefixItems`, positional `items`, `contains`, `patternProperties`, ...), or
-unresolved refs. Generated
+unresolved refs; each is a generation error, except that an API built with
+`accept_unchecked_compositions()` gets a warning (and a rustdoc "Not
+checked" line) for a rule whose only blocker is a composition. Generated
 requests enforce them: a request with rules gets `validate() ->
 Result<(), schematic_runtime::validate::Violations>`, and its `into_parts`
 runs the same checks before encoding, so every send refuses with

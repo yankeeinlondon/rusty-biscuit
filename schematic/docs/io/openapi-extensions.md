@@ -593,6 +593,9 @@ when it is one of the losses listed next.
   parameter's `pager_managed` flag. Re-add them with an
   [import overlay](import-openapi.md#overlays-authored-additions-the-import-keeps).
 - **GraphQL** operations, which are not exported.
+- **The unchecked-compositions opt-in** (`unchecked_compositions`), a
+  generation choice rather than a fact about the HTTP API. Re-add it with
+  an overlay, as OpenAI's does, or with `accept_unchecked_compositions()`.
 - **Component Rust paths.** The importer rebuilds each as
   `{module_path}::{Name}`, or the bare name without a module path.
 - **The split of a hand-written auth policy** into explicit methods and an

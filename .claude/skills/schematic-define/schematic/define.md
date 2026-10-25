@@ -101,6 +101,15 @@ build runs `OAuth2Config::validate`), `None`.
 - `request_id_header(name)` and `secret_header(name)`;
   `definitions/tests/api_policy.rs` pins all three policies for every
   shipped API, so a new definition adds its row there.
+- `accept_unchecked_compositions()` sets `RestApi::unchecked_compositions`
+  (`#[serde(default)]` plain `bool`, omitted when false, listed in
+  `OMITTED_DEFAULTS`; `definition_gen` emits the call when set). It turns a
+  request rule whose only blockers are generic compositions into a
+  `type-constraint` warning instead of an error; positional items, other
+  untraversed keywords, unresolved refs, and `constraint_problems` stay
+  errors. `unenforceable_rules` sets `UnenforceableRule::composition` only
+  when compositions are the sole blocker. OpenAI sets it in
+  `definitions/src/openai_pagination.rs::apply`, never in generated code.
 - `.path_param(ParamDef::path(name, type))`: once any is declared, names
   must equal the placeholders (`{+x}` counts as `x`).
 - `.deprecated()` (endpoint and `ParamDef`), `.rate_limit(..)`,

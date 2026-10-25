@@ -211,6 +211,7 @@ fn rest_api_tokens(api: &RestApi, rules: &RuleSource, overlay: Option<&syn::Path
     let policy = cross_origin_tokens(&api.cross_origin);
     builder = quote! { #builder.cross_origin(#policy) };
     for name in &api.secret_names { builder = quote! { #builder.secret_header(#name) }; }
+    if api.unchecked_compositions { builder = quote! { #builder.accept_unchecked_compositions() }; }
     for (key, value) in &api.headers { builder = quote! { #builder.header(#key, #value) }; }
     if !api.errors.is_empty() {
         let errors = error_set_tokens(&api.errors);
@@ -847,8 +848,19 @@ mod tests {
         assert!(code.contains(".cross_origin(CrossOrigin::deny())"));
         assert!(code.contains(r#".request_id_header("x-request-id")"#));
         assert!(code.contains(r#".secret_header("X-Pin")"#));
+        assert!(!code.contains("accept_unchecked_compositions"), "absent by default");
         assert!(code.contains(r#"rust_name: Some("git_ref".to_string())"#));
         assert!(code.contains("secret: true"));
+    }
+
+    #[test]
+    fn an_api_accepting_unchecked_compositions_emits_the_builder_call() {
+        let mut api = sample_api();
+        api.unchecked_compositions = true;
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &["ListItemsResponse".into()], None)).unwrap());
+        assert_eq!(code.matches(".accept_unchecked_compositions()").count(), 1, "{code}");
+        let builder = &code[code.find("RestApi::builder(ctx,").unwrap()..];
+        assert!(builder.find(".accept_unchecked_compositions()").unwrap() < builder.find(".build()").unwrap(), "{builder}");
     }
 
     fn emit(overlay: Option<&str>) -> String {

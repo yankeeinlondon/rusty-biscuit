@@ -61,3 +61,30 @@ fn origin_policy_variants_round_trip() {
         assert_eq!(restored, policy);
     }
 }
+
+#[test]
+fn unchecked_compositions_is_an_omitted_default_set_only_by_the_builder() {
+    use schematic_define::{DefinitionContext, RestApi};
+    let ctx = DefinitionContext::types_in("::models");
+    let build = |opt_in: bool| {
+        let builder = RestApi::builder(&ctx, "Shapes", "https://example.test").describes("Shapes").no_auth();
+        if opt_in { builder.accept_unchecked_compositions() } else { builder }.build().unwrap()
+    };
+    let default = build(false);
+    assert!(!default.unchecked_compositions);
+    let written = serde_json::to_value(&default).unwrap();
+    assert!(written.get("unchecked_compositions").is_none(), "false is omitted: {written}");
+    assert_eq!(serde_json::from_value::<RestApi>(written.clone()).unwrap(), default, "absent reads as false");
+
+    let opted = build(true);
+    assert!(opted.unchecked_compositions);
+    let opted_json = serde_json::to_value(&opted).unwrap();
+    assert_eq!(opted_json["unchecked_compositions"], json!(true));
+    assert_eq!(serde_json::from_value::<RestApi>(opted_json).unwrap(), opted);
+
+    let with = |value: Value| { let mut input = written.clone(); input["unchecked_compositions"] = value; serde_json::from_value::<RestApi>(input) };
+    assert_eq!(with(json!(false)).unwrap(), default, "an explicit false is accepted");
+    for wrong in [Value::Null, json!("yes"), json!(1), json!([])] {
+        assert!(with(wrong.clone()).is_err(), "{wrong} must not deserialize");
+    }
+}

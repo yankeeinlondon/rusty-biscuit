@@ -37,6 +37,7 @@ writes nothing.
 | `api.schemas[].name` | The component's schema identity, the target of `#/components/schemas/{name}`. |
 | `api.schemas[].rust_path` | The Rust type bound to that name. Absent for a schema that only appears nested inside a registered one. An alias keeps both apart: `{"name": "Thing", "rust_path": "crate::models::Widget"}`. |
 | `api.schemas[].schema` | The JSON Schema (OpenAPI 3.0 settings). It is data: `null` values and any keys inside it are kept. |
+| `api.unchecked_compositions` | `true` when the author [accepts unchecked compositions](../generation/request-side.md#accepting-unchecked-compositions). Omitted when false; an explicit `false` loads, while `null` or a non-Boolean fails. |
 | `models` | Optional structural catalog of the definition context (for example a `one_of` composition). Omitted when not bundled; `{"types": []}` is an explicitly empty catalog. |
 
 A loaded bundle is data. It holds Rust paths as strings, not executable types,

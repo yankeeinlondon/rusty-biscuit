@@ -40,8 +40,10 @@ const FORM_EXPLODE_DEFAULT_APIS: &[&str] = &["openai"];
 // had no Schemars `extend` rules on fields or roots, so every field carried
 // the format Schemars implies for its Rust type and a `serde_json::Value`
 // field carried no nested rule objects. The current definition is compared
-// with all of these undone (see `without_value_rules`); its rules are checked
-// by artifact_drift and the import_overlay re-import test.
+// with all of these undone (see `without_value_rules`), including the
+// overlay's later opt-in to unchecked compositions, which only matters once
+// value rules exist; its rules are checked by artifact_drift and the
+// import_overlay re-import test.
 const VALUE_RULE_APIS: &[&str] = &["openai"];
 
 /// The keywords `import --definitions-out` adds to a model field through
@@ -54,7 +56,8 @@ const FIELD_RULE_KEYWORDS: &[&str] = &[
 ];
 
 /// `api` as a [`VALUE_RULE_APIS`] snapshot recorded it: no endpoint
-/// constraints, and no field rules in any component schema. Other APIs are
+/// constraints, no field rules in any component schema, and no
+/// `unchecked_compositions` opt-in. Other APIs are
 /// returned unchanged. `source` is the vendored document a
 /// [`VALUE_RULE_APIS`] key was imported from.
 fn without_value_rules(key: &str, api: &RestApi, source: Option<&std::path::Path>) -> RestApi {
@@ -63,7 +66,13 @@ fn without_value_rules(key: &str, api: &RestApi, source: Option<&std::path::Path
         return api;
     }
     let source = source.unwrap_or_else(|| panic!("the {key} baseline test passes its vendored document"));
-    let free_form = free_form_fields(source);
+    let imported = schematic_define::openapi::OpenApiImport::new(schematic_define::openapi::OpenApiSource::path(source))
+        .prefer_json()
+        .build()
+        .unwrap();
+    let free_form = free_form_fields(&imported);
+    let nominal = NominalCompositions::of(&imported);
+    api.unchecked_compositions = false;
     for endpoint in &mut api.endpoints {
         endpoint.request_constraints = None;
         if let Some(params) = &mut endpoint.params {
@@ -78,10 +87,100 @@ fn without_value_rules(key: &str, api: &RestApi, source: Option<&std::path::Path
         }
     }
     for component in &mut api.schemas {
+        nominal.strip(&component.name, &mut component.schema);
         let fields = free_form.get(&component.name).cloned().unwrap_or_default();
         strip_field_rules(&mut component.schema, &fields);
     }
     api
+}
+
+/// The nominal compositions of the imported source, whose rebuilt rules sit
+/// at the component root rather than on a field.
+struct NominalCompositions {
+    /// Each union emitted as an untagged enum, by name: for each variant,
+    /// whether its Rust type is a free-form value. Schemars writes the
+    /// variants as the root `anyOf`, and the rebuild writes each variant's
+    /// rules on its member, and a null-only source member's `type: "null"`
+    /// beside a variant with rules.
+    unions: std::collections::HashMap<String, Vec<bool>>,
+    /// Each `allOf` emitted as a struct flattening its members, by name,
+    /// with its source members and the property names its inline members
+    /// alone declare. The rebuild writes the source `allOf` back on the
+    /// root, each member rebuilt with its `type` or as a `$ref`, and
+    /// Schemars' OpenAPI 3.0 output then also lists each property name of an
+    /// `allOf` member on the root, as `{}`.
+    composed: std::collections::HashMap<String, (Vec<Value>, Vec<String>)>,
+}
+
+impl NominalCompositions {
+    fn of(imported: &schematic_define::openapi::OpenApiImportResult) -> Self {
+        use schematic_define::models::{ModelDef, TypeRef};
+
+        let aliases = aliases(&imported.models);
+        let mut unions = std::collections::HashMap::new();
+        let mut composed = std::collections::HashMap::new();
+        for model in &imported.models.types {
+            let ModelDef::Alias(alias) = model else { continue };
+            match &alias.target {
+                TypeRef::OneOf(variants) | TypeRef::AnyOf(variants) if !variants.is_empty() => {
+                    let free_form = variants.iter().map(|variant| is_free_form(variant, &aliases)).collect();
+                    unions.insert(alias.name.clone(), free_form);
+                }
+                TypeRef::AllOf(members) if !members.is_empty() => {
+                    let source = imported.api.component(&alias.name).and_then(|component| component.schema.get("allOf")).and_then(Value::as_array);
+                    if let Some(source) = source {
+                        let names = |member: &Value| member.get("properties").and_then(Value::as_object).map(|properties| properties.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+                        let referenced: std::collections::HashSet<String> = source
+                            .iter()
+                            .filter_map(|member| member.get("$ref")?.as_str()?.strip_prefix("#/components/schemas/"))
+                            .filter_map(|name| imported.api.component(name))
+                            .flat_map(|component| names(&component.schema))
+                            .collect();
+                        let inline: Vec<String> =
+                            source.iter().filter(|member| member.get("$ref").is_none()).flat_map(names).filter(|name| !referenced.contains(name)).collect();
+                        composed.insert(alias.name.clone(), (source.clone(), inline));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self { unions, composed }
+    }
+
+    /// Removes the rebuild's root rules from the component `name`'s schema.
+    fn strip(&self, name: &str, schema: &mut Value) {
+        let Some(object) = schema.as_object_mut() else { return };
+        if let Some(free_form) = self.unions.get(name)
+            && let Some(Value::Array(members)) = object.get_mut("anyOf")
+            && members.len() == free_form.len()
+        {
+            for (member, free_form) in members.iter_mut().zip(free_form) {
+                // Schemars writes the null-only member's `type: "null"` in
+                // OpenAPI 3.0 form.
+                if *free_form && member == &serde_json::json!({"enum": [null], "nullable": true}) {
+                    *member = serde_json::json!({});
+                }
+                // The member is a variant's schema, stripped as a field's.
+                let mut holder = serde_json::json!({"properties": {"variant": member.take()}});
+                let fields = if *free_form { std::collections::HashSet::from(["variant".to_owned()]) } else { Default::default() };
+                strip_field_rules(&mut holder, &fields);
+                *member = holder["properties"]["variant"].take();
+            }
+        }
+        if let Some((source, inline)) = self.composed.get(name)
+            && let Some(Value::Array(members)) = object.get("allOf")
+            && members.len() == source.len()
+            && members.iter().zip(source).all(|(member, source)| match source.get("$ref") {
+                Some(reference) => member.get("$ref") == Some(reference) && member.as_object().is_some_and(|member| member.len() == 1),
+                None => member.get("type") == source.get("type"),
+            })
+        {
+            object.remove("allOf");
+            if let Some(Value::Object(properties)) = object.get_mut("properties") {
+                properties.retain(|name, property| !(inline.contains(name) && property == &serde_json::json!({})));
+            }
+        }
+    }
 }
 
 /// The wire names of each struct's fields that the importer types as
@@ -91,22 +190,18 @@ fn without_value_rules(key: &str, api: &RestApi, source: Option<&std::path::Path
 /// may be Schemars' own `Option` of a model, identical once registered. An
 /// `allOf` model is a struct flattening its members, whose properties
 /// Schemars merges, so it has every named member's free-form fields.
-fn free_form_fields(source: &std::path::Path) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
-    use schematic_define::models::{ModelDef, PrimitiveType, TypeRef};
-    use schematic_define::openapi::{OpenApiImport, OpenApiSource};
+fn free_form_fields(imported: &schematic_define::openapi::OpenApiImportResult) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    use schematic_define::models::{ModelDef, TypeRef};
 
-    let imported = OpenApiImport::new(OpenApiSource::path(source)).prefer_json().build().unwrap();
+    let aliases = aliases(&imported.models);
     let mut fields: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
     for model in &imported.models.types {
         let ModelDef::Struct(def) = model else { continue };
-        let names = def.fields.iter().filter_map(|field| {
-            let mut field_type = &field.field_type;
-            while let TypeRef::Optional(inner) = field_type {
-                field_type = inner;
-            }
-            matches!(field_type, TypeRef::Primitive(PrimitiveType::Json) | TypeRef::Unknown | TypeRef::OneOf(_) | TypeRef::AnyOf(_) | TypeRef::AllOf(_))
-                .then(|| field.serde_rename.clone().unwrap_or_else(|| field.name.clone()))
-        });
+        let names = def
+            .fields
+            .iter()
+            .filter(|field| is_free_form(&field.field_type, &aliases))
+            .map(|field| field.serde_rename.clone().unwrap_or_else(|| field.name.clone()));
         fields.insert(def.name.clone(), names.collect());
     }
     let composed: Vec<(&str, Vec<&str>)> = imported
@@ -137,6 +232,43 @@ fn free_form_fields(source: &std::path::Path) -> std::collections::HashMap<Strin
             return fields;
         }
     }
+}
+
+/// Each alias' target, by alias name.
+type Aliases<'a> = std::collections::HashMap<&'a str, &'a schematic_define::models::TypeRef>;
+
+fn aliases(catalog: &schematic_define::models::ModelCatalog) -> Aliases<'_> {
+    use schematic_define::models::ModelDef;
+
+    catalog.types.iter().filter_map(|model| match model {
+        ModelDef::Alias(alias) => Some((alias.name.as_str(), &alias.target)),
+        _ => None,
+    }).collect()
+}
+
+/// Whether the importer emits `type_ref` as a free-form JSON value
+/// (`serde_json::Value`, also emitted for an inline composition), through an
+/// `Option` and through plain aliases (`pub type`), whose rules the rebuild
+/// writes where the alias is used.
+fn is_free_form(type_ref: &schematic_define::models::TypeRef, aliases: &Aliases) -> bool {
+    use schematic_define::models::{PrimitiveType, TypeRef};
+
+    let mut current = type_ref;
+    for _ in 0..32 {
+        match current {
+            TypeRef::Optional(inner) => current = inner,
+            TypeRef::Primitive(PrimitiveType::Json) | TypeRef::Unknown | TypeRef::OneOf(_) | TypeRef::AnyOf(_) | TypeRef::AllOf(_) => return true,
+            TypeRef::Named(name) => {
+                match aliases.get(name.as_str()).copied() {
+                    Some(TypeRef::OneOf(members) | TypeRef::AnyOf(members) | TypeRef::AllOf(members)) if !members.is_empty() => return false,
+                    Some(target) => current = target,
+                    None => return false,
+                }
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The `format` Schemars writes for the Rust type the importer emits for a
@@ -179,21 +311,43 @@ fn rule_slot(schema: &Value) -> bool {
     })
 }
 
-/// Whether `key: child` is a nullable alternative (a [`rule_slot`] beside a
-/// null-only member) or a one-member `allOf` of a rule slot, the two
-/// compositions the rebuild keeps on a free-form value.
+/// Whether `key: child` is a composition the rebuild keeps on a free-form
+/// value: a nullable alternative (a [`rule_slot`] beside a null-only
+/// member), a one-member `allOf` of a rule slot, or a generic `anyOf`,
+/// `oneOf`, `allOf`, or `not` whose members are [`composed_member`]s or
+/// null-only.
 fn rebuilt_wrapper(key: &str, child: &Value) -> bool {
     let null_only = |member: &Value| {
         member.as_object().is_some_and(|object| {
-            object.get("enum").and_then(Value::as_array).is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_null))
+            (object.get("enum").and_then(Value::as_array).is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_null))
+                || object.get("type") == Some(&Value::from("null")))
                 && object.keys().all(|key| matches!(key.as_str(), "enum" | "type" | "nullable"))
         })
     };
     match (key, child.as_array().map(Vec::as_slice)) {
-        ("anyOf", Some([first, second])) => (null_only(first) && rule_slot(second)) || (rule_slot(first) && null_only(second)),
+        ("anyOf", Some([first, second])) if (null_only(first) && rule_slot(second)) || (rule_slot(first) && null_only(second)) => true,
         ("allOf", Some([member])) => rule_slot(member),
+        ("anyOf" | "oneOf" | "allOf", Some(members)) => members.iter().all(|member| null_only(member) || composed_member(member)),
+        ("not", None) => composed_member(child),
         _ => false,
     }
+}
+
+/// Whether `schema` is a member of a kept generic composition once its rules
+/// are stripped: [`rule_only`] slots and [`rebuilt_wrapper`]s beside the
+/// structure the rebuild keeps on a member, its `type`, `nullable`, and a
+/// `$ref` to a model.
+fn composed_member(schema: &Value) -> bool {
+    schema.as_object().is_some_and(|object| {
+        object.iter().all(|(key, child)| match key.as_str() {
+            "type" | "$ref" => child.is_string(),
+            "nullable" => child.is_boolean(),
+            // A rule the field-rule stripping does not reach, such as one on
+            // an extra value; the whole composition is the rebuild's.
+            key if FIELD_RULE_KEYWORDS.contains(&key) => true,
+            _ => rule_only(key, child) || rebuilt_wrapper(key, child),
+        })
+    })
 }
 
 /// Removes [`FIELD_RULE_KEYWORDS`] from every property schema below
@@ -221,10 +375,13 @@ fn strip_field_rules(schema: &mut Value, free_form: &std::collections::HashSet<S
             if let Some(items) = object.get_mut("items") {
                 strip_property(items, true);
             }
-            for composition in ["anyOf", "allOf"] {
+            for composition in ["anyOf", "oneOf", "allOf"] {
                 if let Some(Value::Array(members)) = object.get_mut(composition) {
                     members.iter_mut().for_each(|member| strip_property(member, false));
                 }
+            }
+            if let Some(negated) = object.get_mut("not") {
+                strip_property(negated, false);
             }
         }
         strip_field_rules(property, &Default::default());

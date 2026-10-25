@@ -212,12 +212,14 @@ fn unenforced_rules_are_findings_with_their_severity() {
     let at = |endpoint: &str, severity, place: &str, keyword: &str| {
         (Some(endpoint.to_string()), severity, place.to_string(), keyword.to_string())
     };
+    // Without the API's opt-in, a rule inside a union component's member is
+    // an error like any other composition rule.
     assert_eq!(findings, [
         at("ListItems", Severity::Warning, "query.id", "format"),
         at("ListItems", Severity::Warning, "query.code", "pattern"),
-        at("CreateTool", Severity::Warning, "body (component `Search` at `#/properties/depth`)", "maximum"),
-        at("CreateTool", Severity::Warning, "body (component `Search` at `#/properties/type`)", "enum"),
-        at("CreateTool", Severity::Warning, "body (component `Code` at `#/properties/type`)", "enum"),
+        at("CreateTool", Severity::Error, "body (component `Search` at `#/properties/depth`)", "maximum"),
+        at("CreateTool", Severity::Error, "body (component `Search` at `#/properties/type`)", "enum"),
+        at("CreateTool", Severity::Error, "body (component `Code` at `#/properties/type`)", "enum"),
         at("Wrap", Severity::Error, "body (component `Wrapper` at `#/properties/value/oneOf/0`)", "maxLength"),
     ]);
 
@@ -347,4 +349,153 @@ fn item_objects_and_nullable_any_of_stay_enforced_without_findings() {
     assert!(code.contains(".items(&Plan::new().max_length(3u64))"), "{code}");
     assert!(code.contains(".max_length(5u64)"), "{code}");
     assert!(code.contains("UPLOAD_REQUEST_FORM_META"), "the multipart JSON field is checked: {code}");
+}
+
+/// `api` with the author's opt-in for unchecked compositions.
+fn opted_in(mut api: RestApi) -> RestApi {
+    api.unchecked_compositions = true;
+    api
+}
+
+/// Asserts that `item`'s one unenforceable rule, `keyword` at `pointer` of
+/// the component `Item`, is reported for the JSON body and the multipart
+/// JSON field alike, with `without` and then `with` the API's opt-in.
+fn assert_both_entry_points(case: &str, item: serde_json::Value, pointer: &str, keyword: &str, without: Severity, with: Severity) {
+    for (api, severity) in [(body_and_form_field(item.clone()), without), (opted_in(body_and_form_field(item)), with)] {
+        let place = format!("component `Item` at `#{pointer}`");
+        assert_eq!(located_findings(&api), [
+            (Some("CreateItem".to_string()), severity, format!("body ({place})"), keyword.to_string()),
+            (Some("Upload".to_string()), severity, format!("body.meta ({place})"), keyword.to_string()),
+        ], "{case}, opted in: {}", api.unchecked_compositions);
+    }
+}
+
+fn limited() -> serde_json::Value {
+    json!({"type": "string", "maxLength": 3})
+}
+
+fn property(value: serde_json::Value) -> serde_json::Value {
+    json!({"type": "object", "properties": {"value": value}})
+}
+
+#[test]
+fn a_composition_rule_is_an_error_without_the_opt_in_and_a_warning_with_it_wherever_it_sits() {
+    let union = |keyword: &str| json!({keyword: [limited(), {"type": "integer"}]});
+    let cases = [
+        ("root anyOf", union("anyOf"), "/anyOf/0"),
+        ("root oneOf", union("oneOf"), "/oneOf/0"),
+        ("nested anyOf", property(union("anyOf")), "/properties/value/anyOf/0"),
+        ("nested oneOf", property(union("oneOf")), "/properties/value/oneOf/0"),
+        ("two-member allOf", property(json!({"allOf": [limited(), {"type": "string"}]})), "/properties/value/allOf/0"),
+        ("not", property(json!({"not": limited()})), "/properties/value/not"),
+        ("map-value union", json!({"type": "object", "additionalProperties": union("anyOf")}), "/additionalProperties/anyOf/0"),
+    ];
+    for (case, item, pointer) in cases {
+        assert_both_entry_points(case, item, pointer, "maxLength", Severity::Error, Severity::Warning);
+    }
+}
+
+#[test]
+fn a_rule_beneath_positional_items_stays_an_error_with_the_opt_in_even_inside_a_composition() {
+    let positional = |keyword: &str| json!({"type": "array", keyword: [limited(), {"type": "integer"}]});
+    let cases = [
+        ("positional items", property(positional("items")), "/properties/value/items/0"),
+        ("prefixItems", property(positional("prefixItems")), "/properties/value/prefixItems/0"),
+        ("positional items inside anyOf", property(json!({"anyOf": [positional("items"), {"type": "integer"}]})), "/properties/value/anyOf/0/items/0"),
+        ("prefixItems inside oneOf", json!({"oneOf": [positional("prefixItems"), {"type": "integer"}]}), "/oneOf/0/prefixItems/0"),
+        ("anyOf inside positional items", property(json!({"type": "array", "items": [{"anyOf": [limited(), {"type": "integer"}]}]})), "/properties/value/items/0/anyOf/0"),
+    ];
+    for (case, item, pointer) in cases {
+        assert_both_entry_points(case, item, pointer, "maxLength", Severity::Error, Severity::Error);
+    }
+}
+
+#[test]
+fn a_rule_beneath_another_untraversed_keyword_stays_an_error_with_the_opt_in() {
+    for keyword in ["additionalItems", "contains", "unevaluatedItems", "propertyNames", "unevaluatedProperties", "if", "then", "else"] {
+        let item = property(json!({keyword: limited()}));
+        assert_both_entry_points(keyword, item, &format!("/properties/value/{keyword}"), "maxLength", Severity::Error, Severity::Error);
+    }
+    for keyword in ["patternProperties", "dependentSchemas", "dependencies"] {
+        let item = property(json!({keyword: {"x": limited()}}));
+        assert_both_entry_points(keyword, item, &format!("/properties/value/{keyword}/x"), "maxLength", Severity::Error, Severity::Error);
+    }
+}
+
+#[test]
+fn a_rule_beside_an_unresolved_reference_stays_an_error_with_the_opt_in_even_inside_a_composition() {
+    let beside = json!({"$ref": "#/components/schemas/Gone", "maxLength": 3});
+    for (case, item, pointer) in [
+        ("plain", property(beside.clone()), "/properties/value"),
+        ("inside anyOf", property(json!({"anyOf": [beside, {"type": "integer"}]})), "/properties/value/anyOf/0"),
+    ] {
+        assert_both_entry_points(case, item.clone(), pointer, "maxLength", Severity::Error, Severity::Error);
+        let finding = api_findings(&opted_in(body_and_form_field(item))).remove(0).1;
+        assert!(finding.reason.starts_with("beside the unresolved reference \"#/components/schemas/Gone\""), "{case}: {finding:?}");
+    }
+}
+
+#[test]
+fn a_component_reached_beneath_a_composition_and_positional_items_is_reported_once_as_an_error() {
+    let item = json!({"type": "object", "properties": {
+        "choice": {"anyOf": [{"$ref": "#/components/schemas/Code"}, {"type": "integer"}]},
+        "pair": {"type": "array", "prefixItems": [{"$ref": "#/components/schemas/Code"}]},
+    }});
+    let api = opted_in(api(vec![json_body("CreateItem", "Item")], vec![("Item", item), ("Code", limited())]));
+    assert_eq!(located_findings(&api), [
+        (Some("CreateItem".to_string()), Severity::Error, "body (component `Code` at `#`)".to_string(), "maxLength".to_string()),
+    ]);
+    assert!(api_findings(&api)[0].1.reason.contains("`prefixItems`"), "{:?}", api_findings(&api));
+}
+
+#[test]
+fn supported_traversal_stays_enforced_without_findings_with_or_without_the_opt_in() {
+    let item = json!({"type": "object", "properties": {
+        "tags": {"type": "array", "items": {"type": "object", "properties": {"name": limited()}}},
+        "note": {"anyOf": [{"type": "string", "maxLength": 5}, {"type": "null"}]},
+        "code": {"allOf": [{"$ref": "#/components/schemas/Code"}], "minLength": 1},
+    }});
+    for opt_in in [false, true] {
+        let mut api = api(vec![json_body("CreateItem", "Item")], vec![("Item", item.clone()), ("Code", json!({"type": "string", "maxLength": 7}))]);
+        let mut upload = endpoint("Upload", RestMethod::Post, "/upload");
+        upload.request = Some(ApiRequest::FormData { fields: vec![schematic_define::FormField::json("meta", TypeRef::Named("Item".into()))] });
+        api.endpoints.push(upload);
+        api.unchecked_compositions = opt_in;
+        assert_eq!(located_findings(&api), [], "opted in: {opt_in}");
+        let code = squash(&module_code(&api));
+        for plan in [".max_length(3u64)", ".max_length(5u64)", ".max_length(7u64)", ".min_length(1u64)"] {
+            assert!(code.contains(plan), "{plan}, opted in: {opt_in}: {code}");
+        }
+        assert!(code.contains("UPLOAD_REQUEST_FORM_META"), "the multipart JSON field is checked: {code}");
+    }
+}
+
+#[test]
+fn the_composition_messages_name_the_remedies_and_the_opt_in_discloses_the_rule_in_rustdoc() {
+    let item = property(json!({"anyOf": [limited(), {"type": "integer"}]}));
+    let place = "body (component `Item` at `#/properties/value/anyOf/0`) `maxLength`";
+    let refused = api_findings(&body_and_form_field(item.clone())).remove(0).1;
+    assert_eq!(
+        refused.message(),
+        format!(
+            "{place} is not enforced: beneath the `anyOf` at `#/properties/value` of component `Item`; the client cannot \
+             check it, so remove the rule or the composition, or accept unchecked compositions for the API with \
+             `accept_unchecked_compositions`"
+        )
+    );
+
+    let api = opted_in(body_and_form_field(item));
+    let accepted = api_findings(&api).remove(0).1;
+    let reason = "beneath the `anyOf` at `#/properties/value` of component `Item`, a composition whose members are not \
+                  checked; the API accepts unchecked compositions";
+    assert_eq!(accepted.message(), format!("{place} is not enforced: {reason}"));
+    let code = module_code(&api);
+    let create = &code[code.find("pub struct CreateItemRequest").expect("request struct")..];
+    let docs = &code[..code.find("pub struct CreateItemRequest").unwrap()];
+    let docs = &docs[docs.rfind("## Value rules").expect("the request documents its value rules")..];
+    assert!(docs.contains("This request declares value rules that the client does not check."), "{docs}");
+    assert!(docs.contains(&format!("/// - body (component `Item` at `#/properties/value/anyOf/0`) `maxLength`: {reason}")), "{docs}");
+    assert!(!squash(create).contains("fnvalidate("), "no check is emitted for the rule: {create}");
+    let upload = &code[..code.find("pub struct UploadRequest").expect("form request struct")];
+    assert!(upload[upload.rfind("## Value rules").unwrap()..].contains("/// - body.meta (component `Item`"), "{upload}");
 }

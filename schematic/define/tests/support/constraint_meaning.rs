@@ -10,7 +10,9 @@
 //! `1e0` agree), a numeric exclusive bound and an OpenAPI 3.0 Boolean flag
 //! with its bound agree, `const: c` equals `enum: [c]`, a component used
 //! only as a primitive alias contributes its rules where it is referenced,
-//! a nullable wrapper contributes the rules of its non-null member, and
+//! a nullable wrapper contributes the rules of its non-null member, each
+//! member of any other `anyOf`, `oneOf`, multi-member `allOf`, or `not` is
+//! its own node (`{at}/anyOf/1`, `{at}/not`), and
 //! component nodes compare without the `format` values `int64` and
 //! `double`, the annotations Schemars writes for a model field's `i64` and
 //! `f64` where the source wrote none.
@@ -27,8 +29,8 @@ pub type Rules = BTreeMap<&'static str, String>;
 /// Every non-empty rule set of `api`: parameters (`param:{endpoint}:{in}.{name}`),
 /// form fields (`form:{endpoint}:{name}`), body roots (`body:{endpoint}`), and
 /// each component node (`schema:{component}{path}`, through `properties`,
-/// `items`, and `additionalProperties`) for the components named in
-/// `components`.
+/// `items`, `additionalProperties`, and the members of a generic
+/// composition) for the components named in `components`.
 pub fn rule_map(api: &RestApi, components: &[&str]) -> BTreeMap<String, Rules> {
     let mut map = BTreeMap::new();
     for endpoint in &api.endpoints {
@@ -83,9 +85,21 @@ fn walk_children(api: &RestApi, object: &Map<String, Value>, at: &str, map: &mut
             walk(api, property, &format!("{at}/properties/{name}"), map);
         }
     }
-    for keyword in ["items", "additionalProperties"] {
+    for keyword in ["items", "additionalProperties", "not"] {
         if let Some(child) = object.get(keyword) {
             walk(api, child, &format!("{at}/{keyword}"), map);
+        }
+    }
+    for keyword in ["anyOf", "oneOf", "allOf"] {
+        let Some(members) = object.get(keyword).and_then(Value::as_array) else { continue };
+        let wrapper = match keyword {
+            "allOf" => members.len() == 1,
+            _ => nullable_member(object, keyword).is_some(),
+        };
+        if !wrapper {
+            for (index, member) in members.iter().enumerate() {
+                walk(api, member, &format!("{at}/{keyword}/{index}"), map);
+            }
         }
     }
 }

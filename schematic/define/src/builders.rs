@@ -333,7 +333,7 @@ impl RestApi {
             docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
             headers: vec![], endpoints: vec![], module_path: None, request_suffix: None, version: None,
             env_mapping: None, cross_origin: CrossOrigin::same_origin(), request_id_header: None, secret_names: vec![],
-            default_pagination: None, rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, schemas: vec![] }, auth_choices: 0, username: None, error: None, state: PhantomData }
+            default_pagination: None, rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false, schemas: vec![] }, auth_choices: 0, username: None, error: None, state: PhantomData }
     }
 }
 #[allow(missing_docs)]
@@ -381,6 +381,14 @@ impl<'a, D, A> RestApiBuilder<'a, D, A> {
     pub fn request_id_header(mut self, name: impl Into<String>) -> Self { self.api.request_id_header = Some(name.into().to_ascii_lowercase()); self }
     pub fn secret_header(mut self, name: impl Into<String>) -> Self { self.api.secret_names.push(name.into().to_ascii_lowercase()); self }
     pub fn default_pagination(mut self, strategy: crate::pagination::Strategy) -> Self { self.api.default_pagination = Some(strategy); self }
+    /// Accepts that the generated client leaves unchecked the request rules
+    /// beneath a generic composition (`anyOf` other than an `Option`,
+    /// `oneOf`, a multi-member `allOf`, `not`): each becomes a generation
+    /// warning, disclosed in the request type's rustdoc, instead of an
+    /// error. Rules beside an unresolved reference or beneath another
+    /// untraversed keyword stay errors. Sets
+    /// [`RestApi::unchecked_compositions`].
+    pub fn accept_unchecked_compositions(mut self) -> Self { self.api.unchecked_compositions = true; self }
     /// Rate-limit headers inherited by every endpoint without its own.
     pub fn rate_limit(mut self, rate_limit: RateLimit) -> Self { self.api.rate_limit = Some(rate_limit); self }
     /// Retry guidance inherited by every endpoint without its own.

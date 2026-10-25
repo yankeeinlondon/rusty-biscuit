@@ -342,7 +342,7 @@ fn reject_nulls(value: &Value, pointer: &mut String, grant: bool) -> Result<(), 
 /// `EndpointParams`, `ParamDef`, `AuthPolicy`, `SuccessShape`,
 /// `ResponseShape::Stream`, `GraphQlSurface`, `GraphQlOperation`, and
 /// `Constraints`.
-const OMITTED_DEFAULTS: [&str; 13] = ["deprecated", "secret", "pager_managed", "path", "explicit",
+const OMITTED_DEFAULTS: [&str; 14] = ["deprecated", "secret", "pager_managed", "path", "explicit", "unchecked_compositions",
     "errors", "no_declared_errors", "operations", "statuses", "fallback", "keep", "unique_items", "pattern_unenforced"];
 
 /// Every member of `input` must survive typed deserialization: `written`,

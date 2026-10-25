@@ -437,7 +437,7 @@ impl OpenApiImport {
             }
         }
 
-        let mut api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let mut api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name,
             description,
             base_url,

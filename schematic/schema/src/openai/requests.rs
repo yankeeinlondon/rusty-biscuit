@@ -9,6 +9,10 @@ use super::{OpenAI, OpenAIApi};
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `CreateSpeechRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateSpeechRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1162,6 +1166,81 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `CreateModelResponseProperties` at `#/properties/prompt_cache_retention/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/safety_identifier/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/temperature/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/temperature/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/top_p/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/properties/top_p/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/prompt_cache_retention/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/safety_identifier/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/temperature/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/temperature/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/top_p/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ModelResponseProperties` at `#/properties/top_p/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/allOf/1/properties/top_logprobs`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModelResponseProperties` at `#/allOf/1/properties/top_logprobs`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/audio/properties/format`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/frequency_penalty`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/frequency_penalty`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/function_call/oneOf/0`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/functions`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/functions`) `maxItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/messages`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestDeveloperMessage` at `#/properties/content/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointParam` at `#/properties/mode`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartText` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestDeveloperMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestSystemMessage` at `#/properties/content/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestSystemMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestUserMessage` at `#/properties/content/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartImage` at `#/properties/image_url/properties/detail`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartImage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartAudio` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartFile` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestUserMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestAssistantMessage` at `#/properties/content/anyOf/0/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestMessageContentPartRefusal` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestAssistantMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionMessageToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionMessageCustomToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestToolMessage` at `#/properties/content/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestToolMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionRequestFunctionMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseModalities` at `#/anyOf/0/items`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/n`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/n`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PredictionContent` at `#/properties/content/oneOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PredictionContent` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/presence_penalty`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/presence_penalty`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatText` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/seed`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/seed`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StopConfiguration` at `#/anyOf/1`) `minItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StopConfiguration` at `#/anyOf/1`) `maxItems`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionAllowedTools` at `#/properties/mode`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionAllowedToolsChoice` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionNamedToolChoice` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionNamedToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionTool` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolChatCompletions` at `#/properties/custom/properties/format/oneOf/0/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolChatCompletions` at `#/properties/custom/properties/format/oneOf/1/properties/grammar/properties/syntax`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolChatCompletions` at `#/properties/custom/properties/format/oneOf/1/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolChatCompletions` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/top_logprobs`) `minimum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/top_logprobs`) `maximum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateChatCompletionRequest2` at `#/allOf/1/properties/web_search_options/properties/user_location/properties/type`) `enum`: beneath the `allOf` at `#` of component `CreateChatCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1543,6 +1622,15 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `CreateCompletionRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateCompletionRequest2` at `#/properties/prompt/oneOf/2`) `minItems`: beneath the `oneOf` at `#/properties/prompt` of component `CreateCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateCompletionRequest2` at `#/properties/prompt/oneOf/3`) `minItems`: beneath the `oneOf` at `#/properties/prompt` of component `CreateCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateCompletionRequest2` at `#/properties/prompt/oneOf/3/items`) `minItems`: beneath the `oneOf` at `#/properties/prompt` of component `CreateCompletionRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StopConfiguration` at `#/anyOf/1`) `minItems`: beneath the `anyOf` at `#` of component `StopConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StopConfiguration` at `#/anyOf/1`) `maxItems`: beneath the `anyOf` at `#` of component `StopConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -1728,6 +1816,25 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `ContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/network_policy` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/skills/items` of component `CreateContainerBody`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -2528,6 +2635,17 @@ impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/1`) `minItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/1`) `maxItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/2`) `minItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/2`) `maxItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/3`) `minItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/3`) `maxItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/input/oneOf/3/items`) `minItems`: beneath the `oneOf` at `#/properties/input` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEmbeddingRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateEmbeddingRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -2736,6 +2854,32 @@ impl schematic_runtime::EndpointSpec for ListEvalsRequest {
     }
 }
 /// Request for `CreateEval` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `CreateEvalCustomDataSourceConfig` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source_config` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalLogsDataSourceConfig` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source_config` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalStoredCompletionsDataSourceConfig` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source_config` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemContentOutputText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemInputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalLabelModelGrader` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/operation`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/evaluation_metric`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderPython` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/sampling_params/properties/max_completions_tokens/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/testing_criteria/items` of component `CreateEvalRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -3100,6 +3244,115 @@ impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
     }
 }
 /// Request for `CreateEvalRun` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `EvalJsonlFileContentSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalJsonlFileIdSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalJsonlRunDataSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EasyInputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EasyInputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemContentOutputText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemInputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalCompletionsRunDataSource` at `#/properties/input_messages/oneOf/0/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalCompletionsRunDataSource` at `#/properties/input_messages/oneOf/1/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ChatCompletionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalStoredCompletionsSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalCompletionsRunDataSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalResponsesRunDataSource` at `#/properties/input_messages/oneOf/0/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalResponsesRunDataSource` at `#/properties/input_messages/oneOf/1/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `TextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComparisonFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompoundFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FileSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/connector_id`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoCodeInterpreterToolParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoCodeInterpreterToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/background`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/model/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/moderation`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_format`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/quality`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/size/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalEnvironmentParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalEnvironmentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomTextFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomGrammarFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `maxLength`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `pattern`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApproximateLocation` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalResponsesSource` at `#/properties/created_after/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalResponsesSource` at `#/properties/created_before/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalResponsesSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateEvalResponsesRunDataSource` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/data_source` of component `CreateEvalRunRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -3883,6 +4136,30 @@ impl schematic_runtime::EndpointSpec for DownloadFileRequest {
 }
 /// Request for `RunGrader` endpoint.
 ///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `GraderStringCheck` at `#/properties/operation`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/evaluation_metric`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderPython` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemContentOutputText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemInputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/sampling_params/properties/max_completions_tokens/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderLabelModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderMulti` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `RunGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -3939,6 +4216,30 @@ impl schematic_runtime::EndpointSpec for RunGraderRequest {
     }
 }
 /// Request for `ValidateGrader` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `GraderStringCheck` at `#/properties/operation`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/evaluation_metric`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderPython` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemContentOutputText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemInputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/sampling_params/properties/max_completions_tokens/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderLabelModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderMulti` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `ValidateGraderRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -4274,6 +4575,70 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/batch_size/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/batch_size` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/batch_size/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/batch_size` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/batch_size/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/batch_size` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/learning_rate_multiplier/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/learning_rate_multiplier` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/learning_rate_multiplier/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/learning_rate_multiplier` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/n_epochs/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/n_epochs` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/n_epochs/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/n_epochs` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/hyperparameters/properties/n_epochs/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/hyperparameters/properties/n_epochs` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/integrations/items/properties/type/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/integrations/items/properties/type` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/batch_size/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/batch_size/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/batch_size/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/beta/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/beta` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/beta/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/beta` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/beta/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/beta` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/n_epochs/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/n_epochs/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneDPOHyperparameters` at `#/properties/n_epochs/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneDPOHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/operation`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderStringCheck` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/evaluation_metric`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderTextSimilarity` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderPython` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemContentOutputText` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItemInputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/input_audio/properties/format`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputAudio` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EvalItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/sampling_params/properties/max_completions_tokens/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderScoreModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderLabelModel` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `GraderMulti` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/grader` of component `FineTuneReinforcementMethod`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/batch_size/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/batch_size/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/batch_size/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/compute_multiplier/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/compute_multiplier` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/compute_multiplier/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/compute_multiplier` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/compute_multiplier/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/compute_multiplier` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/eval_interval/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/eval_interval` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/eval_interval/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/eval_interval` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/eval_samples/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/eval_samples` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/eval_samples/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/eval_samples` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/n_epochs/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/n_epochs/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneReinforcementHyperparameters` at `#/properties/n_epochs/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneReinforcementHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/batch_size/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/batch_size/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/batch_size/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/batch_size` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/learning_rate_multiplier/oneOf/1`) `exclusiveMinimum`: beneath the `oneOf` at `#/properties/learning_rate_multiplier` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/n_epochs/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/n_epochs/oneOf/1`) `minimum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FineTuneSupervisedHyperparameters` at `#/properties/n_epochs/oneOf/1`) `maximum`: beneath the `oneOf` at `#/properties/n_epochs` of component `FineTuneSupervisedHyperparameters`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateFineTuningJobRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateFineTuningJobRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -4739,6 +5104,10 @@ impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `EditImageBodyJsonParam` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `EditImageBodyJsonParam`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -4834,6 +5203,11 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `CreateImageRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateImageRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateImageRequest2` at `#/properties/size/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/size` of component `CreateImageRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -5244,6 +5618,16 @@ impl schematic_runtime::EndpointSpec for DeleteModelRequest {
     }
 }
 /// Request for `CreateModeration` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `CreateModerationRequest2` at `#/properties/input/oneOf/2/items/oneOf/0/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input` of component `CreateModerationRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModerationRequest2` at `#/properties/input/oneOf/2/items/oneOf/1/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input` of component `CreateModerationRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CreateModerationRequest2` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `CreateModerationRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -15687,6 +16071,34 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `RealtimeAudioFormats` at `#/anyOf/0/properties/rate`) `enum`: beneath the `anyOf` at `#` of component `RealtimeAudioFormats`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AudioTranscription` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `AudioTranscription`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/idle_timeout_ms/anyOf/0`) `minimum`: beneath the `oneOf` at `#/anyOf/0` of component `RealtimeTurnDetection`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/idle_timeout_ms/anyOf/0`) `maximum`: beneath the `oneOf` at `#/anyOf/0` of component `RealtimeTurnDetection`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0` of component `RealtimeTurnDetection`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/1/properties/eagerness`) `enum`: beneath the `oneOf` at `#/anyOf/0` of component `RealtimeTurnDetection`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/1/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0` of component `RealtimeTurnDetection`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/max_output_tokens/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/max_output_tokens` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/tool_choice` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/tool_choice` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeFunctionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/connector_id`) `enum`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/tools/items` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/tracing/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/tracing` of component `RealtimeSessionCreateRequestGA`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `minimum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `maximum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/token_limits/properties/post_instructions`) `minimum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -15959,6 +16371,43 @@ impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `RealtimeAudioFormats` at `#/anyOf/0/properties/rate`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AudioTranscription` at `#/properties/delay`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AudioTranscription` at `#/properties/languages`) `minItems`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AudioTranscription` at `#/properties/model/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/idle_timeout_ms/anyOf/0`) `minimum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/idle_timeout_ms/anyOf/0`) `maximum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/0/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/1/properties/eagerness`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTurnDetection` at `#/anyOf/0/oneOf/1/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/audio/properties/output/properties/speed`) `minimum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/audio/properties/output/properties/speed`) `maximum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/include/items`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/max_output_tokens/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/model/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/output_modalities/items`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeFunctionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/connector_id`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/tracing/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `minimum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `maximum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/token_limits/properties/post_instructions`) `minimum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequestGA` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTranscriptionSessionCreateRequestGA` at `#/properties/include/items`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTranscriptionSessionCreateRequestGA` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/session` of component `RealtimeCreateClientSecretRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16059,6 +16508,18 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `RealtimeSessionCreateRequest` at `#/properties/max_response_output_tokens/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/max_response_output_tokens` of component `RealtimeSessionCreateRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `ResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeSessionCreateRequest` at `#/properties/tracing/oneOf/0`) `enum`: beneath the `oneOf` at `#/properties/tracing` of component `RealtimeSessionCreateRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `minimum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/retention_ratio`) `maximum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RealtimeTruncation` at `#/anyOf/1/properties/token_limits/properties/post_instructions`) `minimum`: beneath the `anyOf` at `#` of component `RealtimeTruncation`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -16158,6 +16619,10 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `AudioTranscription` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#/properties/model` of component `AudioTranscription`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -16361,56 +16826,268 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 ///
 /// Not checked:
 ///
-/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaPromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `BetaResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `BetaResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `BetaResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `BetaResponsePromptVariables`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/file_ids`) `maxItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/size/anyOf/1`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/file_ids`) `maxItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/skills`) `maxItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/skills`) `maxItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerReferenceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomTextFormatParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomGrammarFormatParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `maxLength`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/prompt_cache_retention/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/safety_identifier/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/temperature/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/temperature/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/top_p/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/properties/top_p/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/prompt_cache_retention/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/safety_identifier/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/temperature/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/temperature/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/top_logprobs/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/top_p/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaModelResponseProperties` at `#/properties/top_p/anyOf/0`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/allOf/1/properties/top_logprobs`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateModelResponseProperties` at `#/allOf/1/properties/top_logprobs`) `maximum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateResponse` at `#/allOf/2/properties/context_management/anyOf/0`) `minItems`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContextManagementParam` at `#/properties/compact_threshold/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationBody` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationBody` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationBody` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFilePath` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContent` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaRefusalContent` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaVectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaClickParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDoubleClickAction` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDragParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaKeyPressAction` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMoveParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScreenshotParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScrollParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaTypeParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWaitParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerScreenshotImage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/sources/items/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionOpenPage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionFind` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCaller` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCaller` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `pattern`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/output/oneOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaPromptCacheBreakpointParam` at `#/properties/mode`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/image_url/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/file_data/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAgentMessageItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/index`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/end_index`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/start_index`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/end_index`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/start_index`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/role`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningTextContent` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSummaryTextContent` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputLogs` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputImage` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellExecAction` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/status`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/status/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputTimeoutOutcomeParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputExitOutcomeParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stderr`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stdout`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/path`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/output/anyOf/0`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPListTools` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalRequest` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalResponse` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCallOutput` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCall` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateResponse` at `#/allOf/2/properties/max_output_tokens/anyOf/0`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentParam` at `#/properties/max_concurrent_subagents`) `minimum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoning` at `#/properties/context/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoning` at `#/properties/generate_summary/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoning` at `#/properties/summary/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCreateResponse` at `#/allOf/2/properties/truncation/anyOf/0`) `enum`: beneath the `allOf` at `#` of component `BetaCreateResponse`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -17653,6 +18330,13 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `AutoChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `minimum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `maximum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17807,6 +18491,16 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
 }
 /// Request for `ModifyVectorStore` endpoint.
 ///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `VectorStoreExpirationAfter` at `#/properties/anchor`) `enum`: beneath the `allOf` at `#/properties/expires_after` of component `UpdateVectorStoreRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `VectorStoreExpirationAfter` at `#/properties/days`) `minimum`: beneath the `allOf` at `#/properties/expires_after` of component `UpdateVectorStoreRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `VectorStoreExpirationAfter` at `#/properties/days`) `maximum`: beneath the `allOf` at `#/properties/expires_after` of component `UpdateVectorStoreRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -17932,6 +18626,14 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `VectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `VectorStoreFileAttributes`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileBatchRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `minimum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileBatchRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `maximum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileBatchRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileBatchRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -18425,6 +19127,18 @@ impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
 }
 /// Request for `CreateVectorStoreFile` endpoint.
 ///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `VectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `VectorStoreFileAttributes`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `minimum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategy` at `#/properties/max_chunk_size_tokens`) `maximum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `StaticChunkingStrategyRequestParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/chunking_strategy` of component `CreateVectorStoreFileRequest2`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -18539,6 +19253,14 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
     }
 }
 /// Request for `UpdateVectorStoreFileAttributes` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `VectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/anyOf/0/additionalProperties` of component `VectorStoreFileAttributes`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -18716,6 +19438,11 @@ impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
 ///
+/// Not checked:
+///
+/// - body (component `ComparisonFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/filters` of component `VectorStoreSearchRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompoundFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/filters` of component `VectorStoreSearchRequest`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -18819,19 +19546,211 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
 ///
 /// Not checked:
 ///
-/// - body (component `EasyInputMessage` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `EasyInputMessage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `CompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
-/// - body (component `ProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a union whose members are not checked
+/// - body (component `PromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EasyInputMessage` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `EasyInputMessage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputMessage` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputMessage` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputMessage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FileCitationBody` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `UrlCitationBody` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerFileCitationBody` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FilePath` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `OutputTextContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `RefusalContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `OutputMessage` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `OutputMessage` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `OutputMessage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `VectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FileSearchToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FileSearchToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ClickParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `DoubleClickAction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `DragParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `KeyPressAction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MoveParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ScreenshotParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ScrollParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `TypeParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WaitParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerScreenshotImage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchActionSearch` at `#/properties/sources/items/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchActionSearch` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchActionOpenPage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchActionFind` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `DirectToolCallCaller` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramToolCallCaller` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `DirectToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramToolCallCallerParam` at `#/properties/caller_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramToolCallCallerParam` at `#/properties/caller_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `pattern`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/output/oneOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `PromptCacheBreakpointParam` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputTextContentParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContentParamAutoParam` at `#/properties/image_url/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputImageContentParamAutoParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContentParam` at `#/properties/file_data/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InputFileContentParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchCallItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoCodeInterpreterToolParam` at `#/properties/file_ids`) `maxItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AutoCodeInterpreterToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/model/anyOf/1`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/size/anyOf/1`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/file_ids`) `maxItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/skills`) `maxItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SkillReferenceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `InlineSkillParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerAutoParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalEnvironmentParam` at `#/properties/skills`) `maxItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalEnvironmentParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ContainerReferenceParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomTextFormatParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomGrammarFormatParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/name`) `pattern`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `NamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `WebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ToolSearchOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AdditionalToolsItemParam` at `#/properties/role`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `AdditionalToolsItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ReasoningTextContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ReasoningItem` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `SummaryTextContent` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ReasoningItem` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompactionSummaryItemParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompactionSummaryItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ImageGenToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterOutputLogs` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterOutputImage` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CodeInterpreterToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellExecAction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolCall` at `#/properties/status`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolCallOutput` at `#/properties/status/anyOf/0`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `LocalShellToolCallOutput` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputTimeoutOutcomeParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputExitOutcomeParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputContentParam` at `#/properties/stderr`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputContentParam` at `#/properties/stdout`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `FunctionShellCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchCreateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchCreateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchCreateFileOperationParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchDeleteFileOperationParam` at `#/properties/path`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchDeleteFileOperationParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchUpdateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchUpdateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchUpdateFileOperationParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallOutputItemParam` at `#/properties/output/anyOf/0`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ApplyPatchToolCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPListTools` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPApprovalRequest` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPApprovalResponse` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `MCPToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolCallOutput` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CustomToolCall` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `CompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `ProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `InputItem`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -20418,56 +21337,243 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
 ///
 /// Not checked:
 ///
-/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a union whose members are not checked
-/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a union whose members are not checked
-/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
-/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTool`, a union whose members are not checked
+/// - body (component `BetaTokenCountsBody` at `#/properties/input/anyOf/0/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaPromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFilePath` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaRefusalContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaVectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaClickParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDoubleClickAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDragParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaKeyPressAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMoveParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScreenshotParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScrollParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaTypeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWaitParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerScreenshotImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/sources/items/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionOpenPage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionFind` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCaller` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCaller` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/output/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaPromptCacheBreakpointParam` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/image_url/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/file_data/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAgentMessageItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/end_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/start_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/end_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/start_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/model/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/size/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomTextFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomGrammarFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSummaryTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputLogs` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellExecAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/status/anyOf/0`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputTimeoutOutcomeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputExitOutcomeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stderr`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stdout`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/output/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPListTools` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalRequest` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalResponse` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCallOutput` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaTokenCountsBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaResponseFormatText` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaTextResponseFormatJsonSchema` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaResponseFormatJsonObject` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaTextResponseFormatConfiguration`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/mode`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceAllowed` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceTypes` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceFunction` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceMCP` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolChoiceCustom` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificApplyPatchParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSpecificFunctionShellParam` at `#/properties/type`) `enum`: beneath the `anyOf` at `#` of component `BetaToolChoiceParam`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -20631,6 +21737,234 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `BetaCompactResponseMethodPublicBody` at `#/properties/input/anyOf/0/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaPromptCacheBreakpointConfig` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEasyInputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationBody` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFilePath` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaRefusalContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputMessage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaVectorStoreFileAttributes` at `#/anyOf/0/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaClickParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDoubleClickAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDragParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaKeyPressAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMoveParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScreenshotParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaScrollParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaTypeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWaitParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerScreenshotImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/sources/items/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionSearch` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionOpenPage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchActionFind` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCaller` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCaller` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaDirectToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/caller_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramToolCallCallerParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/name/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/namespace/anyOf/0`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/output/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaPromptCacheBreakpointParam` at `#/properties/mode`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputTextContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/image_url/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputImageContentParamAutoParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/file_data/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInputFileContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaEncryptedContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAgentMessageItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/end_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/start_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaUrlCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/end_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/start_index`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerFileCitationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/text`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaOutputTextContentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMultiAgentCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/call_id/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComparisonFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompoundFilter` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFileSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaComputerUsePreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/search_context_size`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/connector_id`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/require_approval/anyOf/0/oneOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/tunnel_id`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDisabledParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/allowed_domains`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/domain_secrets`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/domain`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyDomainSecretParam` at `#/properties/value`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerNetworkPolicyAllowlistParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAutoCodeInterpreterToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgrammaticToolCallingParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/background`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/model/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/moderation`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_compression`) `maximum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/output_format`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `minimum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/partial_images`) `maximum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/quality`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/size/anyOf/1`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/file_ids`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/skill_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSkillReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/data`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/media_type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillSourceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaInlineSkillParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerAutoParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/skills`) `maxItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalEnvironmentParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaContainerReferenceParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomTextFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomGrammarFormatParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/description`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/tools`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/name`) `pattern`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaNamespaceToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaWebSearchPreviewTool` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApproximateLocation` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/allowed_callers/anyOf/0`) `minItems`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaToolSearchOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/role`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaAdditionalToolsItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaSummaryTextContent` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaReasoningItem` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/encrypted_content`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionSummaryItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaImageGenToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputLogs` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterOutputImage` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCodeInterpreterToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellExecAction` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/status`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/status/anyOf/0`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaLocalShellToolCallOutput` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputTimeoutOutcomeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputExitOutcomeParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stderr`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputContentParam` at `#/properties/stdout`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaFunctionShellCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchCreateFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchDeleteFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/diff`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/path`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchUpdateFileOperationParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/output/anyOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaApplyPatchToolCallOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPListTools` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalRequest` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPApprovalResponse` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaMCPToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCallOutput` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCustomToolCall` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaCompactionTriggerItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaItemReferenceParam` at `#/properties/type/anyOf/0`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/code`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/fingerprint`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `minLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/call_id`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/result`) `maxLength`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
+/// - body (component `BetaProgramOutputItemParam` at `#/properties/type`) `enum`: beneath the `oneOf` at `#/properties/input/anyOf/0` of component `BetaCompactResponseMethodPublicBody`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -20829,6 +22163,14 @@ impl schematic_runtime::EndpointSpec for ListSkillsRequest {
     }
 }
 /// Request for `CreateSkill` endpoint.
+///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `CreateSkillBody` at `#/properties/files/oneOf/0`) `maxItems`: beneath the `oneOf` at `#/properties/files` of component `CreateSkillBody`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -21179,6 +22521,14 @@ impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
 }
 /// Request for `CreateSkillVersion` endpoint.
 ///
+/// ## Value rules
+///
+/// This request declares value rules that the client does not check.
+///
+/// Not checked:
+///
+/// - body (component `CreateSkillVersionBody` at `#/properties/files/oneOf/0`) `maxItems`: beneath the `oneOf` at `#/properties/files` of component `CreateSkillVersionBody`, a composition whose members are not checked; the API accepts unchecked compositions
+///
 /// ## Example
 ///
 /// ```no_run
@@ -21459,6 +22809,10 @@ impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
 /// ## Value rules
 ///
 /// Every send checks this request's declared value rules first and refuses a violating request before any network work, with every violation in one `InvalidArgument`; `validate()` reports the same violations early.
+///
+/// Not checked:
+///
+/// - body (component `WorkflowParam` at `#/properties/state_variables/additionalProperties/oneOf/0`) `maxLength`: beneath the `oneOf` at `#/properties/state_variables/additionalProperties` of component `WorkflowParam`, a composition whose members are not checked; the API accepts unchecked compositions
 ///
 /// ## Example
 ///
@@ -22050,21 +23404,21 @@ mod open_ai_value_rules {
         &COMPONENT_57_REALTIME_SESSION_CREATE_REQUEST_GA,
     );
     pub(super) static CREATE_REALTIME_CLIENT_SECRET_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_68_REALTIME_CREATE_CLIENT_SECRET_REQUEST,
+        &COMPONENT_69_REALTIME_CREATE_CLIENT_SECRET_REQUEST,
     );
     pub(super) static CREATE_REALTIME_SESSION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_69_REALTIME_SESSION_CREATE_REQUEST,
+        &COMPONENT_70_REALTIME_SESSION_CREATE_REQUEST,
     );
     pub(super) static CREATE_REALTIME_TRANSCRIPTION_SESSION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_70_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST,
+        &COMPONENT_71_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST,
     );
     pub(super) static CREATE_REALTIME_TRANSLATION_CLIENT_SECRET_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_71_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST,
+        &COMPONENT_72_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST,
     );
     pub(super) static CREATE_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static CREATE_RESPONSE_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_73_BETA_CREATE_RESPONSE,
+        &COMPONENT_74_BETA_CREATE_RESPONSE,
     );
     pub(super) static GET_RESPONSE_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
@@ -22075,53 +23429,53 @@ mod open_ai_value_rules {
     pub(super) static LIST_INPUT_ITEMS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static CREATE_UPLOAD_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_83_CREATE_UPLOAD_REQUEST2,
+        &COMPONENT_85_CREATE_UPLOAD_REQUEST2,
     );
     pub(super) static CREATE_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_86_CREATE_VECTOR_STORE_REQUEST2,
+        &COMPONENT_88_CREATE_VECTOR_STORE_REQUEST2,
     );
     pub(super) static CREATE_VECTOR_STORE_FILE_BATCH_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_89_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2,
+        &COMPONENT_91_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2,
     );
     pub(super) static SEARCH_VECTOR_STORE_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_93_VECTOR_STORE_SEARCH_REQUEST,
+        &COMPONENT_95_VECTOR_STORE_SEARCH_REQUEST,
     );
     pub(super) static CREATE_CONVERSATION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_94_CREATE_CONVERSATION_BODY,
+        &COMPONENT_96_CREATE_CONVERSATION_BODY,
     );
     pub(super) static UPDATEORGANIZATIONSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_97_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY,
+        &COMPONENT_99_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY,
     );
     pub(super) static UPDATEPROJECTSPENDLIMIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_98_UPDATE_PROJECT_SPEND_LIMIT_BODY,
+        &COMPONENT_100_UPDATE_PROJECT_SPEND_LIMIT_BODY,
     );
     pub(super) static CREATE_VIDEO_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_100_CREATE_VIDEO_JSON_BODY,
+        &COMPONENT_102_CREATE_VIDEO_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_CHARACTER_REQUEST_FORM_NAME: Plan = Plan::new()
         .min_length(1u64)
         .max_length(80u64);
     pub(super) static CREATE_VIDEO_EDIT_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_105_CREATE_VIDEO_EDIT_JSON_BODY,
+        &COMPONENT_107_CREATE_VIDEO_EDIT_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_EXTEND_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_107_CREATE_VIDEO_EXTEND_JSON_BODY,
+        &COMPONENT_109_CREATE_VIDEO_EXTEND_JSON_BODY,
     );
     pub(super) static CREATE_VIDEO_REMIX_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_108_CREATE_VIDEO_REMIX_BODY,
+        &COMPONENT_110_CREATE_VIDEO_REMIX_BODY,
     );
     pub(super) static GETINPUTTOKENCOUNTS_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static GETINPUTTOKENCOUNTS_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_109_BETA_TOKEN_COUNTS_BODY,
+        &COMPONENT_111_BETA_TOKEN_COUNTS_BODY,
     );
     pub(super) static COMPACTCONVERSATION_REQUEST_HEADER_OPENAI_BETA_ITEMS: Plan = Plan::new()
         .allowed_values(&[Literal::String("responses_multi_agent=v1")]);
     pub(super) static COMPACTCONVERSATION_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_115_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY,
+        &COMPONENT_117_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY,
     );
     pub(super) static CREATE_CHAT_SESSION_METHOD_REQUEST_BODY: Plan = Plan::reference(
-        &COMPONENT_125_CREATE_CHAT_SESSION_BODY,
+        &COMPONENT_127_CREATE_CHAT_SESSION_BODY,
     );
     pub(super) static LIST_THREADS_METHOD_REQUEST_QUERY_USER: Plan = Plan::new()
         .min_length(1u64)
@@ -22223,6 +23577,11 @@ mod open_ai_value_rules {
                     &Plan::reference(&Plan::new().max_length(64u64)).nullable(),
                 ),
                 Property::new(
+                    "service_tier",
+                    &Plan::reference(&Plan::reference(&COMPONENT_7_SERVICE_TIER))
+                        .nullable(),
+                ),
+                Property::new(
                     "temperature",
                     &Plan::reference(&Plan::new().minimum("0").maximum("2")).nullable(),
                 ),
@@ -22236,6 +23595,20 @@ mod open_ai_value_rules {
                 ),
             ],
         );
+    pub(super) static COMPONENT_7_SERVICE_TIER: Plan = Plan::reference(
+            &Plan::new()
+                .allowed_values(
+                    &[
+                        Literal::String("auto"),
+                        Literal::String("default"),
+                        Literal::String("flex"),
+                        Literal::String("scale"),
+                        Literal::String("priority"),
+                        Literal::String("fast"),
+                    ],
+                ),
+        )
+        .nullable();
     pub(super) static COMPONENT_8_CREATE_COMPLETION_REQUEST2: Plan = Plan::new()
         .properties(
             &[
@@ -22456,6 +23829,11 @@ mod open_ai_value_rules {
                         .nullable(),
                 ),
                 Property::new(
+                    "partial_images",
+                    &Plan::reference(&Plan::reference(&COMPONENT_29_PARTIAL_IMAGES))
+                        .nullable(),
+                ),
+                Property::new(
                     "prompt",
                     &Plan::new().min_length(1u64).max_length(32000u64),
                 ),
@@ -22500,6 +23878,10 @@ mod open_ai_value_rules {
                 ),
             ],
         );
+    pub(super) static COMPONENT_29_PARTIAL_IMAGES: Plan = Plan::reference(
+            &Plan::new().minimum("0").maximum("3"),
+        )
+        .nullable();
     pub(super) static COMPONENT_30_CREATE_IMAGE_REQUEST2: Plan = Plan::new()
         .properties(
             &[
@@ -22535,6 +23917,11 @@ mod open_ai_value_rules {
                                 Literal::String("webp"),
                             ],
                         ),
+                ),
+                Property::new(
+                    "partial_images",
+                    &Plan::reference(&Plan::reference(&COMPONENT_29_PARTIAL_IMAGES))
+                        .nullable(),
                 ),
                 Property::new(
                     "quality",
@@ -22793,7 +24180,7 @@ mod open_ai_value_rules {
                 Property::new("languages", &Plan::new().nullable().min_items(1u64)),
             ],
         );
-    pub(super) static COMPONENT_68_REALTIME_CREATE_CLIENT_SECRET_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_69_REALTIME_CREATE_CLIENT_SECRET_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22815,7 +24202,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_69_REALTIME_SESSION_CREATE_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_70_REALTIME_SESSION_CREATE_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22850,7 +24237,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_70_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_71_REALTIME_TRANSCRIPTION_SESSION_CREATE_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22898,7 +24285,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_71_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_72_REALTIME_TRANSLATION_CLIENT_SECRET_CREATE_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22920,7 +24307,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_73_BETA_CREATE_RESPONSE: Plan = Plan::new()
+    pub(super) static COMPONENT_74_BETA_CREATE_RESPONSE: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22938,8 +24325,20 @@ mod open_ai_value_rules {
                     &Plan::reference(&Plan::new().max_length(64u64)).nullable(),
                 ),
                 Property::new(
+                    "service_tier",
+                    &Plan::reference(&Plan::reference(&COMPONENT_79_BETA_SERVICE_TIER))
+                        .nullable(),
+                ),
+                Property::new(
                     "temperature",
                     &Plan::reference(&Plan::new().minimum("0").maximum("2")).nullable(),
+                ),
+                Property::new(
+                    "text",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_80_BETA_RESPONSE_TEXT_PARAM),
+                        )
+                        .nullable(),
                 ),
                 Property::new(
                     "top_logprobs",
@@ -22951,13 +24350,48 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_83_CREATE_UPLOAD_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_79_BETA_SERVICE_TIER: Plan = Plan::reference(
+            &Plan::new()
+                .allowed_values(
+                    &[
+                        Literal::String("auto"),
+                        Literal::String("default"),
+                        Literal::String("flex"),
+                        Literal::String("scale"),
+                        Literal::String("priority"),
+                        Literal::String("fast"),
+                    ],
+                ),
+        )
+        .nullable();
+    pub(super) static COMPONENT_80_BETA_RESPONSE_TEXT_PARAM: Plan = Plan::new()
+        .properties(
+            &[
+                Property::new(
+                    "verbosity",
+                    &Plan::reference(&Plan::reference(&COMPONENT_82_BETA_VERBOSITY))
+                        .nullable(),
+                ),
+            ],
+        );
+    pub(super) static COMPONENT_82_BETA_VERBOSITY: Plan = Plan::reference(
+            &Plan::new()
+                .allowed_values(
+                    &[
+                        Literal::String("low"),
+                        Literal::String("medium"),
+                        Literal::String("high"),
+                    ],
+                ),
+        )
+        .nullable();
+    pub(super) static COMPONENT_85_CREATE_UPLOAD_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_84_FILE_EXPIRATION_AFTER),
+                            &Plan::reference(&COMPONENT_86_FILE_EXPIRATION_AFTER),
                         )
                         .nullable(),
                 ),
@@ -22975,7 +24409,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_84_FILE_EXPIRATION_AFTER: Plan = Plan::new()
+    pub(super) static COMPONENT_86_FILE_EXPIRATION_AFTER: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -22985,20 +24419,20 @@ mod open_ai_value_rules {
                 Property::new("seconds", &Plan::new().minimum("3600").maximum("2592000")),
             ],
         );
-    pub(super) static COMPONENT_86_CREATE_VECTOR_STORE_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_88_CREATE_VECTOR_STORE_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_87_VECTOR_STORE_EXPIRATION_AFTER),
+                            &Plan::reference(&COMPONENT_89_VECTOR_STORE_EXPIRATION_AFTER),
                         )
                         .nullable(),
                 ),
                 Property::new("file_ids", &Plan::new().nullable().max_items(500u64)),
             ],
         );
-    pub(super) static COMPONENT_87_VECTOR_STORE_EXPIRATION_AFTER: Plan = Plan::new()
+    pub(super) static COMPONENT_89_VECTOR_STORE_EXPIRATION_AFTER: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23008,7 +24442,7 @@ mod open_ai_value_rules {
                 Property::new("days", &Plan::new().minimum("1").maximum("365")),
             ],
         );
-    pub(super) static COMPONENT_89_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2: Plan = Plan::new()
+    pub(super) static COMPONENT_91_CREATE_VECTOR_STORE_FILE_BATCH_REQUEST2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23021,7 +24455,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_93_VECTOR_STORE_SEARCH_REQUEST: Plan = Plan::new()
+    pub(super) static COMPONENT_95_VECTOR_STORE_SEARCH_REQUEST: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23053,7 +24487,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_94_CREATE_CONVERSATION_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_96_CREATE_CONVERSATION_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23062,7 +24496,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_97_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_99_UPDATE_ORGANIZATION_SPEND_LIMIT_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23076,7 +24510,7 @@ mod open_ai_value_rules {
                 Property::new("threshold_amount", &Plan::new().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_98_UPDATE_PROJECT_SPEND_LIMIT_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_100_UPDATE_PROJECT_SPEND_LIMIT_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23090,12 +24524,12 @@ mod open_ai_value_rules {
                 Property::new("threshold_amount", &Plan::new().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_100_CREATE_VIDEO_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_102_CREATE_VIDEO_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "input_reference",
-                    &Plan::reference(&Plan::reference(&COMPONENT_101_IMAGE_REF_PARAM2))
+                    &Plan::reference(&Plan::reference(&COMPONENT_103_IMAGE_REF_PARAM2))
                         .nullable(),
                 ),
                 Property::new(
@@ -23104,7 +24538,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_101_IMAGE_REF_PARAM2: Plan = Plan::new()
+    pub(super) static COMPONENT_103_IMAGE_REF_PARAM2: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23113,7 +24547,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_105_CREATE_VIDEO_EDIT_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_107_CREATE_VIDEO_EDIT_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23122,7 +24556,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_107_CREATE_VIDEO_EXTEND_JSON_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_109_CREATE_VIDEO_EXTEND_JSON_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23131,7 +24565,7 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_108_CREATE_VIDEO_REMIX_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_110_CREATE_VIDEO_REMIX_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23140,17 +24574,24 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_109_BETA_TOKEN_COUNTS_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_111_BETA_TOKEN_COUNTS_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "reasoning",
-                    &Plan::reference(&Plan::reference(&COMPONENT_111_BETA_REASONING))
+                    &Plan::reference(&Plan::reference(&COMPONENT_113_BETA_REASONING))
+                        .nullable(),
+                ),
+                Property::new(
+                    "text",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_80_BETA_RESPONSE_TEXT_PARAM),
+                        )
                         .nullable(),
                 ),
             ],
         );
-    pub(super) static COMPONENT_111_BETA_REASONING: Plan = Plan::new()
+    pub(super) static COMPONENT_113_BETA_REASONING: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23164,6 +24605,13 @@ mod open_ai_value_rules {
                                         Literal::String("all_turns"),
                                     ],
                                 ),
+                        )
+                        .nullable(),
+                ),
+                Property::new(
+                    "effort",
+                    &Plan::reference(
+                            &Plan::reference(&COMPONENT_114_BETA_REASONING_EFFORT),
                         )
                         .nullable(),
                 ),
@@ -23197,7 +24645,22 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_115_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_114_BETA_REASONING_EFFORT: Plan = Plan::reference(
+            &Plan::new()
+                .allowed_values(
+                    &[
+                        Literal::String("none"),
+                        Literal::String("minimal"),
+                        Literal::String("low"),
+                        Literal::String("medium"),
+                        Literal::String("high"),
+                        Literal::String("xhigh"),
+                        Literal::String("max"),
+                    ],
+                ),
+        )
+        .nullable();
+    pub(super) static COMPONENT_117_BETA_COMPACT_RESPONSE_METHOD_PUBLIC_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23206,47 +24669,47 @@ mod open_ai_value_rules {
                 ),
             ],
         );
-    pub(super) static COMPONENT_125_CREATE_CHAT_SESSION_BODY: Plan = Plan::new()
+    pub(super) static COMPONENT_127_CREATE_CHAT_SESSION_BODY: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "chatkit_configuration",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_126_CHATKIT_CONFIGURATION_PARAM),
+                            &Plan::reference(&COMPONENT_128_CHATKIT_CONFIGURATION_PARAM),
                         )
                         .nullable(),
                 ),
                 Property::new(
                     "expires_after",
                     &Plan::reference(
-                            &Plan::reference(&COMPONENT_130_EXPIRES_AFTER_PARAM),
+                            &Plan::reference(&COMPONENT_132_EXPIRES_AFTER_PARAM),
                         )
                         .nullable(),
                 ),
                 Property::new(
                     "rate_limits",
-                    &Plan::reference(&Plan::reference(&COMPONENT_131_RATE_LIMITS_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_133_RATE_LIMITS_PARAM))
                         .nullable(),
                 ),
                 Property::new("user", &Plan::new().min_length(1u64)),
             ],
         );
-    pub(super) static COMPONENT_126_CHATKIT_CONFIGURATION_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_128_CHATKIT_CONFIGURATION_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
                     "file_upload",
-                    &Plan::reference(&Plan::reference(&COMPONENT_128_FILE_UPLOAD_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_130_FILE_UPLOAD_PARAM))
                         .nullable(),
                 ),
                 Property::new(
                     "history",
-                    &Plan::reference(&Plan::reference(&COMPONENT_129_HISTORY_PARAM))
+                    &Plan::reference(&Plan::reference(&COMPONENT_131_HISTORY_PARAM))
                         .nullable(),
                 ),
             ],
         );
-    pub(super) static COMPONENT_128_FILE_UPLOAD_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_130_FILE_UPLOAD_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23256,11 +24719,11 @@ mod open_ai_value_rules {
                 Property::new("max_files", &Plan::new().nullable().minimum("1")),
             ],
         );
-    pub(super) static COMPONENT_129_HISTORY_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_131_HISTORY_PARAM: Plan = Plan::new()
         .properties(
             &[Property::new("recent_threads", &Plan::new().nullable().minimum("1"))],
         );
-    pub(super) static COMPONENT_130_EXPIRES_AFTER_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_132_EXPIRES_AFTER_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(
@@ -23270,7 +24733,7 @@ mod open_ai_value_rules {
                 Property::new("seconds", &Plan::new().minimum("1").maximum("600")),
             ],
         );
-    pub(super) static COMPONENT_131_RATE_LIMITS_PARAM: Plan = Plan::new()
+    pub(super) static COMPONENT_133_RATE_LIMITS_PARAM: Plan = Plan::new()
         .properties(
             &[
                 Property::new(

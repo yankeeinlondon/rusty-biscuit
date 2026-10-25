@@ -84,6 +84,16 @@ let endpoint = Endpoint::get("ReadFile", "/files/{file}")
 
 `ParamDef::new` creates an optional, comma-delimited (`Form`, not exploded) parameter; `required()` and `describes(text)` set existing metadata. The generated Rust client honors these flags for query parameters: a required one becomes a `new()` and endpoint-method argument, a `QueryParamType::Enum` becomes a generated enum, and `style`/`explode` decide the array form (see [query parameters](generation/request-side.md#query-parameters)). `rust_name` changes only the Rust field and setter; encoding and export retain the wire name. For example, `ref` is sent on the wire while callers use `git_ref`. Optional `beta` and `recursive` parameters are ordinary Boolean inputs: omission sends no value, and a supplied false remains false.
 
+API `accept_unchecked_compositions()` records that the author accepts unchecked value rules beneath a generic composition (`oneOf`, an `anyOf` other than an `Option`, a multi-member `allOf`, `not`) in this API's request models. Without it each such rule fails Rust generation; with it each is a `type-constraint` warning and is listed as not checked in the request's rustdoc. It is stored as `unchecked_compositions` (omitted when false) and covers nothing else: rules beneath other untraversed keywords, beside unresolved references, and malformed rules still fail. See [accepting unchecked compositions](generation/request-side.md#accepting-unchecked-compositions).
+
+```rust,ignore
+let api = RestApi::builder(ctx, "Shapes", "https://api.example.com")
+    .describes("Shapes").no_auth()
+    .accept_unchecked_compositions()
+    .endpoints(endpoints).build()?;
+assert!(api.unchecked_compositions);
+```
+
 API `request_id_header("X-Request-ID")` and `secret_header("X-Pin")` normalize names to lowercase and reject invalid HTTP header names. Parameter `secret()` adds its wire name to the predecessor runtime's redaction metadata. The existing auth strategy markers, redaction behavior and explicit `auth_policy` semantics remain authoritative.
 
 `pager_managed()` records an adoption requirement, preserved in serialized definitions. API build resolves the strategy and requires a matching location and wire name with an exposed caller control. A marker alone cannot hide an input. Required managed inputs additionally need a pagination-authored sent default that is valid for the declared type (an `Integer` parses as `i64`, a `Number` as a finite `f64`, a `Boolean` is `true` or `false`, an `Enum` value is one of its values, anything else is nonempty); `pager-managed-required-without-default` reports a missing default and `pager-managed-default-invalid` an invalid one, each naming the strategy kind and parameter. `default_pagination(strategy)` authors an API strategy; `.pagination(Collection)` assigns an endpoint collection, opt-out, or strategy override. Pagination exception tables and legacy parameter pagination fields are removed.

@@ -709,7 +709,7 @@ mod tests {
         use crate::{SuccessShape, AuthStrategy, Endpoint, RestApi, RestMethod};
 
         // Create an API with mixed request types
-        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None,
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "FileService".to_string(),
             description: "File upload and management service".to_string(),
             base_url: "https://api.example.com/v1".to_string(),

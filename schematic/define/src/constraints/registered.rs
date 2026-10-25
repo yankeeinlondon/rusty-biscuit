@@ -58,8 +58,10 @@ pub struct UnenforceableRule {
     pub keyword: &'static str,
     /// Why it cannot be enforced, naming the composition or reference.
     pub reason: String,
-    /// The composition the rule sits beneath; `None` when it sits beside
-    /// an unresolved reference or beneath an untraversed keyword instead.
+    /// The composition the rule sits beneath, when compositions are the
+    /// only reason it is unenforceable. `None` when it sits beside an
+    /// unresolved reference or beneath an untraversed keyword, whether or
+    /// not a composition also encloses it.
     pub composition: Option<CompositionSite>,
 }
 
@@ -79,6 +81,7 @@ pub struct CompositionSite {
 }
 
 /// Why the rules found beneath one point of a walk are unenforceable.
+/// `site` is `Some` only while every blocker so far is a composition.
 struct Blocked {
     reason: String,
     site: Option<CompositionSite>,
@@ -102,6 +105,12 @@ struct Blocked {
 /// `allOf` with exactly one member is walked through too. Each
 /// component is walked at most once outside a composition and once beneath
 /// one, so a recursive model terminates.
+///
+/// A rule both beneath a composition and beneath an untraversed keyword or
+/// beside an unresolved reference is listed once, with that other reason
+/// and no [`UnenforceableRule::composition`]: an untraversed keyword inside
+/// a composition, or a composition inside one, names the untraversed
+/// keyword, and a component reached both ways is reported as the stricter.
 ///
 /// The bounds Schemars writes for a Rust integer width (`minimum: 0` on a
 /// `uint32`, `0..=255` on a `uint8`) are the type's, not authored rules, and
@@ -138,13 +147,35 @@ struct Blocked {
 pub fn unenforceable_rules(api: &RestApi, body: &TypeRef) -> Vec<UnenforceableRule> {
     let mut walk = Walk { api, visited: HashSet::new(), found: Vec::new() };
     walk.schema(&body.wire_schema(), None, &mut String::new(), None);
-    walk.found
+    // A component walked beneath a composition and again beneath another
+    // blocker reports its rules twice; keep the first position, with the
+    // stricter (non-composition) reason.
+    let mut rules: Vec<UnenforceableRule> = Vec::with_capacity(walk.found.len());
+    for rule in walk.found {
+        let same = |kept: &&mut UnenforceableRule| kept.component == rule.component && kept.pointer == rule.pointer && kept.keyword == rule.keyword;
+        match rules.iter_mut().find(same) {
+            Some(kept) if kept.composition.is_some() && rule.composition.is_none() => *kept = rule,
+            Some(_) => {}
+            None => rules.push(rule),
+        }
+    }
+    rules
+}
+
+/// How a component was reached, for [`Walk::visited`]: freely, beneath
+/// compositions only, or beneath another blocker.
+fn blocked_state(blocked: Option<&Blocked>) -> u8 {
+    match blocked {
+        None => 0,
+        Some(Blocked { site: Some(_), .. }) => 1,
+        Some(_) => 2,
+    }
 }
 
 struct Walk<'a> {
     api: &'a RestApi,
-    /// `(component, beneath a composition)` pairs already walked.
-    visited: HashSet<(&'a str, bool)>,
+    /// `(component, blocked_state)` pairs already walked.
+    visited: HashSet<(&'a str, u8)>,
     found: Vec<UnenforceableRule>,
 }
 
@@ -153,18 +184,25 @@ impl<'a> Walk<'a> {
     /// the reason every rule found is unenforceable, once one applies.
     fn schema(&mut self, value: &Value, component: Option<&'a str>, pointer: &mut String, blocked: Option<&Blocked>) {
         let Some(object) = value.as_object() else { return };
-        if let Some(blocked) = blocked {
-            self.report(object, component, pointer, blocked);
+        let reference = object.get("$ref");
+        let target = reference.and_then(|reference| self.resolve(reference, component));
+        // An unresolved reference outranks an enclosing composition, so the
+        // rules beside it stay unenforceable for a reason the opt-in for
+        // compositions does not cover.
+        let unresolved = match (reference, target) {
+            (Some(reference), None) => Some(Blocked { reason: format!("beside the unresolved reference {reference}"), site: None }),
+            _ => None,
+        };
+        let own = match (blocked, &unresolved) {
+            (Some(outer), _) if outer.site.is_none() => Some(outer),
+            (_, Some(unresolved)) => Some(unresolved),
+            (outer, None) => outer,
+        };
+        if let Some(own) = own {
+            self.report(object, component, pointer, own);
         }
-        if let Some(reference) = object.get("$ref") {
-            match self.resolve(reference, component) {
-                Some(target) => self.component(target, blocked),
-                None if blocked.is_none() => {
-                    let unresolved = Blocked { reason: format!("beside the unresolved reference {reference}"), site: None };
-                    self.report(object, component, pointer, &unresolved);
-                }
-                None => {}
-            }
+        if let Some(target) = target {
+            self.component(target, blocked);
         }
         if let Some(properties) = object.get("properties").and_then(Value::as_object) {
             for (name, child) in properties {
@@ -190,7 +228,13 @@ impl<'a> Walk<'a> {
                 continue;
             }
             let here = Blocked { reason: format!("beneath the `{key}` at {}, which the client does not traverse", place(component, pointer)), site: None };
-            let inner = Some(blocked.unwrap_or(&here));
+            // The outermost untraversed keyword names the reason, but one
+            // inside a composition replaces it: the rule is then not one the
+            // opt-in for compositions covers.
+            let inner = match blocked {
+                Some(outer) if outer.site.is_none() => Some(outer),
+                _ => Some(&here),
+            };
             let length = push_token(pointer, key);
             match child {
                 Value::Array(members) => self.members(members, component, pointer, inner),
@@ -240,7 +284,7 @@ impl<'a> Walk<'a> {
     }
 
     fn component(&mut self, target: &'a SchemaComponent, blocked: Option<&Blocked>) {
-        if self.visited.insert((target.name.as_str(), blocked.is_some())) {
+        if self.visited.insert((target.name.as_str(), blocked_state(blocked))) {
             self.schema(&target.schema, Some(&target.name), &mut String::new(), blocked);
         }
     }

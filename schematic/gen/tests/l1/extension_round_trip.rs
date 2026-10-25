@@ -191,6 +191,9 @@ const DOCUMENT_TOLERANCES: &[Tolerance] = &[
 ///   same definition as one that declares none.
 /// - `grouped-operation-ids`: the grouped writer prefixes a later member's
 ///   clashing `operationId`; one document imports as one API (D8).
+/// - `unchecked-compositions`: the opt-in is a generation choice that no
+///   extension carries, so a definition accepting unchecked compositions
+///   re-imports without it (OpenAI's overlay re-adds it).
 /// - `grouped-auth-union`: the grouped writer merges two members' operation
 ///   on one method and path into one accepting either member's requirements,
 ///   so the imported API accepts both members' methods (D8).
@@ -218,6 +221,9 @@ const DEFINITION_TOLERANCES: &[Tolerance] = &[
     Tolerance { category: "grouped-operation-ids", pattern: "/endpoints/*/id", accepts: |_, difference| {
         matches!((string(&difference.expected), string(&difference.actual)),
             (Some(expected), Some(actual)) if actual.len() > expected.len() && actual.ends_with(expected))
+    } },
+    Tolerance { category: "unchecked-compositions", pattern: "/unchecked_compositions", accepts: |_, difference| {
+        difference.expected == Some(Value::Bool(true)) && difference.actual.is_none()
     } },
     Tolerance { category: "grouped-auth-union", pattern: "/auth_policy", accepts: |_, difference| {
         difference.expected == Some(Value::Null)
@@ -359,7 +365,12 @@ fn expected(module: &str) -> Expected {
             document: RENAMED,
             definition: &["grouped-name", "grouped-operation-ids", "schema-json-normalized", "schema-rust-path", "version-default"],
         },
-        "openai" => Expected { document: RENAMED, definition: sized },
+        "openai" => Expected {
+            document: RENAMED,
+            definition: &[
+                "grouped-name", "page-size-bounds", "pagination", "schema-json-normalized", "schema-rust-path", "unchecked-compositions", "version-default",
+            ],
+        },
         other => panic!("no round-trip expectation for module `{other}`"),
     }
 }

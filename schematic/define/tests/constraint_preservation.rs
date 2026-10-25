@@ -13,7 +13,7 @@ use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions, OpenApiImport, OpenApiSource, export, serialize};
 
 /// Components the fixture defines that every route keeps under their own name.
-const COMPONENTS: &[&str] = &["Item", "Node", "Stats", "Owner", "Settings", "Extras"];
+const COMPONENTS: &[&str] = &["Item", "Node", "Stats", "Owner", "Settings", "Extras", "MixedExtras", "MixedUnion", "MixedAll"];
 
 fn import(source: OpenApiSource) -> RestApi {
     OpenApiImport::new(source).api_name("ConstraintPreservation").build().expect("fixture imports").api
@@ -58,6 +58,16 @@ fn the_fixture_imports_every_rule_exactly() {
     assert_eq!(get("schema:Extras/additionalProperties")["maxLength"], "3", "a model's extra-property rule");
     assert_eq!(get("schema:Item/properties/entries/items")["enum"], r#"{"code":"x"}"#, "an inline-object item's rule");
     assert_eq!(get("schema:Item/properties/owners/items")["enum"], r#"{"name":"boss"}"#, "a rule beside a model item reference");
+    for (probe, member) in [("any_of_probe", "anyOf/0"), ("one_of_probe", "oneOf/0"), ("all_of_probe", "allOf/0"), ("not_probe", "not")] {
+        for object in ["Item/properties/mixed_value", "Item/properties/mixed_value/properties/inner", "Item/properties/mixed_value/items",
+            "Item/properties/mixed_map/additionalProperties", "Item/properties/mixed_attributes/additionalProperties",
+            "Item/properties/mixed_entries/items", "MixedExtras/additionalProperties"]
+        {
+            assert_eq!(get(&format!("schema:{object}/properties/{probe}/{member}"))["maxLength"], "11", "a rule beneath a generic composition");
+        }
+    }
+    assert_eq!(get("schema:MixedUnion/anyOf/0")["maxLength"], "11", "a component-root union member's rule");
+    assert_eq!(get("schema:MixedAll/allOf/1/properties/code")["maxLength"], "11", "a component-root allOf member's rule");
 }
 
 #[test]

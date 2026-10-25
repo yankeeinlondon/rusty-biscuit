@@ -644,11 +644,48 @@ fn grouped_document_renames_a_shared_raw_id() {
 const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 
 /// The request value rules of the live definitions that the Rust client does
-/// not check, by endpoint: rules inside the members of a union component (a
-/// Rust enum of request structs), whose member the serialized body does not
-/// identify. Each is a `type-constraint` warning of the Rust output.
-const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 3] =
-    [("OpenAI", "CreateConversation", 13), ("OpenAI", "CreateResponse", 50), ("OpenAI", "Getinputtokencounts", 50)];
+/// not check, by endpoint: rules beneath a generic composition (OpenAI's
+/// request models' `anyOf`/`oneOf` unions and multi-member `allOf`s, at
+/// component roots and inside free-form values, which the emitted
+/// definitions keep), in an API whose author accepts unchecked compositions
+/// (OpenAI's overlay sets `unchecked_compositions`). Each is a
+/// `type-constraint` warning of the Rust output; without the opt-in each
+/// would be an error. `CreateChatCompletion` and `CreateResponse` each count
+/// eight more than a direct import of the OpenAPI document: their rebuilt
+/// `allOf` structs flatten `CreateModelResponseProperties`, whose rules are
+/// reported both beneath the kept `allOf` and at the merged properties.
+const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 30] = [
+    ("OpenAI", "AcceptRealtimeCall", 25),
+    ("OpenAI", "Compactconversation", 225),
+    ("OpenAI", "CreateChatCompletion", 72),
+    ("OpenAI", "CreateChatSessionMethod", 1),
+    ("OpenAI", "CreateCompletion", 6),
+    ("OpenAI", "CreateContainer", 16),
+    ("OpenAI", "CreateConversation", 205),
+    ("OpenAI", "CreateEmbedding", 8),
+    ("OpenAI", "CreateEval", 19),
+    ("OpenAI", "CreateEvalRun", 102),
+    ("OpenAI", "CreateFineTuningJob", 61),
+    ("OpenAI", "CreateImage", 2),
+    ("OpenAI", "CreateImageEdit", 1),
+    ("OpenAI", "CreateModeration", 3),
+    ("OpenAI", "CreateRealtimeClientSecret", 34),
+    ("OpenAI", "CreateRealtimeSession", 9),
+    ("OpenAI", "CreateRealtimeTranscriptionSession", 1),
+    ("OpenAI", "CreateResponse", 262),
+    ("OpenAI", "CreateSkill", 1),
+    ("OpenAI", "CreateSkillVersion", 1),
+    ("OpenAI", "CreateSpeech", 1),
+    ("OpenAI", "CreateVectorStore", 4),
+    ("OpenAI", "CreateVectorStoreFile", 5),
+    ("OpenAI", "CreateVectorStoreFileBatch", 5),
+    ("OpenAI", "Getinputtokencounts", 237),
+    ("OpenAI", "ModifyVectorStore", 3),
+    ("OpenAI", "RunGrader", 17),
+    ("OpenAI", "SearchVectorStore", 2),
+    ("OpenAI", "UpdateVectorStoreFileAttributes", 1),
+    ("OpenAI", "ValidateGrader", 17),
+];
 
 /// The fixed headers of the live definitions that OpenAPI operations cannot
 /// carry: an `Accept` value no success response declares as its media type.
@@ -756,7 +793,7 @@ fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
         let mut unchecked_rules: BTreeMap<(String, String), usize> = BTreeMap::new();
         for d in diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint) {
             assert_eq!((d.severity, d.output), (Severity::Warning, Output::Rust), "{d}");
-            assert!(d.message.ends_with("a union whose members are not checked"), "{d}");
+            assert!(d.message.ends_with("a composition whose members are not checked; the API accepts unchecked compositions"), "{d}");
             *unchecked_rules.entry((d.api.join(","), d.endpoint.clone().unwrap())).or_default() += 1;
         }
         let expected_unchecked: BTreeMap<(String, String), usize> = if *output == Output::Rust {
@@ -1141,11 +1178,74 @@ fn a_request_rule_beneath_a_composition_blocks_only_the_rust_client() {
             Output::Rust,
             "body (component `Wrapper` at `#/properties/value/oneOf/0`) `maxLength` is not enforced: \
              beneath the `oneOf` at `#/properties/value` of component `Wrapper`; the client cannot check it, \
-             so remove the rule or the composition",
+             so remove the rule or the composition, or accept unchecked compositions for the API with \
+             `accept_unchecked_compositions`",
         )]
     );
     assert!(matches!(&rust.result, Err(GeneratorError::Validation { output: Output::Rust, .. })));
     assert_eq!(snapshot_or_absent(roots.schema_dir()), rust_before, "no Rust output is written");
+}
+
+#[test]
+fn an_api_accepting_unchecked_compositions_generates_the_rust_client_with_a_warning() {
+    let composed = serde_json::json!({"oneOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]});
+    let mut api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), composed);
+    api.unchecked_compositions = true;
+    let roots = Roots::new();
+    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts());
+    assert_eq!(report.succeeded(), vec![Output::Rust, Output::OpenApi, Output::Postman]);
+    let rust = report.get(Output::Rust).unwrap();
+    assert_eq!(
+        rust.diagnostics,
+        vec![ValidationDiagnostic::new(
+            Severity::Warning,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/oneOf/0`) `maxLength` is not enforced: \
+             beneath the `oneOf` at `#/properties/value` of component `Wrapper`, a composition whose members are \
+             not checked; the API accepts unchecked compositions",
+        )]
+    );
+}
+
+/// The opt-in relaxes only a valid rule whose sole blocker is a
+/// composition: an unresolved reference beneath the composition, and a
+/// contradictory or malformed rule there, still block the Rust client.
+#[test]
+fn accepting_unchecked_compositions_never_relaxes_unresolved_references_or_definition_errors() {
+    let opted = |value: serde_json::Value| {
+        let mut api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), value);
+        api.unchecked_compositions = true;
+        api
+    };
+    let control = opted(serde_json::json!({"anyOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]}));
+    let control = validate_rust_client(&[&control]);
+    assert!(control.iter().all(|d| !d.is_error()), "control: {control:?}");
+
+    let unresolved = opted(serde_json::json!({"anyOf": [{"$ref": "#/components/schemas/Gone", "maxLength": 3}, {"type": "integer"}]}));
+    let diagnostics = validate_rust_client(&[&unresolved]);
+    let errors: Vec<(Feature, &str)> = diagnostics.iter().filter(|d| d.is_error()).map(|d| (d.feature, d.message.as_str())).collect();
+    assert!(errors.iter().any(|(feature, message)| *feature == Feature::InvalidSchemaReference && message.contains("Gone")), "{errors:?}");
+    assert!(
+        errors.iter().any(|(feature, message)| *feature == Feature::TypeConstraint
+            && message.contains("beside the unresolved reference \"#/components/schemas/Gone\"")),
+        "{errors:?}"
+    );
+
+    for (label, member) in [
+        ("contradictory", serde_json::json!({"type": "string", "minLength": 5, "maxLength": 3})),
+        ("malformed", serde_json::json!({"type": "string", "maxLength": "3"})),
+    ] {
+        let api = opted(serde_json::json!({"anyOf": [member, {"type": "integer"}]}));
+        let errors: Vec<_> = validate_rust_client(&[&api])
+            .into_iter()
+            .filter(|d| d.is_error() && d.feature == Feature::TypeConstraint && d.endpoint.is_none())
+            .collect();
+        assert_eq!(errors.len(), 1, "{label}: {errors:?}");
+        assert!(errors[0].message.starts_with("component `Wrapper` #/properties/value/anyOf/0 `"), "{label}: {errors:?}");
+    }
 }
 
 #[test]

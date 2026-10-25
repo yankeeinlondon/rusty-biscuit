@@ -133,7 +133,7 @@ calls (numbers as text), model rules as `#[schemars(extend(..))]` read from
 the stored component schema (never native `length`/`range`, which drop
 silently on mismatched types): per field, and per model for root and
 extra-property (`additionalProperties`) rules. The Rust type picks where a
-rule goes, and (except beneath a free-form value, below) never whether it stays: `format` (annotation), map values and
+rule goes, and never whether it stays: `format` (annotation), map values and
 array items (over the Schemars slot schema, `$ref` for a model), a rule
 beside a model `$ref` (written on the field, so Schemars' `RemoveRefSiblings`
 makes a one-member `allOf` that `unenforceable_rules` and the value-rule
@@ -146,17 +146,32 @@ type is reached). The two wrappers the value-rule plans pass through are
 rebuilt in source shape when their member has rules: a nullable alternative
 (two-member `anyOf`, exactly one member `admits_only_null`, copied as
 written) and a one-member `allOf` without a sibling `$ref`; nested wrappers
-recurse. Any other `allOf`/`anyOf`/`oneOf`/`not` beneath a
-`serde_json::Value` field is not rebuilt, `$ref`s inside it included: its
-rules are not in the rebuilt definition, so a client generated from it
-neither checks nor reports them (the direct import errors on them). A
+recurse. Any other `allOf`/`anyOf`/`oneOf`/`not` with a rule or ruled
+`$ref` beneath it is kept too (`RuleSource::composed_members`): every
+member in source order and count (pointers match the direct import), each
+rebuilt free-form plus its `type`/`nullable` and a `$ref` even to an
+unruled model (`composition_structure`); one with no rule beneath is left
+out. Plans never enter it, so the rebuilt API errors on its rules, or warns
+and discloses them with `accept_unchecked_compositions()`, as the direct
+import does. Component-root compositions too: a `oneOf`/`anyOf` enum's
+variants get their member's rules (`variant_rules`; `extend`/`schema_with`
+on the variant, a null-only member's `type: "null"` beside a ruled variant;
+Schemars writes `anyOf`, so a `oneOf` component's pointer reads `/anyOf/i`)
+and a flattened `allOf` struct gets the source `allOf` as a container
+`extend` (`alias_attribute`, model members as literal `$ref`s; the merged
+properties stay, so a member's rule is also enforced there, or reported a
+second time when that property is itself beneath an unchecked composition:
+rebuilt findings are a documented superset of the direct import's, e.g.
+OpenAI chat-completion and create-response +8 warnings each). A
 rebuilt nullable `anyOf [{$ref}, null]` registers byte-identical to
-Schemars' own `Option<Model>`, so `definition_baseline` undoes it only on
-fields the importer types as free-form. `--definitions-out` fails the
+Schemars' own `Option<Model>`, so `definition_baseline` undoes it, and the
+generic compositions, only on fields the importer types as free-form
+(through plain aliases too), plus the union-variant and `allOf`-struct root
+rules (`NominalCompositions`). `--definitions-out` fails the
 import (`RuleSource::finish`, before writing) for a ruled plain alias
 reached again through a free-form value, and for a plain-alias JSON body
 whose rules reach past root and item rules (`properties`,
-`additionalProperties`, a ruled `$ref`), since `Constraints` cannot hold
+`additionalProperties`, a composition, a ruled `$ref`), since `Constraints` cannot hold
 them; the fix is naming the item/object schema. Export writes every rule in 3.0 spelling,
 including an adopted page size's strategy bounds. An imported page-size
 parameter's source bounds must agree with the overlay's strategy

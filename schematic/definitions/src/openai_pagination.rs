@@ -30,6 +30,16 @@
 //! parameter must agree with the strategy that adopts it, so [`apply`]
 //! rewrites each adopted parameter's `minimum`/`maximum` to its strategy's
 //! ([`align_page_size_bounds`]).
+//!
+//! The overlay also accepts unchecked compositions for the API
+//! ([`RestApi::unchecked_compositions`]). OpenAI's request models put value
+//! rules inside the members of `anyOf`/`oneOf` unions the generated client
+//! does not evaluate; without the opt-in each such rule is a generation error
+//! and the Rust client could not be generated. With it each rule is a
+//! `type-constraint` warning, listed under "Not checked" in its request
+//! type's rustdoc, and nothing checks it before sending. Rules beside an
+//! unresolved reference or beneath another untraversed keyword still fail
+//! generation.
 
 use schematic_define::{ResponseShape, RestApi, StreamEnd, StreamFraming, SuccessShape, TypeRef};
 use schematic_define::pagination::{
@@ -37,9 +47,11 @@ use schematic_define::pagination::{
 };
 
 /// Sets the OpenAI default strategy and a collection on each list endpoint,
-/// and scopes the imported response model (see the module docs).
+/// scopes the imported response model, and accepts unchecked compositions
+/// (see the module docs).
 #[must_use]
 pub fn apply(mut api: RestApi) -> RestApi {
+    api.unchecked_compositions = true;
     api.default_pagination = Some(last_id_cursor(limit()));
     for (id, collection) in collections() {
         let endpoint = api.endpoints.iter_mut().find(|endpoint| endpoint.id == id)

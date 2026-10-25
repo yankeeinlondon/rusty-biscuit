@@ -12,9 +12,12 @@
 //! annotation only), a pattern outside the enforced subset, or a rule
 //! beneath a composition or a keyword the plans do not enter (see
 //! `unenforceable_rules`). Findings become generation diagnostics and
-//! rustdoc labels; a rule beneath a composition is an error unless it
-//! sits inside a member of a union that is itself a component, the shape
-//! of a Rust enum type. Rules Schemars writes for a Rust enum's own variants
+//! rustdoc labels. A rule beneath a generic composition (`anyOf` other
+//! than an `Option`, `oneOf`, a multi-member `allOf`, `not`) is an error
+//! unless the API sets `RestApi::unchecked_compositions`, which makes it a
+//! warning wherever the composition sits; a rule beneath another
+//! untraversed keyword or beside an unresolved reference is always an
+//! error. Rules Schemars writes for a Rust enum's own variants
 //! (the string `enum`/`const` of a unit enum or of a tag) and for an
 //! integer width (`minimum: 0` on a `uint32`) are guaranteed by the Rust
 //! type and are neither enforced nor reported.
@@ -726,22 +729,25 @@ impl<'a> ApiValueRules<'a> {
                 if self.guaranteed_by_rust_type(&rule) {
                     continue;
                 }
-                let union_member = rule
-                    .composition
-                    .as_ref()
-                    .is_some_and(|site| site.component.is_some() && site.pointer.is_empty() && matches!(site.keyword, "anyOf" | "oneOf"));
+                // Only the API's stored opt-in relaxes a composition rule;
+                // where the composition sits never does.
+                let accepted = rule.composition.is_some() && self.api.unchecked_compositions;
                 let location = match &rule.component {
                     Some(component) => format!("{place} (component `{component}` at `#{}`)", rule.pointer),
                     None => format!("{place} (at `#{}`)", rule.pointer),
                 };
                 findings.push(Finding {
-                    severity: if union_member { Severity::Warning } else { Severity::Error },
+                    severity: if accepted { Severity::Warning } else { Severity::Error },
                     place: location,
                     keyword: rule.keyword.to_owned(),
-                    reason: if union_member {
-                        format!("{}, a union whose members are not checked", rule.reason)
+                    reason: if accepted {
+                        format!("{}, a composition whose members are not checked; the API accepts unchecked compositions", rule.reason)
                     } else if rule.composition.is_some() {
-                        format!("{}; the client cannot check it, so remove the rule or the composition", rule.reason)
+                        format!(
+                            "{}; the client cannot check it, so remove the rule or the composition, or accept unchecked \
+                             compositions for the API with `accept_unchecked_compositions`",
+                            rule.reason
+                        )
                     } else {
                         format!("{}; the client cannot check it, so remove the rule or restructure the schema", rule.reason)
                     },

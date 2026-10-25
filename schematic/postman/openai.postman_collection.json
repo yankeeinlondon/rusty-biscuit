@@ -445,7 +445,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"input\": \"string\",\n  \"model\": {},\n  \"voice\": \"string\"\n}",
+              "raw": "{\n  \"input\": \"string\",\n  \"model\": \"string\",\n  \"voice\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1561,7 +1561,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"id\": \"string\",\n  \"object\": \"chatkit.thread\",\n  \"status\": {},\n  \"title\": {},\n  \"user\": \"string\"\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"id\": \"string\",\n  \"object\": \"chatkit.thread\",\n  \"status\": {\n    \"type\": \"active\"\n  },\n  \"title\": {},\n  \"user\": \"string\"\n}"
             }
           ]
         },
@@ -1686,7 +1686,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"model\": {},\n  \"prompt\": {}\n}",
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2540,7 +2540,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"input\": {},\n  \"model\": {}\n}",
+              "raw": "{\n  \"input\": \"string\",\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2640,7 +2640,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"data_source_config\": {},\n  \"testing_criteria\": []\n}",
+              "raw": "{\n  \"data_source_config\": {\n    \"item_schema\": {},\n    \"type\": \"custom\"\n  },\n  \"testing_criteria\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2660,7 +2660,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {},\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {\n    \"schema\": {},\n    \"type\": \"custom\"\n  },\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
             }
           ]
         },
@@ -2697,7 +2697,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {},\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {\n    \"schema\": {},\n    \"type\": \"custom\"\n  },\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
             }
           ]
         },
@@ -2743,7 +2743,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {},\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source_config\": {\n    \"schema\": {},\n    \"type\": \"custom\"\n  },\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"name\": \"string\",\n  \"object\": \"eval\",\n  \"testing_criteria\": []\n}"
             }
           ]
         },
@@ -2871,7 +2871,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"data_source\": {}\n}",
+              "raw": "{\n  \"data_source\": {\n    \"source\": {\n      \"content\": [],\n      \"type\": \"file_content\"\n    },\n    \"type\": \"jsonl\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2891,7 +2891,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {},\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {\n    \"source\": {\n      \"content\": [],\n      \"type\": \"file_content\"\n    },\n    \"type\": \"jsonl\"\n  },\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
             }
           ]
         },
@@ -2934,7 +2934,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {},\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {\n    \"source\": {\n      \"content\": [],\n      \"type\": \"file_content\"\n    },\n    \"type\": \"jsonl\"\n  },\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
             }
           ]
         },
@@ -2977,7 +2977,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {},\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
+              "body": "{\n  \"created_at\": 0,\n  \"data_source\": {\n    \"source\": {\n      \"content\": [],\n      \"type\": \"file_content\"\n    },\n    \"type\": \"jsonl\"\n  },\n  \"error\": {\n    \"code\": \"string\",\n    \"message\": \"string\"\n  },\n  \"eval_id\": \"string\",\n  \"id\": \"string\",\n  \"metadata\": {},\n  \"model\": \"string\",\n  \"name\": \"string\",\n  \"object\": \"eval.run\",\n  \"per_model_usage\": [],\n  \"per_testing_criteria_results\": [],\n  \"report_url\": \"https://example.com\",\n  \"result_counts\": {},\n  \"status\": \"string\"\n}"
             }
           ]
         },
@@ -3391,7 +3391,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"grader\": {},\n  \"model_sample\": \"string\"\n}",
+              "raw": "{\n  \"grader\": {\n    \"input\": \"string\",\n    \"name\": \"string\",\n    \"operation\": \"eq\",\n    \"reference\": \"string\",\n    \"type\": \"string_check\"\n  },\n  \"model_sample\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3433,7 +3433,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"grader\": {}\n}",
+              "raw": "{\n  \"grader\": {\n    \"input\": \"string\",\n    \"name\": \"string\",\n    \"operation\": \"eq\",\n    \"reference\": \"string\",\n    \"type\": \"string_check\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3681,7 +3681,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"model\": {},\n  \"training_file\": \"string\"\n}",
+              "raw": "{\n  \"model\": \"string\",\n  \"training_file\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4251,7 +4251,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"input\": {}\n}",
+              "raw": "{\n  \"input\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10554,7 +10554,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"expires_at\": 0,\n  \"session\": {},\n  \"value\": \"string\"\n}"
+              "body": "{\n  \"expires_at\": 0,\n  \"session\": {\n    \"id\": \"string\",\n    \"object\": \"realtime.session\",\n    \"type\": \"realtime\"\n  },\n  \"value\": \"string\"\n}"
             }
           ]
         },
@@ -11181,7 +11181,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"files\": {}\n}",
+              "raw": "{\n  \"files\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11444,7 +11444,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"files\": {}\n}",
+              "raw": "{\n  \"files\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"

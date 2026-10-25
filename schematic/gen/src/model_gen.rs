@@ -116,7 +116,7 @@ fn assemble_models(catalog: &ModelCatalog, rules: Option<&RuleSource>) -> TokenS
             let tokens = match model {
                 ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema, rules),
                 ModelDef::Enum(e) => generate_enum_with(e, derive_json_schema, model_rules(rules, model)),
-                ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema, model_rules(rules, model)),
+                ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema, rules),
                 _ => TokenStream::new(),
             };
             // Only nominal declarations implement Registration: aliases reuse
@@ -421,12 +421,15 @@ const MODEL_REFERENCE: &str = "$schematicModel";
 ///
 /// A free-form value keeps a component reference whose target holds a rule
 /// (directly or through another reference), so the rebuilt definition
-/// reaches that rule as the direct import does, and keeps the two
-/// compositions generated plans pass through: a nullable alternative and a
-/// one-member `allOf`. It does not keep any other `allOf`, `anyOf`, `oneOf`,
-/// or `not`: rules beneath such a composition in a free-form value are not
-/// rebuilt, so neither validation nor generation from the rebuilt definition
-/// sees them.
+/// reaches that rule as the direct import does, and keeps every composition
+/// with a rule beneath it, members in source order: the two generated plans
+/// pass through (a nullable alternative and a one-member `allOf`) and any
+/// other `allOf`, `anyOf`, `oneOf`, or `not`, which they do not enter. So
+/// validation of the rebuilt definition refuses, or with the API's
+/// unchecked-composition opt-in discloses, each rule beneath such a
+/// composition as it does for the direct import. A nominal union's variants
+/// and a flattened `allOf` struct's source `allOf` are rebuilt the same way
+/// (see [`Self::variant_rules`] and [`Self::alias_attribute`]).
 ///
 /// Two plain-alias shapes reach rules the rebuilt Rust form has nowhere to
 /// put, and [`Self::finish`] reports them instead of dropping the rules: a
@@ -453,11 +456,9 @@ pub(crate) struct RuleSource<'a> {
     aliases: HashMap<&'a str, &'a TypeRef>,
     /// The components whose source schema, or a component it references,
     /// holds a validation rule (`format` is an annotation, not a rule).
-    /// Rules and references beneath a composition count too, although most
-    /// of a free-form value's compositions are not rebuilt: a nominal
-    /// union's variants still reach their models as Rust types, and a
-    /// reference kept for a rule that is not rebuilt only registers its
-    /// target.
+    /// Rules and references beneath a composition count too: the rebuild
+    /// keeps a composition with a rule beneath it, and a nominal union's
+    /// variants reach their models as Rust types.
     ruled: HashSet<&'a str>,
     /// The plain aliases whose rules are being rebuilt for a free-form
     /// reference, so a reference back to one ends the expansion.
@@ -540,22 +541,91 @@ impl<'a> RuleSource<'a> {
         (own_rules(source), extra)
     }
 
-    /// The container `#[schemars(extend(..))]` attribute of a unit enum or
-    /// nominal alias `model`: the rules of its source root. A unit enum's
-    /// `enum` is its variants, which Schemars writes. `None` for any other
-    /// model (a struct's are [`Self::struct_rules`]) or one without rules.
+    /// The container `#[schemars(extend(..))]` attribute of a unit enum
+    /// `model`: the rules of its source root, except `enum`, which is its
+    /// variants and which Schemars writes. `None` for any other model (a
+    /// struct's are [`Self::struct_rules`], a nominal alias' are
+    /// [`Self::alias_attribute`]) or one without rules.
     pub(crate) fn model_attribute(&self, model: &ModelDef) -> Option<TokenStream> {
-        let name = match model {
-            ModelDef::Enum(def) => &def.name,
-            ModelDef::Alias(def) if is_nominal_alias(def) => &def.name,
-            _ => return None,
-        };
-        let source = self.components.get(name.as_str())?;
+        let ModelDef::Enum(def) = model else { return None };
+        let mut rules = own_rules(self.components.get(def.name.as_str())?);
+        rules.remove("enum");
+        extend_attribute(&rules)
+    }
+
+    /// The container `#[schemars(extend(..))]` attribute of the nominal
+    /// alias `def`: the rules of its source root and, for an `allOf`
+    /// emitted as a struct that flattens its members, the source `allOf`
+    /// itself whenever a rule sits beneath it (see
+    /// [`Self::composed_members`]). Schemars merges the flattened members'
+    /// properties into the struct, which no longer says that they came from
+    /// a composition, so the kept `allOf` gives validation of the rebuilt
+    /// definition the composition the direct import has. The merged copies
+    /// stay, so a member's rule can be reported twice (beneath the kept
+    /// `allOf` and at its merged property); validation of a rebuilt API is
+    /// a superset of the direct import's, never a subset. A model a member
+    /// references is written as a `$ref` to its component, which every
+    /// nominal model registers. `None` for a plain alias or one without
+    /// rules.
+    pub(crate) fn alias_attribute(&self, def: &TypeAlias) -> Option<TokenStream> {
+        if !is_nominal_alias(def) {
+            return None;
+        }
+        let source = self.components.get(def.name.as_str())?;
         let mut rules = own_rules(source);
-        if matches!(model, ModelDef::Enum(_)) {
-            rules.remove("enum");
+        if matches!(def.target, TypeRef::AllOf(_))
+            && let Some(Value::Array(members)) = source.get("allOf")
+            && let Some(mut members) = self.composed_members(members, false)
+        {
+            members.iter_mut().for_each(|member| self.literal_references(member));
+            rules.insert("allOf".to_owned(), Value::Array(members));
         }
         extend_attribute(&rules)
+    }
+
+    /// The rebuilt rules of each variant of the nominal union `def`, whose
+    /// variants are `variants`, from the members of its source `oneOf` or
+    /// `anyOf`, which import maps one to one and in order. The variant's
+    /// Rust type places them as it places a field's (see [`Self::rules`]).
+    /// Empty when no variant has rules or the source members do not line up
+    /// with the variants.
+    ///
+    /// Beside a variant with rules, a member that admits only null is
+    /// written as the source wrote it: its variant's Rust type is a
+    /// free-form value, whose schema admits anything, and without the
+    /// member's `type` the union would no longer read as an `Option`'s
+    /// nullable alternative, which generated checks pass through, but as a
+    /// composition they refuse.
+    pub(crate) fn variant_rules(&self, def: &TypeAlias, variants: &[TypeRef]) -> Vec<Map<String, Value>> {
+        let keyword = match def.target {
+            TypeRef::OneOf(_) => "oneOf",
+            _ => "anyOf",
+        };
+        let Some(Value::Array(members)) = self.components.get(def.name.as_str()).and_then(|source| source.get(keyword)) else {
+            return Vec::new();
+        };
+        if members.len() != variants.len() {
+            return Vec::new();
+        }
+        let rules: Vec<Map<String, Value>> = variants
+            .iter()
+            .zip(members)
+            .map(|(variant, member)| match member.as_object() {
+                Some(_) if admits_only_null(member) => Map::new(),
+                member => self.rules(variant, member.cloned().unwrap_or_default(), true, 0),
+            })
+            .collect();
+        if rules.iter().all(Map::is_empty) {
+            return Vec::new();
+        }
+        rules
+            .into_iter()
+            .zip(members)
+            .map(|(rules, member)| match member.as_object() {
+                Some(null) if admits_only_null(member) => null.clone(),
+                _ => rules,
+            })
+            .collect()
     }
 
     /// The rules of `endpoint`'s JSON request body whose type is
@@ -685,14 +755,14 @@ impl<'a> RuleSource<'a> {
     ///   lose the alias' rules. A reference that names no model is kept as
     ///   written when rules sit beside it, as the direct import keeps it.
     ///
-    /// - The two compositions the generator's plans pass through are kept
-    ///   in their source shape when their member rebuilds to rules: an
-    ///   `anyOf` of two members exactly one of which admits only null (an
-    ///   `Option`'s nullable alternative), whose null member is copied as
-    ///   written, and a one-member `allOf` without a `$ref` beside it.
-    ///
-    /// Any other `allOf`, `anyOf`, `oneOf`, or `not` is left out with
-    /// everything beneath it, a `$ref` included: its rules are not rebuilt.
+    /// - Each `anyOf`, `oneOf`, `allOf`, and `not` with a rule beneath it
+    ///   is kept, members in source order (see [`Self::composed_members`]).
+    ///   The two the generator's plans pass through keep their source shape:
+    ///   an `anyOf` of two members exactly one of which admits only null (an
+    ///   `Option`'s nullable alternative), and a one-member `allOf` without a
+    ///   `$ref` beside it, which the plans ignore for the `$ref`. Any other
+    ///   also keeps each member's structure, so validation sees the
+    ///   composition the direct import has.
     ///
     /// While an `additionalProperties` rule is kept, every declared property
     /// name is kept too, as `{}` when it has no rules: a name missing from
@@ -726,26 +796,27 @@ impl<'a> RuleSource<'a> {
         if let Some(extra) = extra {
             rules.insert("additionalProperties".to_owned(), Value::Object(extra));
         }
-        if let Some(Value::Array(members)) = schema.get("anyOf")
-            && let [first, second] = members.as_slice()
-            && admits_only_null(first) != admits_only_null(second)
-        {
-            let members: Vec<Value> =
-                members.iter().map(|member| if admits_only_null(member) { member.clone() } else { Value::Object(rebuilt(member)) }).collect();
-            // A null-only member is never empty, so an empty one is the
-            // other member without rules.
-            if !members.iter().any(|member| member.as_object().is_some_and(Map::is_empty)) {
-                rules.insert("anyOf".to_owned(), Value::Array(members));
+        for keyword in ["anyOf", "oneOf", "allOf"] {
+            let Some(Value::Array(members)) = schema.get(keyword) else { continue };
+            let wrapper = match (keyword, members.as_slice()) {
+                ("anyOf", [first, second]) => admits_only_null(first) != admits_only_null(second),
+                ("allOf", [_]) => true,
+                _ => false,
+            };
+            // The generator follows a `$ref` rather than a one-member `allOf`
+            // beside it.
+            if keyword == "allOf" && wrapper && schema.contains_key("$ref") {
+                continue;
+            }
+            if let Some(members) = self.composed_members(members, wrapper) {
+                rules.insert(keyword.to_owned(), Value::Array(members));
             }
         }
-        // The generator follows a `$ref` rather than an `allOf` beside it.
-        if let Some(Value::Array(members)) = schema.get("allOf")
-            && let [member] = members.as_slice()
-            && !schema.contains_key("$ref")
-        {
-            let member = rebuilt(member);
+        if let Some(Value::Object(negated)) = schema.get("not") {
+            let mut member = self.free_form_rules(negated);
             if !member.is_empty() {
-                rules.insert("allOf".to_owned(), Value::Array(vec![Value::Object(member)]));
+                self.composition_structure(negated, &mut member);
+                rules.insert("not".to_owned(), Value::Object(member));
             }
         }
         if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
@@ -755,6 +826,94 @@ impl<'a> RuleSource<'a> {
             }
         }
         rules
+    }
+
+    /// The rebuilt members of a composition whose source members are
+    /// `members`, in source order and count, so a rule's pointer
+    /// (`/anyOf/1/maxLength`) is the one the direct import has. A member
+    /// that admits only null is copied as written; any other is rebuilt as
+    /// a free-form value is. `None` when the composition is not kept.
+    ///
+    /// A `wrapper` (an `Option`'s nullable alternative or a one-member
+    /// `allOf`, which generated checks pass through) is kept when its
+    /// member has rules, in its source shape. Any other composition is kept
+    /// when any member has rules (a reference to a model with rules
+    /// counts), and each of its members also keeps its structure (see
+    /// [`Self::composition_structure`]); generated checks do not enter it,
+    /// so validation of the rebuilt definition refuses or discloses each
+    /// rule beneath it as it does for the direct import.
+    fn composed_members(&self, members: &[Value], wrapper: bool) -> Option<Vec<Value>> {
+        let mut rebuilt: Vec<Value> = members
+            .iter()
+            .map(|member| match member.as_object() {
+                Some(object) if !admits_only_null(member) => Value::Object(self.free_form_rules(object)),
+                _ => member.clone(),
+            })
+            .collect();
+        let mut ruled = members
+            .iter()
+            .zip(&rebuilt)
+            .filter(|(source, _)| !admits_only_null(source))
+            .map(|(_, member)| member.as_object().is_some_and(|member| !member.is_empty()));
+        let keep = if wrapper { ruled.all(|ruled| ruled) } else { ruled.any(|ruled| ruled) };
+        if !keep {
+            return None;
+        }
+        if !wrapper {
+            for (source, member) in members.iter().zip(&mut rebuilt) {
+                if !admits_only_null(source)
+                    && let (Some(source), Value::Object(member)) = (source.as_object(), member)
+                {
+                    self.composition_structure(source, member);
+                }
+            }
+        }
+        Some(rebuilt)
+    }
+
+    /// Rewrites each [`MODEL_REFERENCE`] in `value` for a container
+    /// attribute, which has no schema generator to call: a nominal model
+    /// becomes a `$ref` to its component, which registration resolves
+    /// because every nominal model is registered, and a plain alias, which
+    /// registers no component, becomes the schema Schemars writes for its
+    /// target beneath the rules already rebuilt for it.
+    fn literal_references(&self, value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                if let Some(Value::String(name)) = object.remove(MODEL_REFERENCE) {
+                    if self.aliases.contains_key(name.as_str()) {
+                        for (keyword, base) in self.base_schema(&TypeRef::Named(name), 0).unwrap_or_default() {
+                            object.entry(keyword).or_insert(base);
+                        }
+                    } else {
+                        object.insert("$ref".to_owned(), Value::String(format!("#/components/schemas/{name}")));
+                    }
+                }
+                object.values_mut().for_each(|value| self.literal_references(value));
+            }
+            Value::Array(values) => values.iter_mut().for_each(|value| self.literal_references(value)),
+            _ => {}
+        }
+    }
+
+    /// Adds to `member`, the rebuilt rules of one member of a kept generic
+    /// composition, the structure that gives the member its meaning beside
+    /// the rules: the source's `type` and `nullable`, and a reference to the
+    /// model its `$ref` names even when that model holds no rule. Without
+    /// them a member such as `{type: integer}` would rebuild to `{}`, which
+    /// every value matches.
+    fn composition_structure(&self, source: &Map<String, Value>, member: &mut Map<String, Value>) {
+        for keyword in ["type", "nullable"] {
+            if let Some(value) = source.get(keyword) {
+                member.entry(keyword).or_insert_with(|| value.clone());
+            }
+        }
+        if !member.contains_key(MODEL_REFERENCE)
+            && let Some(name) = source.get("$ref").and_then(Value::as_str).and_then(component_name)
+            && let Some((name, _)) = self.components.get_key_value(name.as_str())
+        {
+            member.insert(MODEL_REFERENCE.to_owned(), Value::String((*name).to_owned()));
+        }
     }
 
     /// Adds to `rules`, the rebuilt rules of a free-form schema object, the
@@ -1052,16 +1211,19 @@ fn generate_variant(def: &EnumVariant, is_default: bool) -> TokenStream {
 /// A bare `pub type X = serde_json::Value` would erase the whole shape, so
 /// `oneOf`/`anyOf` become enums (dispatched on their discriminator when the
 /// alias carries one, else untagged) and `allOf` becomes a struct that
-/// flattens its members. `rules`, the container attribute rebuilding the
-/// source root's rules, applies to those; a plain alias carries its rules
-/// where it is used.
-fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool, rules: Option<TokenStream>) -> TokenStream {
+/// flattens its members. `rules`, when given, rebuilds the source root's
+/// rules on those (see [`RuleSource::alias_attribute`]) and each union
+/// variant's (see [`RuleSource::variant_rules`]); a plain alias carries its
+/// rules where it is used.
+fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool, rules: Option<&RuleSource>) -> TokenStream {
+    let container = rules.and_then(|rules| rules.alias_attribute(def));
     match &def.target {
         TypeRef::OneOf(variants) | TypeRef::AnyOf(variants) if !variants.is_empty() => {
-            generate_union_enum(def, variants, derive_json_schema, rules)
+            let variant_rules = rules.map(|rules| rules.variant_rules(def, variants)).unwrap_or_default();
+            generate_union_enum(def, variants, derive_json_schema, container, &variant_rules)
         }
         TypeRef::AllOf(members) if !members.is_empty() => {
-            generate_composed_struct(def, members, derive_json_schema, rules)
+            generate_composed_struct(def, members, derive_json_schema, container)
         }
         _ => {
             let name = format_ident!("{}", def.name);
@@ -1083,11 +1245,15 @@ fn generate_alias_with(def: &TypeAlias, derive_json_schema: bool, rules: Option<
 /// alternatives, deserialization reads the property and decodes only an
 /// alternative that accepts its value; without one it is serde's untagged
 /// first match.
+///
+/// `variant_rules`, when not empty, holds each variant's rebuilt rules, in
+/// variant order, written on the variant as [`write_rules`] writes a field's.
 fn generate_union_enum(
     def: &TypeAlias,
     variants: &[TypeRef],
     derive_json_schema: bool,
     rules: Option<TokenStream>,
+    variant_rules: &[Map<String, Value>],
 ) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
@@ -1110,6 +1276,17 @@ fn generate_union_enum(
 
     let variant_types: Vec<_> = variants.iter().map(type_ref_to_tokens).collect();
     let first_ident = &variant_idents[0];
+    let mut helpers = Vec::new();
+    let variant_attributes: Vec<Option<TokenStream>> = variant_types
+        .iter()
+        .enumerate()
+        .map(|(index, rust_type)| {
+            let rules = variant_rules.get(index)?;
+            let function = format_ident!("variant_rules_schema_{}", index);
+            write_rules(&name, &function, rust_type.clone(), false, rules, &mut helpers)
+        })
+        .collect();
+    let helpers = (!helpers.is_empty()).then(|| quote! { impl #name { #(#helpers)* } });
 
     let dispatch = def
         .discriminator
@@ -1132,8 +1309,10 @@ fn generate_union_enum(
         #rules
         #[serde(untagged)]
         pub enum #name {
-            #(#variant_idents(#variant_types),)*
+            #(#variant_attributes #variant_idents(#variant_types),)*
         }
+
+        #helpers
 
         #dispatch
 
@@ -2430,19 +2609,34 @@ mod tests {
             assert_eq!(plans(&rebuilt), direct_plans, "{case}: {rebuilt_value}");
             assert!(direct_plans.contains(r#"Property::new("owner",&Plan::"#) && direct_plans.contains("COMPONENT_"), "{case}: {direct_plans}");
         }
-        // Compositions the plans do not pass through stay left out: the
-        // direct import reports their rule, the rebuilt value has none.
-        for (case, value) in [
-            ("generic anyOf", serde_json::json!({"properties": {"owner": {"anyOf": [owner(), {"type": "string", "maxLength": 11}]}}})),
-            ("oneOf", serde_json::json!({"properties": {"owner": {"oneOf": [owner(), {"type": "null"}]}}})),
-            ("two-member allOf", serde_json::json!({"properties": {"owner": {"allOf": [owner(), {"type": "string", "maxLength": 11}]}}})),
-            ("not", serde_json::json!({"properties": {"owner": {"not": {"type": "string", "maxLength": 11}}}})),
+        // Compositions the plans do not pass through are kept with their
+        // members, in count and order, so the rebuilt value gives the direct
+        // import's refusal without the opt-in and its warnings with it.
+        let long = || serde_json::json!({"type": "string", "maxLength": 11});
+        for (case, value, keyword) in [
+            ("generic anyOf", serde_json::json!({"properties": {"owner": {"anyOf": [owner(), long()]}}}), "anyOf"),
+            ("anyOf with an integer", serde_json::json!({"properties": {"code": {"anyOf": [long(), {"type": "integer"}]}}}), "anyOf"),
+            ("oneOf", serde_json::json!({"properties": {"owner": {"oneOf": [owner(), {"type": "null"}]}}}), "oneOf"),
+            ("oneOf with an integer", serde_json::json!({"items": {"properties": {"code": {"oneOf": [long(), {"type": "integer"}]}}}}), "oneOf"),
+            ("two-member allOf", serde_json::json!({"properties": {"owner": {"allOf": [owner(), long()]}}}), "allOf"),
+            ("not", serde_json::json!({"additionalProperties": {"not": long()}}), "not"),
         ] {
-            let direct = api(value);
+            let mut direct = api(value);
             let source = RuleSource::new(&catalog, &direct.schemas);
             let StructDef { fields, .. } = match &catalog.types[0] { ModelDef::Struct(def) => def, _ => unreachable!() };
-            assert_eq!(source.field_rules("Item", &fields[0]), Map::new(), "{case}");
-            assert!(findings(&direct).iter().any(|finding| finding.starts_with("Error")), "{case}: {:?}", findings(&direct));
+            let rebuilt_value = as_compiled(&Value::Object(source.field_rules("Item", &fields[0])));
+            assert!(rebuilt_value.to_string().contains(&format!("\"{keyword}\"")), "{case}: {rebuilt_value}");
+            let mut rebuilt = api(rebuilt_value.clone());
+
+            let refused = findings(&direct);
+            assert!(!refused.is_empty() && refused.iter().all(|finding| finding.starts_with("Error")), "{case}: {refused:?}");
+            assert_eq!(findings(&rebuilt), refused, "{case}: {rebuilt_value}");
+            direct.unchecked_compositions = true;
+            rebuilt.unchecked_compositions = true;
+            let accepted = findings(&direct);
+            assert!(accepted.iter().all(|finding| finding.starts_with("Warning")), "{case}: {accepted:?}");
+            assert_eq!(findings(&rebuilt), accepted, "{case}: {rebuilt_value}");
+            assert_eq!(plans(&rebuilt), plans(&direct), "{case}: {rebuilt_value}");
         }
     }
 
@@ -2472,7 +2666,7 @@ mod tests {
     }
 
     #[test]
-    fn transparent_wrappers_are_rebuilt_at_each_free_form_position_and_other_compositions_are_left_out() {
+    fn wrappers_and_generic_compositions_are_rebuilt_at_each_free_form_position() {
         let json = || primitive(PrimitiveType::Json);
         let owner = || serde_json::json!({"$ref": "#/components/schemas/Owner"});
         let plain = || serde_json::json!({"$ref": "#/components/schemas/Plain"});
@@ -2530,7 +2724,9 @@ mod tests {
                     "not": {"not": long()},
                     "unruled": {"anyOf": [plain(), {"type": "null"}]},
                     "allof_unruled": {"allOf": [plain()]},
-                    "allof_beside_ref": {"$ref": "#/components/schemas/Plain", "allOf": [owner()]}
+                    "allof_beside_ref": {"$ref": "#/components/schemas/Plain", "allOf": [owner()]},
+                    "generic_unruled": {"anyOf": [plain(), {"type": "integer"}]},
+                    "unruled_member": {"oneOf": [plain(), long()]}
                 }}
             }})),
             component("Extras", serde_json::json!({"type": "object", "properties": {"id": {"type": "string"}}, "additionalProperties": wrapped_owner()})),
@@ -2572,10 +2768,24 @@ mod tests {
                 "beside": {"allOf": [reference], "const": {"name": "boss"}}
             }})
         );
-        // R3-F1.10 controls: compositions the plans do not pass through, a
-        // wrapper of a model without rules, and a one-member `allOf` beside
-        // the `$ref` the plans follow instead are left out.
-        assert_eq!(rules("controls"), serde_json::json!({}));
+        // Generic compositions are kept with every member, in source order,
+        // each member with its `type` and a reference to its model even
+        // when the model holds no rule. A composition with no rule beneath
+        // it, a wrapper of a model without rules, and a one-member `allOf`
+        // beside the `$ref` the plans follow instead are left out.
+        let rebuilt_long = serde_json::json!({"type": "string", "maxLength": 11});
+        let plain_reference = serde_json::json!({MODEL_REFERENCE: "Plain"});
+        assert_eq!(
+            rules("controls"),
+            serde_json::json!({"properties": {
+                "any_of": {"anyOf": [rebuilt_long, {"type": "integer"}]},
+                "three": {"anyOf": [reference, rebuilt_long, {"type": "null"}]},
+                "one_of": {"oneOf": [reference, {"type": "null"}]},
+                "all_of": {"allOf": [reference, rebuilt_long]},
+                "not": {"not": rebuilt_long},
+                "unruled_member": {"oneOf": [plain_reference, rebuilt_long]}
+            }})
+        );
 
         let code: String = format_code(&validate_code(&assemble_model_tokens_with(&catalog, Some(&components)).unwrap()).unwrap())
             .split_whitespace()
@@ -2615,6 +2825,111 @@ mod tests {
             rules(serde_json::json!({"properties": {"flag": true}, "additionalProperties": {"maxLength": 3}})),
             serde_json::json!({"properties": {"flag": {}}, "additionalProperties": {"maxLength": 3}}).as_object().cloned().unwrap()
         );
+    }
+
+    /// R3-F1.B: each generic composition keeps its keyword, every member in
+    /// source order (a null-only member as written), and each member's
+    /// `type`; one with no rule beneath it is left out, as before.
+    #[test]
+    fn free_form_rules_keep_each_generic_composition_with_a_rule_beneath_it() {
+        let catalog = ModelCatalog { module_path: None, types: vec![] };
+        let source = RuleSource::new(&catalog, &[]);
+        let rules = |schema: Value| Value::Object(source.free_form_rules(schema.as_object().unwrap()));
+        let long = || serde_json::json!({"type": "string", "maxLength": 11});
+
+        for (keyword, members) in [
+            ("anyOf", serde_json::json!([long(), {"type": "integer"}])),
+            ("oneOf", serde_json::json!([long(), {"type": "integer"}])),
+            ("allOf", serde_json::json!([long(), {"type": "string"}])),
+        ] {
+            assert_eq!(rules(serde_json::json!({keyword: members})), serde_json::json!({keyword: members}), "{keyword}");
+        }
+        assert_eq!(rules(serde_json::json!({"not": long()})), serde_json::json!({"not": long()}));
+        // Nested rules of a member are rebuilt as a free-form value's are.
+        assert_eq!(
+            rules(serde_json::json!({"oneOf": [
+                {"type": "object", "properties": {"label": {"type": "string"}, "code": {"type": "string", "maxLength": 2}}},
+                {"type": "null"}
+            ]})),
+            serde_json::json!({"oneOf": [{"type": "object", "properties": {"code": {"maxLength": 2}}}, {"type": "null"}]})
+        );
+        // A composition with no rule beneath it adds nothing to check, so
+        // it is left out: the free-form value's schema stays `{}`.
+        for unruled in [
+            serde_json::json!({"anyOf": [{"type": "string"}, {"type": "integer"}]}),
+            serde_json::json!({"oneOf": [{"type": "string"}, {"type": "null"}]}),
+            serde_json::json!({"allOf": [{"type": "string"}, {"type": "string"}]}),
+            serde_json::json!({"not": {"type": "string"}}),
+        ] {
+            assert_eq!(rules(unruled.clone()), serde_json::json!({}), "{unruled}");
+        }
+    }
+
+    /// R3-F1.11: a nominal union's variants carry their member's rules, a
+    /// null-only member is written as the source spells it, and a variant
+    /// reaching a model through a free-form value is written through the
+    /// generator. R3-F1.12: a struct flattening an `allOf` keeps the source
+    /// `allOf` with each member rebuilt, a model as a `$ref` to its
+    /// component.
+    #[test]
+    fn nominal_compositions_rebuild_their_members_rules() {
+        let union = |name: &str, target: TypeRef| ModelDef::Alias(TypeAlias { name: name.into(), description: None, target, discriminator: None });
+        let catalog = ModelCatalog {
+            module_path: None,
+            types: vec![
+                union("Stop", TypeRef::OneOf(vec![primitive(PrimitiveType::String), TypeRef::Array(Box::new(primitive(PrimitiveType::String)))])),
+                union("Partial", TypeRef::AnyOf(vec![primitive(PrimitiveType::Integer), primitive(PrimitiveType::Json)])),
+                union("Linked", TypeRef::OneOf(vec![primitive(PrimitiveType::Json), primitive(PrimitiveType::Integer)])),
+                union("Combined", TypeRef::AllOf(vec![TypeRef::Named("Owner".into()), primitive(PrimitiveType::Json)])),
+                union("Unruled", TypeRef::AllOf(vec![TypeRef::Named("Plain".into()), primitive(PrimitiveType::Json)])),
+                union("Bare", TypeRef::AnyOf(vec![primitive(PrimitiveType::Json), primitive(PrimitiveType::Json)])),
+                ModelDef::Struct(StructDef { name: "Owner".into(), description: None, fields: vec![field("name", None, false, primitive(PrimitiveType::String))], additional_properties: None }),
+                ModelDef::Struct(StructDef { name: "Plain".into(), description: None, fields: vec![field("note", None, false, primitive(PrimitiveType::String))], additional_properties: None }),
+            ],
+        };
+        let component = |name: &str, schema: Value| SchemaComponent { name: name.into(), rust_path: Some(name.into()), schema };
+        let components = vec![
+            component("Stop", serde_json::json!({"oneOf": [{"type": "string"}, {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}}]})),
+            component("Partial", serde_json::json!({"anyOf": [{"type": "integer", "minimum": 0, "maximum": 3}, {"type": "null"}]})),
+            component("Linked", serde_json::json!({"oneOf": [{"properties": {"owner": {"$ref": "#/components/schemas/Owner"}}}, {"type": "integer"}]})),
+            component("Combined", serde_json::json!({"allOf": [
+                {"$ref": "#/components/schemas/Owner"},
+                {"type": "object", "properties": {"code": {"type": "string", "maxLength": 11}}}
+            ]})),
+            component("Unruled", serde_json::json!({"allOf": [{"$ref": "#/components/schemas/Plain"}, {"type": "object", "properties": {"label": {"type": "string"}}}]})),
+            component("Bare", serde_json::json!({"anyOf": [{"type": "object"}, {"type": "null"}]})),
+            component("Owner", serde_json::json!({"type": "object", "properties": {"name": {"type": "string", "maxLength": 10}}})),
+            component("Plain", serde_json::json!({"type": "object", "properties": {"note": {"type": "string"}}})),
+        ];
+        let source = RuleSource::new(&catalog, &components);
+        let variants = |index: usize| match &catalog.types[index] {
+            ModelDef::Alias(def @ TypeAlias { target: TypeRef::OneOf(variants) | TypeRef::AnyOf(variants), .. }) => {
+                source.variant_rules(def, variants).into_iter().map(Value::Object).collect::<Vec<_>>()
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(variants(0), vec![serde_json::json!({}), serde_json::json!({"minItems": 1, "maxItems": 4})]);
+        assert_eq!(variants(1), vec![serde_json::json!({"minimum": 0, "maximum": 3}), serde_json::json!({"type": "null"})]);
+        assert_eq!(variants(2), vec![serde_json::json!({"properties": {"owner": {MODEL_REFERENCE: "Owner"}}}), serde_json::json!({})]);
+        // A union without rules is written as Schemars derives it.
+        assert_eq!(variants(5), Vec::<Value>::new());
+
+        let code: String = format_code(&validate_code(&assemble_model_tokens_with(&catalog, Some(&components)).unwrap()).unwrap())
+            .split_whitespace()
+            .collect::<String>()
+            .replace(",)", ")");
+        for expected in [
+            r#"#[schemars(extend("maxItems"=4u64,"minItems"=1u64))]TextList(Vec<String>)"#,
+            r#"#[schemars(extend("maximum"=3u64,"minimum"=0u64))]Integer(i64)"#,
+            r#"#[schemars(extend("type"="null"))]Json(serde_json::Value)"#,
+            r#"#[schemars(schema_with="Linked::variant_rules_schema_0")]Json(serde_json::Value)"#,
+            r##"#[schemars(extend("allOf"=[{"$ref":"#/components/schemas/Owner"},{"properties":{"code":{"maxLength":11u64}},"type":"object"}]))]pubstructCombined"##,
+        ] {
+            assert!(code.contains(expected), "missing {expected}\n{code}");
+        }
+        // No rule beneath the `allOf`: Schemars' flattened struct stands.
+        assert!(code.contains("#[derive(JsonSchema)]pubstructUnruled"), "{code}");
+        assert!(!code.contains(MODEL_REFERENCE), "{code}");
     }
 
     #[test]
