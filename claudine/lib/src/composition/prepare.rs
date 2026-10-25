@@ -965,10 +965,11 @@ fn prepare_direct_on(
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
     let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
-    super::lifecycle::reject_incompatible_calls(
+    let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
         &effective_frontmatter,
         &lifecycle,
         &source.resolved_path,
+        Some(&source.original_text),
         launch_schema.as_ref().map(|schema| &schema.effective),
     )?;
     let source_repo_root = options.source_repo_root.clone();
@@ -988,7 +989,7 @@ fn prepare_direct_on(
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
-        warnings: report.warnings.clone(),
+        warnings: lifecycle_warnings.into_iter().chain(report.warnings.iter().cloned()).collect(),
         input_layers,
         compose_context: ctx,
         document_epoch: options.document_epoch,
@@ -1093,10 +1094,11 @@ fn prepare_inline_on(
 
     let launch_schema =
         resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
-    super::lifecycle::reject_incompatible_calls(
+    let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
         &effective_frontmatter,
         &lifecycle,
         &source.resolved_path,
+        Some(&source.original_text),
         launch_schema.as_ref().map(|schema| &schema.effective),
     )?;
     let source_repo_root = options.source_repo_root.clone();
@@ -1120,7 +1122,8 @@ fn prepare_inline_on(
         &super::closure::inline_hash_options(),
     );
 
-    let mut warnings = report.warnings.clone();
+    let mut warnings = lifecycle_warnings;
+    warnings.extend(report.warnings.iter().cloned());
     if let Some(path) = retired_guardrails {
         warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
             "inline_guardrails",

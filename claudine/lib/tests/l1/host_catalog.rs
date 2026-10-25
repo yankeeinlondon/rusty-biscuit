@@ -314,3 +314,36 @@ matrix! {
     group_duplicate: "group" / "duplicate", |t| edit_members(t, "group", |line| if line.contains("failed: \"string[]") { format!("{line}\n{line}") } else { line.to_string() }) => Expect::Yaml;
     group_trailing: "group" / "trailing", |t| format!("{t}        ]: [\n") => Expect::Yaml;
 }
+
+/// Claudine extends the expression language with no host function: no file in
+/// `claudine/schemas/` is a function catalog, and no `.facts.json` artifact
+/// sits there. A host function needs both, registered together: its
+/// `function(...)` declaration in a catalog there, its Rust registration
+/// through `darkmatter::markdown::compose::expression::host::HostFunctions`,
+/// and the artifact that registration writes
+/// (`HostFunctions::facts_artifact`), kept fresh by a test comparing the two
+/// byte for byte. This test fails when a catalog or an artifact appears
+/// without that wiring.
+#[test]
+fn claudine_ships_no_host_function_catalog_and_no_facts_artifact() {
+    let schemas = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schemas");
+    let mut catalogs = Vec::new();
+    let mut artifacts = Vec::new();
+    for entry in std::fs::read_dir(&schemas).expect("claudine/schemas is readable") {
+        let path = entry.expect("a directory entry").path();
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_string();
+        if name.ends_with(".facts.json") {
+            artifacts.push(name);
+        } else if name.ends_with(".yaml") || name.ends_with(".yml") {
+            let text = std::fs::read_to_string(&path).expect("a schema file is text");
+            if darkmatter::markdown::schemas::catalog::is_host_function_catalog(&text) {
+                catalogs.push(name);
+            }
+        }
+    }
+    assert!(
+        catalogs.is_empty() && artifacts.is_empty(),
+        "claudine/schemas holds host function catalogs {catalogs:?} or facts artifacts {artifacts:?}; register \
+         each function through `HostFunctions`, install it at startup, and add a freshness test for its artifact"
+    );
+}

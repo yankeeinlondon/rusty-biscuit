@@ -94,6 +94,12 @@ pub fn validate_no_nested_spans_in_literals(
 /// satisfy rejects the document before any event runs, as it would in the
 /// body.
 ///
+/// ## Returns
+///
+/// The lifecycle surfaces' call warnings (category 3, always-false calls),
+/// located in `authored` (the loaded document text) when given; the caller
+/// reports them with composition's own warnings.
+///
 /// ## Errors
 ///
 /// [`CompositionError::LifecycleCallRejected`] for the first rejected call.
@@ -101,10 +107,18 @@ pub fn reject_incompatible_calls(
     frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
     source_path: &Path,
+    authored: Option<&str>,
     schema: Option<&darkmatter::markdown::schemas::EffectiveSchema>,
-) -> Result<(), CompositionError> {
-    darkmatter::lifecycle::reject_incompatible_calls(frontmatter, lifecycle, source_path, registry::claudine_registry(), schema)
-        .map_err(CompositionError::from)
+) -> Result<Vec<darkmatter::markdown::compose::ComposeWarning>, CompositionError> {
+    darkmatter::lifecycle::reject_incompatible_calls(
+        frontmatter,
+        lifecycle,
+        source_path,
+        authored,
+        registry::claudine_registry(),
+        schema,
+    )
+    .map_err(CompositionError::from)
 }
 
 /// Check the shape every `with:` shares and return its mapping; see

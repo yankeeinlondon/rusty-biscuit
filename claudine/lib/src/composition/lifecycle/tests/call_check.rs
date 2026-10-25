@@ -33,7 +33,7 @@ fn a_lifecycle_call_is_rejected_like_the_body_call() {
     let value = frontmatter(text);
     let config = parse_lifecycle_config(&value, dummy_path()).expect("the lifecycle parses");
     let schema = effective(dir.path(), text);
-    let error = reject_incompatible_calls(&value, &config, dummy_path(), Some(&schema)).expect_err("rejected");
+    let error = reject_incompatible_calls(&value, &config, dummy_path(), None, Some(&schema)).expect_err("rejected");
     let CompositionError::LifecycleCallRejected { property, source, .. } = &error else {
         panic!("{error:?}");
     };
@@ -45,7 +45,7 @@ fn a_lifecycle_call_is_rejected_like_the_body_call() {
     let fixed = "---\n$schema:\n  flag: boolean(required)\nflag: true\nsuccess:\n  - say: \"{{ flag ? 'yes' : 'no' }}\"\n---\nbody\n";
     let value = frontmatter(fixed);
     let config = parse_lifecycle_config(&value, dummy_path()).expect("the lifecycle parses");
-    assert!(reject_incompatible_calls(&value, &config, dummy_path(), Some(&effective(dir.path(), fixed))).is_ok());
+    assert!(reject_incompatible_calls(&value, &config, dummy_path(), None, Some(&effective(dir.path(), fixed))).is_ok());
 }
 
 /// Claudine's globals are typed by its host catalog: the registry carries
@@ -88,7 +88,7 @@ fn a_guard_narrows_until_a_write_and_never_reaches_a_shadowing_host_global() {
             })
             .collect();
     assert_eq!(found, [("success[0].then[2].say.text".to_string(), ArgumentCategory::NullableMatch)]);
-    assert!(reject_incompatible_calls(&value, &config, dummy_path(), Some(&schema)).is_ok());
+    assert!(reject_incompatible_calls(&value, &config, dummy_path(), None, Some(&schema)).is_ok());
 
     // At a sequence site `seq` is the host's global, shadowing the property.
     let roots = ["seq"];
@@ -102,4 +102,24 @@ fn a_guard_narrows_until_a_write_and_never_reaches_a_shadowing_host_global() {
     assert_eq!(read(&site, "fm.seq"), "number | null");
     assert_eq!(read(&guarded, "seq.index"), read(&site, "seq.index"), "the host global is not the guarded property");
     assert_ne!(read(&site, "seq.index"), "unknown");
+}
+
+/// A category 3 lifecycle call is not rejected: Claudine receives its shared
+/// warning, located at the argument in the authored text, to report with the
+/// composition's own warnings.
+#[test]
+fn a_category_3_lifecycle_call_returns_its_located_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = "---\n$schema:\n  label: string\nlabel: \"7\"\nsuccess:\n  - when: min(label, 5) > 1\n    then:\n      - say: done\n---\nBody\n";
+    let value = frontmatter(text);
+    let config = parse_lifecycle_config(&value, dummy_path()).expect("the lifecycle parses");
+    let schema = effective(dir.path(), text);
+    let warnings = reject_incompatible_calls(&value, &config, dummy_path(), Some(text), Some(&schema))
+        .expect("a category 3 call is not rejected");
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    let diagnostic = warnings[0].diagnostic.as_ref().expect("the shared record");
+    assert_eq!(diagnostic.code, darkmatter::markdown::compose::expression::UNCERTAIN_CALL_CODE);
+    let source = diagnostic.source.as_ref().expect("located");
+    // `label` in `  - when: min(label, 5) > 1`, line 6.
+    assert_eq!((source.line, source.column), (6, 15));
 }

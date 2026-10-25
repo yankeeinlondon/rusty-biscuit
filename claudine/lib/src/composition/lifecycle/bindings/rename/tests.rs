@@ -67,3 +67,35 @@ fn body_directive_conditions_are_checked_in_inactive_and_nested_branches() {
         }, None, None).unwrap();
     }
 }
+
+/// The rename names the longest static path of the first retired read, in
+/// source order: dotted members and string keys extend it, through
+/// parentheses; a numeric or computed index ends it.
+#[test]
+fn the_removed_path_is_the_static_prefix_of_the_first_read() {
+    for (expression, removed, replacement) in [
+        ("state[0]", "state", "seq"),
+        ("state[k].x", "state", "seq"),
+        ("(state).id", "state.id", "seq.id"),
+        ("(state)['sequence_id']", "state.sequence_id", "seq.run_id"),
+        ("state['a'].b[0]['c']", "state.a.b", "seq.a.b"),
+        ("x ? 1 : previous.name", "previous.name", "seq.previous.name"),
+        ("f(g(next))", "next", "seq.next"),
+        ("x[outputs]", "outputs", "seq.outputs"),
+        ("{a: step}", "step", "seq.index"),
+        ("is_first || is_last", "is_first", "seq.is_first"),
+    ] {
+        let body = format!("{{{{ {expression} }}}}");
+        let error = reject_removed_sequence_reads(Path::new("prompt.md"), AuthoredDocument {
+            frontmatter: &json!({}), body: &body, body_line_offset: 0,
+        }, None, None).unwrap_err();
+        assert!(matches!(&error, CompositionError::RemovedGrammar { removed: found, replacement: hint, .. }
+            if found == removed && hint == &format!("use `{replacement}`")), "{expression}: {error:?}");
+    }
+    for expression in ["ctx['state']", "f(x).state", "fm.state.previous"] {
+        let body = format!("{{{{ {expression} }}}}");
+        reject_removed_sequence_reads(Path::new("prompt.md"), AuthoredDocument {
+            frontmatter: &json!({}), body: &body, body_line_offset: 0,
+        }, None, None).unwrap();
+    }
+}

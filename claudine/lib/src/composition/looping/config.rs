@@ -8,7 +8,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionFinder, evaluate, parse,
+    EvaluationLookup, Expr, ExpressionFinder, FRONTMATTER_ROOT, evaluate, is_reserved_namespace, parse,
+    static_access_reads,
 };
 use serde_json::Value;
 
@@ -382,14 +383,16 @@ fn parse_on_rate_limit(value: &Value, location: &LoopLocation) -> Result<OnRateL
 /// Sources:
 /// - every action target (`increment`/`decrement`/`set`/`append`/
 ///   `prepend`/`merge` `prop`);
-/// - every identifier referenced by the `while`/`until` condition;
-/// - every identifier referenced inside action-value templates.
+/// - the root of every variable the `while`/`until` condition reads;
+/// - the root of every variable read inside action-value templates.
 ///
-/// Reserved namespaces are excluded because they are supplied by the
-/// runtime rather than resolved from frontmatter: `fm.<head>` references
-/// lift `<head>` as a control variable (the `fm` namespace traverses the
-/// loop's frontmatter state), while bare `fm`, `env`, boolean literals,
-/// and the host-declared `loop` global remain excluded.
+/// Reads come from Darkmatter's [`static_access_reads`], so every branch,
+/// operand, and index expression counts. Roots supplied by the runtime rather
+/// than by frontmatter are excluded: Darkmatter's reserved namespaces
+/// ([`is_reserved_namespace`]) and the host-declared `loop` global. A
+/// `fm.<head>` read lifts `<head>` (the `fm` namespace traverses the loop's
+/// frontmatter state); bare `fm`, including a bracket read such as
+/// `fm['x']`, owns no single key.
 pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
     let mut names = BTreeSet::new();
 
@@ -404,7 +407,11 @@ pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
             | LoopAction::Merge { prop, value } => {
                 names.insert(prop.clone());
                 if let Value::String(raw) = value {
-                    collect_value_template_identifiers(raw, &mut names);
+                    for location in ExpressionFinder::find_all_plain(raw) {
+                        if let Ok(expr) = parse(&location.expression) {
+                            insert_control_variables(&expr, &mut names);
+                        }
+                    }
                 }
             }
         }
@@ -414,90 +421,26 @@ pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
         LoopCondition::While(source) | LoopCondition::Until(source) => source,
     };
     if let Ok(expr) = darkmatter::markdown::compose::expression::parse_condition(condition_source) {
-        collect_identifiers(&expr, &mut names);
+        insert_control_variables(&expr, &mut names);
     }
 
     Vec::from_iter(names)
 }
 
-fn collect_value_template_identifiers(raw: &str, names: &mut BTreeSet<String>) {
-    for location in ExpressionFinder::find_all_plain(raw) {
-        if let Ok(expr) = parse(&location.expression) {
-            collect_identifiers(&expr, names);
+/// Inserts the frontmatter key each read of `expr` names, per
+/// [`extract_control_variables`].
+fn insert_control_variables(expr: &Expr, names: &mut BTreeSet<String>) {
+    for read in static_access_reads(expr) {
+        let mut segments = read.variable.split('.');
+        let head = segments.next().unwrap_or(read.variable);
+        if head == FRONTMATTER_ROOT {
+            if let Some(segment) = segments.next() {
+                names.insert(segment.to_string());
+            }
+        } else if !is_reserved_namespace(head) && head != super::super::reserved::LOOP_ROOT {
+            names.insert(head.to_string());
         }
     }
-}
-
-fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
-    match expr {
-        Expr::Variable(path) => {
-            let mut segments = path.split('.');
-            let head = segments.next().unwrap_or(path);
-            if head == darkmatter::markdown::compose::expression::FRONTMATTER_ROOT {
-                // `fm.<path>` traverses the frontmatter object the loop
-                // owns, so lift the first segment after `fm` as a control
-                // variable. Bare `fm` (the whole object) has no single key
-                // to own.
-                if let Some(segment) = segments.next() {
-                    names.insert(segment.to_string());
-                }
-            } else if !is_reserved_identifier(head) {
-                names.insert(head.to_string());
-            }
-        }
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            collect_identifiers(inner, names);
-        }
-        Expr::Binary { left, right, .. }
-        | Expr::Comparison { left, right, .. }
-        | Expr::Fallback {
-            primary: left,
-            fallback: right,
-        } => {
-            collect_identifiers(left, names);
-            collect_identifiers(right, names);
-        }
-        Expr::Index { base, index } => {
-            collect_identifiers(base, names);
-            collect_identifiers(index, names);
-        }
-        Expr::MemberAccess { base, .. } => {
-            collect_identifiers(base, names);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_identifiers(condition, names);
-            collect_identifiers(then_branch, names);
-            collect_identifiers(else_branch, names);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_identifiers(arg, names);
-            }
-        }
-        // A container literal contributes the union of the identifiers its
-        // elements reference. Object keys are authored text, not variable
-        // references, so they never name a control variable.
-        Expr::ArrayLiteral(elements) => {
-            for element in elements {
-                collect_identifiers(element, names);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_identifiers(value, names);
-            }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-    }
-}
-
-fn is_reserved_identifier(name: &str) -> bool {
-    super::super::reserved::EXPRESSION_RESERVED_ROOTS.contains(&name)
-        || name == super::super::reserved::LOOP_ROOT
 }
 
 /// Iteration-control keys under the `loop:` frontmatter object.

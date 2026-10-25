@@ -360,6 +360,37 @@ fn a_retired_loop_read_is_found_only_in_parsed_reads() {
     assert_eq!(removed_loop_read_in_text("{{ '_loop_count' }}"), None);
 }
 
+/// The retired-name check visits every read position, reports the first
+/// read in source order, and reads only a static first member of `fm`.
+#[test]
+fn a_retired_loop_read_is_found_in_every_read_position() {
+    for (text, found) in [
+        ("fm[_loop_count]", Some("_loop_count")),
+        ("x[_loop_is_first]", Some("_loop_is_first")),
+        ("f(g(_loop_count))", Some("_loop_count")),
+        ("{a: _loop_last_output}", Some("_loop_last_output")),
+        ("x ? _loop_count : 1", Some("_loop_count")),
+        ("_loop_is_last || _loop_count", Some("_loop_is_last")),
+        ("-_loop_count + !_loop_is_first", Some("_loop_count")),
+        ("fm._loop_count.x", Some("_loop_count")),
+        ("fm['_loop_count'].x", Some("_loop_count")),
+        // Parentheses do not hide an explicit frontmatter read.
+        ("(fm)['_loop_count']", Some("_loop_count")),
+        ("(fm)._loop_is_last", Some("_loop_is_last")),
+        ("fm.cfg['_loop_count']", None),
+        ("fm['cfg']['_loop_count']", None),
+        ("fm[0]", None),
+        ("f(fm)['_loop_count']", None),
+    ] {
+        let expr = darkmatter::markdown::compose::expression::parse_condition(text).unwrap();
+        assert_eq!(
+            removed_loop_read(&expr).map(|(removed, _)| removed),
+            found,
+            "`{text}`"
+        );
+    }
+}
+
 #[test]
 fn sequence_roots_shadow_completely_and_restore_without_merging() {
     let document = Document(Map::from_iter([("seq".into(), json!({"name": "document", "leak": true}))]));

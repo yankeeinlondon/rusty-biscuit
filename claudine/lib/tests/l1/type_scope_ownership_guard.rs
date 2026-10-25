@@ -13,6 +13,11 @@
 //!   without asking [`PRESENCE_DECISION`] whether a guard proves it present,
 //!   or the retired classifier `resolve_shell_command_expr` returns.
 //! - a named decision site disappears or stops consulting the scope.
+//! - a Claudine function matches a parsed variable node (`Expr::Variable`,
+//!   `SpannedExprKind::Variable`) outside its reviewed entry: which roots and
+//!   paths an expression reads is Darkmatter's (`static_access_reads`,
+//!   `static_variable_reads`), and Claudine only filters those reads by its
+//!   own names. Darkmatter's lifecycle module is exempt from this rule.
 //!
 //! `is_null` is never banned: runtime dispatch, predicate implementations,
 //! and warning-policy absence handling need it, and an approval read that
@@ -35,6 +40,28 @@ fn is_static_preflight_module(path: &str) -> bool {
         || path.starts_with("composition/sequence/preflight/")
 }
 
+/// Offsets of `Expr::Variable(` / `SpannedExprKind::Variable(` in sanitized
+/// Claudine `text`; none for a Darkmatter `path`.
+fn variable_matches(path: &str, text: &str) -> Vec<usize> {
+    if path.starts_with("darkmatter/") {
+        return Vec::new();
+    }
+    ident_offsets(text, "Variable")
+        .into_iter()
+        .filter(|&at| {
+            let before = text[..at].trim_end();
+            let qualified = before.strip_suffix("::").is_some_and(|rest| {
+                let rest = rest.trim_end();
+                ["Expr", "SpannedExprKind"].iter().any(|kind| {
+                    rest.strip_suffix(kind)
+                        .is_some_and(|head| !head.bytes().last().is_some_and(source_scan::is_ident))
+                })
+            });
+            qualified && text[at + "Variable".len()..].trim_start().starts_with('(')
+        })
+        .collect()
+}
+
 /// A scope primitive whose call sites are reviewed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Primitive {
@@ -47,18 +74,22 @@ enum Primitive {
     Assume,
     /// `type_of_expr` / `guard_presence` / `proves_present`: presence lookups.
     PresenceLookup,
+    /// `Expr::Variable(..)` / `SpannedExprKind::Variable(..)`: a hand walk
+    /// deciding which variables an expression reads. Claudine sources only.
+    VariableMatch,
 }
 
 impl Primitive {
-    const ALL: [Self; 4] = [Self::Unguarded, Self::DeclaredTypes, Self::Assume, Self::PresenceLookup];
+    const ALL: [Self; 5] = [Self::Unguarded, Self::DeclaredTypes, Self::Assume, Self::PresenceLookup, Self::VariableMatch];
 
-    /// Offsets of this primitive's calls in sanitized `text`.
-    fn calls(self, text: &str) -> Vec<usize> {
+    /// Offsets of this primitive's calls in sanitized `text` at `path`.
+    fn calls(self, path: &str, text: &str) -> Vec<usize> {
         let names: &[&str] = match self {
             Self::Unguarded => &["unguarded"],
             Self::DeclaredTypes => &["DeclaredTypes"],
             Self::Assume => &["assume", "assume_at"],
             Self::PresenceLookup => &["type_of_expr", "guard_presence", "proves_present"],
+            Self::VariableMatch => return variable_matches(path, text),
         };
         let mut offsets: Vec<usize> = names
             .iter()
@@ -97,6 +128,34 @@ const fn allowed(primitive: Primitive, path: &'static str, function: &'static st
 }
 
 const ALLOWED: &[Allowed] = &[
+    allowed(
+        Primitive::VariableMatch,
+        "dispatch/matcher.rs",
+        "expression_uses_known_features",
+        1,
+        "a grammar heuristic telling a hook condition from a regex; it decides no variable visibility",
+    ),
+    allowed(
+        Primitive::VariableMatch,
+        "dispatch/template.rs",
+        "render_expression",
+        1,
+        "keeps an unknown bare hook-template variable verbatim; one node, not a read walk",
+    ),
+    allowed(
+        Primitive::VariableMatch,
+        "composition/lifecycle/prewarm/classify.rs",
+        "contains_call",
+        1,
+        "a call search; a variable is a leaf without calls",
+    ),
+    allowed(
+        Primitive::VariableMatch,
+        "composition/lifecycle/prewarm/classify.rs",
+        "frontmatter_reads",
+        2,
+        "pre-warm readiness, kept by the type-aware-evaluation scan inventory; a candidate for `static_access_reads`",
+    ),
     allowed(
         Primitive::Unguarded,
         "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
@@ -263,7 +322,7 @@ fn allowlist_violations(sources: &BTreeMap<String, String>, allowed: &[Allowed])
     for (path, text) in sources {
         let functions = functions(text);
         for primitive in Primitive::ALL {
-            for at in primitive.calls(text) {
+            for at in primitive.calls(path, text) {
                 let function = enclosing(&functions, at).unwrap_or("<item>").to_string();
                 let entry = found.entry((primitive, path.clone(), function)).or_default();
                 entry.0 += 1;
@@ -525,4 +584,23 @@ fn resolve_shell_text(read: &Value) -> Result<(), CompositionError> {
     assert_eq!(violations, vec!["darkmatter/lib/src/lifecycle/preflight/shell_walk.rs::resolve_shell_text no longer calls `placeholder_guard`"]);
     let missing = decision_site_violations(&sources(&[("darkmatter/lib/src/lifecycle/preflight/shell_walk.rs", "fn other() {}")]), &DECISION_SITES[..1]);
     assert_eq!(missing.len(), 1, "{missing:#?}");
+}
+
+#[test]
+fn a_claudine_walk_over_variable_nodes_is_rejected() {
+    let snippet = r#"
+fn my_reads(expr: &Expr, names: &mut Vec<String>) {
+    match expr {
+        Expr::Variable(path) => names.push(path.clone()),
+        SpannedExprKind::Variable ( path ) => names.push(path.clone()),
+        _ => {}
+    }
+    let _ = MyExpr::Variable(1);
+}
+"#;
+    let violations = allowlist_violations(&sources(&[("composition/looping/config.rs", snippet)]), &[]);
+    assert_eq!(violations.len(), 1, "{violations:#?}");
+    assert!(violations[0].contains("unreviewed VariableMatch call in composition/looping/config.rs::my_reads (lines [4, 5])"), "{violations:#?}");
+    let darkmatter = allowlist_violations(&sources(&[("darkmatter/lib/src/lifecycle/validate.rs", snippet)]), &[]);
+    assert_eq!(darkmatter, Vec::<String>::new());
 }

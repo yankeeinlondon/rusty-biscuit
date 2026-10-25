@@ -37,7 +37,7 @@ use darkmatter::markdown::compose::expression::{
     Availability, AuthoredMode, BindingView, Expr, ExpressionError, ExpressionFinder,
     ExpressionLocation, HostGlobals, PreparationError, RuntimeBinding, ScopeId,
     UnavailabilityReason,
-    ValidationDiagnostic, parse, parse_condition, prepare_value, static_variable_reads,
+    ValidationDiagnostic, parse, parse_condition, prepare_value, static_access_reads, static_variable_reads,
     validate_prepared,
 };
 use serde_json::{Map, Value};
@@ -499,55 +499,27 @@ fn retired(name: &str) -> Option<RetiredLoopName> {
 /// The first retired `_loop_*` name `expr` reads, in source order.
 ///
 /// A read is a variable whose root is a retired name (`_loop_count`,
-/// `_loop_count.x`), or an explicit frontmatter read of one (`fm._loop_count`,
-/// `fm['_loop_count']`). String literals are data, an unrelated property such
-/// as `_loop_notes` is not retired, and a dynamically computed key
-/// (`fm[name]`) keeps ordinary lookup semantics.
+/// `_loop_count.x`), or an explicit frontmatter read of one whose first
+/// member names it (`fm._loop_count`, `fm['_loop_count']`, `(fm)._loop_count`).
+/// Reads come from Darkmatter's [`static_access_reads`], so string literals
+/// are data, an unrelated property such as `_loop_notes` is not retired, and
+/// a dynamically computed key (`fm[name]`) keeps ordinary lookup semantics
+/// (its index is read on its own).
 pub(crate) fn removed_loop_read(expr: &Expr) -> Option<RetiredLoopName> {
-    use darkmatter::markdown::compose::expression::FRONTMATTER_ROOT;
-    let is_fm = |base: &Expr| matches!(base, Expr::Variable(root) if root == FRONTMATTER_ROOT);
-    match expr {
-        Expr::Variable(path) => {
-            let mut segments = path.split('.');
-            let root = segments.next()?;
-            if root == FRONTMATTER_ROOT {
-                segments.next().and_then(retired)
-            } else {
-                retired(root)
-            }
+    use darkmatter::markdown::compose::expression::{AccessStep, FRONTMATTER_ROOT};
+    static_access_reads(expr).iter().find_map(|read| {
+        let mut segments = read.variable.split('.');
+        let root = segments.next()?;
+        if root != FRONTMATTER_ROOT {
+            return retired(root);
         }
-        Expr::Index { base, index } => match index.as_ref() {
-            Expr::StringLiteral(key) if is_fm(base) => retired(key),
-            _ => None,
+        match (segments.next(), read.steps.first()) {
+            (Some(member), _) => retired(member),
+            (None, Some(AccessStep::Member(name))) => name.split('.').next().and_then(retired),
+            (None, Some(AccessStep::Key(key))) => retired(key),
+            (None, Some(AccessStep::Index { .. }) | None) => None,
         }
-        .or_else(|| removed_loop_read(base))
-        .or_else(|| removed_loop_read(index)),
-        Expr::MemberAccess { base, name } => is_fm(base)
-            .then(|| name.split('.').next().and_then(retired))
-            .flatten()
-            .or_else(|| removed_loop_read(base)),
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            removed_loop_read(inner)
-        }
-        Expr::Binary { left, right, .. }
-        | Expr::Comparison { left, right, .. }
-        | Expr::Fallback {
-            primary: left,
-            fallback: right,
-        } => removed_loop_read(left).or_else(|| removed_loop_read(right)),
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => removed_loop_read(condition)
-            .or_else(|| removed_loop_read(then_branch))
-            .or_else(|| removed_loop_read(else_branch)),
-        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
-            args.iter().find_map(removed_loop_read)
-        }
-        Expr::ObjectLiteral(entries) => entries.iter().find_map(|(_, value)| removed_loop_read(value)),
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
-    }
+    })
 }
 
 /// The first retired `_loop_*` read in the `{{ … }}` spans of authored text.

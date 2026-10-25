@@ -1364,6 +1364,36 @@ mod shell {
         );
     }
 
+    /// The target-identity scan visits every read position and reports the
+    /// first in source order: a static path (dotted, string-keyed, through
+    /// parentheses) at or below a target-identity root names the root; a
+    /// `ctx`/`env` read with a numeric or computed index names the access up
+    /// to its last such index, as written.
+    #[test]
+    fn target_identity_paths_are_found_in_every_read_position() {
+        for (raw, expected) in [
+            ("{{ ctx.agent[0] }}", Some("ctx.agent[0]")),
+            ("{{ ctx[k].x[j].y }}", Some("ctx[k].x[j]")),
+            ("{{ ctx[0] }}", Some("ctx[0]")),
+            ("{{ (ctx)[k] }}", Some("(ctx)[k]")),
+            ("{{ (ctx).agent }}", Some("ctx.agent")),
+            ("{{ ctx['agent'].name }}", Some("ctx.agent")),
+            ("{{ x ? 'a' : env.MODEL }}", Some("env.MODEL")),
+            ("{{ upper(trim(ctx.model)) }}", Some("ctx.model")),
+            ("{{ {a: env.AGENT} }}", Some("env.AGENT")),
+            ("{{ a || ctx.agent }}", Some("ctx.agent")),
+            ("{{ seq[ctx.agent] }}", Some("ctx.agent")),
+            ("{{ env.MODEL == ctx.agent }}", Some("env.MODEL")),
+            ("{{ ctx.cwd }} {{ ctx.agent }}", Some("ctx.agent")),
+            ("{{ ctx.agentx }}", None),
+            ("{{ ctx.cwd }}", None),
+            ("{{ f(x)[k] }}", None),
+            ("{{ fm.ctx.agent }}", None),
+        ] {
+            assert_eq!(shape::first_target_identity_root(raw).as_deref(), expected, "{raw}");
+        }
+    }
+
     /// A task's `teardown:` stack resolves through the same graph phase, so a
     /// target-identity reference there is rejected identically — the bytes it
     /// would bake in are the bytes execution runs.

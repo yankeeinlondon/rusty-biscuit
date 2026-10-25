@@ -6,7 +6,9 @@
 use std::path::PathBuf;
 
 use darkmatter::markdown::compose::ResolvedShellValue;
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
+use darkmatter::markdown::compose::expression::{
+    AccessStep, ExpressionFinder, StaticAccessRead, parse, static_access_reads,
+};
 use darkmatter::markdown::compose::shell_expansion::template::{CommandTemplate, HoleTiming};
 use serde_json::{Map, Value};
 
@@ -507,88 +509,40 @@ pub(crate) const TARGET_IDENTITY_ROOTS: &[&str] =
 /// would read a pre-selection value at approval, so the reference is rejected
 /// rather than expanded. The bare late roots are the binding catalog's
 /// sequence approval scope.
+///
+/// Reads come from Darkmatter's [`static_access_reads`], in source order. A
+/// `ctx`/`env` read whose static path is at or below a
+/// [`TARGET_IDENTITY_ROOTS`] entry names that entry. One with a numeric or
+/// computed index (`ctx[key]`) could select a target-identity leaf, so it
+/// fails closed, named by the access up to its last such index as Darkmatter
+/// displays it.
 pub(crate) fn first_target_identity_root(raw: &str) -> Option<String> {
     for location in ExpressionFinder::find_all_plain(raw) {
         let Ok(expr) = parse(&location.expression) else {
             continue;
         };
-        if let Some(path) = target_identity_path_in_expr(&expr) {
+        if let Some(path) = static_access_reads(&expr).iter().find_map(target_identity_path) {
             return Some(path);
         }
     }
     None
 }
 
-fn target_identity_path_in_expr(expr: &Expr) -> Option<String> {
-    if let Some(path) = static_member_path(expr)
-        && let Some(root) = TARGET_IDENTITY_ROOTS
-            .iter()
-            .find(|root| path == **root || path.starts_with(&format!("{root}.")))
-    {
-        return Some((*root).to_string());
+fn target_identity_path(read: &StaticAccessRead<'_>) -> Option<String> {
+    if !matches!(read.root(), "ctx" | "env") {
+        return None;
     }
-
-    if let Expr::Index { base, index } = expr
-        && !matches!(index.as_ref(), Expr::StringLiteral(_))
-        && matches!(member_root(base), Some("ctx" | "env"))
-    {
-        return Some(expr.to_string());
+    let computed = read.steps.iter().rev().find_map(|step| match step {
+        AccessStep::Index { access, .. } => Some(access.to_string()),
+        AccessStep::Member(_) | AccessStep::Key(_) => None,
+    });
+    if computed.is_some() {
+        return computed;
     }
-
-    match expr {
-        Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_)
-        | Expr::BoolLiteral(_) => None,
-        Expr::MemberAccess { base, .. } => target_identity_path_in_expr(base),
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            target_identity_path_in_expr(inner)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            target_identity_path_in_expr(left).or_else(|| target_identity_path_in_expr(right))
-        }
-        Expr::Index { base, index } => target_identity_path_in_expr(base)
-            .or_else(|| target_identity_path_in_expr(index)),
-        Expr::FunctionCall { args, .. } => {
-            args.iter().find_map(target_identity_path_in_expr)
-        }
-        Expr::ArrayLiteral(items) => items.iter().find_map(target_identity_path_in_expr),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .find_map(|(_, value)| target_identity_path_in_expr(value)),
-        Expr::Fallback { primary, fallback } => target_identity_path_in_expr(primary)
-            .or_else(|| target_identity_path_in_expr(fallback)),
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => target_identity_path_in_expr(condition)
-            .or_else(|| target_identity_path_in_expr(then_branch))
-            .or_else(|| target_identity_path_in_expr(else_branch)),
-    }
-}
-
-fn static_member_path(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Variable(path) => Some(path.clone()),
-        Expr::MemberAccess { base, name } => {
-            Some(format!("{}.{}", static_member_path(base)?, name))
-        }
-        Expr::Index { base, index } => {
-            let Expr::StringLiteral(key) = index.as_ref() else {
-                return None;
-            };
-            Some(format!("{}.{}", static_member_path(base)?, key))
-        }
-        Expr::Paren(inner) => static_member_path(inner),
-        _ => None,
-    }
-}
-
-fn member_root(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::Variable(path) => path.split('.').next(),
-        Expr::MemberAccess { base, .. } | Expr::Index { base, .. } => member_root(base),
-        Expr::Paren(inner) => member_root(inner),
-        _ => None,
-    }
+    let path = read.static_path();
+    TARGET_IDENTITY_ROOTS
+        .iter()
+        .find(|root| path == **root || path.starts_with(&format!("{root}.")))
+        .map(|root| (*root).to_string())
 }
 
