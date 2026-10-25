@@ -1095,7 +1095,7 @@ pub fn check_prepared_calls(prepared: &PreparedValue, site: &TypeScope<'_>) -> V
 }
 
 /// Calls `visit` for every function-call node in `expr`, outermost first.
-fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e SpannedExpr)) {
+pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e SpannedExpr)) {
     match &expr.kind {
         SpannedExprKind::Variable(_)
         | SpannedExprKind::StringLiteral(_)

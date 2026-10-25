@@ -265,6 +265,12 @@ impl Markdown {
         }
     }
 
+    /// The text this document was loaded from, before any stage rewrote it;
+    /// `None` when none was retained (a document built from parts).
+    pub fn loaded_text(&self) -> Option<&str> {
+        self.loaded.as_ref().map(|loaded| &*loaded.text)
+    }
+
     /// A [`SourceContext`](biscuit_terminal::errors::SourceContext) over the
     /// text this document was loaded from, for a file-backed document.
     ///

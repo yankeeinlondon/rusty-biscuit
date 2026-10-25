@@ -6,21 +6,10 @@ use super::{FunctionBinding, bound, json_number, numberlike_value};
 use crate::markdown::compose::expression::call_binding::BoundCall;
 use crate::markdown::compose::expression::call_binding::FactKind::{FalseImplies, TrueIff, TrueImplies};
 
-/// The absence predicates: a direct bare-variable argument to one of these
-/// states that the author expects the value may be missing, so it is not an
-/// unknown-identifier warning (spec Requirement 4). Membership in this group
-/// is the marker; walkers ask [`super::is_absence_predicate`] and never spell
-/// the names.
-///
-/// Interim (spec Resolved Decision 9): the expression type-system successor
-/// replaces this with "any parameter whose type admits null".
-pub(super) const ABSENCE_PREDICATES: &[FunctionBinding] = &[
+pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::pure("is_null", &["isnull"], is_null).narrowing("x", TrueIff, Some("null")),
     // True for `null` and empty values, so only the false side learns presence.
     FunctionBinding::pure("is_empty", &["isempty"], is_empty).narrowing("x", FalseImplies, None),
-];
-
-pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::pure("is_string", &["isstring"], is_string).narrowing("x", TrueIff, Some("string")),
     FunctionBinding::pure("is_number", &["isnumber"], is_number).narrowing("x", TrueIff, Some("number")),
     FunctionBinding::pure("is_array", &["isarray"], is_array).narrowing("x", TrueIff, Some("unknown[]")),

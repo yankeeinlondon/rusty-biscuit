@@ -44,6 +44,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     let Some(overlay) = ctx.overlay else {
         return Vec::new();
     };
+    let _host_functions = crate::providers::dsl::enter_host_functions(ctx);
     let mut out = Vec::new();
 
     // A hard YAML parse error from the *current* buffer, ranged at the parser's
@@ -861,6 +862,11 @@ fn stack_expression_diagnostics(
                         calls.push(ctx, doc_span, found, out);
                     }
                 }
+                // The library's checks skip a host function it knows nothing about.
+                for found in crate::diagnostics::call_check::incomplete_diagnostics(&parsed) {
+                    let doc_span = expression.range(found.span.clone());
+                    calls.push(ctx, doc_span, found, out);
+                }
             }
             None => {
                 for found in calls.check(&parsed) {
@@ -1014,7 +1020,7 @@ impl<'d> FrontmatterCalls<'d> {
         out: &mut Vec<Diagnostic>,
     ) {
         if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
-            out.push(diagnostic(range, found.severity, source::FRONTMATTER, found.code, found.message));
+            out.push(crate::diagnostics::call_check::lsp_diagnostic(range, source::FRONTMATTER, found));
         }
     }
 }

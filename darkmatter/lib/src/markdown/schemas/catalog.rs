@@ -436,6 +436,119 @@ pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Resul
     catalogs
 }
 
+/// Why a host function catalog in a schema root did not load.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostFunctionCatalogError {
+    pub path: std::path::PathBuf,
+    pub message: String,
+}
+
+impl std::fmt::Display for HostFunctionCatalogError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "function catalog `{}`: {}", self.path.display(), self.message)
+    }
+}
+
+impl std::error::Error for HostFunctionCatalogError {}
+
+/// The host function catalogs in a document's schema roots, each as an
+/// analysis-only [`HostFunctions`](crate::markdown::compose::expression::HostFunctions)
+/// set: every top-level `.yaml`/`.yml` file claiming the function-catalog
+/// envelope ([`is_host_function_catalog`]), with its facts read from
+/// `<stem>.facts.json` beside it. A file name in an earlier root shadows the
+/// same name in later ones. Passive: files are read, nothing runs, and no
+/// host handler exists in the result.
+///
+/// A catalog that does not load, or that names a built-in function, is
+/// returned as its error; a missing or bad facts artifact is not an error but
+/// makes the affected functions incomplete. Results are cached per catalog
+/// path, catalog bytes, and artifact bytes, because a loaded catalog lives
+/// for the rest of the process.
+pub fn host_function_catalogs(
+    context: &biscuit_file::FileResolutionContext,
+) -> Vec<Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>> {
+    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut sets = Vec::new();
+    for root in roots.search_paths() {
+        let Ok(entries) = std::fs::read_dir(root) else { continue };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
+            .collect();
+        files.sort();
+        for path in files {
+            let Some(name) = path.file_name().map(|name| name.to_os_string()) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            if !is_host_function_catalog(&text) || !seen.insert(name) {
+                continue;
+            }
+            sets.push(host_function_set(&path, &text));
+        }
+    }
+    sets
+}
+
+/// The artifact's state, as part of a cache key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ArtifactKey {
+    Absent,
+    Unreadable(String),
+    Text(String),
+}
+
+type HostFunctionCacheKey = (std::path::PathBuf, String, ArtifactKey);
+type HostFunctionCacheValue = Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>;
+
+fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
+    use crate::markdown::compose::expression::host::{FactsArtifact, facts_artifact_path};
+    use crate::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
+    static CACHE: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<HostFunctionCacheKey, HostFunctionCacheValue>>,
+    > = std::sync::LazyLock::new(Default::default);
+
+    let artifact = match std::fs::read(facts_artifact_path(path)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ArtifactKey::Absent,
+        Err(error) => ArtifactKey::Unreadable(error.to_string()),
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => ArtifactKey::Text(text),
+            Err(_) => ArtifactKey::Unreadable("the file is not UTF-8 text".to_string()),
+        },
+    };
+    let key = (path.to_path_buf(), biscuit_hash::blake3_hash(text), artifact);
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(found) = cache.get(&key) {
+        return found.clone();
+    }
+    let fail = |message: String| HostFunctionCatalogError { path: path.to_path_buf(), message };
+    let built = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
+        let artifact = match &key.2 {
+            ArtifactKey::Absent => FactsArtifact::Absent,
+            ArtifactKey::Unreadable(error) => FactsArtifact::Unreadable(error),
+            ArtifactKey::Text(text) => FactsArtifact::Text(text),
+        };
+        HostFunctions::analysis_only(catalog, artifact).map_err(|error| fail(error.to_string()))
+    });
+    cache.insert(key, built.clone());
+    built
+}
+
+/// Whether `text` claims the function-catalog envelope: `kind: schema` with
+/// a `categories` list and a `types` mapping. Passive: nothing is resolved.
+#[must_use]
+pub fn is_host_function_catalog(text: &str) -> bool {
+    serde_yaml_ng::from_str::<YamlValue>(text).is_ok_and(|value| {
+        value.as_mapping().is_some_and(|map| {
+            map.get("kind").and_then(YamlValue::as_str) == Some("schema")
+                && matches!(map.get("categories"), Some(YamlValue::Sequence(_)))
+                && matches!(map.get("types"), Some(YamlValue::Mapping(_)))
+        })
+    })
+}
+
 fn declares_fm(text: &str) -> bool {
     serde_yaml_ng::from_str::<YamlValue>(text)
         .ok()

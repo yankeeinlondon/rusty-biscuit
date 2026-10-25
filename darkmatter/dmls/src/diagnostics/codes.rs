@@ -23,6 +23,7 @@
 //! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
 //! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
 //! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
+//! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -161,15 +162,21 @@ pub mod code {
     /// A function call Darkmatter's design-time check proves wrong (argument
     /// category 5, a wrong argument count, or an ambiguous overload), so
     /// composition rejects the document. Ranges the argument, or the whole
-    /// call for a call-level problem.
-    pub const EXPRESSION_INCOMPATIBLE_CALL: &str = "dm.expression.incompatible_call";
+    /// call for a call-level problem. The code is Darkmatter's.
+    pub const EXPRESSION_INCOMPATIBLE_CALL: &str = darkmatter::markdown::compose::expression::INCOMPATIBLE_CALL_CODE;
     /// A call argument that might not bind: category 3, and with
-    /// `expressions.strict` also categories 2 and 4.
-    pub const EXPRESSION_UNCERTAIN_CALL: &str = "dm.expression.uncertain_call";
+    /// `expressions.strict` also categories 2 and 4. The code is
+    /// Darkmatter's, which composition reports under too.
+    pub const EXPRESSION_UNCERTAIN_CALL: &str = darkmatter::markdown::compose::expression::UNCERTAIN_CALL_CODE;
     /// A call that is always `false`: an authored literal argument is not a
     /// well-formed file reference. The code is Darkmatter's, which
     /// composition reports under too.
     pub const EXPRESSION_ALWAYS_FALSE_CALL: &str = darkmatter::markdown::compose::expression::ALWAYS_FALSE_CALL_CODE;
+    /// A call to a host function whose facts artifact is missing, stale, or
+    /// invalid: no argument category or narrowing is known for it. The code
+    /// is Darkmatter's.
+    pub const EXPRESSION_INCOMPLETE_ANALYSIS: &str =
+        darkmatter::markdown::compose::expression::INCOMPLETE_ANALYSIS_CODE;
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

@@ -127,6 +127,8 @@ pub struct LifecycleSurfaceCalls {
     pub property: LifecyclePath,
     /// Where the surface's authored scalar sits in the frontmatter.
     pub location: Vec<AuthoredSegment>,
+    /// The authored scalar, which [`Self::checks`]' spans index.
+    pub text: String,
     /// Every call whose category is not 1, with spans relative to the
     /// authored scalar.
     pub checks: Vec<PreparedCallCheck>,
@@ -186,6 +188,7 @@ pub fn lifecycle_call_checks(
                 signal,
                 property: path.clone(),
                 location: sources.location(path).unwrap_or_default().to_vec(),
+                text: text.to_string(),
                 checks: check_prepared_calls(&prepared, scope),
             });
         });
@@ -199,6 +202,16 @@ pub fn lifecycle_call_checks(
 /// guards. An impossible branch keeps its incoming types, so a call no
 /// value can satisfy is rejected even where its guard can never hold.
 ///
+/// ## Returns
+///
+/// When nothing is rejected, one warning per finding the shared call
+/// diagnostics show without `expressions.strict`
+/// ([`CallCheck::diagnostics`](crate::markdown::compose::expression::CallCheck::diagnostics):
+/// category 3 and always-false calls), in [`LifecycleSignal::ALL`] order and
+/// then authored order. Each carries its shared record
+/// ([`ComposeWarning::diagnostic`]), located in `authored` (the loaded
+/// document text) when given and the scalar still decodes to its surface.
+///
 /// ## Errors
 ///
 /// [`LifecycleError::LifecycleCallRejected`] for the first rejected call, in
@@ -207,24 +220,72 @@ pub fn reject_incompatible_calls(
     frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
     source_path: &Path,
+    authored: Option<&str>,
     registry: &super::registry::EventRegistry,
     schema: Option<&crate::markdown::schemas::EffectiveSchema>,
-) -> Result<(), LifecycleError> {
-    let rejected = lifecycle_call_checks(frontmatter, lifecycle, registry, schema)
-        .into_iter()
-        .find_map(|surface| {
-            let property = surface.property;
-            surface.checks.into_iter().find(|found| found.check.is_rejected()).map(|found| (property, found))
-        });
-    match rejected {
-        Some((property, found)) => Err(LifecycleError::LifecycleCallRejected {
+) -> Result<Vec<ComposeWarning>, LifecycleError> {
+    let surfaces = lifecycle_call_checks(frontmatter, lifecycle, registry, schema);
+    let rejected = surfaces.iter().find_map(|surface| {
+        surface.checks.iter().find(|found| found.check.is_rejected()).map(|found| (&surface.property, found))
+    });
+    if let Some((property, found)) = rejected {
+        return Err(LifecycleError::LifecycleCallRejected {
             source_path: source_path.to_path_buf(),
             property: property.to_string(),
-            expression: found.expression,
-            source: Box::new(ExpressionError::CallCheck(Box::new(found.check))),
-        }),
-        None => Ok(()),
+            expression: found.expression.clone(),
+            source: Box::new(ExpressionError::CallCheck(Box::new(found.check.clone()))),
+        });
     }
+    Ok(surfaces.iter().flat_map(|surface| surface_warnings(surface, source_path, authored)).collect())
+}
+
+/// The warnings of one lifecycle surface's checks; see
+/// [`reject_incompatible_calls`].
+fn surface_warnings(surface: &LifecycleSurfaceCalls, source_path: &Path, authored: Option<&str>) -> Vec<ComposeWarning> {
+    use crate::markdown::compose::expression::one_based_position;
+    use crate::markdown::compose::value_origin::ValuePathSegment;
+
+    let path: Vec<_> = surface
+        .location
+        .iter()
+        .map(|segment| match segment {
+            AuthoredSegment::Key(key) => ValuePathSegment::Key(key.clone()),
+            AuthoredSegment::Index(index) => ValuePathSegment::Index(*index),
+        })
+        .collect();
+    surface
+        .checks
+        .iter()
+        .flat_map(|found| found.check.diagnostics(false).into_iter().map(move |finding| (found, finding)))
+        .map(|(found, finding)| {
+            let position = authored.and_then(|loaded| {
+                let range = crate::markdown::compose::locate_frontmatter_span(
+                    loaded,
+                    path.clone(),
+                    &surface.text,
+                    finding.span.start..finding.span.end,
+                )?;
+                one_based_position(loaded, range.start)
+            });
+            let function = &found.check.function;
+            let detail = finding.message.strip_prefix(&format!("{function}: ")).unwrap_or(&finding.message);
+            let location = match position {
+                Some((line, _)) => format!(" at {}:{line}", source_path.display()),
+                None => format!(" in {}", source_path.display()),
+            };
+            ComposeWarning {
+                source: Some(ComposeWarning::EXPRESSION_SOURCE.to_string()),
+                code: Some(finding.code.to_string()),
+                path: Some(source_path.to_path_buf()),
+                line_number: position.map(|(line, _)| line),
+                diagnostic: Some(Box::new(finding.at(Some(source_path.to_path_buf()), position))),
+                ..ComposeWarning::new(
+                    "lifecycle",
+                    format!("`{function}(…)` in lifecycle `{}`{location}: {detail}", surface.property),
+                )
+            }
+        })
+        .collect()
 }
 
 /// One expression surface [`walk_stack`] reaches.
@@ -515,6 +576,7 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 use super::*;
 use super::actions::{WithValue, branch_scopes, for_each_action, scope_after_action};
 use super::source_map::{AuthoredSegment, AuthoredValue, LifecycleSourceMap};
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::expression::{
     AuthoredMode, ExpressionError, ExpressionLintKind, ParseMode, PreparedCallCheck, TypeScope, check_prepared_calls,
     is_whole_value_span, lint_expression, prepare_value,

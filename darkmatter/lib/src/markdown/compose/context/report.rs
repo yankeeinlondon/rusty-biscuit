@@ -578,6 +578,12 @@ pub struct ComposeWarning {
     /// Which issue this warning reports, when its family declares one.
     /// Set only by a family's constructor; see [`WarningIdentity`].
     pub(crate) identity: Option<WarningIdentity>,
+
+    /// The shared diagnostic this warning reports, for a family whose
+    /// findings DMLS reports too (the call diagnostics): the same code,
+    /// severity, message, authored position, and types the editor shows.
+    /// [`Self::message`] is that finding phrased for a terminal row.
+    pub diagnostic: Option<Box<crate::markdown::compose::expression::Diagnostic>>,
 }
 
 /// The issue a coded warning reports, so each issue is reported once.
@@ -670,6 +676,7 @@ impl ComposeWarning {
             consumer: None,
             resolution_failure: None,
             identity: None,
+            diagnostic: None,
         }
     }
 
@@ -700,6 +707,7 @@ impl ComposeWarning {
             path: Some(path),
             consumer: Some(consumer.into()),
             resolution_failure: None,
+            diagnostic: None,
         }
     }
 
@@ -963,6 +971,7 @@ mod tests {
                 identity: Some(WarningIdentity {
                     subject: WarningSubject::Path(PathBuf::from("schema.yaml")),
                 }),
+                diagnostic: None,
             }
         };
         let mut report = ComposeReport::new();

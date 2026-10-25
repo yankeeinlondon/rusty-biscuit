@@ -468,6 +468,67 @@ impl MarkdownError {
         None
     }
 
+    /// The shared diagnostic of the call this error rejects the document for
+    /// ([`Self::rejected_call`]): its first category 5 finding
+    /// ([`CallCheck::rejection_diagnostic`](crate::markdown::compose::expression::CallCheck::rejection_diagnostic)),
+    /// located at the finding's authored start when the error is anchored to
+    /// the `{{ … }}` or condition that holds it. The file is the document's
+    /// path as its source names it. A construct whose authored text is escaped
+    /// (a quoted YAML scalar with escapes) is located at the construct's
+    /// start.
+    pub fn call_diagnostic(&self) -> Option<crate::markdown::compose::expression::Diagnostic> {
+        use crate::markdown::compose::conditions::ConditionError;
+        use crate::markdown::compose::expression::one_based_position;
+        use crate::markdown::compose::page_blocks::PageBlockError;
+        use crate::markdown::compose::TransclusionError;
+
+        let finding = self.rejected_call()?.rejection_diagnostic()?;
+        // A condition: located by its text on its line.
+        let condition = match self {
+            MarkdownError::PageBlock(inner) => match inner.as_ref() {
+                PageBlockError::Condition(condition) => match condition.as_ref() {
+                    ConditionError::Eval { ctx, expr, line, .. } => Some((ctx.as_ref(), expr, *line)),
+                    ConditionError::Parse { .. } => None,
+                },
+                _ => None,
+            },
+            MarkdownError::Transclusion(inner) => match inner.as_ref() {
+                TransclusionError::ConditionEval { ctx, expr, line, .. } => Some((ctx.as_ref(), expr, *line)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some((ctx, expr, line)) = condition {
+            let file = Some(ctx.display.clone());
+            let line_start = ctx.content.split_inclusive('\n').take(line.saturating_sub(1)).map(str::len).sum::<usize>();
+            let line_text = ctx.content.get(line_start..).and_then(|rest| rest.split('\n').next()).unwrap_or_default();
+            return Some(match line_text.find(expr.as_str()) {
+                Some(offset) => finding.locate(file, &ctx.content, line_start + offset),
+                None => finding.at(file, one_based_position(&ctx.content, line_start)),
+            });
+        }
+        // An interpolation: located inside its anchored `{{ … }}`.
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let markdown = error
+                .downcast_ref::<MarkdownError>()
+                .or_else(|| error.downcast_ref::<Box<MarkdownError>>().map(AsRef::as_ref));
+            if let Some(MarkdownError::Interpolation { expression, source, .. }) = markdown {
+                let SourceRef::OnDiskSpan { context, span } = source.as_ref() else {
+                    return Some(finding.at(None, None));
+                };
+                let construct = span.range();
+                let file = Some(context.display.clone());
+                return Some(match context.content.get(construct.clone()).and_then(|text| text.find(expression.as_str())) {
+                    Some(offset) => finding.locate(file, &context.content, construct.start + offset),
+                    None => finding.at(file, Some((span.line(), span.column()))),
+                });
+            }
+            current = error.source();
+        }
+        Some(finding.at(None, None))
+    }
+
     /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
     /// failure somewhere in this error's cause chain, if any.
     ///

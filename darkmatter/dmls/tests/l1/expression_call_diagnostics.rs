@@ -673,3 +673,99 @@ source: ./a.md
         assert_eq!(config["expressions"], json!({ "strict": false }));
     }
 }
+
+/// Criterion 19 (composition and editor legs) and the shared record behind
+/// it: the same call reports the same code, severity, message, authored
+/// position, and expected/actual types from composition (the rejection's
+/// [`call_diagnostic`](darkmatter::markdown::MarkdownError::call_diagnostic),
+/// a warning's `diagnostic`) and from DMLS, whose types travel in `data`.
+mod shared_fields {
+    use super::*;
+
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::expression::{Diagnostic, DiagnosticSource, Severity};
+    use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest};
+
+    /// The editor's diagnostic as the shared record, positions made
+    /// one-based (UTF-8 columns; the fixtures are ASCII).
+    fn editor_record(diagnostic: &Value, file: &std::path::Path) -> Diagnostic {
+        let start = &diagnostic["range"]["start"];
+        Diagnostic {
+            code: diagnostic["code"].as_str().unwrap().to_string(),
+            severity: match diagnostic["severity"].as_u64().unwrap() {
+                ERROR => Severity::Error,
+                WARNING => Severity::Warning,
+                other => panic!("unexpected severity {other}"),
+            },
+            message: diagnostic["message"].as_str().unwrap().to_string(),
+            source: Some(DiagnosticSource {
+                file: Some(file.to_path_buf()),
+                line: start["line"].as_u64().unwrap() as usize + 1,
+                column: start["character"].as_u64().unwrap() as usize + 1,
+            }),
+            expected_type: diagnostic["data"]["expected_type"].as_str().map(str::to_string),
+            actual_type: diagnostic["data"]["actual_type"].as_str().map(str::to_string),
+        }
+    }
+
+    fn editor_calls(session: &mut Session<'_>, file: &std::path::Path) -> Vec<Diagnostic> {
+        session
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!(INCOMPATIBLE) || diagnostic["code"] == json!(UNCERTAIN))
+            .map(|diagnostic| editor_record(diagnostic, file))
+            .collect()
+    }
+
+    /// A request anchored at the test's own workspace, never the checkout.
+    fn request(dir: &std::path::Path, path: &std::path::Path) -> ComposeRequest {
+        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
+            .with_source_file(path.to_path_buf());
+        let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(dir).with_env(options.context().env().clone());
+        ComposeRequest::prepare(options, &snapshot).expect("test request")
+    }
+
+    #[test]
+    fn a_rejected_call_reports_the_editor_fields() {
+        let text = "---\n$schema:\n  flag: boolean(required)\nflag: true\ntitle: \"{{ min(flag, 2) }}\"\n---\n\nBody {{ min(flag, 5) }}\n";
+        for (label, document) in [
+            ("body", text.replace("title: \"{{ min(flag, 2) }}\"\n", "")),
+            ("frontmatter", text.replace("Body {{ min(flag, 5) }}", "Body")),
+        ] {
+            let workspace = LspWorkspace::new();
+            let mut session = Session::open(&workspace, &document);
+            let path = workspace.path().join("doc.md");
+            let editor = editor_calls(&mut session, &path);
+            session.shutdown();
+
+            let error = Markdown::try_from(path.as_path())
+                .unwrap()
+                .compose_with(&request(workspace.path(), &path))
+                .expect_err("a category 5 call rejects the document");
+            let composed = error.call_diagnostic().unwrap_or_else(|| panic!("{label}: no call diagnostic: {error}"));
+            assert_eq!(editor, vec![composed.clone()], "{label}");
+            assert_eq!(composed.severity, Severity::Error, "{label}");
+            assert_eq!(composed.expected_type.as_deref(), Some("number"), "{label}");
+            assert_eq!(composed.actual_type.as_deref(), Some("boolean"), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_category_3_warning_reports_the_editor_fields() {
+        let document = "---\n$schema:\n  label: string\nlabel: \"7\"\ntitle: \"{{ min(label, 9) }}\"\n---\n\nBody {{ min(label, 5) }}\n";
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, document);
+        let path = workspace.path().join("doc.md");
+        let editor = editor_calls(&mut session, &path);
+        session.shutdown();
+
+        let (_, report) = Markdown::try_from(path.as_path())
+            .unwrap()
+            .compose_with(&request(workspace.path(), &path))
+            .unwrap_or_else(|error| panic!("a category 3 call composes: {error}"));
+        let composed: Vec<Diagnostic> = report.warnings.iter().filter_map(|warning| warning.diagnostic.as_deref().cloned()).collect();
+        assert_eq!(composed.len(), 2, "{:#?}", report.warnings);
+        assert_eq!(editor, composed);
+        assert!(composed.iter().all(|diagnostic| diagnostic.severity == Severity::Warning && diagnostic.code == UNCERTAIN));
+    }
+}

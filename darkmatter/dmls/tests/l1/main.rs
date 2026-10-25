@@ -23,6 +23,7 @@ mod expression_call_diagnostics;
 mod expression_scopes;
 mod formatting_transaction;
 mod full_index_removal_guard;
+mod host_function_diagnostics;
 mod host_globals;
 mod index_build;
 mod index_store_concurrency;

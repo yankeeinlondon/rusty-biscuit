@@ -398,9 +398,10 @@ pub fn run_compose(
     options = options.with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
-    if let Some(config) = &lifecycle {
-        lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request)?;
-    }
+    let lifecycle_warnings = match &lifecycle {
+        Some(config) => lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request)?,
+        None => Vec::new(),
+    };
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
@@ -436,6 +437,7 @@ pub fn run_compose(
             check_references: is_file_input.then_some(allow),
             document,
             verbose: cli.verbose,
+            call_warnings: lifecycle_warnings,
         });
     }
 
@@ -480,7 +482,9 @@ pub fn run_compose(
         }
     }
 
-    let (composed, report) = md.compose_with(&compose_request).map_err(compose_error)?;
+    let (composed, mut report) = md.compose_with(&compose_request).map_err(compose_error)?;
+    // The lifecycle surfaces' call warnings lead: their check ran first.
+    report.warnings.splice(0..0, lifecycle_warnings);
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Verbose compose summary

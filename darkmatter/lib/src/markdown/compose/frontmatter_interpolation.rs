@@ -549,7 +549,7 @@ impl FrontmatterExpressionLocation {
     /// loading (a schema coercion, a shell expansion) or is authored in a form
     /// the shared decoder does not model (a flow-collection member spread over
     /// several lines).
-    fn project(&self, loaded: &str) -> Option<Range<usize>> {
+    pub(crate) fn project(&self, loaded: &str) -> Option<Range<usize>> {
         use crate::markdown::schemas::SchemaValueKind;
         use crate::markdown::schemas::decode_scalar_node;
         use crate::markdown::schemas::simplified::yaml_scalar::alias_token;
@@ -597,6 +597,18 @@ impl FrontmatterExpressionLocation {
             None => alias_token(yaml, node.span.start),
         }
     }
+}
+
+/// The byte range in `loaded` of `span` in the frontmatter string leaf at
+/// `path`, which must still decode to `scanned`
+/// ([`FrontmatterExpressionLocation::project`]).
+pub(crate) fn locate_frontmatter_span(
+    loaded: &str,
+    path: Vec<ValuePathSegment>,
+    scanned: &str,
+    span: Range<usize>,
+) -> Option<Range<usize>> {
+    FrontmatterExpressionLocation { path, scanned: scanned.to_string(), span }.project(loaded)
 }
 
 /// The character column of byte `offset` on its line of `text`.

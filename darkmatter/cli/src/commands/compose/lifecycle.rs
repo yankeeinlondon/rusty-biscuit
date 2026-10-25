@@ -37,7 +37,7 @@ use darkmatter::lifecycle::run::ApprovalEpoch;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry, ShellRuleSet};
-use darkmatter::markdown::compose::{ComposeOperation, ComposeReport, ComposeRequest};
+use darkmatter::markdown::compose::{ComposeOperation, ComposeReport, ComposeRequest, ComposeWarning};
 use serde_json::{Map, Value};
 
 use super::{
@@ -64,6 +64,11 @@ pub(super) fn root_lifecycle(md: &Markdown, source_path: &Path) -> Result<Option
 /// Rejects a lifecycle call the design-time check proves wrong, against the
 /// effective schema `request` composes `md` with, before the run starts.
 ///
+/// ## Returns
+///
+/// The lifecycle surfaces' call warnings (category 3, always-false calls),
+/// which the caller reports with composition's own.
+///
 /// ## Errors
 ///
 /// The first rejected call, or a schema composition would refuse.
@@ -72,12 +77,13 @@ pub(super) fn reject_incompatible_calls(
     config: &LifecycleConfig,
     source_path: &Path,
     request: &ComposeRequest,
-) -> Result<()> {
+) -> Result<Vec<ComposeWarning>> {
     let schema = darkmatter::markdown::compose::effective_schema_for(md, request).map_err(compose_error)?;
     darkmatter::lifecycle::reject_incompatible_calls(
         &frontmatter_value(md),
         config,
         source_path,
+        md.loaded_text(),
         md_host::registry(),
         schema.as_ref(),
     )
@@ -110,6 +116,9 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) check_references: Option<&'a ComposeAllowFlags>,
     pub(super) document: DocumentOutput<'a>,
     pub(super) verbose: u8,
+    /// The lifecycle surfaces' call warnings ([`reject_incompatible_calls`]),
+    /// reported ahead of composition's own.
+    pub(super) call_warnings: Vec<ComposeWarning>,
 }
 
 /// Runs the lifecycle and exits with its status when it did not succeed.
@@ -265,6 +274,7 @@ struct ComposeHost<'a> {
     check_references: Option<&'a ComposeAllowFlags>,
     document: DocumentOutput<'a>,
     verbose: u8,
+    call_warnings: Vec<ComposeWarning>,
     frontmatter: Map<String, Value>,
     live: Mutex<Map<String, Value>>,
     state: MdRuntimeState,
@@ -306,6 +316,7 @@ impl<'a> ComposeHost<'a> {
             check_references: compose.check_references,
             document: compose.document,
             verbose: compose.verbose,
+            call_warnings: compose.call_warnings,
             live: Mutex::new(bootstrap.clone()),
             frontmatter: bootstrap,
             state: MdRuntimeState::default(),
@@ -381,7 +392,9 @@ impl<'a> ComposeHost<'a> {
             });
         }
 
-        let (composed, report) = self.md.compose_with(&self.request).map_err(|error| ("compose", compose_error(error)))?;
+        let (composed, mut report) =
+            self.md.compose_with(&self.request).map_err(|error| ("compose", compose_error(error)))?;
+        report.warnings.splice(0..0, self.call_warnings.iter().cloned());
         self.frontmatter =
             composed.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
         let mut live = self.live.lock().expect("live frontmatter lock");

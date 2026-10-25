@@ -93,6 +93,7 @@ mod error_snapshots;
 mod expression_regression;
 mod expression_strict_equality;
 mod expression_type_scope;
+mod host_functions;
 #[cfg(feature = "effects-instrumentation")]
 mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]
@@ -103,6 +104,8 @@ mod file_predicates;
 mod flow_sensitive_narrowing;
 #[cfg(feature = "effects-instrumentation")]
 mod compose_call_precheck;
+#[cfg(feature = "effects-instrumentation")]
+mod shared_diagnostics;
 mod frontmatter_coercion_engine;
 mod frontmatter_surface_projection;
 mod fs_capability;

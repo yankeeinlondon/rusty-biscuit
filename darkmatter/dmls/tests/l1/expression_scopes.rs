@@ -339,31 +339,34 @@ fn nullable_target_is_suppressed_by_registry_predicate_guards() {
 }
 
 /// `dm.expression.undeclared_property` reports exactly the reads the
-/// library's static walk leaves unhandled: a later `&&` operand is covered by
-/// the earlier one, a false ternary branch is not covered by its condition,
-/// a fact about `bar.a` does not cover its sibling `bar.b`, and under strict
-/// equality `baz != null` covers `baz.name` while `qux != ''` does not cover
-/// `qux.name` (a missing `qux` is `null`, and `null != ''`).
+/// library's static walk leaves unhandled: a direct `&&` operand is handled
+/// (`and` declares `unknown | null` and returns `boolean`), a later operand
+/// is covered by the earlier one's facts, a false ternary branch is not
+/// covered by its condition, a fact about `bar.a` does not cover its sibling
+/// `bar.b`, and under strict equality `baz != null` covers `baz.name` while
+/// `qux != ''` does not cover `qux.name` (a missing `qux` is `null`, and
+/// `null != ''`). `lower` passes `null` through, so only facts cover its
+/// argument.
 #[test]
 fn undeclared_property_findings_match_the_library_branch_facts() {
     let text = concat!(
         "---\ntitle: T\n---\n\n",
-        "A {{ foo && foo }}\n",
+        "A {{ foo && lower(foo) }}\n",
         "B {{ foo ? 'x' : foo }}\n",
-        "C {{ bar.a && bar.b }}\n",
-        "D {{ baz != null && baz.name }}\n",
-        "E {{ qux != '' && qux.name }}\n",
+        "C {{ bar.a && lower(bar.b) }}\n",
+        "D {{ baz != null && lower(baz.name) }}\n",
+        "E {{ qux != '' && lower(qux.name) }}\n",
     );
     let workspace = LspWorkspace::new();
     let session = Session::open(&workspace, text);
 
     let mut library: Vec<(u64, u64)> = Vec::new();
     for (prefix, inner) in [
-        ("A {{ ", "foo && foo"),
+        ("A {{ ", "foo && lower(foo)"),
         ("B {{ ", "foo ? 'x' : foo"),
-        ("C {{ ", "bar.a && bar.b"),
-        ("D {{ ", "baz != null && baz.name"),
-        ("E {{ ", "qux != '' && qux.name"),
+        ("C {{ ", "bar.a && lower(bar.b)"),
+        ("D {{ ", "baz != null && lower(baz.name)"),
+        ("E {{ ", "qux != '' && lower(qux.name)"),
     ] {
         let base = text.find(prefix).unwrap() + prefix.len();
         let expr = parse_spanned(inner).unwrap();
@@ -379,9 +382,7 @@ fn undeclared_property_findings_match_the_library_branch_facts() {
     library.sort();
 
     let expected: Vec<(u64, u64)> = [
-        offset_of(text, "A {{", "foo", 0),
         offset_of(text, "B {{", "foo", 1),
-        offset_of(text, "C {{", "bar.a", 0),
         offset_of(text, "C {{", "bar.b", 0),
         offset_of(text, "D {{", "baz", 0),
         offset_of(text, "E {{", "qux", 0),
@@ -614,5 +615,30 @@ fn expression_branch_rows_agree_with_the_library() {
             assert_agrees(&mut session, start + row.read.len() - 1, &library, row, prefix.trim());
         }
     }
+    session.shutdown();
+}
+
+/// Criterion 21, editor side: `dm.expression.undeclared_property` follows the
+/// library's type rule. A direct argument to `is_null`, `is_empty`, or
+/// `file_exists` (each `unknown | null`, returning `boolean`) is handled;
+/// `min(x, 5)`'s `number` parameter and `is_empty(trim(x))`'s indirect read
+/// are not, so they warn as composition does.
+#[test]
+fn undeclared_property_findings_follow_the_parameter_types() {
+    let text = concat!(
+        "---\ntitle: T\n---\n\n",
+        "A {{ is_null(a) }} {{ is_empty(b) }} {{ file_exists(c) }}\n",
+        "B {{ min(d, 5) }} {{ is_empty(trim(e)) }}\n",
+    );
+    let workspace = LspWorkspace::new();
+    let session = Session::open(&workspace, text);
+    let expected: Vec<(u64, u64)> = [offset_of(text, "B {{", "d", 0), offset_of(text, "B {{", "trim(e", 0) + "trim(".len()]
+        .into_iter()
+        .map(|offset| {
+            let (line, character) = position(text, offset);
+            (u64::from(line), u64::from(character))
+        })
+        .collect();
+    assert_eq!(session.ranges("dm.expression.undeclared_property"), expected, "{:#?}", session.diagnostics);
     session.shutdown();
 }

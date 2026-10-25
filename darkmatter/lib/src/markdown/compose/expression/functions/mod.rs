@@ -51,6 +51,7 @@ mod terminal;
 #[cfg(any(test, feature = "effects-instrumentation"))]
 pub mod test_hooks;
 
+use super::host;
 use super::call_binding::{self, BoundCall, CallBindingError, FunctionRegistration, RegistrationError};
 use super::catalog::{FunctionCatalog, expression_function_catalog};
 
@@ -174,7 +175,6 @@ fn short_circuit(canonical: &str) -> ShortCircuit {
 }
 
 const BINDING_GROUPS: &[&[FunctionBinding]] = &[
-    predicates::ABSENCE_PREDICATES,
     predicates::BINDINGS,
     collections::BINDINGS,
     strings::BINDINGS,
@@ -360,8 +360,8 @@ fn find_binding(name: &str) -> Option<&'static JoinedBinding> {
 ///
 /// This is the registration calls bind against, with the registry's source
 /// exclusions and numeric recoveries; a registration built from the catalog
-/// signatures alone lacks them. Thread-local test functions are not
-/// consulted.
+/// signatures alone lacks them. Thread-local test functions and host
+/// functions are not consulted.
 ///
 /// ## Examples
 ///
@@ -702,18 +702,6 @@ mod fs;
 pub use fs::*;
 
 
-/// Whether `name` resolves, as a canonical name or alias, to an absence
-/// predicate (`is_null`, `is_empty`). Case-insensitive, like dispatch.
-///
-/// Interim rule (spec Resolved Decision 9); see
-/// [`predicates::ABSENCE_PREDICATES`].
-pub(crate) fn is_absence_predicate(name: &str) -> bool {
-    predicates::ABSENCE_PREDICATES.iter().any(|binding| {
-        binding.canonical.eq_ignore_ascii_case(name)
-            || binding.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name))
-    })
-}
-
 /// The canonical registry name the evaluator dispatches `name` to:
 /// lowercased, then by canonical name or alias. `None` for an unregistered
 /// name.
@@ -730,26 +718,41 @@ pub(crate) fn accepts_call_arity(canonical: &str, arity: usize) -> bool {
         .is_some_and(|entry| entry.registration.overloads().iter().any(|signature| signature.accepts_count(arity)))
 }
 
-/// Runs `inspect` on the registration a call to `name` binds against (a
-/// thread's test function first, as dispatch resolves it), for passive
-/// design-time checks. `None` for an unknown name.
+/// Whether the lowercased `name` is a built-in's canonical name or alias.
+pub(crate) fn is_builtin_name(name: &str) -> bool {
+    find_binding(name).is_some()
+}
+
+/// Runs `inspect` on the registration a call to `name` binds against, for
+/// passive design-time checks, resolved as dispatch resolves it: a thread's
+/// test function, then host functions ([`super::host`]: the thread's entered
+/// sets, then installed ones), then the built-ins. `None` for an unknown
+/// name and for a host function whose analysis metadata is incomplete.
 pub(crate) fn inspect_registration<R>(name: &str, inspect: impl FnOnce(&FunctionRegistration) -> R) -> Option<R> {
     let name = name.to_ascii_lowercase();
     #[cfg(any(test, feature = "effects-instrumentation"))]
     if let Some(function) = test_hooks::lookup(&name) {
         return Some(inspect(function.registration()));
     }
+    if let Some(entry) = host::lookup(&name) {
+        return match entry.state() {
+            host::FunctionState::Complete { registration, .. } => Some(inspect(registration)),
+            host::FunctionState::Incomplete { .. } => None,
+        };
+    }
     find_binding(&name).map(|entry| inspect(&entry.registration))
 }
 
-/// Whether the evaluator dispatches `name`: lowercased, then by canonical
-/// name or alias.
+/// Whether the evaluator dispatches `name`: lowercased, then a thread's test
+/// function, a host function (incomplete ones included), or a built-in's
+/// canonical name or alias.
 pub(crate) fn is_dispatchable(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
     #[cfg(any(test, feature = "effects-instrumentation"))]
-    if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+    if test_hooks::lookup(&name).is_some() {
         return true;
     }
-    find_binding(name).is_some()
+    host::lookup(&name).is_some() || find_binding(&name).is_some()
 }
 
 /// Every canonical function name the evaluator can dispatch.
@@ -758,20 +761,28 @@ pub fn dispatchable_canonical_names() -> Vec<&'static str> {
 }
 
 /// Whether `name` is a built-in that reads the document resolution context
-/// (its first argument is evaluated as a caller file argument).
+/// (its first argument is evaluated as a caller file argument). Test and
+/// host functions never do.
 pub(crate) fn is_context_function(name: &str) -> bool {
     #[cfg(any(test, feature = "effects-instrumentation"))]
     if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+        return false;
+    }
+    if host::lookup(&name.to_ascii_lowercase()).is_some() {
         return false;
     }
     find_binding(name).is_some_and(|entry| entry.binding.evaluation == EvaluationMode::Context)
 }
 
 /// The registration and short-circuit side of the lazy function `name`
-/// names; `None` for an eager or unknown name.
+/// names; `None` for an eager or unknown name. Test and host functions are
+/// always eager.
 pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, ShortCircuit)> {
     #[cfg(any(test, feature = "effects-instrumentation"))]
     if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
+        return None;
+    }
+    if host::lookup(&name.to_ascii_lowercase()).is_some() {
         return None;
     }
     let entry = find_binding(name)?;
@@ -786,9 +797,11 @@ fn call_error(error: CallBindingError) -> ExpressionError {
 /// Calls the eager function `name` with evaluated arguments.
 ///
 /// Resolves `name` (lowercased; canonical or alias; a thread's test function
-/// first), binds the arguments to its overloads, enters the handler, and
-/// checks a successful result against the selected overload's return type.
-/// A context function without `ctx` fails before anything binds.
+/// first, then host functions, then built-ins), binds the arguments to its
+/// overloads, enters the handler, and checks a successful result against the
+/// selected overload's return type. A context function without `ctx` fails
+/// before anything binds, and a host function this process has no handler
+/// for (an editor's analysis-only set) fails without binding.
 ///
 /// ## Returns
 ///
@@ -810,8 +823,44 @@ pub(crate) fn call_function(
     if let Some(function) = test_hooks::lookup(&name) {
         return Some(test_hooks::call(&function, &name, args));
     }
+    if let Some(entry) = host::lookup(&name) {
+        return Some(call_host(&entry, &name, args));
+    }
     let entry = find_binding(&name)?;
     Some(call_entry(entry, &name, args, ctx))
+}
+
+/// Calls a host function through the same steps as a built-in pure handler:
+/// bind, count the entry, compute, check the return.
+fn call_host(entry: &host::HostEntry, name: &str, args: &[Value]) -> Result<Value, ExpressionError> {
+    let failure = |message: String| ExpressionError::Other {
+        function: name.to_string(),
+        message,
+    };
+    let (registration, handler) = match entry.state() {
+        host::FunctionState::Complete {
+            registration,
+            handler: Some(handler),
+        } => (registration, handler),
+        host::FunctionState::Complete { handler: None, .. } => {
+            return Err(failure(format!(
+                "host function {}() has no implementation in this process",
+                entry.canonical()
+            )));
+        }
+        host::FunctionState::Incomplete { reason } => {
+            return Err(failure(format!(
+                "host function {}() has no implementation in this process, and its analysis is incomplete: {reason}",
+                entry.canonical()
+            )));
+        }
+    };
+    let call = registration.bind_call(args).map_err(call_error)?;
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    test_hooks::record_entry(entry.canonical());
+    let value = handler(&call).map_err(failure)?;
+    registration.check_return(&call, &value).map_err(call_error)?;
+    Ok(value)
 }
 
 fn call_entry(
@@ -1983,21 +2032,6 @@ mod registration_tests {
         assert!(!length.overloads()[0].parameters()[0].excluded_sources().is_empty());
         for name in ["number", "round"] {
             assert!(super::function_registration(name).unwrap().numeric_recovery().is_some(), "{name}");
-        }
-    }
-
-    #[test]
-    fn exactly_is_null_and_is_empty_are_absence_predicates_with_their_aliases() {
-        let marked: HashSet<_> = bindings()
-            .filter(|binding| super::is_absence_predicate(binding.canonical))
-            .map(|binding| binding.canonical)
-            .collect();
-        assert_eq!(marked, HashSet::from(["is_null", "is_empty"]));
-        for alias in ["isnull", "isempty", "IS_NULL", "isEmpty"] {
-            assert!(super::is_absence_predicate(alias), "{alias}");
-        }
-        for other in ["is_string", "trim", "length", "or", "is_nul", ""] {
-            assert!(!super::is_absence_predicate(other), "{other}");
         }
     }
 

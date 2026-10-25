@@ -46,7 +46,7 @@ use crate::markdown::compose::expression::call_binding::{BoundCall, FunctionRegi
 /// domain failure.
 pub type TestHandler = Arc<dyn Fn(&BoundCall<'_>) -> Result<Value, String> + Send + Sync>;
 
-pub(super) struct TestFunction {
+pub(in crate::markdown::compose::expression) struct TestFunction {
     registration: FunctionRegistration,
     handler: TestHandler,
 }
@@ -109,7 +109,7 @@ impl TestFunction {
 }
 
 /// The test function registered under the lowercased `name` on this thread.
-pub(super) fn lookup(name: &str) -> Option<Rc<TestFunction>> {
+pub(in crate::markdown::compose::expression) fn lookup(name: &str) -> Option<Rc<TestFunction>> {
     FUNCTIONS.with(|functions| functions.borrow().get(name).cloned())
 }
 

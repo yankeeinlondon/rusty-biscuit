@@ -8,9 +8,14 @@
 //! - **Intentional absence handling**, a warning policy only: the primary of a
 //!   fallback (`x || "d"`), and the operands of a fallback chain that is
 //!   itself a primary (`a || b || "d"`); the condition of a ternary
-//!   (`x ? a : b`); and a direct argument to an absence predicate
-//!   (`is_null(x)`, `is_empty(x)` or an alias). `is_empty(trim(x))` is not
-//!   direct. Handling a read never proves its value present.
+//!   (`x ? a : b`); and a direct argument bound to a parameter whose
+//!   declared type explicitly includes `null` (`is_null(x)`, `is_empty(x)`,
+//!   `file_exists(x)`, a host function's `string | null` parameter), unless
+//!   the function's result may itself be `null` (`trim(x)` passes the
+//!   absence on). A plain `unknown` parameter or an optional non-null one
+//!   does not handle it, and an overloaded function handles it only when
+//!   every overload taking that many arguments does. `is_empty(trim(x))` is
+//!   not direct. Handling a read never proves its value present.
 //! - **Shared branch facts**: a read the enclosing branch facts prove present
 //!   ([`TypeScope::assume`], the one fact producer). A ternary branch gets
 //!   its own side of the condition, so `x ? x : "none"` handles the second
@@ -21,7 +26,8 @@
 //!
 //! "Direct" is the rule for the first: only a variable occupying the position
 //! itself (through parentheses and path/index access on it) is handled. Any
-//! other node — arithmetic, comparison, negation, a non-predicate call —
+//! other node — arithmetic, comparison, negation, a call whose parameter
+//! does not declare `null` —
 //! makes its operands ordinary again, so `{{ x == "a" ? … }}` still warns.
 //!
 //! The runtime evaluator applies these rules while it evaluates, so a warning
@@ -33,8 +39,13 @@
 //! Static consumers (DMLS) cannot know which branch runs, so
 //! [`static_variable_reads`] applies the same rules to every branch instead,
 //! each under its own side's facts.
+//!
+//! [`static_access_reads`] is the same read inventory without the absence
+//! classification, for a host that filters reads by its own names: each read
+//! is a variable plus the selectors applied to it, so `fm['key']` and
+//! `state.a[0]` keep the path they read.
 
-use super::ast::{SpannedExpr, SpannedExprKind};
+use super::ast::{Expr, SpannedExpr, SpannedExprKind};
 use super::scope::{DeclaredTypes, Polarity, TypeScope};
 use crate::markdown::span::SourceSpan;
 
@@ -66,7 +77,7 @@ impl<'a> AbsenceScope<'a> {
     }
 
     /// An ordinary operand: arithmetic, comparison, negation, collection
-    /// items, index expressions, and non-predicate call arguments.
+    /// items, and index expressions.
     pub(crate) fn operand(self) -> Self {
         Self {
             handles_absence: false,
@@ -82,10 +93,18 @@ impl<'a> AbsenceScope<'a> {
         }
     }
 
-    /// An argument of a call to `function`.
-    pub(crate) fn call_argument(self, function: &str) -> Self {
+    /// The argument at `index` of a call to `function` with `count`
+    /// arguments, handled as
+    /// [`FunctionRegistration::handles_absence_at`](super::call_binding::FunctionRegistration::handles_absence_at)
+    /// decides.
+    /// An unknown function, or a host function whose analysis is incomplete,
+    /// handles nothing.
+    pub(crate) fn call_argument(self, function: &str, index: usize, count: usize) -> Self {
         Self {
-            handles_absence: super::functions::is_absence_predicate(function),
+            handles_absence: super::functions::inspect_registration(function, |registration| {
+                registration.handles_absence_at(index, count)
+            })
+            .unwrap_or(false),
             ..self
         }
     }
@@ -127,7 +146,8 @@ pub struct StaticVariableRead<'e> {
     /// Byte span of the `Variable` node in the parsed expression text.
     pub span: SourceSpan,
     /// Whether the author handled this read's absence (fallback primary,
-    /// ternary condition, or direct absence-predicate argument), or the
+    /// ternary condition, or direct argument to a parameter declaring
+    /// `null`), or the
     /// branch facts around it prove it present.
     pub handles_absence: bool,
 }
@@ -149,6 +169,151 @@ pub fn static_variable_reads(expr: &SpannedExpr) -> Vec<StaticVariableRead<'_>> 
     let mut reads = Vec::new();
     walk_static(expr, AbsenceScope::default(), &mut reads);
     reads
+}
+
+/// One selector applied to a variable read by [`static_access_reads`],
+/// outside the variable's own dotted path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AccessStep<'e> {
+    /// `.name` after a parenthesized or bracketed base; `name` may itself be
+    /// a dotted path, as the lexer folds it.
+    Member(&'e str),
+    /// `['key']`: a string-literal index.
+    Key(&'e str),
+    /// `[index]` with any other index: a number literal or a computed value.
+    /// `access` is the whole `base[index]` node.
+    Index {
+        /// The index expression.
+        index: &'e Expr,
+        /// The access expression this selector ends.
+        access: &'e Expr,
+    },
+}
+
+/// One variable read found by [`static_access_reads`]: a variable and the
+/// selectors applied to it, innermost first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticAccessRead<'e> {
+    /// The variable path as authored: `state`, `fm.cfg`, `ctx.today`.
+    pub variable: &'e str,
+    /// The selectors applied to the variable, innermost first, through
+    /// parentheses: `(state).a['b'][0]` is `[Member(a), Key(b), Index(0)]`.
+    pub steps: Vec<AccessStep<'e>>,
+}
+
+impl StaticAccessRead<'_> {
+    /// The first dotted segment of [`Self::variable`].
+    pub fn root(&self) -> &str {
+        root_of(self.variable)
+    }
+
+    /// The read's longest static path, dotted: the variable, then each
+    /// member and string key up to the first [`AccessStep::Index`].
+    /// `state['a'].b[0]['c']` is `state.a.b`.
+    pub fn static_path(&self) -> String {
+        let mut path = self.variable.to_string();
+        for step in &self.steps {
+            match step {
+                AccessStep::Member(name) | AccessStep::Key(name) => {
+                    path.push('.');
+                    path.push_str(name);
+                }
+                AccessStep::Index { .. } => break,
+            }
+        }
+        path
+    }
+}
+
+/// Every variable read of `expr`, in source order, each with the selectors
+/// applied to it.
+///
+/// Like [`static_variable_reads`], the walk is static: it visits every
+/// branch, operand, call argument, container value, and index expression,
+/// and does not evaluate. A read inside an index expression follows the read
+/// it indexes. Literals are data, so `'state'` reads nothing, and a selector
+/// on a non-variable base (`f(x).state`) belongs to no read.
+pub fn static_access_reads(expr: &Expr) -> Vec<StaticAccessRead<'_>> {
+    let mut reads = Vec::new();
+    walk_access(expr, &mut reads);
+    reads
+}
+
+fn walk_access<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
+    match expr {
+        Expr::Variable(_) | Expr::MemberAccess { .. } | Expr::Index { .. } | Expr::Paren(_) => {
+            walk_access_chain(expr, reads);
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) => walk_access(inner, reads),
+        Expr::Binary { left, right, .. }
+        | Expr::Comparison { left, right, .. }
+        | Expr::Fallback {
+            primary: left,
+            fallback: right,
+        } => {
+            walk_access(left, reads);
+            walk_access(right, reads);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            walk_access(condition, reads);
+            walk_access(then_branch, reads);
+            walk_access(else_branch, reads);
+        }
+        Expr::FunctionCall { args: items, .. } | Expr::ArrayLiteral(items) => {
+            for item in items {
+                walk_access(item, reads);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                walk_access(value, reads);
+            }
+        }
+    }
+}
+
+/// Unwinds the member, index, and parenthesis chain ending at `expr` onto
+/// its base, then reads the base and each computed index in source order.
+fn walk_access_chain<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
+    let mut steps = Vec::new();
+    let mut base = expr;
+    loop {
+        match base {
+            Expr::MemberAccess { base: inner, name } => {
+                steps.push(AccessStep::Member(name));
+                base = inner;
+            }
+            Expr::Index { base: inner, index } => {
+                steps.push(match index.as_ref() {
+                    Expr::StringLiteral(key) => AccessStep::Key(key),
+                    index => AccessStep::Index { index, access: base },
+                });
+                base = inner;
+            }
+            Expr::Paren(inner) => base = inner,
+            _ => break,
+        }
+    }
+    steps.reverse();
+    let indexes: Vec<&'e Expr> = steps
+        .iter()
+        .filter_map(|step| match step {
+            AccessStep::Index { index, .. } => Some(*index),
+            AccessStep::Member(_) | AccessStep::Key(_) => None,
+        })
+        .collect();
+    match base {
+        Expr::Variable(variable) => reads.push(StaticAccessRead { variable, steps }),
+        other => walk_access(other, reads),
+    }
+    for index in indexes {
+        walk_access(index, reads);
+    }
 }
 
 /// `site` extended by the branch facts of `expr` that enclose the node
@@ -279,10 +444,10 @@ fn walk_static<'e>(
             walk_static(else_branch, scope.with_facts(&false_side), reads);
         }
         SpannedExprKind::FunctionCall { name, args } => {
-            let argument = scope.call_argument(name);
             let continues = short_circuit_polarity(name);
-            let mut facts = argument.facts();
-            for arg in args {
+            let mut facts = scope.facts();
+            for (index, arg) in args.iter().enumerate() {
+                let argument = scope.call_argument(name, index, args.len());
                 walk_static(arg, argument.with_facts(&facts), reads);
                 if let Some(polarity) = continues {
                     facts = facts.assume(&arg.erase(), polarity);
@@ -359,13 +524,20 @@ mod tests {
     }
 
     #[test]
-    fn only_absence_predicate_arguments_are_handled() {
+    fn only_arguments_bound_to_a_parameter_declaring_null_are_handled() {
         let scope = AbsenceScope::default();
-        assert!(scope.call_argument("is_null").handles("x"));
-        assert!(scope.call_argument("isEmpty").handles("x"));
-        assert!(!scope.call_argument("trim").handles("x"));
-        // A handled scope does not leak into a non-predicate call's arguments.
-        assert!(!scope.absence_check().call_argument("trim").handles("x"));
+        // `x: unknown | null`, by canonical name or alias.
+        assert!(scope.call_argument("is_null", 0, 1).handles("x"));
+        assert!(scope.call_argument("isEmpty", 0, 1).handles("x"));
+        assert!(scope.call_argument("file_exists", 0, 1).handles("x"));
+        // `a: number`; `text: string | null` passing null through.
+        assert!(!scope.call_argument("min", 0, 2).handles("x"));
+        assert!(!scope.call_argument("trim", 0, 1).handles("x"));
+        // No overload takes that many arguments; no such function.
+        assert!(!scope.call_argument("is_null", 0, 3).handles("x"));
+        assert!(!scope.call_argument("no_such_function", 0, 1).handles("x"));
+        // A handled scope does not leak into another call's arguments.
+        assert!(!scope.absence_check().call_argument("trim", 0, 1).handles("x"));
     }
 
     #[test]
@@ -420,16 +592,22 @@ mod tests {
         ("x.a || x.b", &["x"]),
         // Comparisons, predicates, and `&&` give their branch facts too.
         ("x != null ? x : \"n\"", &["x", "null"]),
-        ("is_string(x) ? x : \"n\"", &["x"]),
-        ("x && x.name", &["x"]),
-        ("and(x, y) ? y : z", &["x", "y", "z"]),
+        ("is_string(x) ? x : \"n\"", &[]),
+        // `and`/`or` operands bind `unknown | null` and return `boolean`, so
+        // a direct variable operand is handled like any such argument.
+        ("x && x.name", &[]),
+        ("and(x, y) ? y : z", &["z"]),
         ("x || y ? y : z", &["y", "z"]),
-        ("or(x, y) ? z : x", &["x", "y", "z", "x"]),
+        ("or(x, y) ? z : x", &["z", "x"]),
         ("a ? x : b", &["x", "b"]),
         ("is_null(x)", &[]),
         ("isnull(x)", &[]),
         ("isEmpty(x)", &[]),
         ("is_empty(lower(x))", &["x"]),
+        ("is_empty(trim(x))", &["x"]),
+        ("file_exists(x)", &[]),
+        ("min(x, 5)", &["x"]),
+        ("lower(x)", &["x"]),
         ("x == 1 ? y : z", &["x", "y", "z"]),
         ("!x ? y : z", &["x", "y", "z"]),
         ("x.deep || \"d\"", &[]),
@@ -496,6 +674,81 @@ mod tests {
                 ("b", "b")
             ]
         );
+    }
+
+    /// `(variable, static path, display of each computed index access)` of
+    /// every read of `source`, in source order.
+    fn access_reads(source: &str) -> Vec<(String, String, Vec<String>)> {
+        let expr = parse(source).unwrap();
+        static_access_reads(&expr)
+            .iter()
+            .map(|read| {
+                let computed = read
+                    .steps
+                    .iter()
+                    .filter_map(|step| match step {
+                        AccessStep::Index { access, .. } => Some(access.to_string()),
+                        AccessStep::Member(_) | AccessStep::Key(_) => None,
+                    })
+                    .collect();
+                (read.variable.to_string(), read.static_path(), computed)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn access_reads_keep_each_static_path_through_members_keys_and_parentheses() {
+        let none = Vec::<String>::new;
+        for (source, expected) in [
+            ("state", vec![("state", "state", none())]),
+            ("state.a.b", vec![("state.a.b", "state.a.b", none())]),
+            ("state['a']", vec![("state", "state.a", none())]),
+            ("(state).a['b']", vec![("state", "state.a.b", none())]),
+            ("(fm)['k']", vec![("fm", "fm.k", none())]),
+            ("state['a'].b[0]['c']", vec![("state", "state.a.b", vec![r#"state["a"].b[0]"#.to_string()])]),
+            (
+                "ctx[k].x[j]",
+                vec![
+                    ("ctx", "ctx", vec!["ctx[k]".to_string(), "ctx[k].x[j]".to_string()]),
+                    ("k", "k", none()),
+                    ("j", "j", none()),
+                ],
+            ),
+            ("(ctx)[0]", vec![("ctx", "ctx", vec!["(ctx)[0]".to_string()])]),
+        ] {
+            let expected: Vec<(String, String, Vec<String>)> = expected
+                .into_iter()
+                .map(|(variable, path, computed)| (variable.to_string(), path.to_string(), computed))
+                .collect();
+            assert_eq!(access_reads(source), expected, "`{source}`");
+        }
+    }
+
+    #[test]
+    fn access_reads_visit_every_position_in_source_order() {
+        for (source, expected) in [
+            ("x ? y : f(g(z))", &["x", "y", "z"][..]),
+            ("a || -b + !c", &["a", "b", "c"]),
+            ("[a, {k: b}] == c", &["a", "b", "c"]),
+            ("a[b[c]].d", &["a", "b", "c"]),
+            ("f(x).state", &["x"]),
+            ("'state' + 1 + true", &[]),
+        ] {
+            let variables: Vec<String> = access_reads(source).into_iter().map(|(variable, ..)| variable).collect();
+            assert_eq!(variables, expected, "`{source}`");
+        }
+    }
+
+    /// Both read inventories visit the same variables in the same order.
+    #[test]
+    fn access_reads_and_absence_reads_visit_the_same_variables() {
+        for (source, _) in STATIC_ROWS {
+            let spanned = crate::markdown::compose::expression::parse_spanned(source).unwrap();
+            let absence: Vec<&str> = static_variable_reads(&spanned).iter().map(|read| read.path).collect();
+            let erased = spanned.erase();
+            let access: Vec<&str> = static_access_reads(&erased).iter().map(|read| read.variable).collect();
+            assert_eq!(access, absence, "`{source}`");
+        }
     }
 
     #[test]

@@ -281,6 +281,57 @@ fn host_catalog_results(
     (loaded, failed)
 }
 
+/// The analysis-only host function sets of the function catalogs in the
+/// document's schema roots
+/// ([`darkmatter::markdown::schemas::catalog::host_function_catalogs`]), and
+/// the load failures of the others; none without a resolution context.
+fn host_function_results(
+    ctx: &DocumentContext,
+) -> (
+    Vec<darkmatter::markdown::compose::expression::HostFunctions>,
+    Vec<darkmatter::markdown::schemas::catalog::HostFunctionCatalogError>,
+) {
+    let mut loaded = Vec::new();
+    let mut failed = Vec::new();
+    if let Ok(context) = ctx.file_context() {
+        for result in darkmatter::markdown::schemas::catalog::host_function_catalogs(context) {
+            match result {
+                Ok(functions) => loaded.push(functions),
+                Err(error) => failed.push(error),
+            }
+        }
+    }
+    (loaded, failed)
+}
+
+/// Makes the document's host functions visible to Darkmatter's analysis on
+/// this thread while the guards live, so its call checks type, narrow, and
+/// report host calls by the document's own schema roots. Each set has no
+/// handler; nothing is ever invoked. An earlier schema root wins a name.
+pub(crate) fn enter_host_functions(
+    ctx: &DocumentContext,
+) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
+    host_function_results(ctx).0.iter().rev().map(|functions| functions.enter()).collect()
+}
+
+/// One `dm.schema.host_catalog` warning per host function catalog that
+/// failed to load (or names a built-in function), at the top of the
+/// document: the functions it declares are unknown here.
+fn host_function_catalog_diagnostics(
+    failed: &[darkmatter::markdown::schemas::catalog::HostFunctionCatalogError],
+    out: &mut Vec<Diagnostic>,
+) {
+    for error in failed {
+        out.push(diagnostic(
+            Range::default(),
+            DiagnosticSeverity::WARNING,
+            code::SCHEMA_HOST_CATALOG,
+            source::SCHEMA,
+            format!("host {error}; the functions it declares are not known to this document"),
+        ));
+    }
+}
+
 /// One `dm.schema.host_catalog` warning per host catalog that failed to load,
 /// at the top of the document: its globals are unknown here, so expressions
 /// reading them are validated as document properties. The message is the
@@ -685,8 +736,11 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 /// All Layer-3 DSL diagnostics for the document.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    let (functions, failed_functions) = host_function_results(ctx);
+    let _host_functions: Vec<_> = functions.iter().rev().map(|functions| functions.enter()).collect();
     let (catalogs, failed_catalogs) = host_catalog_results(ctx);
     host_catalog_diagnostics(&failed_catalogs, &mut out);
+    host_function_catalog_diagnostics(&failed_functions, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);
@@ -941,8 +995,8 @@ fn expression_diagnostics(
         call_check::call_diagnostics(expr, &site, strict)
             .into_iter()
             .filter_map(|found| {
-                let range = ctx.source_map.byte_range_to_lsp(project(found.span))?;
-                Some(diagnostic(range, found.severity, found.code, source::COMPOSE, found.message))
+                let range = ctx.source_map.byte_range_to_lsp(project(found.span.clone()))?;
+                Some(call_check::lsp_diagnostic(range, source::COMPOSE, found))
             })
             .collect::<Vec<_>>()
     };

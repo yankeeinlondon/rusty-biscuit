@@ -105,6 +105,7 @@ mod call_precheck;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
+pub(crate) use frontmatter_interpolation::locate_frontmatter_span;
 pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod glob_listing;
 pub(crate) mod icmp;

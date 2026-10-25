@@ -72,11 +72,13 @@ pub mod call_check;
 pub mod catalog;
 pub mod ctx;
 mod deferred;
+pub mod diagnostics;
 pub(crate) mod equality;
 pub(crate) mod fm_namespace;
 pub mod error;
 pub mod file_suggestions;
 pub mod functions;
+pub mod host;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
@@ -86,7 +88,7 @@ pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
 
-pub use absence::{StaticVariableRead, branch_scope, static_variable_reads};
+pub use absence::{AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -111,6 +113,15 @@ pub use catalog::{
 #[cfg(any(test, feature = "effects-instrumentation"))]
 pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
+pub use diagnostics::{
+    Diagnostic, DiagnosticSource, ExpressionDiagnostic, INCOMPATIBLE_CALL_CODE, Severity, UNCERTAIN_CALL_CODE,
+    call_severity, expression_call_diagnostics, one_based_position,
+};
+pub use host::{
+    FactsArtifact, HostCatalogError, HostFunctionCatalog, HostFunctionError, HostFunctionScope, HostFunctions,
+    HostFunctionsBuilder, HostHandler, INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls,
+    install_host_functions,
+};
 pub use deferred::{defer_templates, is_deferred_template, is_deferred_value, is_malformed_template};
 pub use fm_namespace::{
     FRONTMATTER_ROOT, FmPath, fm_namespace_path, resolve_fm_namespace_in_object,
@@ -790,7 +801,11 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     scope: AbsenceScope<'_>,
     observer: &mut O,
 ) -> Result<Value, ExpressionError> {
-    let argument = scope.call_argument(name);
+    // Only an observer reads absence handling, so a plain evaluation skips
+    // the registration lookup per argument.
+    let argument = |index: usize| {
+        if O::OBSERVES { scope.call_argument(name, index, args.len()) } else { scope.operand() }
+    };
     let name = name.to_ascii_lowercase();
     if let Some((registration, short_circuit)) = functions::lazy_function(&name) {
         return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer);
@@ -799,6 +814,7 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     let evaluated: Vec<Value> = if functions::is_context_function(&name) {
         let mut values = Vec::with_capacity(args.len());
         for (index, arg) in args.iter().enumerate() {
+            let argument = argument(index);
             if index == 0 {
                 let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
                 values.push(value);
@@ -810,7 +826,8 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
         values
     } else {
         args.iter()
-            .map(|arg| evaluate_expr(arg, lookup, argument, observer))
+            .enumerate()
+            .map(|(index, arg)| evaluate_expr(arg, lookup, argument(index), observer))
             .collect::<Result<_, _>>()?
     };
     // Prefer the borrowed context (Finding 12) so a read-side function
@@ -836,12 +853,12 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
 
 /// Evaluates a lazy function's operands one at a time, binding each as it is
 /// evaluated; an operand after the short-circuit is never evaluated or bound.
-fn evaluate_lazy_function<L: EvaluationLookup, O: MissingRootObserver>(
+fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     registration: &call_binding::FunctionRegistration,
     short_circuit: functions::ShortCircuit,
     args: &[Expr],
     lookup: &L,
-    argument: AbsenceScope<'_>,
+    argument: impl Fn(usize) -> AbsenceScope<'a>,
     observer: &mut O,
 ) -> Result<Value, ExpressionError> {
     let call_error = |error| ExpressionError::Call(Box::new(error));
@@ -852,9 +869,9 @@ fn evaluate_lazy_function<L: EvaluationLookup, O: MissingRootObserver>(
         functions::ShortCircuit::OnTruthy => (true, scope::Polarity::False),
     };
     // Each operand reads under the facts the earlier operands established.
-    let mut facts = argument.facts();
-    for arg in args {
-        let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
+    let mut facts = argument(0).facts();
+    for (index, arg) in args.iter().enumerate() {
+        let value = evaluate_expr(arg, lookup, argument(index).with_facts(&facts), observer)?;
         let bound = call.bind_next(value).map_err(call_error)?;
         if is_truthy(bound) == stop_on_truthy {
             return Ok(Value::Bool(stop_on_truthy));

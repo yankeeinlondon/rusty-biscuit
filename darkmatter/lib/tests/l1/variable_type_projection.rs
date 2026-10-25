@@ -629,7 +629,7 @@ mod lifecycle_calls {
         let value: serde_json::Value = serde_json::to_value(yaml).expect("JSON");
         let source = Path::new("doc.md");
         let config = md_host::parse_lifecycle(&value, source, None).expect("the lifecycle parses");
-        darkmatter::lifecycle::reject_incompatible_calls(&value, &config, source, md_host::registry(), schema).err()
+        darkmatter::lifecycle::reject_incompatible_calls(&value, &config, source, None, md_host::registry(), schema).err()
     }
 
     fn effective_for(dir: &Path, frontmatter: &str) -> EffectiveSchema {
