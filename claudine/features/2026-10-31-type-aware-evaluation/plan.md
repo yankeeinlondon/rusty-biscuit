@@ -10,6 +10,8 @@ packages:
     - dmls
     - claudine
     - biscuit-file
+    - renderable
+    - content-policy
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -226,6 +228,136 @@ skills_files_updated_during_phase_6:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_7:
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/policy.rs
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/artifact.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_call_warnings.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_icmp.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_shell_template.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/literal_glob_hint.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/policy_verbs.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/markdown/block/hr_parser.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/suffix.rs
+    - darkmatter/lib/src/markdown/compose/icmp.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/remote.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/advisory.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/tests/l1/blocking_policy.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/schemas/partials/functions.yaml
+docs_updated_during_phase_7:
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/cli/README.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/inline/fm-shell-expansion.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/rendering/disclosure.md
+    - darkmatter/docs/rendering/hr.md
+    - darkmatter/docs/rendering/style.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/docs/topics/markdown-formatting.md
+    - darkmatter/docs/topics/remote-url-references.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/topics/transclusion.md
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - prompts/_add/add-expressions.md
+    - renderable/docs/layout-and-style.md
+    - renderable/README.md
+docs_created_during_phase_7:
+    - darkmatter/docs/cli/policy.md
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/remote-cache.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_8:
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/cli/src/args/enums.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/compose/report.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/tests/l1/compose_report_json.rs
+    - darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_8:
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/index.md
+docs_created_during_phase_8:
+    - darkmatter/docs/cli/report-json.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Type-aware Evaluation, Narrowing, and Diagnostics Implementation Plan
@@ -805,7 +937,7 @@ the registry lands.
 
 ### Wave 12 — Registry
 
-- [ ] **Single command registry**
+- [x] **Single command registry**
   - One registry drives validation, help, and completions. Records, per
     identifier: kind (recovery, host, feature, style), the commands that
     accept it, and which diagnostic codes each recovery governs (selector
@@ -820,7 +952,7 @@ the registry lands.
     calls, parse errors, unavailable globals not allowable); `--disable`
     accepts feature identifiers and no `all`; `--deny host=HOST` is a usage
     error; `--disable baseline-schema` conflicts with `--baseline-schema PATH`.
-- [ ] **Precedence and conflict resolution**
+- [x] **Precedence and conflict resolution**
   - Specific beats `all` regardless of order; equally specific opposites
     (including a recovery spelled as a code) and `--allow all --deny all` are
     usage errors detected before any composition/render effect. `--allow all`
@@ -834,7 +966,7 @@ the registry lands.
 Parallelizable by command (disjoint files) after Wave 12; coordinator owns the
 shared registry and `args/command.rs`.
 
-- [ ] **`md compose`**, **`md render`** (explicit and default `md FILE`),
+- [x] **`md compose`**, **`md render`** (explicit and default `md FILE`),
   **`md clean`**, **`md schema validate`**
   - Replace policy flags with the three verbs; each command accepts only its
     meaningful identifiers. `--allow-any-missing-reference` becomes the three
@@ -846,12 +978,12 @@ shared registry and `args/command.rs`.
   - Tests: criteria 24, 26, 38 (each registry mapping; baseline conflict;
     rejected host denials; disabled checks stay disabled and are not reported
     as passing).
-- [ ] **Removed spellings**
+- [x] **Removed spellings**
   - Old flags are usage errors on every migrated command (no aliases).
     Update completions, justfiles, scripts, examples, docs, and tests together.
     Test: criterion 25 (every removed flag; grep for stragglers in repo
     scripts and docs).
-- [ ] **Blocking and stopping**
+- [x] **Blocking and stopping**
   - `--deny all` makes warnings/errors blocking except recoveries selected by
     a more specific allowance; informational notices and off diagnostics never
     block; denial never executes a non-running branch; allowance never makes an
@@ -871,13 +1003,13 @@ remains outside tests that assert it is rejected.
 
 ### Wave 14 — `report-json`
 
-- [ ] **Output selector and gating**
+- [x] **Output selector and gating**
   - Add `report-json` to `md compose --output`; every other command
     (`render`, default `md FILE`, `clean`, `schema validate`) rejects it as an
     unsupported output format before any work. `--output json` and human
     output unchanged; rendering JSON and multi-file schema-validation JSON
     keep their formats.
-- [ ] **Report builder**
+- [x] **Report builder**
   - One object, fixed schema, every field always present: `outcome`,
     `diagnostics[]` (each with `code`, `severity`, `message`, `source`
     {`file`, `line`, `column`}, `expected_type`, `actual_type`; unavailable
@@ -895,7 +1027,7 @@ remains outside tests that assert it is rejected.
   - Tests: criteria 29, 39 (input-read, schema, parse, runtime failures;
     success; warnings surviving failure; null fields; authored positions from
     transcluded content; one JSON object on stdout; non-compose rejection).
-- [ ] **Parity and privacy legs**
+- [x] **Parity and privacy legs**
   - Complete criterion 19 (identical fields across composition,
     `--output report-json`, DMLS) and criterion 22 (no argument values,
     environment values, or file contents; instrumented no-extra-I/O), and
@@ -903,7 +1035,7 @@ remains outside tests that assert it is rejected.
 
 ### Wave 15 — Performance evidence
 
-- [ ] **"After" measurement**
+- [x] **"After" measurement**
   - Repeat the Phase 1 baseline on the same host and input, composition and
     DMLS analysis. Record in `implementation-log.md`; explain any visible
     regression. No synthetic workload, extra host, repetition requirement, or

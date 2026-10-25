@@ -13,6 +13,8 @@ packages:
     - dmls
     - claudine
     - biscuit-file
+    - renderable
+    - content-policy
 human_review: false
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
@@ -226,23 +228,150 @@ skills_files_updated_during_phase_6:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_7:
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/policy.rs
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/artifact.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_call_warnings.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_icmp.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_shell_template.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/literal_glob_hint.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/policy_verbs.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/markdown/block/hr_parser.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/suffix.rs
+    - darkmatter/lib/src/markdown/compose/icmp.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/remote.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/advisory.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/tests/l1/blocking_policy.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/schemas/partials/functions.yaml
+docs_updated_during_phase_7:
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/cli/README.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/inline/fm-shell-expansion.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/rendering/disclosure.md
+    - darkmatter/docs/rendering/hr.md
+    - darkmatter/docs/rendering/style.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/docs/topics/markdown-formatting.md
+    - darkmatter/docs/topics/remote-url-references.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/topics/transclusion.md
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - prompts/_add/add-expressions.md
+    - renderable/docs/layout-and-style.md
+    - renderable/README.md
+docs_created_during_phase_7:
+    - darkmatter/docs/cli/policy.md
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/remote-cache.md
+    - .claude/skills/darkmatter/schema.md
 message_to_agent: |-
-    Phase 6 is done; read "## Phase 6" in this log (P6-D1..D7). For Phase 7:
-    every call finding is the library's shared record,
-    darkmatter::markdown::compose::expression::{ExpressionDiagnostic,
-    Diagnostic, DiagnosticSource, Severity} (expression/diagnostics.rs); the
-    call codes INCOMPATIBLE_CALL_CODE / UNCERTAIN_CALL_CODE live there now.
-    Composition warnings carry it in ComposeWarning.diagnostic, a rejection
-    in MarkdownError::call_diagnostic(). --deny all / --deny <code> should
-    key on those codes (ComposeWarning.code) and must not change a record's
-    severity (spec: blocking changes outcome only). md compose's lifecycle
-    call warnings are spliced into report.warnings in both paths
-    (compose.rs plain path and LifecycleCompose.call_warnings), so a deny
-    policy over report.warnings sees them. Criterion 20's "--deny all fails
-    a category 3 document" is the remaining leg; the fixture in
-    darkmatter/cli/tests/l1/compose_call_warnings.rs is ready for it. Absence
-    handling is now type-based (handles_absence_at); x && y operands are
-    handled (P6-D3).
+    Phase 8 is done; read "## Phase 8" in this log (P8-D1..D11). For Phase 9:
+    the user-facing report doc is darkmatter/docs/cli/report-json.md (new,
+    linked from docs/cli/compose.md and index.md); the codes it lists live in
+    darkmatter::markdown::compose::report_diagnostics and schemas/mod.rs
+    (SCHEMA_*_CODE), and DMLS's codes.rs now reads them from the library, so
+    dmls/docs/diagnostics.md may want a line saying the schema/YAML codes are
+    shared. New public API to document: Markdown::compose_with_warnings ->
+    Result<_, Box<ComposeFailure>>. The pipeline node frame is still at the
+    2 MiB test-stack edge (P8-D11 fixed it with out-of-line helpers); rerun
+    nested_composition::self_composition_reaches_the_depth_limit after any
+    pipeline edit. Traceability rows 19, 22, 28, 29, 30, 39 are filled; rows
+    20, 21, 23-27, 36-38 still show "—" in the Phase 1 table although their
+    tests are in the Phase 6/7 mapping tables: Wave 17 should fill them in.
+source_files_during_phase_8:
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/cli/src/args/enums.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/compose/report.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/tests/l1/compose_report_json.rs
+    - darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_8:
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/index.md
+docs_created_during_phase_8:
+    - darkmatter/docs/cli/report-json.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Implementation Log for 2026-10-31-type-aware-evaluation (9 phases)
@@ -427,18 +556,18 @@ Later phases add the new test names to the last column.
 | 16 | `LT/design_time_call_check.rs::the_worked_example_rows` (category 4 machinery) | guarded `frontmatter` category 1 (P4) | `LT/file_predicates.rs::guarded_file_arguments::an_is_file_type_guard_makes_the_file_argument_category_1`; `DT/expression_call_diagnostics.rs::file_predicates::under_strict_only_the_unguarded_file_argument_warns` |
 | 17 | `LT/function_binding_registry.rs::every_registered_function_has_a_row` (built-ins) | host predicate, catalog, never-invoked counter (P5) | — |
 | 18 | DMLS `config/mod.rs` unit tests (strict only) | assert no `file_exists` setting (P4) | `DT/expression_call_diagnostics.rs::file_predicates::the_configuration_has_no_file_exists_setting` |
-| 19 | `DT/call_check_agreement.rs::composition_and_the_editor_reject_the_same_documents`; `DT/recursive_call_check.rs::the_editor_reports_exactly_the_recursive_call_composition_rejects` | identical fields across composition, report-json, DMLS (P6, P8) | — |
+| 19 | `DT/call_check_agreement.rs::composition_and_the_editor_reject_the_same_documents`; `DT/recursive_call_check.rs::the_editor_reports_exactly_the_recursive_call_composition_rejects` | identical fields across composition, report-json, DMLS (P6, P8) | `CT/compose_report_json.rs::a_rejected_call_reports_the_shared_record` (report == library `error_diagnostics`); `DT/expression_call_diagnostics.rs::shared_fields::a_rejected_call_reports_the_editor_fields`, `::a_category_3_warning_reports_the_editor_fields` (report records == editor, P8 leg) |
 | 20 | none | category 3 warning; `--deny all` fails (P6, P7) | — |
 | 21 | `LT/unknown_identifier_warning.rs::every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root`, `::a_handled_absence_is_silent_and_renders_the_fallback`; `DT/expression_scopes.rs::undeclared_property_findings_match_the_library_branch_facts`; `absence.rs` unit tests | `\| null` type rule; no name list (P6) | — |
-| 22 | `DT/no_side_effects.rs::expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers` | instrumented report privacy/passivity (P6, P8) | — |
+| 22 | `DT/no_side_effects.rs::expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers` | instrumented report privacy/passivity (P6, P8) | `LT/report_diagnostics.rs::report_diagnostics_hold_no_value_and_read_nothing`; `CT/compose_report_json.rs::the_report_holds_no_value_or_file_content` |
 | 23 | none | precedence and conflict usage errors (P7) | — |
 | 24 | `CT/compose_shell.rs::test_compose_allow_shell_timeout_emits_warning`; `CT/compose_refs_and_missing.rs::test_compose_scalar_ctx_with_allow_override_succeeds`; `CT/compose_state_set.rs::test_set_overlay_permissive_reassigned_warns_and_rightmost_wins`, `::test_set_overlay_permissive_invalid_warns`; `CT/compose_remote_caching.rs::test_compose_remote_allowed_host_fetches_url` (no missing-reference allow tests exist) | port each to `--allow <id>`; `--allow all` grants no host/shell (P7) | — |
 | 25 | `CT/schema_trigger_rename.rs::the_old_flag_is_a_usage_error_naming_the_new_one`, `::completions_offer_only_the_new_flag`; `LT/trigger_spelling_guard.rs::no_active_file_spells_a_renamed_trigger_form` | every removed flag on every command; spelling guard (P7) | — |
 | 26 | `CT/layout_style_frontmatter.rs::style_strict_style_fails_on_unknown_key`, `::style_strict_style_fails_on_deprecated_key`, `::style_strict_style_accepts_markdown_cleanup_rules` | `--deny style`; info never blocks (P7) | — |
 | 27 | `LT/compose_call_precheck.rs::a_proven_bad_call_rejects_before_any_expression_runs`, `::a_bad_body_call_rejects_before_frontmatter_runs` | stop-before-effect / no rollback under `--deny` (P7) | — |
-| 28 | `CT/schema_trigger_rename.rs::compose_reports_an_invalid_trigger_field_by_location_and_composes_nothing` (partial) | no stdout document in all modes; no viewer/file publish (P7, P8) | — |
-| 29 | none | report-json success/failure schema (P8) | — |
-| 30 | this log (baseline below) | "after" sample + explanation (P8) | — |
+| 28 | `CT/schema_trigger_rename.rs::compose_reports_an_invalid_trigger_field_by_location_and_composes_nothing` (partial) | no stdout document in all modes; no viewer/file publish (P7, P8) | `CT/compose_report_json.rs::deny_all_reports_the_blocking_warning_once_and_no_document` (report leg; human/json legs P7) |
+| 29 | none | report-json success/failure schema (P8) | `CT/compose_report_json.rs::success_reports_the_document_and_leaves_other_outputs_unchanged`, `::a_category_3_warning_is_reported_once_with_every_field`, `::a_rejected_call_reports_the_shared_record`, `::an_unreadable_input_is_one_failure_with_null_fields` |
+| 30 | this log (baseline below) | "after" sample + explanation (P8) | this log (`## Phase 8` → Performance "after"); `LT/variable_type_projection.rs::bounds::a_path_past_the_projection_depth_bound_stays_unknown` |
 | 31 | `LT/expression_type_scope.rs::bare_and_fm_reads_share_one_document_binding_unless_a_host_root_shadows_it`, `::an_unavailable_global_stays_unavailable_under_any_guard`; `LT/host_globals_compose.rs::reading_an_unavailable_global_is_a_typed_binding_error_in_body_and_frontmatter` | type-level bare/`fm` agreement (P2) | `LT/variable_type_projection.rs::precedence::bare_and_fm_paths_agree_unless_a_host_global_shadows_the_bare_one` |
 | 32 | `LT/expression_type_scope.rs::constant_paths_and_indices_are_subjects_and_computed_ones_are_not`; `LT/recursive_schema_typed_consumers.rs` | item type + null; terminating recursive path (P2) | `LT/variable_type_projection.rs::nested_paths::constant_indices_project_the_item_type`, `::nested_paths::a_path_through_a_recursive_type_terminates` |
 | 33 | `LT/expression_type_scope.rs::a_disjunction_proves_what_both_routes_prove`, `::negation_swaps_sides_and_parentheses_keep_facts`; `LT/compose_call_precheck.rs::a_dead_ternary_branch_is_checked` | re-assert on extended scope (P3) | `LT/flow_sensitive_narrowing.rs::compound_guards::short_circuit_operands_and_ternaries_see_only_justified_facts`, `::compound_guards::an_impossible_branch_is_checked_with_the_incoming_type`, `::body_guards::composition_reads_the_same_narrowing` |
@@ -447,7 +576,7 @@ Later phases add the new test names to the last column.
 | 36 | `LT/design_time_call_check.rs::criterion_36_pairs`, `::null_is_accepted_only_by_an_explicit_null_arm` | `\| null` suppression incl. host and overloads (P6) | — |
 | 37 | `LT/function_binding_registry.rs::*`; `LT/function_catalog_parity.rs` | registration errors; `.facts.json` matrix (P5) | — |
 | 38 | `CT/clean_schema.rs::test_baseline_schema_flags_conflict`; `CT/schema_validate_baseline_selection.rs::no_baseline_schema_conflicts_with_schema_flag`; `CT/schema_trigger_rename.rs::the_new_flag_disables_triggers_on_compose_validate_and_clean` | registry mappings, unknown/repeated ids, host denial, precedence (P7) | — |
-| 39 | none | report-json failure kinds, transcluded positions, non-compose rejection (P8) | — |
+| 39 | none | report-json failure kinds, transcluded positions, non-compose rejection (P8) | `CT/compose_report_json.rs::*` (input-read, schema, YAML parse, runtime, transcluded, lifecycle, reference, non-compose rejection); `LT/report_diagnostics.rs::*` |
 
 ### Spike S1: biscuit-file structural-validation gap
 
@@ -1655,3 +1784,485 @@ The Input Robustness Matrix does not apply: no file-format reader changed.
   (lib + L1), `shared_diagnostics`, `compose_call_precheck|file_predicates|design_time_call_check|host_functions|flow_sensitive`;
   DMLS `shared_fields|undeclared|expression`; CLI `compose_call_warnings|compose_lifecycle|compose_file_predicates`;
   Claudine `lifecycle::tests::call_check`. Nothing was load-sensitive.
+
+## Phase 7
+
+Phase 7 delivers the CLI policy verbs (spec §7; criteria 20, 23–28, 38):
+one registry of `--allow` / `--deny` / `--disable` identifiers that drives
+validation, help, and completions on `md compose`, `md render`, default
+`md FILE`, `md clean`, and `md schema validate`; the library seam that gives
+every recovery a diagnostic code and lets a blocking policy stop a document;
+and the removal of every legacy spelling.
+
+### What changed
+
+- **Registry** (`darkmatter/cli/src/args/policy.rs`, new): `POLICY_REGISTRY`
+  records each identifier's kind (recovery, host, feature, diagnostics), the
+  commands that accept it, the codes a recovery governs, and its summary.
+  `PolicyValueParser` (a clap `TypedValueParser`) rejects unknown, empty,
+  unsupported, and wrong-verb values at parse time; a recovery's code given
+  to `--deny` resolves to that recovery. `ResolvedPolicy::resolve` /
+  `resolve_for` reject `--allow all --deny all`, the same recovery allowed
+  and denied (any spelling), and `--disable baseline-schema` beside
+  `--baseline-schema PATH` / `--schema PATH`, as clap `ArgumentConflict`
+  errors (exit 2) before the input is read. `long_help` and `complete` read
+  the same registry. `main.rs` exits a `clap::Error` found after parsing as
+  clap does.
+- **Commands**: `md compose` takes all three verbs (`--deny` also takes
+  `style` and the library's `COMPOSE_DIAGNOSTIC_CODES`); `md render` and the
+  top-level `md FILE` take `--deny style|all`; `md clean` and `md schema
+  validate` take `--disable`. `ComposeAllowFlags` is gone; `run_compose`
+  takes the `ResolvedPolicy`. The style strictness travels as a
+  `strict_style` argument through `apply_style_frontmatter`,
+  `render_terminal_output`, and the HTML/MarkdownPlus artifacts
+  (`denied_style_issues` is the one partition: schema issues plus inline HR
+  deprecations block, informational notices never).
+- **Removed spellings**: `REMOVED_FLAGS` in `main.rs` (was `RENAMED_FLAGS`)
+  lists all 13 legacy flags with their replacement; each is a usage error
+  naming it, checked before parsing so completion never offers a hidden
+  alias.
+- **Library seam** (`darkmatter/lib/src/markdown/compose/policy.rs`, new):
+  the recovery codes (`dm.reference.missing_hyperlink|missing_image|missing_transclusion`,
+  `dm.context.ctx_override`, `dm.transclusion.invalid_frontmatter_assignment`,
+  `dm.transclusion.reassigned_frontmatter_property`, `dm.shell.timeout_recovered`),
+  `missing_reference_code`, the `COMPOSE_DIAGNOSTIC_CODES` catalog, and
+  `BlockingPolicy` (`deny_all`, `deny_code`, `exempt_code`, `blocks`,
+  `blocking`). `ComposeOptions::with_blocking_policy` (graph and cache
+  identity both encode it). The pipeline's call precheck returns the new
+  `MarkdownError::BlockedDiagnostics { blocking, earlier }` before any
+  expression of that document runs; `transclusion_failure_is_fatal` treats a
+  child's as fatal (`MarkdownError::blocked_diagnostics()` walks the chain).
+  The recovery warnings now carry their codes (ctx override, invalid and
+  reassigned `set=`, shell timeout, tolerated missing transclusion).
+- **Missing-transclusion recovery** (`ComposeOptions::with_allow_missing_transclusions`,
+  P7-D4): a `::file` whose target does not exist is removed with a warning in
+  the transclusion engine (body and frontmatter prologue/epilogue) and
+  skipped by the preflight collector.
+- **CLI blocking points** (`commands/compose.rs`, `compose/lifecycle.rs`):
+  the lifecycle call warnings are checked before `initialize`;
+  `check_references` refuses (exit 2) when a reported reference issue blocks,
+  and now prints the warning rows with the view; composition's remaining
+  warnings are checked after `compose_with` and before the document is
+  written, in both the plain path and the lifecycle host's `prepare`.
+- **Stragglers**: library doc comments and messages that named old flags
+  (`icmp.rs`'s ICMP warning, the shell-timeout hints, `functions.yaml`'s
+  `ping` description, `suffix.rs`, `schemas/clean.rs`, `style/parse.rs`,
+  `hr_parser.rs`, `types.rs`, a bench doc), and the internal
+  `prompts/_add/add-expressions.md` line.
+- **Docs**: new `darkmatter/docs/cli/policy.md` (verbs, per-command table,
+  identifiers and codes, precedence, a Mermaid flow of the stop points,
+  removed-flag table); `docs/cli/index.md` links it; 20 darkmatter doc pages,
+  `darkmatter/cli/README.md`, `renderable/README.md`,
+  `renderable/docs/layout-and-style.md`, and
+  `content-policy/docs/topics/policy-lifecycle.md` use the new verbs.
+- **Skills**: `.claude/skills/darkmatter/{SKILL,compose,frontmatter,remote-cache,schema}.md`
+  and `.claude/skills/claudine/research-contracts.md`.
+
+### Design Decisions
+
+- **P7-D1. `style` is a deny-only "diagnostics" identifier, also on
+  `md compose`.**
+  - *Decision:* `style` is accepted by `--deny` on `md render`, `md FILE`, and
+    `md compose`; `--deny all` on those commands implies it.
+  - *Alternatives:* render-only (`md compose --output html` would lose the
+    strict check the old top-level `md --strict-style compose …` gave it);
+    an `--allow style` recovery (there is no recovery contract).
+  - *Why:* `md compose --output html|markdown-plus` applies `style:` through
+    the same `apply_style_frontmatter`; spec §7 says each command accepts the
+    identifiers meaningful to it.
+  - *Downsides:* `md compose --deny style` with Markdown output checks
+    nothing (Markdown output applies no style).
+- **P7-D2. Codes come from the library; the CLI only maps recoveries onto
+  them.**
+  - *Decision:* every code `--deny` accepts on `md compose` is in
+    `darkmatter::markdown::compose::policy::COMPOSE_DIAGNOSTIC_CODES`; each
+    registry recovery lists the codes it governs, and a registry test
+    asserts they are catalog codes. Uncoded warnings block only under
+    `--deny all`.
+  - *Alternatives:* a CLI-side code list (two owners of meaning); accept any
+    `dm.*` string (unknown codes could not be usage errors).
+  - *Why:* spec §7 makes unknown identifiers usage errors and the library
+    owns diagnostic meaning.
+  - *Downsides:* a new coded warning family must add its code to the catalog
+    to be deniable by name.
+- **P7-D3. Where blocking is decided.**
+  - *Decision:* the library decides only at the call precheck (passive, per
+    document, before evaluation); the CLI decides at its own passive points
+    (lifecycle call check, reference validation) and once after composing,
+    before writing. A blocking reference issue keeps the reference refusal's
+    exit status 2; other blocking diagnostics exit 1 through the shared
+    `BlockedDiagnostics` error block.
+  - *Alternatives:* a check inside `ComposeReport::add_warning` (it cannot
+    return an error, and would stop mid-stage); CLI-only checking (call
+    warnings would be found only after shells ran, violating criterion 27).
+  - *Why:* criterion 27 asks to stop before the next effectful step when
+    passive inputs establish the problem, and not to reorder the pipeline.
+  - *Downsides:* a warning found mid-composition (an undeclared property, a
+    recovered timeout) stops only the write; earlier shells ran. That is the
+    spec's "no rollback" leg.
+- **P7-D4. `--allow missing-transclusions` now removes the directive in
+  composition.**
+  - *Decision:* new `ComposeOptions::with_allow_missing_transclusions`,
+    applied only to a `NoMatch` resolution failure, in the engine and the
+    preflight collector.
+  - *Alternatives:* reuse `ignore_invalid_references` (it also skips URL
+    transclusions and every other resolution failure); keep the old
+    behavior.
+  - *Why:* the legacy flag only relaxed reference validation; composition
+    then failed on the same missing target, contradicting its documented
+    contract ("remove directive") and the spec's "behavior retained" column.
+    Found by the new end-to-end test.
+  - *Downsides:* none known; the old behavior was a failure.
+- **P7-D5. The baseline `ctx` type check is not a ctx-override recovery.**
+  - *Decision:* `--allow ctx-override` keeps its old scope (the merge-time
+    downgrade). With the default baseline, `ctx: 5` is still a schema
+    failure; the tests pass `--disable baseline-schema`, as the existing
+    legacy test did.
+  - *Alternatives:* make `ctx-override` suppress the baseline's `ctx` type
+    problem (a new recovery contract, which the spec forbids adding without
+    documentation).
+  - *Why:* spec §7: "behavior retained".
+  - *Downsides:* `--allow ctx-override` alone does not recover a scalar
+    `ctx` under the default baseline; documented in `policy.md` only by
+    example.
+- **P7-D6. A top-level `--deny` beside a subcommand is the existing
+  top-level conflict error (exit 1), not a usage error.**
+  - *Decision:* `validate_subcommand_usage` lists `--deny` with `--output`,
+    `--show`, `--save`; `md --save --deny …` is a clap conflict.
+  - *Alternatives:* make every top-level conflict exit 2 (changes unrelated
+    flags' status).
+  - *Why:* surgical; every top-level option already behaves this way.
+  - *Downsides:* `md --deny style compose` exits 1 rather than 2.
+- **P7-D7. No shipped style key is informational today.** Every known
+  `style:` leaf is wired, so no document produces a `KnownButInactive`
+  notice end to end. Criterion 26's "a notice never blocks" leg is tested at
+  the one partition seam (`render::tests::a_denied_style_blocks_schema_issues_and_inline_rules_but_never_a_notice`)
+  with a synthesized notice, plus `BlockingPolicy`'s `Severity::Info` rule.
+- **P7-D8. The precheck itself decides blocking; the policy is shared, not
+  inline.**
+  - *Decision:* `call_precheck::check_document` returns
+    `PrecheckFailure::Blocked { blocking, rest }`, which the pipeline's
+    existing `map_err` closure maps to `BlockedDiagnostics`;
+    `ComposeOptions.blocking_policy` is an `Arc<BlockingPolicy>`; the new
+    warning constructors in the pipeline and its transclusion phase are
+    out-of-line helpers.
+  - *Alternatives:* the check inline in the pipeline after the precheck (the
+    first version).
+  - *Why:* `darkmatter::l1 nested_composition::self_composition_reaches_the_depth_limit`
+    overflowed the 2 MiB test stack (reproduced alone; passed at
+    `RUST_MIN_STACK=2110000`, so under 13 KB over across 16 levels): the
+    pipeline's frame recurs once per nested composition in debug builds,
+    and the inline check's temporaries grew it. With the check in the
+    precheck's own frame the test passes at the default stack. Same
+    sensitivity as P6-D8.
+  - *Downsides:* `earlier` in a precheck stop holds the report's prior
+    warnings plus the precheck's non-blocking ones, assembled in the closure.
+
+### Requirement-to-test mapping
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| 23: `--allow all --deny <id>` and the reverse order deny it | spawned `md`, L1 | `darkmatter-cli::l1 policy_verbs::a_specific_denial_beats_allow_all_in_either_order` |
+| 23: `--deny all --allow <id>` in either order recovers (warning reported, not blocking) | spawned, L1 | `policy_verbs::a_specific_recovery_beats_deny_all_in_either_order` |
+| 23: `--allow x --deny x`, `--allow all --deny all`, both orders: exit 2, no stdout, no `initialize` effect | spawned, L1 | `policy_verbs::opposite_selections_are_usage_errors_in_either_order_before_any_effect` |
+| 23/38: a recovery spelled as its code conflicts | spawned, L1 | `policy_verbs::a_recovery_denied_by_its_code_conflicts_with_its_allowance` |
+| 24: missing hyperlink / image / transclusion allowances recover their kind only; directive removed | spawned, L1 | `policy_verbs::each_missing_reference_allowance_recovers_its_own_kind_only` |
+| 24: ctx-override, invalid / reassigned assignment, shell timeout, host (ported legacy tests) | spawned, L1 | `compose_refs_and_missing::test_compose_scalar_ctx_with_allow_override_succeeds`, `compose_state_set::test_set_overlay_permissive_invalid_warns`, `::test_set_overlay_permissive_reassigned_warns_and_rightmost_wins`, `compose_shell::test_compose_allow_shell_timeout_emits_warning`, `compose_remote_caching::test_compose_remote_allowed_host_fetches_url` |
+| 24: `--allow all` recovers a timeout as an empty string; grants no host (0 requests); authorizes no shell | spawned + mock HTTP, L1 | `policy_verbs::allow_all_recovers_a_shell_timeout_as_an_empty_string`, `::allow_all_grants_no_unnamed_host`, `::allow_all_authorizes_no_shell_command` |
+| 24: each recovery's warning carries its registered code; missing transclusion fails without and is removed with the recovery | library `compose_with`, L1 | `darkmatter::l1 blocking_policy::each_recovery_reports_under_its_registered_code` |
+| 25: every removed flag on every migrated command is a usage error naming its replacement | spawned, L1 | `policy_verbs::every_removed_flag_is_a_usage_error_naming_its_replacement`, `schema_trigger_rename::the_old_flag_is_a_usage_error_naming_the_new_one` |
+| 25: completions offer only the new verbs and registry values | spawned `COMPLETE=fish`, L1 | `schema_trigger_rename::completions_offer_only_the_new_flag`, `policy_verbs::completions_offer_the_registry_identifiers_per_command` |
+| 25: no legacy spelling in live scripts, docs, examples | `git grep` (log, below) | — |
+| 26: `--deny style` / `--deny all` block a style issue on `md FILE`, `md render`, `md compose --output html` | spawned, L1 | `policy_verbs::deny_style_and_deny_all_block_a_style_issue_on_every_render_path`, `layout_style_frontmatter::deny_style_fails_on_unknown_key`, `::deny_style_fails_on_deprecated_key`, `::deny_style_accepts_markdown_cleanup_rules` |
+| 26: informational notices never block; inline HR deprecations do | unit | `render::tests::a_denied_style_blocks_schema_issues_and_inline_rules_but_never_a_notice` |
+| 20: `--deny all` fails the category 3 document (lifecycle and plain paths) | spawned, L1 | `compose_call_warnings::deny_all_fails_the_category_3_document` |
+| 27: passive lifecycle finding stops before `initialize` (marker absent; control present) | spawned, L1 | `policy_verbs::a_passive_blocking_diagnostic_stops_before_initialize` |
+| 27: body finding after `initialize` stops later work (`composed` effect absent), no rollback (`initialize` effect present) | spawned, L1 | `policy_verbs::a_blocking_diagnostic_found_after_an_effect_stops_later_work_without_rollback` |
+| 27: the precheck stops before any expression runs (handler entries 0); a child blocks before its own expressions; severity unchanged | library + test hooks, L1 | `blocking_policy::a_blocking_call_warning_stops_the_document_before_any_expression_runs`, `::a_transcluded_child_blocks_before_its_own_expressions_run` |
+| 28: no stdout in markdown, json, html; no viewer launch or temp file under `--show` | spawned, `MD_DRY_RUN`, L1 | `policy_verbs::deny_all_fails_a_category_3_document_with_no_document_in_any_mode` |
+| 38: unknown, empty, unsupported identifiers; verbs a command does not declare | spawned, L1 | `policy_verbs::unknown_and_empty_identifiers_are_usage_errors`, `::identifiers_a_verb_or_command_does_not_take_are_usage_errors`, `::verbs_a_command_does_not_declare_are_usage_errors` |
+| 38: repeated identical options harmless | spawned, L1 | `policy_verbs::repeated_identical_selections_are_harmless` |
+| 38: baseline-file conflicts on compose, clean, schema validate | spawned, L1 | `policy_verbs::disabling_the_baseline_conflicts_with_an_explicit_baseline`, `clean_schema::test_baseline_schema_flags_conflict`, `schema_validate_baseline_selection::disable_baseline_schema_conflicts_with_schema_flag` |
+| 38: rejected host denials | spawned, L1 | `policy_verbs::a_host_is_an_allowance_only`; `--deny all` keeps host consent: `::deny_all_keeps_explicit_host_consent` |
+| 38: disabled checks stay disabled under `--deny all`, not reported as passing | spawned, L1 | `policy_verbs::a_disabled_baseline_stays_disabled_under_deny_all` |
+| 38: independently denied diagnostic blocks a recovered command | spawned, L1 | `policy_verbs::an_independently_denied_diagnostic_still_blocks_a_recovered_command` |
+| registry invariants, code→recovery resolution, exemptions | unit | `args::policy::tests::*`, `compose::policy::tests::*`, `args::cli::tests::compose_*` |
+| help explains allowance vs denial and lists identifiers and codes | spawned, L1 | `policy_verbs::help_explains_that_an_allowance_controls_recovery_only` |
+
+Criterion 28's `report-json` leg is Phase 8's. The Input Robustness Matrix
+does not apply: no file-format reader changed (the verbs are argv values,
+validated by the registry tests above).
+
+Renamed tests (legacy names): `clean_schema::test_default_baseline_is_active_and_no_baseline_schema_disables_it`
+→ `…_and_disable_baseline_schema_turns_it_off`, `::test_no_baseline_schema_suppresses_quoting`
+→ `test_disable_baseline_schema_suppresses_quoting`, `::test_no_schema_triggers_disables_discovery`
+→ `test_disable_schema_triggers_disables_discovery`;
+`compose_base_schema::compose_no_baseline_schema_disables_default_baseline`
+→ `compose_disable_baseline_schema_disables_default_baseline`;
+`layout_style_frontmatter::style_strict_style_*` → `deny_style_*`,
+`::style_fixture_strict_style_passes_on_schema_clean_doc` →
+`style_fixture_deny_style_passes_on_schema_clean_doc`;
+`schema_validate_baseline_selection::no_baseline_schema_conflicts_with_schema_flag`
+→ `disable_baseline_schema_conflicts_with_schema_flag`,
+`::no_schema_triggers_keeps_the_embedded_baseline` →
+`disable_schema_triggers_keeps_the_embedded_baseline`. The Phase 1
+traceability table above keeps the names it recorded.
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["darkmatter", "darkmatter-cli", "test-toolkit", "claudine-cli", "dmls"]`,
+  `change_class: package`. Gates were run.
+- **`darkmatter/` `just test`:** 12267 passed (5 slow), 10 skipped, after
+  three fixes found by earlier runs: the `ping` row of the generated
+  function table in `docs/topics/darkmatter-expressions.md` had gained
+  backticks the catalog lacks (`catalog::tests::narrative_doc_function_table_matches_catalog`);
+  the depth-limit stack overflow (P7-D8, deterministic, reproduced alone);
+  `policy.md` spelled `--no-trigger-schemas`, which `trigger_spelling_guard`
+  forbids in active docs (removed from its table); and `policy_verbs` set
+  `MD_DRY_RUN` with a raw `.env`, which `spawn_site_guard` rejects (now
+  `application_input`). **`just lint`:** passed (after gating the new
+  `blocking_policy` L1 module on `effects-instrumentation`, like its
+  neighbors). **`just check-tier-coverage darkmatter`:** 0 stranded.
+- **`claudine/` `just test`:** 11455 passed (11 slow), 9 skipped.
+  **`just lint`:** passed. **`just check-tier-coverage claudine`:** 0 stranded.
+- **Dependents:** `cargo check --workspace --tests` is clean. Of darkmatter's
+  reverse dependencies, only `darkmatter-cli`, `dmls`, and Claudine read
+  compose warnings or `MarkdownError`; all three suites passed in full. The
+  others (`messenger`, `research`, `sniff-cli`, `playa-cli`, `biscuit-icon-cli`,
+  `biscuit-speaks-cli`, `claudine-gen`) reference none of the changed symbols.
+- **Targeted runs during the phase:** CLI unit `args::|render::tests|policy`
+  (77); `policy_verbs|compose_call_warnings|compose_refs_and_missing|compose_transclusion`
+  (45); the migration agent's 21 modules (149 + 194); library
+  `blocking_policy|shared_diagnostics` (8), `catalog::tests` (61),
+  `trigger_spelling_guard` (2). Nothing was load-sensitive.
+- **Cross-OS:** not run. The change is argv parsing, messages, and a
+  transclusion recovery keyed on a resolution-failure class; no path,
+  process, or OS-specific code. The one shell test mirrors the existing
+  `compose_shell::test_compose_allow_shell_timeout_emits_warning`.
+- **Stragglers:** `git grep` for every legacy spelling outside
+  `features/`, `fixes/`, `reviews/`, `docs/research/`, and the frozen
+  `recursive_schema_frozen` fixtures finds only `main.rs::REMOVED_FLAGS`, the
+  tests that assert rejection, `policy.md`'s removed-flag table, and
+  `trigger_spelling_guard.rs`'s own fixture lines. The internal
+  `prompts/_add/add-expressions.md` line was updated too.
+
+## Phase 8
+
+Phase 8 delivers `md compose --output report-json` (spec §8; criteria 19,
+22, 28, 29, 39) and the performance "after" sample with a bounds regression
+test (spec §9; criterion 30).
+
+### What changed
+
+- **Library: shared failure diagnostics** (`darkmatter/lib/src/markdown/compose/report_diagnostics.rs`,
+  new): `warning_diagnostic` (a warning's own record, else its code or
+  `dm.compose.warning`, no source), `error_diagnostics` (any error chain: a
+  policy stop's earlier then blocking warnings, a rejected call's record, one
+  record per schema problem, else one record classified by the innermost
+  typed error, located for YAML parse, fence, and on-disk interpolation
+  errors), `reference_issue_diagnostic`, `lifecycle_failure_diagnostics`, and
+  the family codes (P8-D4). `ValidationProblemCode::diagnostic_code` and the
+  `SCHEMA_*_CODE` constants in `schemas/mod.rs`; DMLS's `codes.rs` now reads
+  those, `FRONTMATTER_PARSE_CODE`, and `UNKNOWN_FUNCTION_CODE` from the
+  library (strings unchanged).
+- **Library: warnings survive a failure** (P8-D6):
+  `Markdown::compose_with_warnings` → `Result<_, Box<ComposeFailure { error, warnings }>>`
+  (boxed for clippy's `result_large_err`);
+  `PipelineRuntime.failed_warnings` (shared with child runtimes) receives each
+  failed document's warnings, the outer document's first;
+  `run_root_pipeline_collecting` returns them. `compose_with` is unchanged.
+  The pipeline node's report is boxed and built/finished out of line
+  (`new_document_report`, `finish_document`; P8-D11).
+- **CLI** (`darkmatter/cli`): `ComposeOutputFormat` (compose's own `--output`
+  enum, adding `report-json`); `commands/compose/report.rs` (new):
+  `ReportSink` (collects diagnostics in discovery order and the document),
+  `ReportedExit` (the status `main` exits with silently), `ClassifiedFailure`
+  (a CLI-worded shell failure keeping its typed diagnostics);
+  `reject_report_conflicts` (`--show`, `--shell`). `run_compose` and the
+  lifecycle host record warnings, reference issues, the document, and
+  failures into the sink instead of printing; the reference refusal returns
+  `ReportedExit(2)` and a failed lifecycle run `ReportedExit(code)` instead of
+  `process::exit`; lifecycle `stdout` actions and command output go to stderr
+  in report mode. `compose_error` / `preflight_approval_error` wrap shell
+  failures in `ClassifiedFailure` (human text unchanged).
+- **Docs**: new `darkmatter/docs/cli/report-json.md` (shape, exit table,
+  streams, Mermaid flow, order, codes, privacy, no rollback);
+  `docs/cli/compose.md` (`--output` values, output behavior, lifecycle
+  output under report mode, example); `docs/cli/index.md` link.
+- **Skill**: `.claude/skills/darkmatter/SKILL.md` (report-json ownership).
+
+### Design Decisions
+
+- **P8-D1. `report-json` is a value of compose's own output enum.**
+  - *Decision:* `md compose --output` takes `ComposeOutputFormat` (the old
+    values plus `report-json`); `md render` and `md FILE` keep `OutputFormat`,
+    so clap rejects `report-json` there as an invalid value (exit 2); `md
+    clean` has no `--output` (unknown argument, exit 2); `md schema validate
+    --format report-json` is an invalid value.
+  - *Alternatives:* add `ReportJson` to the shared `OutputFormat` and refuse
+    it at run time in each other command.
+  - *Why:* the refusal happens at parse time, before any input is read, with
+    no per-command code; help and completions show the value only on
+    compose.
+  - *Downsides:* the rejection message is clap's ("invalid value"), not a
+    bespoke "unsupported output format".
+- **P8-D2. The report's `document` is the Markdown output** (as
+  `--output markdown`, honoring `--frontmatter`).
+  - *Alternatives:* a selectable inner format. *Why:* the spec says "the
+    composed document as a string"; Markdown is compose's default.
+  - *Downsides:* no HTML-in-report mode.
+- **P8-D3. `--show` and `--shell` with `report-json` are usage errors** (clap
+  `ArgumentConflict`, exit 2, through `policy::usage_error`). `--show` has no
+  artifact to open; `--shell` prints its own report to stdout, which would
+  break "stdout carries only the object".
+- **P8-D4. "An existing typed code" means a code chosen by the failure's
+  typed error.**
+  - *Decision:* call, schema, YAML-parse, unknown-function, expression
+    parse/evaluation, and recovery codes reuse the existing taxonomy (the
+    DMLS/library strings, unchanged); a typed error with no code yet gets a
+    family code in the same `dm.<family>.<kind>` form (`dm.input.read_failure`,
+    `dm.directive.parse_failure`, `dm.shell.failure`, `dm.transclusion.failure`,
+    `dm.reference.failure`, `dm.compose.parameter_binding`,
+    `dm.lifecycle.failure`), and anything untyped is `dm.compose.failure`.
+    The codes live in the library; the CLI only maps its own
+    `DocumentArgumentError` onto `INPUT_READ_CODE`.
+  - *Alternatives:* one catch-all code for every failure (loses the
+    classification a script needs); a code per `MarkdownError` variant (30
+    codes, most never distinguished by a consumer).
+  - *Why:* the spec forbids inventing ad-hoc strings and requires library
+    ownership; one code per failure family matches what DMLS already does.
+  - *Downsides:* these failure codes are not `--deny` identifiers (they are
+    errors, which already block), so they are not in `COMPOSE_DIAGNOSTIC_CODES`.
+- **P8-D5. `source` is `null` unless the error holds an authored position.**
+  Located: call findings, schema problems with a line, YAML parse (YAML line
+  mapped to the file line as the error block does), fence mismatch, and
+  interpolation errors anchored `OnDiskSpan`. Reference issues record a line
+  but no column and their span indexes the scanned text, so they are
+  unlocated rather than given a fabricated column. The file is the root as
+  given and a transcluded child by its resolved path (P6-D6).
+- **P8-D6. Earlier warnings travel beside the error, not inside it.**
+  - *Decision:* `compose_with_warnings` returns `ComposeFailure { error,
+    warnings }`; each failed document's pipeline puts its report's warnings
+    into the runtime's shared stash, the outer document's first (it fails
+    after its child, and its warnings were reported first).
+  - *Alternatives:* a new `MarkdownError` wrapper variant (every caller that
+    matches error variants would have to unwrap it); an observer on
+    `ComposeReport::add_warning` (children's warnings are merged into their
+    parent and would be seen twice).
+  - *Why:* no existing error type changes and `compose_with` is untouched.
+  - *Downsides:* when two concurrently resolved sibling transclusions both
+    fail, their warnings appear in completion order. A failure raised by the
+    pre-flight walk (for example a transcluded child's rejected call, found
+    before composition) carries no earlier warnings: nothing had been
+    reported. Documented in `report-json.md`.
+- **P8-D7. The sink records diagnostics as the run reports them and skips a
+  failure's records it already holds** (multiset subtraction by equality), so
+  a policy stop raised by the CLI, which repeats the warnings it was given,
+  lists each warning once, in discovery order.
+- **P8-D8. In report mode a lifecycle `stdout:` action and lifecycle command
+  output go to stderr.** Stdout must hold only the object; dropping the
+  output would lose authored effects.
+- **P8-D9. Exit statuses are unchanged by report mode:** 2 for a refused
+  reference, the lifecycle run's own status, 1 otherwise; usage errors
+  precede report mode and keep clap's stderr and exit 2.
+- **P8-D10. A CLI-worded shell failure keeps its typed diagnostics**
+  (`ClassifiedFailure`, Display = the old message, so human output is byte
+  identical).
+- **P8-D11. The pipeline node's report is boxed and built and finished out of
+  line.** Moving the report out of the closure overflowed
+  `nested_composition::self_composition_reaches_the_depth_limit` (alone,
+  deterministic; passed at `RUST_MIN_STACK=2150000`); boxing alone still
+  overflowed (the `ComposeReport` temporaries stayed in the frame);
+  `new_document_report` / `finish_document` (`#[inline(never)]`) fixed it at
+  the default stack. Same sensitivity as P6-D8 and P7-D8.
+
+### Performance "after" (criterion 30)
+
+Same host (Apple M4 Max, macOS 27.2), same input
+(`darkmatter/cli/tests/fixtures/frozen_prompts/prompts/plan.md`, with
+`spec=…/spec.md`), same three commands as the Phase 1 baseline, release
+binaries built from this working tree (HEAD `032fab2ae` plus Phases 7–8
+uncommitted). Load average 13–21 during the run (7–9 at baseline; other
+sessions on the host).
+
+| Measurement | Before | After |
+|---|---|---|
+| `md compose` (hyperfine, 20 runs) | 797.9 ms ± 5.5 | **782.0 ms ± 4.9** (773.1–796.4) |
+| `md schema validate -vv` stages | resolve 8.3, compile 28.5, validate 48.3, total 85.5 ms | resolve 7.8, compile 26.8, validate 43.4, total **78.3 ms** |
+| DMLS first publish (median of 10) | 250.1 ms (245.2–274.8) | **269.9 ms** (267.3–320.2); rerun 276.2 ms |
+| DMLS second (cache-hit) publish | 41.8–48.5 ms | 47.7–55.4 ms |
+| DMLS schema stages, first publish | total 101–107 ms | total 101–103 ms (one 116 ms first run) |
+
+- **Composition:** no regression (−16 ms, within noise of the busier host).
+- **DMLS:** first publish +~20 ms (8%), cache-hit publish +~6 ms. Both are
+  outside schema validation, whose stages are unchanged, so the cost is the
+  expression analysis this feature added to every published document:
+  call diagnostics and narrowing at every expression site (Phases 2–4, 6) and
+  the host catalog and facts artifact lookup at open (Phase 5). The load
+  average was about twice the baseline's, which inflates both figures; the
+  cache-hit delta (6 ms on 26 + 36 × 4 expressions) is the closer measure of
+  the analysis itself. Judged acceptable: no per-keystroke path regressed by
+  more than a few milliseconds.
+- **Bounds:** the projection's depth bound (`scope/raw.rs::DEPTH_LIMIT`, 32)
+  and named-type translation bound (`MAX_REFERENCE_DEPTH`, 32) are unchanged.
+  `variable_type_projection::bounds::a_path_past_the_projection_depth_bound_stays_unknown`
+  proves a 40-deep raw schema path is category 4 (unknown: neither rejected
+  nor proven valid) while the same leaf 3 deep is rejected.
+
+### Requirement-to-test mapping
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| 29: success is one object `{outcome, diagnostics, document}`; human Markdown and AST JSON unchanged | spawned `md`, L1 | `darkmatter-cli::l1 compose_report_json::success_reports_the_document_and_leaves_other_outputs_unchanged` |
+| 29/39: a warning carries all six fields, located; no stderr footer repeats it | spawned, L1 | `::a_category_3_warning_is_reported_once_with_every_field` |
+| 19 (report leg): the rejected call's record equals the library's `error_diagnostics`, field for field | spawned + in-process, L1 | `::a_rejected_call_reports_the_shared_record` |
+| 19: the library's report records equal DMLS's (rejection and warnings) | real LSP session, L1 | `dmls::l1 expression_call_diagnostics::shared_fields::a_rejected_call_reports_the_editor_fields`, `::a_category_3_warning_reports_the_editor_fields` |
+| 39: input-read failure, null source/types | spawned, L1 | `::an_unreadable_input_is_one_failure_with_null_fields` |
+| 39: schema and YAML parse failures, located | spawned, L1 | `::schema_and_parse_failures_are_located_in_the_frontmatter` |
+| 39: earlier warning survives a runtime failure, in order | spawned, L1 | `::an_earlier_warning_survives_a_runtime_failure` |
+| 39: transcluded warning and rejection located in the child | spawned, L1 | `::transcluded_findings_are_located_in_the_child` |
+| 28 (report leg): `--deny all` fails with `document: null`, each warning once with its severity (plain and lifecycle paths) | spawned, `MD_DRY_RUN`, L1 | `::deny_all_reports_the_blocking_warning_once_and_no_document` |
+| lifecycle: stdout holds only the report; a failed event is one diagnostic | spawned, L1 | `::a_lifecycle_run_writes_only_the_report_to_stdout` |
+| refused reference keeps exit 2 | spawned, L1 | `::an_unresolved_reference_keeps_its_exit_status` |
+| 22: no frontmatter value or transcluded content in the report | spawned, L1 | `::the_report_holds_no_value_or_file_content` |
+| 39: `render`, `md FILE`, `clean`, `schema validate` reject report-json; `--show`/`--shell` conflict; exit 2, no stdout, no `--save` effect | spawned, L1 | `::report_conflicts_and_other_commands_are_usage_errors_before_any_work` |
+| failure classification by typed error, located | library, L1 | `darkmatter::l1 report_diagnostics::each_failure_is_classified_by_its_typed_error`, `::a_rejected_call_reports_its_shared_record`, `::a_foreign_error_takes_a_family_code_and_no_source` |
+| warning record / code / uncoded | library, L1 | `::a_warning_keeps_its_record_or_its_code` |
+| `compose_with_warnings` keeps earlier warnings; `compose_with` unchanged | library, L1 | `::a_failed_composition_keeps_the_warnings_it_reported` |
+| policy stop: earlier then blocking, own severities | library, L1 | `::a_policy_stop_reports_every_warning_with_its_own_severity` |
+| 22: no fm/env/file value; no handler; no network; same records after the files are deleted (no read) | library + hooks + effects counter, L1 | `::report_diagnostics_hold_no_value_and_read_nothing` |
+| 30: depth bound conservative | library, L1 | `variable_type_projection::bounds::a_path_past_the_projection_depth_bound_stays_unknown` |
+
+The Input Robustness Matrix does not apply: no file-format reader or
+configuration loader changed (the report is a writer).
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["darkmatter", "darkmatter-cli", "dmls", "test-toolkit", "claudine-cli"]`,
+  `change_class: package` (the tree still holds Phase 7's uncommitted work).
+  Gates were run.
+- **`darkmatter/` `just test`:** 12287 passed (7 slow), 10 skipped.
+  **`just lint`:** passed after two fixes (`ComposeFailure` boxed for
+  `result_large_err`; `ClassifiedFailure::new` renamed `report` for
+  `new_ret_no_self`); the touched tests were rerun after them
+  (`report_diagnostics|nested_composition|bounds::` 26 passed;
+  `compose_report_json|compose_shell|policy_verbs` 69 passed).
+  **`just check-tier-coverage darkmatter`:** 0 stranded.
+- **`claudine/` `just test`:** 11455 passed (12 slow), 9 skipped.
+  **`just lint`:** passed. **`just check-tier-coverage claudine`:** 0 stranded.
+- **Dependents:** `cargo check --workspace --tests` is clean. The phase adds
+  public API only (`compose_with_warnings`, `report_diagnostics`,
+  `ValidationProblemCode::diagnostic_code`, schema code constants) and leaves
+  `compose_with` and every existing signature unchanged; DMLS and Claudine
+  suites passed in full above.
+- **Load-sensitive:** none. The one failure during the phase,
+  `nested_composition::self_composition_reaches_the_depth_limit`, was a
+  deterministic stack overflow (P8-D11), fixed before the full runs.
+- **Cross-OS:** not run. No path, process, or OS-specific code changed; the
+  report's `file` is `Path::display()` of the paths the existing diagnostics
+  already carry, and the new CLI tests compare against the paths the fixture
+  wrote (root) or `canonicalize_simplified` (children), never raw
+  `canonicalize`.
+
