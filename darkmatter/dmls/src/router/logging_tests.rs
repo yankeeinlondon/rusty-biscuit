@@ -315,8 +315,8 @@ fn no_source_text_or_frontmatter_value_is_logged() {
 
 /// The incident: with the registry up, an unrelated schema-root file goes
 /// mid-edit malformed and every later request used to re-warn. Now it logs
-/// nothing, and a claimed envelope breaking warns once however many requests
-/// follow.
+/// nothing, and a claimed envelope breaking warns once, as a skipped trigger,
+/// however many requests follow.
 #[test]
 fn a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once() {
     let session = Session::start(Duration::ZERO);
@@ -348,13 +348,17 @@ fn a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once
     }
     let logs = session.finish();
 
-    let registry_lines = logs.matching("trigger registry");
+    let registry_lines: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("trigger registry") || line.contains("invalid schema trigger"))
+        .collect();
     assert!(
         registry_lines.iter().all(|line| !line.contains("feature-review.yaml")),
         "the unrelated file is never a trigger failure: {registry_lines:#?}"
     );
     let warnings: Vec<&String> = registry_lines.iter().filter(|line| line.starts_with(" WARN")).collect();
     assert_eq!(warnings.len(), 1, "{registry_lines:#?}");
-    assert!(warnings[0].contains("retaining last-good trigger registry"), "{}", warnings[0]);
-    assert!(warnings[0].contains(&format!("trigger_file={}", envelope.display())), "{}", warnings[0]);
+    assert!(warnings[0].contains("ignoring invalid schema trigger"), "{}", warnings[0]);
+    assert!(warnings[0].contains(&format!("trigger={}", envelope.display())), "{}", warnings[0]);
 }

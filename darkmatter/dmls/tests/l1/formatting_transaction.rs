@@ -390,6 +390,32 @@ fn repairable_frontmatter_is_repaired_as_the_library_repairs_it() {
     session.shutdown();
 }
 
+/// A schema trigger discovery skips (the incident shape: unsupported
+/// envelope keys and a null `match`) neither blocks formatting nor adds a
+/// message: the registry publishes its warning on the trigger file instead.
+#[test]
+fn an_invalid_schema_trigger_beside_the_document_neither_blocks_formatting_nor_adds_a_message() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let schemas = root.path().join("schemas");
+    std::fs::create_dir(&schemas).expect("schemas folder");
+    std::fs::write(
+        schemas.join("memory.yaml"),
+        "kind: schema-trigger\nname: memory\ndescription: Memory notes\nmatch:\n$schema: memory-payload.yaml\n",
+    )
+    .expect("write trigger");
+    let uri = file_uri(&root.path().join("doc.md"));
+    let mut session = Session::start(root.path(), &[]);
+    let source = "---\ntitle: @daily-report\n---\n\n```\ncode\n```\n";
+    session.open(&uri, source);
+
+    let edits = session.format(&uri);
+
+    let expected = "---\ntitle: \"@daily-report\"\n---\n\n```text\ncode\n```\n";
+    assert_eq!(whole_document_edit(&edits, source), expected);
+    assert!(session.take_messages().is_empty());
+    session.shutdown();
+}
+
 #[test]
 fn frontmatter_false_with_repairable_invalid_yaml_returns_no_edits_and_one_warning() {
     let root = tempfile::tempdir().expect("tempdir");

@@ -26,7 +26,7 @@ const REQUEST_CANCELED: i32 = -32800;
 const SERVER_CANCELLED: i32 = -32802;
 
 const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
-/// A trigger whose payload file does not exist: its preparation fails.
+/// A trigger whose payload file does not exist: discovery skips it.
 const MISSING_PAYLOAD_ENVELOPE: &str =
     "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: absent-payload.yaml\n";
 /// The payload names a property no log line may carry.
@@ -223,11 +223,11 @@ fn a_fresh_probe_records_neither_a_hit_nor_a_miss() {
     fixture.shutdown();
 }
 
-/// A folder whose trigger names a missing payload fails its preparation:
-/// the pass counts it as failed, not prepared or fresh, and its attempted
-/// resolution as a miss.
+/// A folder whose trigger names a missing payload skips that trigger and
+/// still prepares: the pass counts it as prepared, not failed, and its
+/// attempted resolution as a miss.
 #[test]
-fn a_failed_probe_is_counted_apart_from_prepared_and_fresh() {
+fn a_probe_that_skips_a_trigger_is_counted_as_prepared() {
     let logs = CapturedLogs::global();
     let (workspace, first, second) = two_folder_workspace();
     write(&second.join("schemas/prompt.trigger.yaml"), MISSING_PAYLOAD_ENVELOPE);
@@ -240,7 +240,29 @@ fn a_failed_probe_is_counted_apart_from_prepared_and_fresh() {
     fixture.registry_jobs_until_idle();
     assert_eq!(
         only_pass_counts(&logs),
-        "probes=2 prepared=1 fresh=0 failed=1 payload_hits=1 payload_misses=1"
+        "probes=2 prepared=2 fresh=0 failed=0 payload_hits=1 payload_misses=1"
+    );
+    assert_no_schema_text(&logs);
+    fixture.shutdown();
+}
+
+/// A folder whose schema root holds a file that is not UTF-8 fails its
+/// whole preparation: the pass counts it as failed, not prepared or fresh.
+#[test]
+fn a_failed_probe_is_counted_apart_from_prepared_and_fresh() {
+    let logs = CapturedLogs::global();
+    let (workspace, first, second) = two_folder_workspace();
+    std::fs::write(second.join("schemas/not-utf8.yaml"), [0xff, 0xfe, 0x00]).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(params(&[&first, &second]));
+    fixture.flush_server();
+
+    change_settings(&fixture);
+    fixture.round_trip();
+    fixture.registry_jobs_until_idle();
+    assert_eq!(
+        only_pass_counts(&logs),
+        "probes=2 prepared=1 fresh=0 failed=1 payload_hits=1 payload_misses=0"
     );
     assert_no_schema_text(&logs);
     fixture.shutdown();

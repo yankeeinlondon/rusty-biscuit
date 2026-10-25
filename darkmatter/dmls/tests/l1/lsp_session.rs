@@ -570,8 +570,22 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     fixture.shutdown();
 }
 
+/// Whether `diagnostic` is the skipped-trigger warning DMLS publishes on the
+/// trigger file named `trigger_file_name`.
+fn is_invalid_trigger_warning(diagnostic: &Value, trigger_file_name: &str) -> bool {
+    diagnostic["code"] == json!("dm.schema.invalid_trigger")
+        && diagnostic["severity"] == json!(2)
+        && diagnostic["source"] == json!("darkmatter.schema")
+        && diagnostic["message"].as_str().is_some_and(|message| {
+            message.starts_with("ignoring invalid schema trigger ")
+                && message.contains(trigger_file_name)
+        })
+}
+
+/// A trigger whose payload disappears is skipped, not retained: the consumer
+/// loses the trigger's property and the open envelope gets one warning.
 #[test]
-fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
+fn trigger_payload_failure_drops_the_trigger_and_warns_on_the_envelope() {
     let workspace = LspWorkspace::new();
     // A repository, so the open envelope's own context has the workspace as
     // its tree root and `schemas/` as a schema root: its refresh reports the
@@ -634,32 +648,35 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     );
 
     let envelope_diagnostics = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(
-        envelope_diagnostics.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.prepare")
-                && diagnostic["source"] == json!("darkmatter.schema")
-                && diagnostic["message"]
-                    .as_str()
-                    .is_some_and(|message| message.contains("prompt.trigger.yaml"))
-        }),
-        "the failed scan must publish a schema-load diagnostic on the envelope: \
+    assert_eq!(
+        envelope_diagnostics
+            .iter()
+            .filter(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml"))
+            .count(),
+        1,
+        "the skipping scan must publish exactly one invalid-trigger warning on the envelope: \
          {envelope_diagnostics:?}"
     );
-
-    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
-        retained.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.missing_required")
-                && diagnostic["message"]
-                    .as_str()
-                    .is_some_and(|message| message.contains("model"))
-        }),
-        "the consumer must retain the prior effective schema after payload removal: {retained:?}"
+        !envelope_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        "a parseable envelope must not carry a schema-load error: {envelope_diagnostics:?}"
+    );
+
+    let dropped = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        !requires_model(&dropped),
+        "the skipped trigger's property must no longer apply to the consumer: {dropped:?}"
     );
 
     fixture.shutdown();
 }
 
+/// Removing an unopened trigger's payload publishes a file-level
+/// invalid-trigger warning on the envelope and drops the trigger from its
+/// consumer; restoring the payload clears the warning and the trigger applies
+/// again.
 fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
@@ -716,19 +733,18 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     }
 
     let failed = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(
-        failed.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.prepare")
-                && diagnostic["source"] == json!("darkmatter.schema")
-        }),
-        "an unopened envelope must receive the failed registry diagnostic: {failed:?}"
-    );
-    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
-    assert!(
-        retained
+    assert_eq!(
+        failed
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
-        "the consumer must retain its last-good trigger schema: {retained:?}"
+            .filter(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml"))
+            .count(),
+        1,
+        "an unopened envelope must receive one invalid-trigger warning: {failed:?}"
+    );
+    let dropped = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        !requires_model(&dropped),
+        "the consumer must stop applying the skipped trigger's schema: {dropped:?}"
     );
 
     std::fs::write(&payload_path, payload).unwrap();
@@ -747,6 +763,11 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     assert!(
         repaired.is_empty(),
         "repair must clear the unopened envelope: {repaired:?}"
+    );
+    let restored = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        requires_model(&restored),
+        "repair must restore the trigger's property on the consumer: {restored:?}"
     );
 
     fixture.shutdown();
@@ -787,8 +808,8 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     assert!(
         failed
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
-        "the open envelope must receive its trigger-load diagnostic: {failed:?}"
+            .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml")),
+        "the open envelope must receive its invalid-trigger warning: {failed:?}"
     );
     let _ = fixture.wait_for_diagnostics(document_uri.as_str());
 
@@ -921,8 +942,8 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     assert!(
         failed_a
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
-        "envelope A must initially own the trigger-load diagnostic: {failed_a:?}"
+            .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "a.trigger.yaml")),
+        "envelope A must initially own the invalid-trigger warning: {failed_a:?}"
     );
 
     std::fs::write(&payload_a_path, "$schema:\n  alpha: string\n").unwrap();
@@ -955,9 +976,9 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
             .is_some_and(|diagnostics| {
                 diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+                    .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "b.trigger.yaml"))
             }),
-        "envelope B must receive transferred trigger-load ownership immediately: {failed_b:?}"
+        "envelope B must receive the invalid-trigger warning immediately: {failed_b:?}"
     );
 
     fixture.shutdown();

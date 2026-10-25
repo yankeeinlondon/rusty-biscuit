@@ -5,8 +5,9 @@
 //! first-level directory with a `schemas` folder that is a package area only
 //! by the catalog's first-directory fallback.
 //!
-//! The startup cases read the registry line's counts and the trigger-load
-//! diagnostic published on an unopened envelope; the refresh cases show that
+//! The startup cases read the registry line's counts and the invalid-trigger
+//! warning published on an unopened envelope: a skipped trigger counts in
+//! `failed_triggers` but never fails its scope; the refresh cases show that
 //! each refresh (watched manifest, watched or saved YAML, server rescan,
 //! configuration change) prepares those scopes again from the current
 //! catalog.
@@ -109,8 +110,17 @@ fn assert_registry_line(logs: &CapturedLogs, message: &str, fields: &[&str]) {
     }
 }
 
-fn has_prepare_error(diagnostics: &[Value]) -> bool {
-    diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+fn invalid_trigger_warnings(diagnostics: &[Value]) -> Vec<&Value> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_trigger") && diagnostic["severity"] == json!(2)
+        })
+        .collect()
+}
+
+fn has_invalid_trigger_warning(diagnostics: &[Value]) -> bool {
+    !invalid_trigger_warnings(diagnostics).is_empty()
 }
 
 // ── Startup ─────────────────────────────────────────────────────────────────
@@ -125,14 +135,14 @@ fn startup_classifies_a_broken_trigger_in_an_unopened_package() {
     fixture.initialize(watched_params(&[repo]));
 
     let broken = fixture.wait_for_diagnostics(&uri(&repo.join("area/pkg/schemas/broken.yaml")));
-    assert!(has_prepare_error(&broken), "{broken:#?}");
+    assert!(has_invalid_trigger_warning(&broken), "{broken:#?}");
     assert_eq!(work_counts().since(before).parses, 0, "startup parses no Markdown");
     fixture.shutdown();
 }
 
-/// The spelling before the rename is a broken trigger like any other: a
-/// trigger-load diagnostic on its file naming `schema-trigger`, and one failed
-/// scope, never a silently ignored file.
+/// The spelling before the rename is a broken trigger like any other: an
+/// invalid-trigger warning on its file naming `schema-trigger` and one skipped
+/// trigger, never a silently ignored file and never a failed scope.
 #[test]
 fn startup_reports_a_renamed_trigger_kind_as_a_broken_trigger_in_its_scope_only() {
     let logs = CapturedLogs::global();
@@ -145,15 +155,16 @@ fn startup_reports_a_renamed_trigger_kind_as_a_broken_trigger_in_its_scope_only(
     fixture.initialize(watched_params(&[repo]));
 
     let diagnostics = fixture.wait_for_diagnostics(&uri(&renamed));
-    let prepare: Vec<&Value> =
-        diagnostics.iter().filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")).collect();
-    assert_eq!(prepare.len(), 1, "{diagnostics:#?}");
-    let message = prepare[0]["message"].as_str().unwrap_or_default();
+    let warnings = invalid_trigger_warnings(&diagnostics);
+    assert_eq!(warnings.len(), 1, "{diagnostics:#?}");
+    assert!(
+        !diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        "{diagnostics:#?}"
+    );
+    let message = warnings[0]["message"].as_str().unwrap_or_default();
+    assert!(message.starts_with("ignoring invalid schema trigger "), "{message}");
     assert!(message.contains("trigger-schema") && message.contains("schema-trigger"), "{message}");
-    assert_registry_line(&logs, "schema registry initialized with failures", &[
-        "failed_triggers=1",
-        "failed_scopes=1",
-    ]);
+    assert_registry_line(&logs, "schema registry ready", &["failed_triggers=1", "failed_scopes=0"]);
     fixture.shutdown();
 }
 
@@ -181,7 +192,7 @@ fn startup_counts_the_named_schema_of_an_unopened_package_area() {
 }
 
 #[test]
-fn startup_reports_an_unopened_package_failure_with_no_open_documents() {
+fn startup_reports_an_unopened_package_skipped_trigger_with_no_open_documents() {
     let logs = CapturedLogs::global();
     let workspace = LspWorkspace::new();
     let repo = workspace.path();
@@ -190,16 +201,19 @@ fn startup_reports_an_unopened_package_failure_with_no_open_documents() {
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[repo]));
 
-    assert_registry_line(&logs, "schema registry initialized with failures", &[
+    assert_registry_line(&logs, "schema registry ready", &[
         "roots=2",
         "tree_schemas=0",
         "scoped_schemas=1",
         "trigger_schemas=0",
         "unclassified=0",
         "failed_triggers=1",
-        "failed_scopes=1",
+        "failed_scopes=0",
     ]);
-    assert!(logs.matching("schema registry ready").is_empty(), "{:#?}", logs.lines());
+    assert!(logs.matching("initialized with failures").is_empty(), "{:#?}", logs.lines());
+    let skipped = logs.matching("ignoring invalid schema trigger");
+    assert_eq!(skipped.len(), 1, "{:#?}", logs.lines());
+    assert!(skipped[0].contains("code=\"dm.schema.invalid_trigger\""), "{}", skipped[0]);
     assert_eq!(work_counts().since(before).parses, 0, "startup parses no Markdown");
     fixture.shutdown();
 }
@@ -216,12 +230,12 @@ fn a_workspace_subfolder_keeps_the_repository_roots_above_it() {
 
     // The folder is the package area; its package below it is prepared, and
     // the repository's tree root above it still applies.
-    assert_registry_line(&logs, "schema registry initialized with failures", &[
+    assert_registry_line(&logs, "schema registry ready", &[
         "roots=3",
         "tree_schemas=1",
         "scoped_schemas=1",
         "failed_triggers=1",
-        "failed_scopes=1",
+        "failed_scopes=0",
     ]);
     fixture.shutdown();
 }
@@ -297,7 +311,7 @@ fn a_watched_manifest_change_prepares_a_new_package() {
         json!({ "changes": [ { "uri": uri(&repo.join("Cargo.toml")), "type": 2 } ] }),
     );
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }
 
@@ -313,7 +327,7 @@ fn a_server_rescan_prepares_a_new_package() {
     declare_packages(repo, &["area/pkg"]);
     fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": uri(&repo.join("a.md")) } }));
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }
 
@@ -333,7 +347,7 @@ fn a_configuration_change_prepares_a_new_package() {
         json!({ "settings": { "dmls": { "formatting": { "markdown": { "unwrap": true } } } } }),
     );
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }
 
@@ -361,13 +375,13 @@ fn an_unchanged_configuration_prepares_an_open_document_whose_context_changed() 
     declare_packages(repo, &["area/pkg"]);
     fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     assert_eq!(fixture.registry_jobs_until_idle(), vec![dmls::RegistryJobKind::Document], "no workspace pass");
     fixture.shutdown();
 }
 
 #[test]
-fn a_watched_fix_clears_a_trigger_failure_in_an_unopened_package() {
+fn a_watched_fix_clears_a_trigger_warning_in_an_unopened_package() {
     let workspace = LspWorkspace::new();
     let repo = workspace.path();
     package_fixture(repo);
@@ -375,7 +389,7 @@ fn a_watched_fix_clears_a_trigger_failure_in_an_unopened_package() {
     write(&repo.join("area/pkg/schemas/payload.yaml"), NAMED_SCHEMA);
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[repo]));
-    assert!(has_prepare_error(&fixture.wait_for_diagnostics(&uri(&path))));
+    assert!(has_invalid_trigger_warning(&fixture.wait_for_diagnostics(&uri(&path))));
 
     write(&path, "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
     fixture.notify(
@@ -388,7 +402,7 @@ fn a_watched_fix_clears_a_trigger_failure_in_an_unopened_package() {
 }
 
 #[test]
-fn a_saved_fix_clears_a_trigger_failure_in_an_unopened_package() {
+fn a_saved_fix_clears_a_trigger_warning_in_an_unopened_package() {
     let workspace = LspWorkspace::new();
     let repo = workspace.path();
     package_fixture(repo);
@@ -396,7 +410,7 @@ fn a_saved_fix_clears_a_trigger_failure_in_an_unopened_package() {
     write(&repo.join("area/pkg/schemas/payload.yaml"), NAMED_SCHEMA);
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[repo]));
-    assert!(has_prepare_error(&fixture.wait_for_diagnostics(&uri(&path))));
+    assert!(has_invalid_trigger_warning(&fixture.wait_for_diagnostics(&uri(&path))));
 
     write(&path, "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
     fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": uri(&path) } }));
@@ -427,10 +441,10 @@ fn startup_prepares_a_fallback_package_area_with_no_catalog_entry() {
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[repo]));
 
-    assert_registry_line(&logs, "schema registry initialized with failures", &[
+    assert_registry_line(&logs, "schema registry ready", &[
         "roots=1",
         "failed_triggers=1",
-        "failed_scopes=1",
+        "failed_scopes=0",
     ]);
     assert_eq!(work_counts().since(before).parses, 0, "startup parses no Markdown");
     fixture.shutdown();
@@ -451,7 +465,7 @@ fn a_watched_schema_creation_prepares_a_fallback_package_area() {
         json!({ "changes": [ { "uri": uri(&broken), "type": 1 } ] }),
     );
     let diagnostics = fixture.wait_for_diagnostics(&uri(&broken));
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }
 
@@ -536,7 +550,7 @@ fn a_server_rescan_prepares_a_new_nested_repository() {
     let broken = add_broken_repository(folder);
     fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": uri(&folder.join("a.md")) } }));
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }
 
@@ -554,6 +568,6 @@ fn a_watched_git_config_creation_prepares_a_new_nested_repository() {
         json!({ "changes": [ { "uri": uri(&folder.join("two/.git/config")), "type": 1 } ] }),
     );
     let diagnostics = fixture.wait_for_diagnostics(&broken);
-    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert!(has_invalid_trigger_warning(&diagnostics), "{diagnostics:#?}");
     fixture.shutdown();
 }

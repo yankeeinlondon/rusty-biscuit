@@ -38,6 +38,7 @@ use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::resolve::expand_named_types;
+use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
     ValidationStage,
@@ -98,9 +99,14 @@ pub enum SuggestionState {
         error: Option<Arc<SchemaError>>,
     },
     /// A YAML file in a `schemas/` root claims `kind: schema-trigger` but its
-    /// envelope is malformed. The registry remains last-good while this error
-    /// is published on the authoring file.
+    /// envelope is malformed: the strict authoring check's error on the open
+    /// buffer. Discovery skips the saved trigger and its warning is published
+    /// once the file closes.
     TriggerError(Arc<SchemaError>),
+    /// The open buffer's envelope loads, but discovery skipped the saved
+    /// trigger (its payload failed, or the saved envelope does not load):
+    /// the warning the registry publishes on that file.
+    TriggerWarning(Arc<InvalidTriggerFinding>),
 }
 
 /// The per-request overlay snapshot for one open document.
@@ -184,12 +190,12 @@ pub struct RegistryNeed {
     pub context: FileResolutionContext,
 }
 
-/// A trigger-load diagnostic that must be published or cleared.
+/// A skipped-trigger warning that must be published or cleared.
 pub struct TriggerDiagnosticTransition {
-    /// Trigger envelope owning the diagnostic.
+    /// The skipped trigger file the warning is published on.
     pub path: PathBuf,
-    /// The current load error, or `None` when a prior diagnostic must clear.
-    pub error: Option<Arc<SchemaError>>,
+    /// The current finding, or `None` when a prior warning must clear.
+    pub finding: Option<InvalidTriggerFinding>,
 }
 
 struct CachedSchema {
@@ -357,8 +363,9 @@ impl OverlayState {
             });
         }
 
-        // Trigger-schema authoring path. Only claimed, malformed envelopes are
-        // diagnostics; ordinary schema-root YAML remains silent.
+        // Trigger-schema authoring path. A claimed, malformed envelope is an
+        // error and a trigger discovery skipped is a warning; ordinary
+        // schema-root YAML remains silent.
         if path
             .parent()
             .and_then(Path::file_name)
@@ -388,13 +395,13 @@ impl OverlayState {
                             cache.trigger_registry(path, workspace_roots)
                         });
                     }
-                    if let Some(error) = cache.triggers.load_error_for(path) {
+                    if let Some(finding) = cache.triggers.finding_for(path) {
                         return Some(DocumentOverlay {
                             ast: None,
                             stale: false,
                             parse_error: None,
                             schema: SchemaOutcome::Ready(None),
-                            suggestions: SuggestionState::TriggerError(error),
+                            suggestions: SuggestionState::TriggerWarning(Arc::new(finding.clone())),
                             schema_authoring: SchemaAuthoringState::Inactive,
                             named_types: Arc::default(),
                             standalone_resolution: None,
@@ -511,7 +518,14 @@ impl OverlayState {
         cache.standalone_resolution.remove(uri.as_str());
     }
 
-    /// Takes trigger-load diagnostic ownership changes since the last refresh.
+    /// The published warning for trigger file `path`, when a prepared
+    /// registry skipped it.
+    pub fn trigger_finding(&self, path: &Path) -> Option<InvalidTriggerFinding> {
+        let cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.finding_for(path).cloned()
+    }
+
+    /// Takes skipped-trigger warning changes since the last refresh.
     pub fn take_trigger_diagnostic_transitions(&self) -> Vec<TriggerDiagnosticTransition> {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.take_transitions()
@@ -2023,15 +2037,15 @@ mod tests {
         )
         .unwrap();
         state.invalidate_trigger_inputs(&[root.join("schemas/prompt.trigger.yaml")]);
-        let retained = state
+        let skipped = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         assert!(
-            !ready_bundle(&retained)
+            ready_bundle(&skipped)
                 .effective
-                .validate(&ready_bundle(&retained).frontmatter_json)
+                .validate(&ready_bundle(&skipped).frontmatter_json)
                 .valid,
-            "a malformed envelope edit must retain the last-good registry"
+            "a saved malformed envelope is skipped: its trigger no longer applies"
         );
     }
 
@@ -2121,7 +2135,7 @@ mod tests {
     }
 
     #[test]
-    fn trigger_payload_edit_retains_last_good_registry() {
+    fn trigger_payload_edit_skips_the_trigger_without_failing_the_document() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_trigger_fixture(root);
@@ -2145,9 +2159,9 @@ mod tests {
         );
 
         // Edit the PAYLOAD file to an invalid shape (root union). The envelope
-        // is untouched; only the payload becomes non-mergeable. `scan` must now
-        // fail, so the last-good registry is retained — the document must NOT
-        // flap to `SchemaOutcome::Failed` and must keep the prior activation.
+        // is untouched; only the payload becomes non-mergeable, so discovery
+        // skips the trigger: the document must NOT flap to
+        // `SchemaOutcome::Failed`, and the skipped trigger's property is gone.
         std::fs::write(
             root.join("schemas/prompt.yaml"),
             "$schema:\n  - model: string(required)\n  - title: string(required)\n",
@@ -2155,21 +2169,24 @@ mod tests {
         .unwrap();
         state.invalidate_trigger_inputs(&[root.join("schemas/prompt.yaml")]);
 
-        let retained = state
+        let skipped = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
-        let retained_report = ready_bundle(&retained)
+        let skipped_report = ready_bundle(&skipped)
             .effective
-            .validate(&ready_bundle(&retained).frontmatter_json);
+            .validate(&ready_bundle(&skipped).frontmatter_json);
         assert!(
-            retained_report.problems.iter().any(|p| p.message.contains("model")),
-            "a payload edit must retain the last-good registry and activation: {:?}",
-            retained_report.problems
+            !skipped_report.problems.iter().any(|p| p.message.contains("model")),
+            "a skipped trigger contributes nothing: {:?}",
+            skipped_report.problems
         );
+        let transitions = state.take_trigger_diagnostic_transitions();
+        assert_eq!(transitions.len(), 1);
+        assert!(transitions[0].finding.is_some(), "the skipped trigger's warning is published");
     }
 
     #[test]
-    fn consecutive_failed_scans_transfer_diagnostic_ownership() {
+    fn each_skipped_trigger_publishes_and_clears_its_own_warning() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let schemas = root.join("schemas");
@@ -2204,39 +2221,42 @@ mod tests {
             ready_bundle(&initial).effective.validate(&ready_bundle(&initial).frontmatter_json);
         assert!(
             initial_report.problems.iter().any(|problem| problem.message.contains("model")),
-            "the matching trigger must contribute to the last-good schema: {:?}",
+            "the matching trigger must contribute to the schema: {:?}",
             initial_report.problems
         );
 
         std::fs::remove_file(&a_payload).unwrap();
         state.invalidate_trigger_inputs(std::slice::from_ref(&a_payload));
-        let failed_a = state
+        let skipped_a = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 1);
         assert_eq!(transitions[0].path, a_envelope);
-        assert!(transitions[0].error.is_some());
+        assert!(transitions[0].finding.is_some());
 
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::remove_file(&b_payload).unwrap();
         state.invalidate_trigger_inputs(&[a_payload.clone(), b_payload.clone()]);
-        let failed_b = state
+        let skipped_b = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 2);
         assert_eq!(transitions[0].path, a_envelope);
-        assert!(transitions[0].error.is_none(), "A's obsolete diagnostic must clear");
+        assert!(transitions[0].finding.is_none(), "A's repaired warning must clear");
         assert_eq!(transitions[1].path, b_envelope);
-        assert!(transitions[1].error.is_some(), "B must own the current diagnostic");
+        assert!(transitions[1].finding.is_some(), "B's warning must publish");
 
-        for overlay in [&failed_a, &failed_b] {
+        // Each overlay serves the current valid subset: A's `model` only
+        // while A loads.
+        for (overlay, has_model) in [(&skipped_a, false), (&skipped_b, true)] {
             let bundle = ready_bundle(overlay);
             let report = bundle.effective.validate(&bundle.frontmatter_json);
-            assert!(
+            assert_eq!(
                 report.problems.iter().any(|problem| problem.message.contains("model")),
-                "a failed replacement scan must retain the last-good consumer schema: {:?}",
+                has_model,
+                "{:?}",
                 report.problems
             );
         }

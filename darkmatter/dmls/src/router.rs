@@ -1080,33 +1080,43 @@ impl ServerState {
         self.publish_trigger_transitions();
     }
 
-    /// Publishes the trigger-file diagnostics registry preparations changed
+    /// Publishes the skipped-trigger warnings registry preparations changed
     /// since the last call (see
     /// [`OverlayState::take_trigger_diagnostic_transitions`]).
     fn publish_trigger_transitions(&self) {
         let mut trigger_transitions = HashMap::new();
         for transition in self.overlay.take_trigger_diagnostic_transitions() {
-            trigger_transitions.insert(transition.path, transition.error);
+            trigger_transitions.insert(transition.path, transition.finding);
         }
-        for (path, error) in trigger_transitions {
+        for (path, finding) in trigger_transitions {
             let Some(uri) = crate::workspace::file_path_to_uri(&path) else {
                 continue;
             };
             // Open-buffer diagnostics are versioned and derive from the
             // authoritative in-memory text. Recompute them after every scan
-            // has settled because a later document can move or clear trigger
-            // failure ownership after the envelope's first refresh.
+            // has settled because a later document can publish or clear the
+            // trigger's warning after the envelope's first refresh.
             if self.documents.is_open(&uri) {
                 self.refresh_diagnostics(&uri);
                 continue;
             }
-            let diagnostics = error
-                .as_deref()
-                .map(crate::diagnostics::frontmatter::trigger_load_diagnostic)
+            let diagnostics = finding
+                .as_ref()
+                .map(crate::diagnostics::frontmatter::invalid_trigger_diagnostic)
                 .into_iter()
                 .collect();
             self.diagnostics.publish(uri, None, diagnostics);
         }
+    }
+
+    /// The diagnostics a closed file keeps: the skipped-trigger warning a
+    /// prepared registry still reports for it, or none.
+    fn closed_file_diagnostics(&self, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
+        uri_to_file_path(uri)
+            .and_then(|path| self.overlay.trigger_finding(&path))
+            .map(|finding| crate::diagnostics::frontmatter::invalid_trigger_diagnostic(&finding))
+            .into_iter()
+            .collect()
     }
 
     /// Rescans the workspace from disk and reconciles the index for
@@ -2545,9 +2555,11 @@ impl Router {
                 }
                 self.state.close_buffer(&uri);
                 self.state.overlay.forget(&uri);
-                // Clear the closed document's markers, then refresh the rest
+                // Replace the closed document's markers with what a closed file
+                // keeps (a skipped trigger's warning), then refresh the rest
                 // (its links may have propped up another document's validity).
-                self.state.diagnostics.publish(uri, None, Vec::new());
+                let kept = self.state.closed_file_diagnostics(&uri);
+                self.state.diagnostics.publish(uri, None, kept);
                 self.state.refresh_all_diagnostics();
             }
             DidSaveTextDocument::METHOD => {

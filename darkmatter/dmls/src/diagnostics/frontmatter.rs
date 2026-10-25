@@ -21,9 +21,11 @@ use darkmatter::markdown::schemas::{
     locate_schema_value,
     parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
+use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Position,
+    Range,
 };
 
 use crate::context::resolution_failure_data;
@@ -114,6 +116,12 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
         named_types::standalone_diagnostics(&scope, error, None, &mut out);
     }
 
+    if let SuggestionState::TriggerWarning(finding) = &overlay.suggestions {
+        let span = trigger_yaml_span(ctx.text, finding.cause()).unwrap_or(0..ctx.text.len());
+        let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+        out.push(invalid_trigger_diagnostic_at(finding, range));
+    }
+
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
         let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
         out.push(diagnostic(
@@ -151,15 +159,31 @@ fn schema_advisory_diagnostics(
     }));
 }
 
-/// Builds the file-level diagnostic for a failed trigger-registry scan.
-pub fn trigger_load_diagnostic(error: &SchemaError) -> Diagnostic {
-    diagnostic(
-        zero_range(),
-        DiagnosticSeverity::ERROR,
-        source::SCHEMA,
-        code::SCHEMA_PREPARE,
-        error.to_string(),
-    )
+/// The warning a trigger discovery skipped publishes on its closed file:
+/// at the start of a malformed envelope's YAML error line, else at the file
+/// start.
+pub fn invalid_trigger_diagnostic(finding: &InvalidTriggerFinding) -> Diagnostic {
+    let range = finding.position().map_or_else(zero_range, |(line, _)| {
+        let start = Position::new(u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX), 0);
+        Range::new(start, start)
+    });
+    invalid_trigger_diagnostic_at(finding, range)
+}
+
+/// The skipped-trigger warning at `range`, with the payload or import its
+/// cause points into as related information.
+fn invalid_trigger_diagnostic_at(finding: &InvalidTriggerFinding, range: Range) -> Diagnostic {
+    let mut out = diagnostic(range, DiagnosticSeverity::WARNING, finding.source_family(), finding.code(), finding.message());
+    out.related_information = finding
+        .cause_path()
+        .and_then(file_path_to_uri)
+        .map(|uri| {
+            vec![DiagnosticRelatedInformation {
+                location: Location::new(uri, zero_range()),
+                message: "the trigger's payload failed to load here".to_string(),
+            }]
+        });
+    out
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
@@ -1184,7 +1208,7 @@ fn suggestion_diagnostics(
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
-        SuggestionState::Inactive | SuggestionState::TriggerError(_) => {}
+        SuggestionState::Inactive | SuggestionState::TriggerError(_) | SuggestionState::TriggerWarning(_) => {}
         SuggestionState::Inline(problems) => {
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));

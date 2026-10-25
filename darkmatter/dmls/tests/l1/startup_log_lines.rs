@@ -132,8 +132,11 @@ fn startup_and_revalidation_lines_carry_the_fixture_counts() {
     fixture.shutdown();
 }
 
+/// A skipped trigger leaves the registry line `ready`: its valid neighbor
+/// still loads, the skipped file counts only as a failed trigger, and the
+/// skip is logged once at WARN with the trigger's path and code.
 #[test]
-fn a_failed_trigger_switches_the_registry_line_to_its_failure_variant() {
+fn a_skipped_trigger_keeps_the_registry_line_ready() {
     let logs = CapturedLogs::global();
     let workspace = LspWorkspace::new();
     known_workspace(&workspace);
@@ -142,10 +145,36 @@ fn a_failed_trigger_switches_the_registry_line_to_its_failure_variant() {
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(root));
 
-    assert_line(&logs, "schema registry initialized with failures", &[
+    assert_line(&logs, "schema registry ready", &[
         "roots=2".into(),
         "trigger_schemas=1".into(),
         "failed_triggers=1".into(),
+        "failed_scopes=0".into(),
+        format!("workspace={}", workspace_uri(root)),
+    ]);
+    assert!(logs.matching("initialized with failures").is_empty(), "{:#?}", logs.lines());
+    let skipped = logs.matching("ignoring invalid schema trigger");
+    assert_eq!(skipped.len(), 1, "one skip warning: {:#?}", logs.lines());
+    assert!(skipped[0].starts_with(" WARN "), "{}", skipped[0]);
+    assert!(skipped[0].contains("trigger=") && skipped[0].contains("broken.trigger.yaml"), "{}", skipped[0]);
+    assert!(skipped[0].contains("code=\"dm.schema.invalid_trigger\""), "{}", skipped[0]);
+    fixture.shutdown();
+}
+
+/// A schema root that cannot be read fails its whole scope, which switches
+/// the registry line to its failure variant.
+#[test]
+fn a_failed_scope_switches_the_registry_line_to_its_failure_variant() {
+    let logs = CapturedLogs::global();
+    let workspace = LspWorkspace::new();
+    known_workspace(&workspace);
+    let root = workspace.path();
+    std::fs::write(root.join("schemas/not-utf8.yaml"), [0xff, 0xfe, 0x00]).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(root));
+
+    assert_line(&logs, "schema registry initialized with failures", &[
+        "roots=2".into(),
         "failed_scopes=1".into(),
         format!("workspace={}", workspace_uri(root)),
     ]);
@@ -175,7 +204,9 @@ fn payload_registry_line(payload: Option<&str>) -> (CapturedLogs, String) {
 }
 
 /// Each row varies only the trigger's payload and asserts the registry
-/// line's variant and its trigger counts.
+/// line's variant and its trigger counts. A payload that keeps its trigger
+/// from loading skips that trigger without failing the scope, so the line
+/// stays `ready` and only `failed_triggers` counts it.
 macro_rules! payload_registry_cases {
     ($($name:ident: $payload:expr => $message:literal, $triggers:literal / $failed:literal / $scopes:literal;)+) => {$(
         #[test]
@@ -195,15 +226,17 @@ payload_registry_cases! {
     a_loading_payload_counts_a_ready_trigger:
         Some("$schema:\n  model: string(required)\n") => "schema registry ready", 1 / 0 / 0;
     a_missing_payload_counts_a_failed_trigger:
-        None => "schema registry initialized with failures", 0 / 1 / 1;
+        None => "schema registry ready", 0 / 1 / 0;
     an_unparseable_payload_counts_a_failed_trigger:
-        Some("$schema: [unclosed\n") => "schema registry initialized with failures", 0 / 1 / 1;
+        Some("$schema: [unclosed\n") => "schema registry ready", 0 / 1 / 0;
     an_unresolved_payload_import_counts_a_failed_trigger:
-        Some("$schema:\n  model: Missing@./missing.yaml\n") => "schema registry initialized with failures", 0 / 1 / 1;
+        Some("$schema:\n  model: Missing@./missing.yaml\n") => "schema registry ready", 0 / 1 / 0;
     an_unresolved_payload_example_counts_a_failed_trigger:
-        Some("$schema:\n  when: \"date(example(../missing.json))\"\n") => "schema registry initialized with failures", 0 / 1 / 1;
+        Some("$schema:\n  when: \"date(example(../missing.json))\"\n") => "schema registry ready", 0 / 1 / 0;
 }
 
+/// A malformed envelope is skipped like a broken payload: counted as a failed
+/// trigger in a scope that still prepares.
 #[test]
 fn a_malformed_envelope_counts_a_failed_trigger() {
     let logs = CapturedLogs::global();
@@ -213,11 +246,11 @@ fn a_malformed_envelope_counts_a_failed_trigger() {
     write(root, "schemas/notes.trigger.yaml", "kind: schema-trigger\nmatch: {}\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(root));
-    assert_line(&logs, "schema registry initialized with failures", &[
+    assert_line(&logs, "schema registry ready", &[
         "trigger_schemas=0".into(),
         "failed_triggers=1".into(),
-        "failed_scopes=1".into(),
+        "failed_scopes=0".into(),
     ]);
-    assert!(logs.matching("schema registry ready").is_empty(), "{:#?}", logs.lines());
+    assert!(logs.matching("initialized with failures").is_empty(), "{:#?}", logs.lines());
     fixture.shutdown();
 }

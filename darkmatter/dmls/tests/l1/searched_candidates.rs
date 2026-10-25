@@ -111,8 +111,21 @@ fn rejects_model(diagnostics: &[Value]) -> bool {
     })
 }
 
-fn has_prepare_error(diagnostics: &[Value]) -> bool {
-    diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+/// Whether the trigger carries the skipped-trigger warning blaming the
+/// nearer `shared/types.yaml`, both in its message and its related location.
+fn warns_of_invalid_nearer_file(diagnostics: &[Value]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic["code"] == json!("dm.schema.invalid_trigger")
+            && diagnostic["severity"] == json!(2)
+            && diagnostic["message"].as_str().is_some_and(|message| {
+                message.starts_with("ignoring invalid schema trigger ") && message.contains("types.yaml")
+            })
+            && diagnostic["relatedInformation"].as_array().is_some_and(|related| {
+                related.iter().any(|info| {
+                    info["location"]["uri"].as_str().is_some_and(|uri| uri.ends_with("/shared/types.yaml"))
+                })
+            })
+    })
 }
 
 /// The `(base URI, pattern)` pairs of every schema-location registration
@@ -216,9 +229,9 @@ fn a_fallback_rescan_rebuilds_from_the_new_candidate() {
 /// Startup's preparation has searched for `schemas/shared/types.yaml` (and
 /// not found it) when a malformed file appears there and its event arrives.
 /// The replayed change leaves startup's scope stale, so the refresh the
-/// event scheduled prepares it again and reports the malformed import on
-/// the trigger; were the outdated reading installed as fresh, nothing would
-/// be published. Repairing the file clears the report.
+/// event scheduled prepares it again and warns on the trigger that it was
+/// skipped for the malformed import; were the outdated reading installed as
+/// fresh, nothing would be published. Repairing the file clears the warning.
 #[test]
 fn a_candidate_created_during_an_in_flight_preparation_is_prepared_again_and_recovers() {
     let (workspace, root) = candidate_workspace();
@@ -234,12 +247,12 @@ fn a_candidate_created_during_an_in_flight_preparation_is_prepared_again_and_rec
 
     fixture.open_startup_probe_gate();
     let failed = latest(&mut fixture, &trigger);
-    assert!(has_prepare_error(&failed), "the malformed nearer file is reported: {failed:#?}");
+    assert!(warns_of_invalid_nearer_file(&failed), "the malformed nearer file is reported: {failed:#?}");
 
     write(&nearer(&root), NEARER_FIELDS);
     watched(&fixture, &nearer(&root), 2);
     let repaired = latest(&mut fixture, &trigger);
-    assert!(!has_prepare_error(&repaired), "the repair recovers: {repaired:#?}");
+    assert!(repaired.is_empty(), "the repair clears the warning: {repaired:#?}");
     fixture.shutdown();
 }
 

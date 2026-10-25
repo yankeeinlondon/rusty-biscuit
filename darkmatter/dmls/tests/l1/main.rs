@@ -26,6 +26,7 @@ mod full_index_removal_guard;
 mod host_function_diagnostics;
 mod host_globals;
 mod index_build;
+mod invalid_trigger_warnings;
 mod index_store_concurrency;
 mod index_store_facts;
 mod index_store_keys;
