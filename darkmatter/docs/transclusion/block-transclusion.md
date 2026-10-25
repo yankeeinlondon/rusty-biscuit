@@ -209,8 +209,8 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
 
     **Error handling:**
 
-    - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow-invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
-    - `set.name="Bob" set.name="Mary"` raises `InvalidReassignedFrontmatterProperty`. Use `--allow-reassigned-frontmatter-property` to downgrade to a warning; the rightmost assignment wins.
+    - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
+    - `set.name="Bob" set.name="Mary"` raises `InvalidReassignedFrontmatterProperty`. Use `--allow reassigned-frontmatter-property` to downgrade to a warning; the rightmost assignment wins.
 
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 
@@ -251,7 +251,7 @@ For the full grammar, truthiness rules, supported operators, functions, and edge
 
 An included file is composed as part of the same composition, so what happens when it fails depends on why it failed.
 
-- **A shell span fails the composition, exactly as it would inline.** A `::shell`, `::shell-block`, or frontmatter `$( … )` that fails without a handler (a non-zero exit with no `when_error`, a missing program, a timeout without `--allow-shell-timeout`) stops the composition, and the error names the included file. A command the author gave a fallback renders that fallback, as it does inline.
+- **A shell span fails the composition, exactly as it would inline.** A `::shell`, `::shell-block`, or frontmatter `$( … )` that fails without a handler (a non-zero exit with no `when_error`, a missing program, a timeout without `--allow shell-timeout`) stops the composition, and the error names the included file. A command the author gave a fallback renders that fallback, as it does inline.
 - **Structural and context failures also stop it:** a cycle, the depth limit, a remote fetch that failed, a `ctx` value the composition never captured, and a command missing from the approved set.
 - **Any other failure is tolerated in lenient mode (`fail_fast` off, the default).** The included file is replaced by a visible `_Could not transclude `name`_` notice, a warning is reported, and the parent composes on. With `fail_fast` on, it stops the composition.
 

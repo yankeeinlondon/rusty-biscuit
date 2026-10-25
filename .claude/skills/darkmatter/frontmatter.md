@@ -293,7 +293,7 @@ The supported surface includes:
 - `style.hr.*` as the canonical horizontal-rule namespace
 - hyperlink style plus local hyperlink/image style overrides
 
-`KnownButInactive` should be empty for valid v1 schema keys. `--strict-style`
+`KnownButInactive` should be empty for valid v1 schema keys. `--deny style`
 promotes unknown and deprecated keys to errors, while valid unsupported
 combinations fail through documented `StyleApplyError` variants.
 

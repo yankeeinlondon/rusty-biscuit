@@ -113,9 +113,26 @@ impl AuthoredSpan {
     }
 }
 
+fn blocked_message(blocking: &[crate::markdown::compose::ComposeWarning]) -> String {
+    let count = blocking.len();
+    let first = blocking.first().map_or("", |warning| warning.message.as_str());
+    let noun = if count == 1 { "diagnostic" } else { "diagnostics" };
+    format!("{count} blocking {noun} under the deny policy; first: {first}")
+}
+
 /// Errors that can occur when working with Markdown documents.
 #[derive(Error, Debug)]
 pub enum MarkdownError {
+    /// Reported warnings a [`BlockingPolicy`](crate::markdown::compose::policy::BlockingPolicy)
+    /// selects failed the document, before anything after them ran.
+    #[error("{}", blocked_message(.blocking))]
+    BlockedDiagnostics {
+        /// The blocking warnings, in the order they were reported.
+        blocking: Vec<crate::markdown::compose::ComposeWarning>,
+        /// The non-blocking warnings reported before the stop.
+        earlier: Vec<crate::markdown::compose::ComposeWarning>,
+    },
+
     /// Failed to parse frontmatter YAML.
     #[error("Failed to parse frontmatter in {}: {source}", .ctx.display.display())]
     FrontmatterParse {
@@ -468,6 +485,19 @@ impl MarkdownError {
         None
     }
 
+    /// The warnings a blocking policy made fatal, when this error, or one it
+    /// wraps (a transcluded child's), is [`Self::BlockedDiagnostics`].
+    pub fn blocked_diagnostics(&self) -> Option<&[crate::markdown::compose::ComposeWarning]> {
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            if let Some(MarkdownError::BlockedDiagnostics { blocking, .. }) = error.downcast_ref::<MarkdownError>() {
+                return Some(blocking);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The shared diagnostic of the call this error rejects the document for
     /// ([`Self::rejected_call`]): its first category 5 finding
     /// ([`CallCheck::rejection_diagnostic`](crate::markdown::compose::expression::CallCheck::rejection_diagnostic)),
@@ -590,7 +620,7 @@ impl MarkdownError {
     /// lenient transclusion fallback (a notice in place of the file) must not
     /// absorb it: that would turn a fact the author declared required into a
     /// silent gap. A failure the author handled (`when_error`, a matching exit
-    /// code, `--allow-shell-timeout`) never reaches this error at all.
+    /// code, `--allow shell-timeout`) never reaches this error at all.
     pub fn shell_span_failure(&self) -> bool {
         use crate::markdown::compose::{ShellBlockError, ShellExpansionError};
         let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
@@ -762,6 +792,7 @@ impl BlockError for MarkdownError {
                 provided,
                 reason,
             } => blocks::parameter_binding_block(property, provided, reason),
+            MarkdownError::BlockedDiagnostics { blocking, .. } => blocks::blocked_diagnostics_block(blocking),
         }
     }
 

@@ -291,7 +291,7 @@ mod ping_tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].stage, "icmp");
         assert!(warnings[0].message.contains("10.0.0.2"), "{}", warnings[0].message);
-        assert!(warnings[0].message.contains("--allow-host"), "{}", warnings[0].message);
+        assert!(warnings[0].message.contains("--allow host="), "{}", warnings[0].message);
     }
 
     /// AC33: a denied multi-attempt call returns one `null` and one diagnostic

@@ -49,7 +49,7 @@ fn repository(process: &CliProcessFixture, bundle: &[(&str, &str)], documents: &
 fn validate(process: &CliProcessFixture, documents: &[PathBuf]) -> (Option<i32>, BTreeMap<String, Value>) {
     let output = process
         .command()
-        .args(["schema", "validate", "--no-baseline-schema", "--format", "json"])
+        .args(["schema", "validate", "--disable", "baseline-schema", "--format", "json"])
         .args(documents)
         .output()
         .expect("md runs");

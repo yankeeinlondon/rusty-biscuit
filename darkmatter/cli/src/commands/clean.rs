@@ -54,9 +54,9 @@ pub struct CleanSchemaFlags {
     pub schema: Option<PathBuf>,
     /// `--baseline-schema PATH`
     pub baseline_schema: Option<PathBuf>,
-    /// `--no-baseline-schema`
+    /// `--disable baseline-schema`
     pub no_baseline_schema: bool,
-    /// `--no-schema-triggers`
+    /// `--disable schema-triggers`
     pub no_schema_triggers: bool,
 }
 

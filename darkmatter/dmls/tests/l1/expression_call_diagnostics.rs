@@ -684,6 +684,7 @@ mod shared_fields {
 
     use darkmatter::markdown::Markdown;
     use darkmatter::markdown::compose::expression::{Diagnostic, DiagnosticSource, Severity};
+    use darkmatter::markdown::compose::report_diagnostics::{error_diagnostics, warning_diagnostic};
     use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest};
 
     /// The editor's diagnostic as the shared record, positions made
@@ -744,6 +745,8 @@ mod shared_fields {
                 .expect_err("a category 5 call rejects the document");
             let composed = error.call_diagnostic().unwrap_or_else(|| panic!("{label}: no call diagnostic: {error}"));
             assert_eq!(editor, vec![composed.clone()], "{label}");
+            // `md compose --output report-json` writes these records.
+            assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
             assert_eq!(composed.severity, Severity::Error, "{label}");
             assert_eq!(composed.expected_type.as_deref(), Some("number"), "{label}");
             assert_eq!(composed.actual_type.as_deref(), Some("boolean"), "{label}");
@@ -766,6 +769,8 @@ mod shared_fields {
         let composed: Vec<Diagnostic> = report.warnings.iter().filter_map(|warning| warning.diagnostic.as_deref().cloned()).collect();
         assert_eq!(composed.len(), 2, "{:#?}", report.warnings);
         assert_eq!(editor, composed);
+        let reported: Vec<Diagnostic> = report.warnings.iter().filter(|warning| warning.diagnostic.is_some()).map(warning_diagnostic).collect();
+        assert_eq!(reported, editor, "the report's records");
         assert!(composed.iter().all(|diagnostic| diagnostic.severity == Severity::Warning && diagnostic.code == UNCERTAIN));
     }
 }

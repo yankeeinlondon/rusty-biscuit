@@ -424,10 +424,7 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(
-                        ComposeWarning::new("transclusion", error.to_string())
-                            .with_resolution_failure(error.resolution_failure()),
-                    );
+                    skipped.add_warning(tolerated_failure_warning(&error));
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
@@ -560,6 +557,17 @@ impl Markdown {
 /// bind, which is the document's rejection, not a resolution failure. A child command
 /// missing from the approval set is a broken pre-flight invariant, not a
 /// failure an author can tolerate.
+/// The warning of a tolerated transclusion failure. A target that does not
+/// exist is the missing transclusion its recovery governs. Out of line: the
+/// caller's frame recurs once per nested composition.
+#[inline(never)]
+fn tolerated_failure_warning(error: &MarkdownError) -> ComposeWarning {
+    let failure = error.resolution_failure();
+    let code = (failure == Some(biscuit_file::ResolutionFailure::NoMatch))
+        .then(|| super::super::policy::MISSING_TRANSCLUSION_CODE.to_string());
+    ComposeWarning { code, ..ComposeWarning::new("transclusion", error.to_string()) }.with_resolution_failure(failure)
+}
+
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     matches!(
         error,
@@ -573,6 +581,8 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     ) || error.missing_runtime_context().is_some()
         || error.unavailable_binding().is_some()
         || error.rejected_call().is_some()
+        // A policy that blocks the child's warning blocks the document.
+        || error.blocked_diagnostics().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()

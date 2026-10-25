@@ -47,10 +47,11 @@ it uses the already-parsed YAML value and performs no additional I/O.
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
-`kind: trigger-schema`, `any:`, and `--no-trigger-schemas` were renamed with no
-alias: the first two are `SchemaError::TriggerRenamed { field, found,
-replacement }`, the flag is a usage error raised by `md`'s argv pre-check
-(`main.rs::reject_renamed_flags`, so completions never offer it). A null or
+`kind: trigger-schema` and `any:` were renamed with no alias
+(`SchemaError::TriggerRenamed { field, found, replacement }`); the old trigger
+flags are now `--disable schema-triggers`, and spelling one is a usage error
+raised by `md`'s argv pre-check (`main.rs::reject_removed_flags`, so
+completions never offer it). A null or
 non-string `kind` is a `TriggerMatch` error, not ordinary data; no `$schema` is
 a matcher-only trigger (`resolve_trigger_layers` skips it).
 
@@ -205,7 +206,7 @@ at a global catalog uses its `fm`.
 `md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
 first match wins:
 
-1. `--no-baseline-schema` → none (clap conflict with `--schema`, exit 2);
+1. `--disable baseline-schema` → none (usage conflict with `--schema`, exit 2);
 2. `--schema <path>` → custom, even with the env opt-out;
 3. `DARKMATTER_NO_BASELINE_SCHEMA` exactly `1|true|TRUE|yes|YES`
    (`commands::compose::disables_baseline_schema`, read from the captured
@@ -215,14 +216,14 @@ first match wins:
 
 Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
 a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
-and triggers; `--no-schema-triggers` is independent. JSON `schema` stays null
+and triggers; `--disable schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
-`--baseline-schema`/`--no-baseline-schema`/the env (live
+`--baseline-schema`/`--disable baseline-schema`/the env (live
 `env_disables_baseline_schema`); DMLS layers built-in → extensions →
 triggers → document. Each document with a distinct schema/context compiles the
 merged baseline (validator cache keys on the full resolution context), so
-tests that judge only document schemas pass `--no-baseline-schema` to stay in
+tests that judge only document schemas pass `--disable baseline-schema` to stay in
 the L1 budget.
 
 The baseline types Darkmatter's five lifecycle events (`initialize`,

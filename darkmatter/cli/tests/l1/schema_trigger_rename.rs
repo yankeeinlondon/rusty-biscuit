@@ -1,10 +1,12 @@
 //! The schema-trigger renames on the `md` surface
 //! (`2026-10-27-darkmatter-lifecycle-ownership`, criteria 16 and 17):
-//! `--no-schema-triggers` works on `md compose`, `md schema validate`, and
-//! `md clean`; `--no-trigger-schemas` is a usage error naming its
-//! replacement; completions offer only the new flag; and the trigger input
-//! matrix reaches `md compose` (the full matrix runs in-process in the
-//! library's `trigger_input_matrix`).
+//! `--disable schema-triggers` works on `md compose`, `md schema validate`,
+//! and `md clean`; both earlier spellings, `--no-trigger-schemas` and
+//! `--no-schema-triggers`, are usage errors naming that replacement;
+//! completions never offer a removed `--no-…` flag and offer
+//! `schema-triggers` and `baseline-schema` as `--disable` values; and the
+//! trigger input matrix reaches `md compose` (the full matrix runs
+//! in-process in the library's `trigger_input_matrix`).
 
 use crate::common;
 
@@ -43,7 +45,7 @@ fn the_new_flag_disables_triggers_on_compose_validate_and_clean() {
         process
             .command()
             .args(subcommand)
-            .arg("--no-schema-triggers")
+            .args(["--disable", "schema-triggers"])
             .arg(&document)
             .assert()
             .success();
@@ -56,38 +58,46 @@ fn the_new_flag_disables_triggers_on_compose_validate_and_clean() {
 fn the_old_flag_is_a_usage_error_naming_the_new_one() {
     let process = CliProcessFixture::new();
     let document = repository(&process, CONTROL);
-    for subcommand in [&["compose"][..], &["schema", "validate"], &["clean"]] {
-        process
-            .command()
-            .args(subcommand)
-            .arg("--no-trigger-schemas")
-            .arg(&document)
-            .assert()
-            .code(2)
-            .stdout(predicate::str::is_empty())
-            .stderr(predicate::str::contains("`--no-trigger-schemas` was renamed"))
-            .stderr(predicate::str::contains("use `--no-schema-triggers`"));
+    for old in ["--no-trigger-schemas", "--no-schema-triggers"] {
+        for subcommand in [&["compose"][..], &["schema", "validate"], &["clean"]] {
+            process
+                .command()
+                .args(subcommand)
+                .arg(old)
+                .arg(&document)
+                .assert()
+                .code(2)
+                .stdout(predicate::str::is_empty())
+                .stderr(predicate::str::contains(format!("`{old}` was removed with no alias")))
+                .stderr(predicate::str::contains("use `--disable schema-triggers`"));
+        }
     }
 }
 
 #[test]
 fn completions_offer_only_the_new_flag() {
     let process = CliProcessFixture::new();
+    let complete = |words: &[&str], current: &str| {
+        let output = process
+            .command()
+            .env("COMPLETE", "fish")
+            .arg("--")
+            .args(words)
+            .arg(current)
+            .output()
+            .expect("md runs");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
     for words in [&["md", "compose"][..], &["md", "schema", "validate"], &["md", "clean"]] {
-        for prefix in ["--no-", "--no-t", "--no-s"] {
-            let output = process
-                .command()
-                .env("COMPLETE", "fish")
-                .arg("--")
-                .args(words)
-                .arg(prefix)
-                .output()
-                .expect("md runs");
-            let candidates = String::from_utf8_lossy(&output.stdout);
-            assert!(!candidates.contains("--no-trigger-schemas"), "{words:?} {prefix}: {candidates}");
-            if prefix != "--no-t" {
-                assert!(candidates.contains("--no-schema-triggers"), "{words:?} {prefix}: {candidates}");
+        for prefix in ["--no-", "--no-t", "--no-s", "--no-b"] {
+            let candidates = complete(words, prefix);
+            for removed in ["--no-trigger-schemas", "--no-schema-triggers", "--no-baseline-schema"] {
+                assert!(!candidates.contains(removed), "{words:?} {prefix}: {candidates}");
             }
+        }
+        let values = complete(&[words, &["--disable"]].concat(), "");
+        for value in ["schema-triggers", "baseline-schema"] {
+            assert!(values.contains(value), "{words:?} --disable: {values}");
         }
     }
 }

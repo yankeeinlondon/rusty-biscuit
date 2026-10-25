@@ -2,6 +2,7 @@
 //! compose pipeline runner, the shell-command report, and the compose
 //! performance report.
 
+use crate::args::policy::ResolvedPolicy;
 use crate::args::{Cli, OutputFormat};
 use crate::artifact::{
     OutputArtifact, html_artifact, json_artifact, markdown_plus_artifact,
@@ -17,29 +18,18 @@ use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
 mod lifecycle;
+pub(crate) mod report;
 
-/// Resolved allow flags for compose validation.
-pub struct ComposeAllowFlags {
-    pub hyperlinks: bool,
-    pub image_refs: bool,
-    pub transclusions: bool,
-}
+use report::{ClassifiedFailure, ReportSink, ReportedExit};
 
-impl ComposeAllowFlags {
-    /// Returns `true` if no allow flags are set (strict mode).
-    fn is_strict(&self) -> bool {
-        !self.hyperlinks && !self.image_refs && !self.transclusions
-    }
-
-    /// Returns `true` if the given issue kind is allowed by the current flags.
-    fn is_allowed(&self, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
-        use darkmatter::markdown::reference::types::ReferenceKind;
-        match kind {
-            ReferenceKind::Hyperlink => self.hyperlinks,
-            ReferenceKind::Image => self.image_refs,
-            ReferenceKind::Transclusion => self.transclusions,
-            _ => false,
-        }
+/// Whether `policy` recovers a missing target of `kind`.
+fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    match kind {
+        ReferenceKind::Hyperlink => policy.recovers("missing-hyperlinks"),
+        ReferenceKind::Image => policy.recovers("missing-image-refs"),
+        ReferenceKind::Transclusion => policy.recovers("missing-transclusions"),
+        _ => false,
     }
 }
 
@@ -151,6 +141,25 @@ pub(crate) fn build_remote_read_config(
     }
 }
 
+/// Refuses `--show` and `--shell` beside `--output report-json`: the report
+/// is the command's only output.
+///
+/// ## Errors
+///
+/// A clap `ArgumentConflict` usage error.
+pub(crate) fn reject_report_conflicts(show: bool, shell: bool) -> Result<()> {
+    let conflict = [(show, "--show"), (shell, "--shell")].into_iter().find_map(|(set, flag)| set.then_some(flag));
+    match conflict {
+        Some(flag) => Err(crate::args::policy::usage_error(
+            crate::args::policy::PolicyCommand::Compose,
+            clap::error::ErrorKind::ArgumentConflict,
+            format!("the argument '--output report-json' cannot be used with '{flag}'"),
+        )
+        .into()),
+        None => Ok(()),
+    }
+}
+
 /// Run the compose pipeline.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(command = "compose"))]
@@ -164,21 +173,16 @@ pub fn run_compose(
     include_frontmatter: bool,
     list_spacing: ListItemPadding,
     indent: Option<usize>,
-    allow: &ComposeAllowFlags,
-    allow_ctx_override: bool,
-    allow_invalid_frontmatter_assignment: bool,
-    allow_reassigned_frontmatter_property: bool,
+    policy: &ResolvedPolicy,
     baseline_schema: Option<&PathBuf>,
-    no_baseline_schema: bool,
-    no_schema_triggers: bool,
     timeout_secs: Option<u64>,
-    allow_shell_timeout: bool,
     shell_report: bool,
     perf: bool,
     remote_config: darkmatter::markdown::compose::RemoteReadConfig,
     cache_root: Option<&PathBuf>,
     cli: &Cli,
     request: &MdRequest,
+    sink: Option<&ReportSink>,
 ) -> Result<()> {
     info!("starting compose pipeline");
     use biscuit_terminal::terminal::Terminal;
@@ -254,8 +258,10 @@ pub fn run_compose(
     // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
-    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema, request)?;
-    options = options.with_trigger_schemas(!no_schema_triggers);
+    options = apply_compose_baseline_schema(options, baseline_schema, policy.disables("baseline-schema"), request)?;
+    options = options.with_trigger_schemas(!policy.disables("schema-triggers"));
+    let blocking = policy.blocking_policy();
+    options = options.with_blocking_policy(blocking.clone());
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -313,12 +319,22 @@ pub fn run_compose(
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
     let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
-        match check_references(&md, &prepare_request(options.clone())?, allow) {
+        match check_references(&md, &prepare_request(options.clone())?, policy) {
             ReferenceCheck::Clean => None,
-            ReferenceCheck::Report(report) => Some(report),
+            ReferenceCheck::Report(report) => {
+                if let Some(sink) = sink {
+                    sink.references(&report);
+                }
+                Some(report)
+            }
             ReferenceCheck::Refused(report) => {
+                if let Some(sink) = sink {
+                    sink.references(&report);
+                    return Err(ReportedExit(2).into());
+                }
                 let term = term_cell.get_or_init(Terminal::default);
                 eprint!("{}", render_reference_report(&report, term));
+                eprint!("{}", render_reference_warnings(&report, term));
                 std::process::exit(2);
             }
         }
@@ -372,15 +388,16 @@ pub fn run_compose(
         } else {
             None
         };
-    if allow_shell_timeout {
+    if policy.recovers("shell-timeout") {
         options = options.with_allow_shell_timeout(true);
     }
     options = options.with_list_spacing(list_spacing);
-    options = options.with_allow_ctx_override(allow_ctx_override);
-    options =
-        options.with_allow_invalid_frontmatter_assignment(allow_invalid_frontmatter_assignment);
-    options =
-        options.with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
+    options = options.with_allow_ctx_override(policy.recovers("ctx-override"));
+    options = options.with_allow_missing_transclusions(policy.recovers("missing-transclusions"));
+    options = options
+        .with_allow_invalid_frontmatter_assignment(policy.recovers("invalid-frontmatter-assignment"));
+    options = options
+        .with_allow_reassigned_frontmatter_property(policy.recovers("reassigned-frontmatter-property"));
     options = options.with_perf(perf);
     options = options.with_remote_read_config(remote_config);
     options = options.with_allow_remote_transclusion(true);
@@ -402,6 +419,12 @@ pub fn run_compose(
         Some(config) => lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request)?,
         None => Vec::new(),
     };
+    if let Some(sink) = sink {
+        sink.warnings(&lifecycle_warnings);
+    }
+    // The lifecycle check is passive: a warning it blocks stops the command
+    // before `initialize` or any composition runs.
+    blocked_diagnostics(&blocking, &lifecycle_warnings, &[])?;
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
@@ -422,8 +445,10 @@ pub fn run_compose(
         output,
         show,
         include_frontmatter,
+        strict_style: policy.denies("style"),
         cli,
         input,
+        sink,
     };
 
     if let Some(config) = lifecycle {
@@ -434,7 +459,7 @@ pub fn run_compose(
             config,
             source_path: lifecycle_source,
             approval_handler: preflight_handler,
-            check_references: is_file_input.then_some(allow),
+            check_references: is_file_input.then_some(policy),
             document,
             verbose: cli.verbose,
             call_warnings: lifecycle_warnings,
@@ -482,9 +507,20 @@ pub fn run_compose(
         }
     }
 
-    let (composed, mut report) = md.compose_with(&compose_request).map_err(compose_error)?;
+    let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|failure| {
+        if let Some(sink) = sink {
+            sink.warnings(&failure.warnings);
+        }
+        compose_error(failure.error)
+    })?;
+    if let Some(sink) = sink {
+        sink.warnings(&report.warnings);
+    }
     // The lifecycle surfaces' call warnings lead: their check ran first.
     report.warnings.splice(0..0, lifecycle_warnings);
+    // A warning found while composing stops the command before the document
+    // is written; the effects that ran are not undone.
+    blocked_diagnostics(&blocking, &report.warnings, &[])?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Verbose compose summary
@@ -519,7 +555,9 @@ pub fn run_compose(
     }
 
     document.emit(&composed)?;
-    report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
+    if sink.is_none() {
+        report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
+    }
 
     // Emit perf report to stderr (after all other diagnostics)
     if perf {
@@ -549,8 +587,14 @@ pub(crate) struct DocumentOutput<'a> {
     pub(crate) output: OutputFormat,
     pub(crate) show: bool,
     pub(crate) include_frontmatter: bool,
+    /// `--deny style`: the HTML and MarkdownPlus artifacts reject the
+    /// `style:` issues it selects.
+    pub(crate) strict_style: bool,
     pub(crate) cli: &'a Cli,
     pub(crate) input: Option<&'a PathBuf>,
+    /// `--output report-json`: the document goes into the report instead of
+    /// stdout, and the warnings into its diagnostics.
+    pub(crate) sink: Option<&'a ReportSink>,
 }
 
 impl DocumentOutput<'_> {
@@ -573,8 +617,8 @@ impl DocumentOutput<'_> {
             // `markdown-plus` routes the composed document through the
             // MarkdownPlus fold so disclosure blocks emit `<details>` /
             // `<summary>` inline HTML rather than the DSL verbatim.
-            OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input),
-            OutputFormat::Html => html_artifact(composed, self.cli, self.input),
+            OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input, self.strict_style),
+            OutputFormat::Html => html_artifact(composed, self.cli, self.input, self.strict_style),
             OutputFormat::Json => json_artifact(composed),
         }
     }
@@ -587,6 +631,10 @@ impl DocumentOutput<'_> {
 
     fn emit(&self, composed: &Markdown) -> Result<()> {
         let artifact = self.artifact(composed)?;
+        if let Some(sink) = self.sink {
+            sink.document(artifact.content);
+            return Ok(());
+        }
         if self.prints() {
             println!("{}", artifact.content);
         }
@@ -602,13 +650,19 @@ pub(crate) enum ReferenceCheck {
     Clean,
     /// Issues that never fail the run, reported after the content.
     Report(darkmatter::markdown::reference::validate::ReferenceValidationReport),
-    /// An error the allow flags do not cover.
+    /// An error no recovery covers, or a reported issue the deny policy
+    /// selects.
     Refused(darkmatter::markdown::reference::validate::ReferenceValidationReport),
 }
 
 /// Validates references with the same request composition will use, so
 /// interpolation inside transclusion targets resolves as it will compose.
-pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, allow: &ComposeAllowFlags) -> ReferenceCheck {
+///
+/// An error `policy` does not recover refuses the document, and so does a
+/// reported issue its blocking policy selects.
+pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> ReferenceCheck {
+    use darkmatter::markdown::compose::expression::Severity;
+    use darkmatter::markdown::compose::policy::missing_reference_code;
     use darkmatter::markdown::reference::ReferenceGraphOptions;
     use darkmatter::markdown::reference::validate::{
         ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
@@ -619,27 +673,64 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, allow: &
         return ReferenceCheck::Clean;
     };
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
-    if has_errors {
-        let has_unallowed = report
-            .issues
-            .iter()
-            .any(|i| i.severity == ReferenceSeverity::Error && !allow.is_allowed(i.kind));
-        if allow.is_strict() || has_unallowed {
-            return ReferenceCheck::Refused(report);
-        }
-        // All errors are allowed — defer report for stderr after content
-        return ReferenceCheck::Report(report);
-    }
-    // Warnings (such as a missing link inside inserted data) never fail the
-    // run; report them after the content.
     if report
         .issues
         .iter()
-        .any(|i| i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget)
+        .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i.kind))
     {
+        return ReferenceCheck::Refused(report);
+    }
+    // Warnings (such as a missing link inside inserted data) never fail the
+    // run unless denied; report them after the content.
+    let has_warnings = report
+        .issues
+        .iter()
+        .any(|i| i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget);
+    let blocking = policy.blocking_policy();
+    let blocked = report.issues.iter().any(|issue| {
+        let severity = match issue.severity {
+            ReferenceSeverity::Error => Severity::Error,
+            ReferenceSeverity::Warning if issue.code == ReferenceIssueCode::MissingLocalTarget => Severity::Warning,
+            // Not reported, so never blocking.
+            ReferenceSeverity::Warning | ReferenceSeverity::Info => return false,
+        };
+        let code = (issue.code == ReferenceIssueCode::MissingLocalTarget).then(|| missing_reference_code(issue.kind)).flatten();
+        blocking.blocks(code, severity)
+    });
+    if blocked {
+        return ReferenceCheck::Refused(report);
+    }
+    if has_errors || has_warnings {
         return ReferenceCheck::Report(report);
     }
     ReferenceCheck::Clean
+}
+
+/// Fails with the warnings of `warnings` that `blocking` selects, carrying
+/// the rest as earlier warnings.
+///
+/// ## Errors
+///
+/// [`MarkdownError::BlockedDiagnostics`](darkmatter::markdown::MarkdownError::BlockedDiagnostics)
+/// when any warning blocks.
+pub(crate) fn blocked_diagnostics(
+    blocking: &darkmatter::markdown::compose::policy::BlockingPolicy,
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+    earlier: &[darkmatter::markdown::compose::ComposeWarning],
+) -> Result<()> {
+    let selected = blocking.blocking(warnings);
+    if selected.is_empty() {
+        return Ok(());
+    }
+    let earlier = earlier
+        .iter()
+        .chain(warnings.iter().filter(|warning| !blocking.blocks_warning(warning)))
+        .cloned()
+        .collect();
+    Err(compose_error(darkmatter::markdown::MarkdownError::BlockedDiagnostics {
+        blocking: selected.into_iter().cloned().collect(),
+        earlier,
+    }))
 }
 
 pub(crate) fn render_reference_report(
@@ -652,7 +743,19 @@ pub(crate) fn render_reference_report(
 }
 
 /// Maps a composition failure to the report `md` prints.
+///
+/// A shell failure is worded here, so it keeps the shared diagnostics of the
+/// typed error ([`ClassifiedFailure`]) for `--output report-json`.
 pub(crate) fn compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::eyre::Report {
+    use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+    if matches!(e, darkmatter::markdown::MarkdownError::ShellExpansion(_)) {
+        let diagnostics = error_diagnostics(&e);
+        return ClassifiedFailure::report(shell_compose_error(e), diagnostics);
+    }
+    e.into()
+}
+
+fn shell_compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::eyre::Report {
     use darkmatter::markdown::MarkdownError::ShellExpansion;
     use darkmatter::markdown::compose::ShellExpansionError;
 
@@ -743,21 +846,32 @@ pub(crate) fn report_compose_diagnostics(
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
-        // The view lists errors only; a warning (a missing link inside text an
-        // expression inserted) is reported line by line.
-        use biscuit_terminal::components::prose::Prose;
-        use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
-        for issue in report.issues.iter().filter(|i| {
-            i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
-        }) {
-            let markup = format!(
-                "{} <dim>(line {}, inside inserted text)</dim>",
-                Prose::escape_text_outside_code_spans(&issue.message),
-                issue.origin.line,
-            );
-            eprintln!("{}", warning_rows(&markup, term));
-        }
+        eprint!("{}", render_reference_warnings(report, term));
     }
+}
+
+/// The report's warnings, one row each: the reference view lists errors
+/// only, so a warning (a missing link inside text an expression inserted) is
+/// reported line by line.
+pub(crate) fn render_reference_warnings(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    use biscuit_terminal::components::prose::Prose;
+    use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
+    let mut rendered = String::new();
+    for issue in report.issues.iter().filter(|i| {
+        i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
+    }) {
+        let markup = format!(
+            "{} <dim>(line {}, inside inserted text)</dim>",
+            Prose::escape_text_outside_code_spans(&issue.message),
+            issue.origin.line,
+        );
+        rendered.push_str(&warning_rows(&markup, term));
+        rendered.push('\n');
+    }
+    rendered
 }
 
 /// A warning status for `markup`, whose further lines (a `hint:` or
@@ -855,7 +969,7 @@ fn print_shell_command_report(
 ///
 /// Printed alongside the shell approval candidates because both answer the
 /// same question: which effects would a compose run perform. `Granted` is
-/// whether an existing `--allow-host` entry already permits the target; an
+/// whether an existing `--allow host=HOST` entry already permits the target; an
 /// ungranted probe is the one that needs a new grant.
 fn print_icmp_effect_report(probes: &[darkmatter::markdown::compose::PlannedIcmpProbe]) {
     println!();
@@ -923,6 +1037,16 @@ fn approval_required_report(
 pub(crate) fn preflight_approval_error(
     err: darkmatter::markdown::compose::ShellExpansionError,
 ) -> color_eyre::eyre::Report {
+    use darkmatter::markdown::compose::ShellExpansionError;
+    use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+    if matches!(err, ShellExpansionError::Preflight(_)) {
+        return preflight_approval_message(err);
+    }
+    let diagnostics = error_diagnostics(&err);
+    ClassifiedFailure::report(preflight_approval_message(err), diagnostics)
+}
+
+fn preflight_approval_message(err: darkmatter::markdown::compose::ShellExpansionError) -> color_eyre::eyre::Report {
     use darkmatter::markdown::compose::ShellExpansionError;
     match err {
         // A rich error surfaced during pre-flight (transform parse, ctx merge,

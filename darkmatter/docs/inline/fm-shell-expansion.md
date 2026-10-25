@@ -77,7 +77,7 @@ diff: "$(git diff --quiet)::result"
 | exits `0` | trimmed stdout | `true` | `0` | `{ ok: true, code: 0, stdout, stderr }` |
 | exits `N` ≠ 0 | compose error | `false` | `N` | `{ ok: false, code: N, stdout, stderr }` |
 | times out, default | compose error | compose error | compose error | compose error |
-| times out, `--allow-shell-timeout` | `""` and a warning | `false` | `null` | `{ ok: false, code: null, stdout: "", stderr: "" }` |
+| times out, `--allow shell-timeout` | `""` and a warning | `false` | `null` | `{ ok: false, code: null, stdout: "", stderr: "" }` |
 
 `ok` is always `code == 0`, and `stdout`/`stderr` are trimmed the way plain
 stdout is. The values are typed: `::ok` is a real boolean, `::exit-code` a real
@@ -113,7 +113,7 @@ lint: "$( has_command('just') ? just lint : 'skipped' )::result" # { ok: true, c
 ```
 
 To learn **which** command in a chain failed, give each its own property.
-Under `--allow-shell-timeout`, a timed-out command in a chain counts as a
+Under `--allow shell-timeout`, a timed-out command in a chain counts as a
 success for `&&`/`||`, as it always has, and its code is `null` only when it is
 the last command that ran.
 
@@ -154,7 +154,7 @@ two frontmatter interpolation passes and before EffectiveState construction:
 4. **Schema Validation** -- validate/coerce frontmatter against `$schema`; problems on a whole-value `$(...)`, and on a key whose `{{ }}` template reads one, are deferred to step 7. `$(...)` text anywhere else (in a list item, a mapping, or after other text) is never expanded, so it is judged here as written
 5. **Frontmatter Shell Expansion** -- execute `$(cmd)` expressions
 6. **Frontmatter Interpolation (pass 2)** -- resolve only the keys deferred in pass 1, from their authored source, against the now-concrete shell-expanded values; shell output itself is never scanned
-7. **Schema Validation (post-shell)** -- the resolved frontmatter is validated and coerced against the effective schema (`$schema`, baseline, and matched triggers; `--no-schema-triggers` removes only the triggers). Nothing later resolves frontmatter, so no problem is deferred: a value that still holds `$(...)` or `{{ }}` text is judged as that text. Unsuffixed stdout is judged as text, and a value a result suffix produced is judged as what it produced, so a property declared `boolean` is checked against what `::ok` returned; a mismatch is a compose error. A library caller that sets `ComposeOptions::with_caller_owned_post_shell_verdict(true)` judges unsuffixed stdout itself; compose still judges result-suffix values and, with trigger schemas enabled, runs the full pass
+7. **Schema Validation (post-shell)** -- the resolved frontmatter is validated and coerced against the effective schema (`$schema`, baseline, and matched triggers; `--disable schema-triggers` removes only the triggers). Nothing later resolves frontmatter, so no problem is deferred: a value that still holds `$(...)` or `{{ }}` text is judged as that text. Unsuffixed stdout is judged as text, and a value a result suffix produced is judged as what it produced, so a property declared `boolean` is checked against what `::ok` returned; a mismatch is a compose error. A library caller that sets `ComposeOptions::with_caller_owned_post_shell_verdict(true)` judges unsuffixed stdout itself; compose still judges result-suffix values and, with trigger schemas enabled, runs the full pass
 8. Build EffectiveState
 9. Body operations continue...
 
@@ -238,7 +238,7 @@ This keeps approval preflight aligned with the commands that real compose will e
 
 Frontmatter shell expansion has **no error-recovery options**. Without a result suffix, any non-zero exit code, missing executable, blacklisted command, denied approval, or malformed shell expression results in an immediate compose error. A result suffix forgives only the exit status; see [Reading a Command's Result](#reading-a-commands-result). This is intentionally simpler than body `::shell` directives. The error stops the composition in a transcluded file as well as in the root document.
 
-Timeout failures follow the timeout behavior configured via `--allow-shell-timeout` (CLI) or `ComposeOptions::with_allow_shell_timeout()` (library).
+Timeout failures follow the timeout behavior configured via `--allow shell-timeout` (CLI) or `ComposeOptions::with_allow_shell_timeout()` (library).
 
 ### Post-Expansion Leak Guard
 
@@ -302,7 +302,7 @@ c: "$(git diff --quiet)::ok"
 - Override per-command: `$(cmd)::timeout:<seconds>`
 - Timeout outcome:
     - Default: compose error, with or without a result suffix
-    - With `--allow-shell-timeout`: empty string replacement + warning; with a
+    - With `--allow shell-timeout`: empty string replacement + warning; with a
       result suffix, `false`, `null`, or `{ ok: false, code: null, … }`
 
 ## Compose Reporting

@@ -118,7 +118,7 @@ Collecting them sends no packet: discovery records the plan and answers `null`.
 A probe inside `as_markdown` content is discovered the same way, because that
 content is walked as a child of the document that named it.
 
-The grant itself comes from `--allow-host` (`ComposeOptions::with_allowed_host`),
+The grant itself comes from `--allow host=HOST` (`ComposeOptions::with_allowed_host`),
 which is one entry point for two disjoint policies:
 
 - An **exact IP literal** grants ICMP to that address and, as before, HTTP to
@@ -459,7 +459,7 @@ session over any reader and writer, which is how the prompt is tested.
 - Override globally: `--timeout <seconds>` (CLI) or `ComposeOptions::with_shell_timeout()` (library)
 - Override per-command: `$(cmd)::timeout:<seconds>` (frontmatter only)
 - Default timeout behavior: compose error
-- With `--allow-shell-timeout`: timed-out commands are replaced with an empty string and compose emits a warning instead of failing
+- With `--allow shell-timeout`: timed-out commands are replaced with an empty string and compose emits a warning instead of failing
 
 ## Integration with External Tools
 

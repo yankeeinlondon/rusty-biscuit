@@ -22,6 +22,7 @@ pub fn run_render(
     output: OutputFormat,
     show: bool,
     indent: Option<usize>,
+    strict_style: bool,
     cli: &Cli,
     request: &MdRequest,
 ) -> Result<()> {
@@ -48,9 +49,7 @@ pub fn run_render(
         OutputFormat::Auto => {
             if stdout_is_tty {
                 let term = Terminal::new();
-                render_terminal_output(
-                    &md, input, cli, term,
-                )?;
+                render_terminal_output(&md, input, cli, term, strict_style)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -62,13 +61,11 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::MarkdownPlus => {
-            let artifact = markdown_plus_artifact(&md, cli, input,
-            )?;
+            let artifact = markdown_plus_artifact(&md, cli, input, strict_style)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, cli, input,
-            )?;
+            let artifact = html_artifact(&md, cli, input, strict_style)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {

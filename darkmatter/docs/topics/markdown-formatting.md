@@ -473,7 +473,7 @@ frontmatter keys do not affect `style.markdown`.
 
 `style.markdown` is read only by `md clean`, `md FILE --save`, and DMLS
 formatting. `md FILE` rendering accepts the keys as valid style (including
-under `--strict-style`), but it tidies the body with the built-in defaults
+under `--deny style`), but it tidies the body with the built-in defaults
 and `--indent`, not with the document's settings. Compose's own cleanup step
 takes its settings from compose options, not from the document either. See
 [Cleaning](../inline/cleaning.md).

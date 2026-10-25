@@ -147,7 +147,7 @@ fn test_compose_allow_shell_timeout_emits_warning() {
         .arg(&md_path)
         .arg("--timeout")
         .arg("1")
-        .arg("--allow-shell-timeout")
+        .args(["--allow", "shell-timeout"])
         .assert()
         .success()
         .stdout(predicate::str::contains("# Test"))

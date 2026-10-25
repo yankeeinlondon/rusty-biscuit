@@ -1739,6 +1739,33 @@ pub enum ValidationProblemCode {
     InvalidFileReference,
 }
 
+/// Code of a frontmatter value whose type does not match its declaration.
+pub const SCHEMA_TYPE_MISMATCH_CODE: &str = "dm.schema.type_mismatch";
+/// Code of a failed non-type constraint (range, length, pattern, enum, …).
+pub const SCHEMA_CONSTRAINT_CODE: &str = "dm.schema.constraint";
+/// Code of an absent required key.
+pub const SCHEMA_MISSING_REQUIRED_CODE: &str = "dm.schema.missing_required";
+/// Code of a key the schema does not declare.
+pub const SCHEMA_UNKNOWN_KEY_CODE: &str = "dm.schema.unknown_key";
+/// Code of a `file(...)`-typed value that failed to parse, resolve, or match.
+pub const SCHEMA_INVALID_FILE_REFERENCE_CODE: &str = "dm.schema.invalid_file_reference";
+/// Code of a schema that could not be resolved, merged, or compiled.
+pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
+
+impl ValidationProblemCode {
+    /// The shared diagnostic code DMLS and `md compose --output report-json`
+    /// report this problem under.
+    pub fn diagnostic_code(self) -> &'static str {
+        match self {
+            Self::MissingRequired => SCHEMA_MISSING_REQUIRED_CODE,
+            Self::TypeMismatch => SCHEMA_TYPE_MISMATCH_CODE,
+            Self::ConstraintViolation => SCHEMA_CONSTRAINT_CODE,
+            Self::UnknownKey => SCHEMA_UNKNOWN_KEY_CODE,
+            Self::InvalidFileReference => SCHEMA_INVALID_FILE_REFERENCE_CODE,
+        }
+    }
+}
+
 /// A parsed RFC 6901 JSON Pointer.
 ///
 /// [`ValidationProblem::path`] carries the raw pointer string (`/tags/2`); this

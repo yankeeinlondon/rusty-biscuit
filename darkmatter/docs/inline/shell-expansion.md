@@ -168,7 +168,7 @@ Error: Shell command timed out after 10s at line 4: 'just ci-local --plan'
 ```
 
 - `md compose --timeout <seconds>` changes the limit for every command in the run. In the library, use `ComposeOptions::with_shell_timeout()`.
-- `md compose --allow-shell-timeout` turns a timeout into an empty insertion and a warning instead of an error. In the library, use `ComposeOptions::with_allow_shell_timeout(true)`.
+- `md compose --allow shell-timeout` turns a timeout into an empty insertion and a warning instead of an error (see [Policy Flags](../cli/policy.md)). In the library, use `ComposeOptions::with_allow_shell_timeout(true)`.
 - A single `::shell` line cannot set its own limit. A [shell block](./shell-blocks.md) can (`timeout=60`), and so can a [frontmatter expression](./fm-shell-expansion.md) (`::timeout:60`).
 
 ## Caching

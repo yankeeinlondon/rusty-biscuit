@@ -246,7 +246,7 @@ fn parse_attributes_legacy(attribute_str: &str) -> HorizontalRuleAttrs {
 /// the HR-attribute pattern, returning any deprecation warnings emitted for
 /// legacy inline `style` attributes (`--- { style: waves }`).
 ///
-/// This is a preflight helper for `--strict-style`: callers can check the
+/// This is a preflight helper for `--deny style`: callers can check the
 /// returned warnings before rendering and promote them to errors when strict
 /// mode is enabled.
 ///

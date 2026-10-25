@@ -192,7 +192,7 @@ layout, and page/component `color` / `bg-color`. The active phase is
 style remain planned.
 
 CLI precedence is field-level: invocation flags win over frontmatter. Use
-`md --strict-style` to fail on unknown or deprecated `style:` keys while still
+`md --deny style` to fail on unknown or deprecated `style:` keys while still
 allowing valid future-phase keys to report as `KnownButInactive`.
 
 ### Markdown (`markdown.rs`)

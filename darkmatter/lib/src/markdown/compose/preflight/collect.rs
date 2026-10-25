@@ -793,6 +793,8 @@ fn collect_recursive(
                 }
                 Ok(transclusion::ResolvedTarget::Url { url, .. }) => super::PreflightResolvedTarget::Url(url),
                 Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+                // Composition removes it, so nothing of it can run.
+                Err(e) if removes_missing(options, &e) => continue,
                 Err(e) => return Err(e.into()),
             };
             targets.push(super::PreflightTargetEdge {
@@ -818,6 +820,8 @@ fn collect_recursive(
             // Remote transclusion disabled: the child cannot appear in the
             // composed output, so its commands can never execute.
             Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+            // A missing target composition removes contributes no command.
+            Err(e) if removes_missing(options, &e) => continue,
             Err(e) => return Err(e.into()),
         };
 
@@ -2057,6 +2061,12 @@ fn detect_dynamic_command_shape(
     }
 
     Ok(())
+}
+
+/// Whether composition removes the transclusion `err` failed to resolve
+/// (the missing-transclusion recovery), so preflight skips it.
+fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
+    options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
 }
 
 #[cfg(test)]

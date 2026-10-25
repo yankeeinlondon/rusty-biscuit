@@ -1,6 +1,6 @@
 //! ICMP consent through the normal `md compose` path (AC6, AC33).
 //!
-//! `--allow-host` is one entry point for two disjoint policies. Every case
+//! `--allow host=HOST` is one entry point for two disjoint policies. Every case
 //! here uses targets no entry grants, or the packet-free `--shell` preflight,
 //! so the tests send no ICMP and open no socket.
 
@@ -21,7 +21,7 @@ fn preflight_reports_planned_icmp_effects_and_their_cidr_grant() {
 
     fixture
         .command()
-        .args(["compose", "--shell", "--allow-host", "10.77.0.0/16"])
+        .args(["compose", "--shell", "--allow", "host=10.77.0.0/16"])
         .arg(&document)
         .assert()
         .success()
@@ -41,13 +41,13 @@ fn an_ungranted_target_is_denied_with_one_warning() {
 
     fixture
         .command()
-        .args(["compose", "--allow-host", "10.77.0.0/16"])
+        .args(["compose", "--allow", "host=10.77.0.0/16"])
         .arg(&document)
         .assert()
         .success()
         .stdout(predicate::str::contains("{{").not())
         .stderr(predicate::str::contains("10.99.1.5"))
-        .stderr(predicate::str::contains("--allow-host"));
+        .stderr(predicate::str::contains("--allow host="));
 }
 
 /// AC33: a CIDR grant is ICMP-only. The same entry does not put any address in
@@ -60,7 +60,7 @@ fn a_cidr_grant_does_not_authorize_http_to_that_range() {
 
     fixture
         .command()
-        .args(["compose", "--allow-host", "10.77.0.0/16"])
+        .args(["compose", "--allow", "host=10.77.0.0/16"])
         .arg(&document)
         .assert()
         .failure()

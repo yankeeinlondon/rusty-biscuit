@@ -106,8 +106,8 @@ fn empty_frontmatter_produces_no_findings() {
 }
 
 /// With the baseline disabled and triggers off there is no schema at all, so
-/// the tier is fully inert — the configuration `--no-baseline-schema
-/// --no-schema-triggers` selects.
+/// the tier is fully inert — the configuration `--disable baseline-schema
+/// --disable schema-triggers` selects.
 #[test]
 #[serial]
 fn schema_free_configuration_resolves_no_effective_schema() {

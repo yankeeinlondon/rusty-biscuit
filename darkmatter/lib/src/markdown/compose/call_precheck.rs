@@ -57,6 +57,13 @@ pub(crate) enum PrecheckFailure {
     Frontmatter(LocatedFrontmatterError),
     /// In the body, already located.
     Body(MarkdownError),
+    /// Warnings the request's blocking policy selects
+    /// ([`ComposeOptions::with_blocking_policy`](super::ComposeOptions::with_blocking_policy)),
+    /// with the precheck's other warnings.
+    Blocked {
+        blocking: Vec<ComposeWarning>,
+        rest: Vec<ComposeWarning>,
+    },
 }
 
 /// A shown warning of one call, where its scanned text holds it.
@@ -140,7 +147,8 @@ fn expression_start(text: &str, location: &ExpressionLocation) -> usize {
 /// ## Errors
 ///
 /// The first rejected call (frontmatter first, then the body in document
-/// order), carrying [`ExpressionError::CallCheck`].
+/// order), carrying [`ExpressionError::CallCheck`]; or, when no call is
+/// rejected, the warnings the request's blocking policy selects.
 pub(crate) fn check_document(
     markdown: &Markdown,
     provenance: &FrontmatterProvenance,
@@ -155,7 +163,13 @@ pub(crate) fn check_document(
             .map_err(PrecheckFailure::Frontmatter)?;
     }
     check_body(markdown, options, &site, &mut advisories).map_err(PrecheckFailure::Body)?;
-    Ok(advisory_warnings(markdown, options, advisories))
+    let warnings = advisory_warnings(markdown, options, advisories);
+    let policy = options.blocking_policy();
+    if policy.blocking(&warnings).is_empty() {
+        return Ok(warnings);
+    }
+    let (blocking, rest) = warnings.into_iter().partition(|warning| policy.blocks_warning(warning));
+    Err(PrecheckFailure::Blocked { blocking, rest })
 }
 
 fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advisories: Advisories) -> Vec<ComposeWarning> {

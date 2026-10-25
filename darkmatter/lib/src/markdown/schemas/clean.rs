@@ -49,7 +49,7 @@ use crate::markdown::Markdown;
 /// The default is Darkmatter's built-in baseline (covering the
 /// Darkmatter-owned `ctx`, `hash`, `style`, and `replace` keys); the CLI's
 /// `--baseline-schema PATH` maps to [`CleanBaselineSchema::File`] and
-/// `--no-baseline-schema` to [`CleanBaselineSchema::Disabled`].
+/// `--disable baseline-schema` to [`CleanBaselineSchema::Disabled`].
 #[derive(Debug, Clone, Default)]
 pub enum CleanBaselineSchema {
     /// Darkmatter's built-in baseline schema.
@@ -110,7 +110,7 @@ impl CleanSchemaConfig {
         self
     }
 
-    /// Disables the baseline entirely (`--no-baseline-schema`).
+    /// Disables the baseline entirely (`--disable baseline-schema`).
     #[must_use]
     pub fn without_baseline_schema(mut self) -> Self {
         self.baseline = CleanBaselineSchema::Disabled;
@@ -131,7 +131,7 @@ impl CleanSchemaConfig {
     }
 
     /// Enables or disables repository schema-trigger discovery and bare-name
-    /// schema-root lookup (`--no-schema-triggers`).
+    /// schema-root lookup (`--disable schema-triggers`).
     #[must_use]
     pub fn with_trigger_schemas(mut self, enabled: bool) -> Self {
         self.trigger_schemas = enabled;

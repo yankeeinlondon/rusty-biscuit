@@ -270,7 +270,7 @@ fn template_input_failures_are_never_suppressed() {
     let recorder = Recorder::new("template_unsuppressed_directive");
     recorder.write("doc.md", "::shell --when-error fallback argv-recorder {{ v }}\n");
     recorder.whitelist(&template_rule("argv-recorder {{ v }}"));
-    let assert = recorder.compose(&["v=[1]", "--allow-shell-timeout"]).failure();
+    let assert = recorder.compose(&["v=[1]", "--allow", "shell-timeout"]).failure();
     assert!(mentions(&stderr_of(&assert), "is an array or object"), "{}", stderr_of(&assert));
     assert!(!String::from_utf8_lossy(&assert.get_output().stdout).contains("fallback"));
 

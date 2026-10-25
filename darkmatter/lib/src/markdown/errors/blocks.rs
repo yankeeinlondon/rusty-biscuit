@@ -249,6 +249,22 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the block for warnings a blocking policy made fatal. Each row is
+/// the warning's own message, which is already Prose markup.
+pub(crate) fn blocked_diagnostics_block(blocking: &[crate::markdown::compose::ComposeWarning]) -> StatusBlock {
+    let rows: Vec<String> = blocking
+        .iter()
+        .map(|warning| match &warning.code {
+            Some(code) => format!("{} <dim>({})</dim>", warning.message, Prose::escape_text(code)),
+            None => warning.message.clone(),
+        })
+        .collect();
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "blocking diagnostics"))
+        .body(Prose::new(rows.join("\n")).with_line_breaks(LineBreaks::Hard))
+        .hint("These warnings fail the command because its policy denies them; fix them, or narrow the denial.")
+}
+
 /// Build the block for unstable caller file typing.
 pub(crate) fn caller_file_classification_changed_block(property: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)

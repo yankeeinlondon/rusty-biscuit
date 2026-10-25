@@ -37,13 +37,17 @@ use darkmatter::lifecycle::run::ApprovalEpoch;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry, ShellRuleSet};
+use darkmatter::markdown::compose::report_diagnostics::lifecycle_failure_diagnostics;
 use darkmatter::markdown::compose::{ComposeOperation, ComposeReport, ComposeRequest, ComposeWarning};
 use serde_json::{Map, Value};
 
+use crate::args::policy::ResolvedPolicy;
+
 use super::{
-    ComposeAllowFlags, DocumentOutput, ReferenceCheck, check_references, compose_error, open_output_artifact,
-    preflight_approval_error, render_reference_report, report_compose_diagnostics,
+    DocumentOutput, ReferenceCheck, blocked_diagnostics, check_references, compose_error, open_output_artifact,
+    preflight_approval_error, render_reference_report, render_reference_warnings, report_compose_diagnostics,
 };
+use super::report::ReportedExit;
 
 /// The root document's lifecycle under the `md` profile, or `None` when it
 /// authors none of `md`'s events.
@@ -112,8 +116,8 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) config: LifecycleConfig,
     pub(super) source_path: PathBuf,
     pub(super) approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
-    /// The allow flags, when the root is a file whose references are checked.
-    pub(super) check_references: Option<&'a ComposeAllowFlags>,
+    /// The policy, when the root is a file whose references are checked.
+    pub(super) check_references: Option<&'a ResolvedPolicy>,
     pub(super) document: DocumentOutput<'a>,
     pub(super) verbose: u8,
     /// The lifecycle surfaces' call warnings ([`reject_incompatible_calls`]),
@@ -131,14 +135,22 @@ pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
     let interrupted = install_interrupt_handler();
     ignore_broken_pipe_signal();
     let term = Terminal::default();
-    let effects = TerminalEffects { term: &term, stdout_is_terminal: std::io::stdout().is_terminal() };
+    let sink = compose.document.sink;
+    let effects = TerminalEffects {
+        term: &term,
+        stdout_is_terminal: std::io::stdout().is_terminal(),
+        stdout_is_report: sink.is_some(),
+    };
     let mut host = ComposeHost::new(compose, bootstrap, &effects, interrupted);
     let config = host.config.clone();
     let end = md_host::drive(&mut host, &config);
     if let Some(error) = &end.error
         && host.reported.as_deref() != Some(error.msg.as_str())
     {
-        effects.status(StatusState::Error, &error.msg);
+        match sink {
+            Some(sink) => sink.diagnostics(lifecycle_failure_diagnostics(error)),
+            None => effects.status(StatusState::Error, &error.msg),
+        }
     }
     let code = match end.exit_code() {
         // Only while the refusal is still the selected error; a cleanup error
@@ -147,6 +159,9 @@ pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
         code => code,
     };
     if code != 0 {
+        if sink.is_some() {
+            return Err(ReportedExit(code).into());
+        }
         let _ = std::io::stderr().flush();
         std::process::exit(code);
     }
@@ -203,6 +218,9 @@ struct TerminalEffects<'t> {
     /// Off a terminal, stdout carries the Markdown document, so a `stdout`
     /// action's line joins it as authored rather than styled.
     stdout_is_terminal: bool,
+    /// `--output report-json`: stdout carries only the report, so a `stdout`
+    /// action's line and a command's output go to stderr.
+    stdout_is_report: bool,
 }
 
 impl TerminalEffects<'_> {
@@ -217,6 +235,10 @@ impl TerminalEffects<'_> {
 
 impl LifecycleEffects for TerminalEffects<'_> {
     fn stdout(&self, text: &str) {
+        if self.stdout_is_report {
+            self.prose_to_stderr(text);
+            return;
+        }
         let mut stdout = std::io::stdout().lock();
         // A closed stdout fails the document write, which the run reports;
         // an action's own line is not an operation of its own.
@@ -255,6 +277,10 @@ impl LifecycleEffects for TerminalEffects<'_> {
 
 impl CommandOutput for TerminalEffects<'_> {
     fn stdout(&self, text: &str) {
+        if self.stdout_is_report {
+            let _ = std::io::stderr().write_all(text.as_bytes());
+            return;
+        }
         let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(text.as_bytes()).and_then(|()| stdout.flush());
     }
@@ -271,7 +297,7 @@ struct ComposeHost<'a> {
     config: LifecycleConfig,
     source_path: PathBuf,
     approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
-    check_references: Option<&'a ComposeAllowFlags>,
+    check_references: Option<&'a ResolvedPolicy>,
     document: DocumentOutput<'a>,
     verbose: u8,
     call_warnings: Vec<ComposeWarning>,
@@ -335,7 +361,10 @@ impl<'a> ComposeHost<'a> {
 
     /// Renders `report` in full and returns the error the run selects.
     fn fail(&mut self, verb: &str, report: Report) -> LifecycleErrorInfo {
-        eprintln!("{}", render_report(&report));
+        match self.document.sink {
+            Some(sink) => sink.failure(&report),
+            None => eprintln!("{}", render_report(&report)),
+        }
         let error = LifecycleErrorInfo::from_action_failure_with(&md_host::MdDiagnostics, verb, report.to_string());
         self.reported = Some(error.msg.clone());
         error
@@ -345,9 +374,20 @@ impl<'a> ComposeHost<'a> {
         if let Some(allow) = self.check_references {
             match check_references(self.md, &self.request, allow) {
                 ReferenceCheck::Clean => {}
-                ReferenceCheck::Report(report) => self.deferred_report = Some(report),
+                ReferenceCheck::Report(report) => {
+                    if let Some(sink) = self.document.sink {
+                        sink.references(&report);
+                    }
+                    self.deferred_report = Some(report);
+                }
                 ReferenceCheck::Refused(report) => {
-                    eprint!("{}", render_reference_report(&report, self.effects.term));
+                    match self.document.sink {
+                        Some(sink) => sink.references(&report),
+                        None => {
+                            eprint!("{}", render_reference_report(&report, self.effects.term));
+                            eprint!("{}", render_reference_warnings(&report, self.effects.term));
+                        }
+                    }
                     self.refused_references = true;
                     return Err(("references", eyre!("the document has unresolved references")));
                 }
@@ -393,8 +433,19 @@ impl<'a> ComposeHost<'a> {
         }
 
         let (composed, mut report) =
-            self.md.compose_with(&self.request).map_err(|error| ("compose", compose_error(error)))?;
+            self.md.compose_with_warnings(&self.request).map_err(|failure| {
+                if let Some(sink) = self.document.sink {
+                    sink.warnings(&failure.warnings);
+                }
+                ("compose", compose_error(failure.error))
+            })?;
+        if let Some(sink) = self.document.sink {
+            sink.warnings(&report.warnings);
+        }
         report.warnings.splice(0..0, self.call_warnings.iter().cloned());
+        // A warning found while composing stops the run before `write`.
+        blocked_diagnostics(self.request.options().blocking_policy(), &report.warnings, &[])
+            .map_err(|error| ("compose", error))?;
         self.frontmatter =
             composed.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
         let mut live = self.live.lock().expect("live frontmatter lock");
@@ -409,6 +460,10 @@ impl<'a> ComposeHost<'a> {
     fn try_write(&self) -> Result<()> {
         let (composed, report) = self.composed.as_ref().expect("the run writes only after a preparation");
         let artifact = self.document.artifact(composed)?;
+        if let Some(sink) = self.document.sink {
+            sink.document(artifact.content);
+            return Ok(());
+        }
         if self.document.prints() {
             let mut stdout = std::io::stdout().lock();
             writeln!(stdout, "{}", artifact.content)

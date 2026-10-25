@@ -1,7 +1,8 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
+use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::{
-    CodeBlockOutput, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
+    CodeBlockOutput, ComposeOutputFormat, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
     complete_compose_args, complete_fixed_width_values, complete_indent_values,
     complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size,
     parse_theme_name,
@@ -34,6 +35,16 @@ pub enum Command {
             add = ArgValueCompleter::new(complete_indent_values)
         )]
         indent: Option<usize>,
+
+        /// Make the selected diagnostics blocking (repeatable; `all` for every warning)
+        #[arg(
+            long = "deny",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::Render, PolicyVerb::Deny),
+            long_help = policy::long_help(PolicyCommand::Render, PolicyVerb::Deny),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Render, PolicyVerb::Deny, current))
+        )]
+        deny: Vec<PolicySelector>,
     },
 
     /// Clean up markdown formatting.
@@ -90,16 +101,18 @@ pub enum Command {
         schema: Option<PathBuf>,
 
         /// Baseline SimplifiedSchema YAML file for frontmatter validation
-        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
+        #[arg(long, value_name = "PATH")]
         baseline_schema: Option<PathBuf>,
 
-        /// Disable the default Darkmatter baseline frontmatter schema
-        #[arg(long)]
-        no_baseline_schema: bool,
-
-        /// Disable trigger discovery and bare-name schema-root lookup
-        #[arg(long)]
-        no_schema_triggers: bool,
+        /// Stop a feature from running (repeatable)
+        #[arg(
+            long = "disable",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::Clean, PolicyVerb::Disable),
+            long_help = policy::long_help(PolicyCommand::Clean, PolicyVerb::Disable),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Clean, PolicyVerb::Disable, current))
+        )]
+        disable: Vec<PolicySelector>,
     },
 
     /// Compose a document through the compose pipeline.
@@ -120,9 +133,9 @@ pub enum Command {
         #[arg(long, value_name = "JSON")]
         set: Option<String>,
 
-        /// Output format (default: markdown for compose)
-        #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
-        output: OutputFormat,
+        /// Output format (default: markdown; `report-json` prints the composition report)
+        #[arg(long, value_enum, default_value_t = ComposeOutputFormat::Markdown)]
+        output: ComposeOutputFormat,
 
         /// Render composed content to stdout AND open in default app
         #[arg(long)]
@@ -149,53 +162,43 @@ pub enum Command {
         )]
         indent: Option<usize>,
 
-        /// Allow missing hyperlink targets (emit content, report errors on stderr)
-        #[arg(long)]
-        allow_missing_hyperlinks: bool,
-
-        /// Allow missing image reference targets (emit content, report errors on stderr)
-        #[arg(long)]
-        allow_missing_image_refs: bool,
-
-        /// Allow missing transclusion targets (remove directive, report errors on stderr)
-        #[arg(long)]
-        allow_missing_transclusions: bool,
-
-        /// Allow any missing reference (combines all --allow-missing-* flags)
-        #[arg(long)]
-        allow_any_missing_reference: bool,
-
-        /// Allow non-object ctx frontmatter (downgrade error to warning)
-        #[arg(long)]
-        allow_ctx_override: bool,
-
-        /// Allow invalid set= RHS on ::file directives (downgrade error to warning; sibling valid set clauses still apply)
-        #[arg(long)]
-        allow_invalid_frontmatter_assignment: bool,
-
-        /// Allow duplicate set.NAME= assignments on ::file directives (downgrade error to warning; rightmost wins)
-        #[arg(long)]
-        allow_reassigned_frontmatter_property: bool,
-
         /// Baseline SimplifiedSchema YAML file for compose-time frontmatter validation
-        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
+        #[arg(long, value_name = "PATH")]
         baseline_schema: Option<PathBuf>,
 
-        /// Disable the default Darkmatter baseline frontmatter schema
-        #[arg(long)]
-        no_baseline_schema: bool,
+        /// Permit a recovery or reads from a named host (repeatable; `all` for every recovery)
+        #[arg(
+            long = "allow",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::Compose, PolicyVerb::Allow),
+            long_help = policy::long_help(PolicyCommand::Compose, PolicyVerb::Allow),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Compose, PolicyVerb::Allow, current))
+        )]
+        allow: Vec<PolicySelector>,
 
-        /// Disable trigger discovery and bare-name schema-root lookup
-        #[arg(long)]
-        no_schema_triggers: bool,
+        /// Make the selected diagnostics blocking (repeatable; `all` for every warning)
+        #[arg(
+            long = "deny",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::Compose, PolicyVerb::Deny),
+            long_help = policy::long_help(PolicyCommand::Compose, PolicyVerb::Deny),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Compose, PolicyVerb::Deny, current))
+        )]
+        deny: Vec<PolicySelector>,
+
+        /// Stop a feature from running (repeatable)
+        #[arg(
+            long = "disable",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::Compose, PolicyVerb::Disable),
+            long_help = policy::long_help(PolicyCommand::Compose, PolicyVerb::Disable),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Compose, PolicyVerb::Disable, current))
+        )]
+        disable: Vec<PolicySelector>,
 
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]
         timeout: Option<u64>,
-
-        /// Convert shell timeout failures into empty strings instead of errors
-        #[arg(long)]
-        allow_shell_timeout: bool,
 
         /// Report condition-blind shell approval candidates (every command that
         /// could run under any state, including dead branches) without executing them
@@ -205,10 +208,6 @@ pub enum Command {
         /// Emit a compose performance report to stderr after completion
         #[arg(long)]
         perf: bool,
-
-        /// Allow remote reads from the specified host (repeatable)
-        #[arg(long, value_name = "HOST")]
-        allow_host: Vec<String>,
 
         /// Maximum concurrent remote fetches (default: 16, or $DARKMATTER_REMOTE_CONCURRENCY)
         #[arg(long, value_name = "N")]
@@ -232,7 +231,7 @@ pub enum Command {
         /// `::toc-linking` output) are never persisted. Nothing is created on
         /// disk until a storable remote response is written. A
         /// `Cache-Control: no-store` response is never written. A cache root
-        /// never authorizes a host; use `--allow-host`.
+        /// never authorizes a host; use `--allow host=HOST`.
         #[arg(long, value_name = "DIR")]
         cache_root: Option<PathBuf>,
     },

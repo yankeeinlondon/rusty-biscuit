@@ -16,7 +16,7 @@ Every variable on this page has a lazy twin at `current.<key>`: the same key and
 - If there is a `ctx` property defined on the page that is _not_ a dictionary then we will:
 
     - By default return an error and stop composition
-    - If the user uses the `--allow-ctx-override` CLI switch, downgrade to a warning and proceed with composition using the runtime context
+    - If the user uses the `--allow ctx-override` CLI switch, downgrade to a warning and proceed with composition using the runtime context
 
 ## Timing in Compose
 

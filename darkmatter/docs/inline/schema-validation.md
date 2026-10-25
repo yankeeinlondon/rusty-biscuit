@@ -189,20 +189,21 @@ disk. `md compose`, `md schema validate`, and DMLS all apply it by default.
 
 | # | Input | Baseline | Example |
 |---|-------|----------|---------|
-| 1 | `--no-baseline-schema` | none | `md schema validate post.md --no-baseline-schema` |
+| 1 | `--disable baseline-schema` | none | `md schema validate post.md --disable baseline-schema` |
 | 2 | `--schema <path>` | that file, even when the opt-out variable is set | `md schema validate post.md --schema ./schemas/baseline.yaml` |
 | 3 | `DARKMATTER_NO_BASELINE_SCHEMA` is `1`, `true`, `TRUE`, `yes`, or `YES` | none; `BASELINE_SCHEMA` is ignored | `DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md` |
 | 4 | `BASELINE_SCHEMA=<path>` | that file | `BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md` |
 | 5 | nothing | the built-in baseline | `md schema validate post.md` |
 
-`--no-baseline-schema` and `--schema` cannot be combined (a usage error, exit
+`--disable baseline-schema` and `--schema` cannot be combined (a usage error, exit
 `2`). A custom path resolves from the directory you ran the command in, and a
 custom baseline that cannot be loaded exits `2`; it never falls back. Opting
 out removes only the baseline: the document's own `$schema` and matching
-trigger schemas still apply, and `--no-schema-triggers` controls triggers
+trigger schemas still apply, and `--disable schema-triggers` controls triggers
 separately. See
 [Selecting the Baseline](../topics/schemas/definition.md#selecting-the-baseline)
-for the precedence flowchart.
+for the precedence flowchart, and [Policy Flags](../cli/policy.md) for the
+`--disable` verb.
 
 Because the built-in baseline is the default, a document with no `$schema` is
 checked the same way by `md schema validate` and `md compose`:
@@ -210,11 +211,11 @@ checked the same way by `md schema validate` and `md compose`:
 ```bash
 printf -- '---\nlast_updated: not-a-date\n---\n' > post.md
 md schema validate post.md                       # exit 1: last_updated is a date
-md schema validate post.md --no-baseline-schema  # exit 0
+md schema validate post.md --disable baseline-schema  # exit 0
 ```
 
 `md compose` keeps its own flags: `--baseline-schema <path>` replaces the
-built-in baseline, and `--no-baseline-schema` or
+built-in baseline, and `--disable baseline-schema` or
 `DARKMATTER_NO_BASELINE_SCHEMA=1` removes it.
 
 A library caller starts with no baseline and attaches one explicitly, either a
@@ -230,7 +231,7 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path> | --no-baseline-schema] [--no-schema-triggers] [--format pretty|json] [--quiet] [-vv]
+md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--format pretty|json] [--quiet] [-vv]
 ```
 
 Pretty output (the default) renders one styled block per file:
@@ -291,7 +292,7 @@ The stages never overlap; each one's time is work done in it and nowhere else:
 
 | Stage | Work it covers |
 |-------|----------------|
-| `discover` | Scanning the schema roots for trigger files and checking each trigger's envelope and `match:` definition. Zero when trigger discovery does not run (outside a repository, or with `--no-schema-triggers`). |
+| `discover` | Scanning the schema roots for trigger files and checking each trigger's envelope and `match:` definition. Zero when trigger discovery does not run (outside a repository, or with `--disable schema-triggers`). |
 | `match` | Judging each trigger's `match:` conditions against the document. |
 | `resolve` | Resolving `$schema` and trigger payloads, lowering SimplifiedSchema to JSON Schema, and merging the baseline, trigger, and document layers. |
 | `compile` | Building validators. A validator reused from the cache costs nothing here, so this time is taken out of the stage that asked for it. |
@@ -318,7 +319,7 @@ assignment can change which triggers match. Both resolutions are counted, so a
 validator first built while preparing the assignments is still a `miss`:
 
 ```console
-$ md schema validate --no-baseline-schema review_counter=2 doc.md -vv
+$ md schema validate --disable baseline-schema review_counter=2 doc.md -vv
 - ✔ the document doc.md has a schema definition and is valid.
 Validation timings for doc.md
 matched triggers: none
@@ -375,7 +376,7 @@ This placement is deliberate:
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
 By default, `md compose` validates documents with no `$schema` against the
-Darkmatter base frontmatter schema. Use `--no-baseline-schema` or
+Darkmatter base frontmatter schema. Use `--disable baseline-schema` or
 `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior; with no document
 `$schema` and no baseline, the stage is a complete no-op. Use
 `--baseline-schema <path>` to replace the default baseline for that invocation.
@@ -437,13 +438,13 @@ cfg:
 
 Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../topics/schemas/definition.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
 
-The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--no-schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
+The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--disable schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
 
 ```yaml
 content_policy: "$(cat policy.txt)"   # policy.txt holds ["Duration(3mo)"]
 ```
 
-fails `md compose` and `md compose --no-schema-triggers` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--no-baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
+fails `md compose` and `md compose --disable schema-triggers` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--disable baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
 
 A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{ … }}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
 

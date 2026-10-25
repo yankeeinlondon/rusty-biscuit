@@ -1,7 +1,7 @@
 //! Which baseline `md schema validate` checks a document against, and what
 //! the embedded Darkmatter baseline's `content_policy` typing reports.
 //!
-//! The selection order, first match wins: `--no-baseline-schema` (none) →
+//! The selection order, first match wins: `--disable baseline-schema` (none) →
 //! `--schema <path>` (custom) → truthy `DARKMATTER_NO_BASELINE_SCHEMA` (none)
 //! → `BASELINE_SCHEMA` (custom) → the embedded baseline. Each row spawns `md`
 //! once or twice, so every row is its own `#[test]`.
@@ -97,7 +97,7 @@ fn run_json(
     let mut command = builder.build();
     command.args(["schema", "validate", "--format", "json"]);
     if selection.no_baseline_flag {
-        command.arg("--no-baseline-schema");
+        command.args(["--disable", "baseline-schema"]);
     }
     if selection.schema_flag {
         command.args(["--schema", "./flag.yaml"]);
@@ -295,13 +295,13 @@ fn missing_baseline_schema_env_file_exits_2_without_fallback() {
 }
 
 #[test]
-fn no_baseline_schema_conflicts_with_schema_flag() {
+fn disable_baseline_schema_conflicts_with_schema_flag() {
     let process = CliProcessFixture::new();
     // Clap rejects the pair before `md` reads either path; clap's usage exit
     // is `2` throughout this CLI.
     process
         .command()
-        .args(["schema", "validate", "--no-baseline-schema", "--schema", "x.yaml", "doc.md"])
+        .args(["schema", "validate", "--disable", "baseline-schema", "--schema", "x.yaml", "doc.md"])
         .assert()
         .code(2)
         .stdout(predicate::str::is_empty())
@@ -380,16 +380,16 @@ fn trigger_schema_still_validates_after_env_opt_out() {
     assert_trigger_schema_survives(Selection { no_baseline_env: Some("true"), ..Selection::default() });
 }
 
-/// `--no-schema-triggers` turns triggers off and leaves the embedded baseline
+/// `--disable schema-triggers` turns triggers off and leaves the embedded baseline
 /// on.
 #[test]
-fn no_schema_triggers_keeps_the_embedded_baseline() {
+fn disable_schema_triggers_keeps_the_embedded_baseline() {
     let process = CliProcessFixture::new();
     trigger_layout(&process);
     let document = process.cwd().join("docs/prompt.md");
     std::fs::write(&document, "---\nkind: prompt\nlast_updated: not-a-date\n---\nBody\n").unwrap();
 
-    let run = run_json(&process, Selection::default(), &["--no-schema-triggers"], &document);
+    let run = run_json(&process, Selection::default(), &["--disable", "schema-triggers"], &document);
     assert_eq!(run.code, Some(1), "{}", run.stdout);
     assert_eq!(run.problem_paths(), ["/last_updated"], "baseline only, no trigger: {}", run.stdout);
 }
@@ -547,7 +547,7 @@ fn flag_opt_out_accepts_an_invalid_last_updated_without_a_schema() {
     let process = CliProcessFixture::new();
     let document = process.cwd().join("doc.md");
     std::fs::write(&document, NOT_A_DATE).unwrap();
-    let (code, stdout) = pretty(&process, &["--no-baseline-schema"], None, &document);
+    let (code, stdout) = pretty(&process, &["--disable", "baseline-schema"], None, &document);
     assert_eq!(code, Some(0), "{stdout}");
     assert!(stdout.contains(NO_SCHEMA_CLAIM), "{stdout}");
 }

@@ -61,7 +61,7 @@ pub fn from_json_value(
     // Pass 4: detect deprecated typed-enum spellings that serde's `alias`
     // attribute accepts silently. Currently this covers
     // `style.hr.alignment: centered`, which is accepted as an alias for
-    // `center` but must surface a `Deprecated` warning so `--strict-style`
+    // `center` but must surface a `Deprecated` warning so `--deny style`
     // rejects it.
     scan_deprecated_enum_aliases(value, &mut warnings);
 
@@ -969,7 +969,7 @@ mod tests {
         // `style.hr.alignment: centered` is accepted as an alias for
         // `center` (serde alias). The typed value must still parse to
         // `HrAlignment::Center`, but a `Deprecated` warning must be
-        // emitted so `--strict-style` rejects the legacy spelling.
+        // emitted so `--deny style` rejects the legacy spelling.
         let (s, w) = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
         let hr = s.hr.expect("hr should be populated");
         assert_eq!(

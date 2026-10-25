@@ -101,7 +101,7 @@ fn schema_validate_no_schema_with_baseline_opt_out_is_vacuous_success() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-baseline-schema"])
+        .args(["schema", "validate", "--disable", "baseline-schema"])
         .arg(&doc)
         .assert()
         .success()
@@ -867,7 +867,7 @@ fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
     let validate = |doc: &Path, spec: &str| {
         let output = process
             .command()
-            .args(["schema", "validate", "--no-schema-triggers", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
             .arg(doc)
             .arg(format!("spec={spec}"))
             .output()
@@ -933,7 +933,7 @@ fn schema_validate_enforces_each_root_union_arm_match() {
         for (spec, accepted) in [(matching, true), (outside, false)] {
             let output = process
                 .command()
-                .args(["schema", "validate", "--no-schema-triggers", "--format", "json"])
+                .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
                 .arg(&doc)
                 .arg(format!("spec={spec}"))
                 .output()
@@ -984,7 +984,7 @@ fn assert_spelling_applied(schema: &str, instances: &[(&str, Expected)]) {
         );
         let output = process
             .command()
-            .args(["schema", "validate", "--no-schema-triggers", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
             .arg(&doc)
             .output()
             .unwrap();
@@ -1044,7 +1044,7 @@ fn schema_validate_reports_folded_description_of_continued_scalar() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-schema-triggers", "--format", "json"])
+        .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
         .arg(&doc)
         .assert()
         .code(1)
@@ -1080,7 +1080,7 @@ fn schema_validate_rejects_indentless_types_sequence() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-schema-triggers"])
+        .args(["schema", "validate", "--disable", "schema-triggers"])
         .arg(&doc)
         .assert()
         .code(2)
@@ -1149,7 +1149,7 @@ fn validate_json(
         .args([
             "schema",
             "validate",
-            "--no-schema-triggers",
+            "--disable", "schema-triggers",
             "--format",
             "json",
         ])

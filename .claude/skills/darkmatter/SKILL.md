@@ -161,7 +161,7 @@ registered explicitly, never applied as a document schema; see
 HTTP(S) composition covers `::file`, `::code`, and read-side expression
 arguments where a remote runtime is present; rendered links are never fetched,
 and frontmatter interpolation and `$()` fail loudly on a URL. Reads are
-deny-all until `--allow-host`; only transport artifacts (raw HTTP bodies) may
+deny-all until `--allow host=HOST`; only transport artifacts (raw HTTP bodies) may
 persist under a cache root; `Cache-Control` outranks every freshness flag;
 host policy is checked before the cache is read. Read
 [remote-cache.md](remote-cache.md) before changing any of this.
@@ -186,6 +186,30 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
 validate|detect|about|triggers`, `hash`, `frontmatter get|set|rm`,
 `code-block`, `graph`, and reference commands.
+
+Checks are relaxed or tightened only through three verbs: `--allow <id|all>`
+(a recovery, or `host=HOST`), `--deny <id|all>` (make diagnostics blocking),
+and `--disable <id>` (stop a feature; no `all`). `cli/src/args/policy.rs` is
+the one registry of identifiers, commands, and help; on `md compose`,
+`--deny` lowers to the library's `compose::policy::BlockingPolicy`. The legacy per-flag spellings are
+usage errors (`main.rs::REMOVED_FLAGS`); see `docs/cli/policy.md`. The
+pipeline's call precheck consults the policy per document, before its
+expressions run (`MarkdownError::BlockedDiagnostics`; a child's is fatal,
+never a tolerated transclusion failure); every other warning is checked by
+the CLI after composing and before writing. A new coded warning adds its
+code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
+naming the codes it governs.
+
+`md compose --output report-json` (compose only; `ComposeOutputFormat`)
+prints one `{outcome, diagnostics, document}` object for every parsed
+invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
+`ReportedExit` for the exit status); every code and record comes from
+`compose::report_diagnostics` (`warning_diagnostic`, `error_diagnostics`,
+`lifecycle_failure_diagnostics`), and a CLI-worded shell failure keeps its
+typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
+returns a failure with the warnings reported before it (`PipelineRuntime`'s
+failed-document stash). Never print to stdout on a report-mode path; see
+`docs/cli/report-json.md`.
 
 Every source-file argument opens through `cli/src/io::open_argument`:
 `FileReference` grammar first, resolved in the launch context, with the

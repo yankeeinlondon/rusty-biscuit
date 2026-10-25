@@ -118,14 +118,14 @@ style:
 
 Top-level `hr:` frontmatter is no longer an HR styling surface. Put page-wide horizontal-rule defaults under `style.hr`; a root `hr:` block is not merged into the active style tree.
 
-## `--strict-style`
+## `--deny style`
 
-`md --strict-style` treats deprecated HR syntax as an error:
+`md --deny style` treats deprecated HR syntax as an error:
 
 - Documents with inline `--- { style: waves }` fail validation.
 - Documents with `style.hr.alignment: centered` fail validation.
 
-Use strict mode in CI to catch deprecated syntax early.
+Use `--deny style` in CI to catch deprecated syntax early. See [Policy Flags](../cli/policy.md) for how `--deny` combines with the other policy verbs.
 
 ## Parsing
 

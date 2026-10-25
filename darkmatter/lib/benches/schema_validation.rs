@@ -20,7 +20,7 @@
 //! [`reset_process_caches_for_bench`](darkmatter::markdown::schemas::reset_process_caches_for_bench)
 //! outside the measured work; a warm one reuses everything a previous
 //! validation cached. Both build a fresh [`DarkmatterSchemas`] with trigger
-//! discovery, as `md schema validate --no-baseline-schema` does.
+//! discovery, as `md schema validate --disable baseline-schema` does.
 //!
 //! The `resolve_frozen` groups time the frozen recursive and depth-5 unrolled
 //! lifecycle fixtures in `tests/fixtures/recursive_schema_frozen/`, wired to

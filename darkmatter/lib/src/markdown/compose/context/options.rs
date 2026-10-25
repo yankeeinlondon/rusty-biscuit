@@ -274,6 +274,11 @@ pub struct ComposeOptions {
     /// - `Some(false)`: treat invalid references as errors
     pub(crate) ignore_invalid_references: Option<bool>,
 
+    /// When `true`, a transclusion whose target does not exist is removed
+    /// with a warning instead of failing the document. Narrower than
+    /// [`Self::ignore_invalid_references`]: every other failure still fails.
+    pub(crate) allow_missing_transclusions: bool,
+
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
@@ -373,6 +378,12 @@ pub struct ComposeOptions {
     /// When `true`, the pipeline collects per-stage timing metrics
     /// and populates `ComposeReport::perf`. Default: `false`.
     pub(crate) perf_enabled: bool,
+
+    // ── Blocking ───────────────────────────────────────────────────
+    /// Which reported warnings fail the document. Default: none. Shared
+    /// rather than inline: the options are held by value in every nested
+    /// composition frame, which the self-composition depth limit multiplies.
+    pub(crate) blocking_policy: std::sync::Arc<crate::markdown::compose::policy::BlockingPolicy>,
 
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
@@ -499,7 +510,7 @@ pub struct ComposeOptions {
     /// during shell-command discovery — the planned-probe sink that lets
     /// preflight report an ICMP effect without sending a packet. The grants
     /// themselves are derived from `remote_read_config.allowed_hosts` each time
-    /// the authority is projected, so `--allow-host` stays the single entry
+    /// the authority is projected, so `--allow host=HOST` stays the single entry
     /// point. Default: no grants, which denies every target.
     pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
 
@@ -631,6 +642,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("allow_local_code", &self.allow_local_code)
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
+            .field("allow_missing_transclusions", &self.allow_missing_transclusions)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
@@ -659,6 +671,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("cache_root", &self.cache_root)
             .field("cache_namespace", &self.cache_namespace)
             .field("perf_enabled", &self.perf_enabled)
+            .field("blocking_policy", &self.blocking_policy)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("interpolate_code_blocks", &self.interpolate_code_blocks)
@@ -915,6 +928,7 @@ impl ComposeOptions {
             allow_local_code: true,
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
+            allow_missing_transclusions: false,
             resolve_repo_root: true,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
@@ -933,6 +947,7 @@ impl ComposeOptions {
             cache_root: None,
             cache_namespace: None,
             perf_enabled: false,
+            blocking_policy: std::sync::Arc::default(),
             context,
             context_authority: super::authority::ContextAuthority::CallerSupplied,
             replace_parent_wins: false,
@@ -1536,6 +1551,14 @@ impl ComposeOptions {
         self
     }
 
+    /// Removes a transclusion whose target does not exist, with a warning,
+    /// instead of failing the document.
+    #[must_use]
+    pub fn with_allow_missing_transclusions(mut self, allow: bool) -> Self {
+        self.allow_missing_transclusions = allow;
+        self
+    }
+
     /// Sets how invalid transclusion references are handled.
     #[must_use]
     pub fn with_ignore_invalid_references(mut self, ignore: Option<bool>) -> Self {
@@ -1803,7 +1826,7 @@ impl ComposeOptions {
     }
 
     /// The request's ICMP authority with its grants derived from the
-    /// `--allow-host` allowlist.
+    /// `--allow host=HOST` allowlist.
     ///
     /// Sharing one entry point with HTTP is deliberate (R6), but the two
     /// policies stay disjoint: a CIDR entry grants ICMP and nothing else, and a
@@ -1915,6 +1938,20 @@ impl ComposeOptions {
         self.context = context;
         self.context_authority = super::authority::ContextAuthority::CallerSupplied;
         self
+    }
+
+    /// Fails the document on every reported warning `policy` blocks. A
+    /// warning found by the passive call check blocks before any expression
+    /// or shell of that document runs.
+    #[must_use]
+    pub fn with_blocking_policy(mut self, policy: crate::markdown::compose::policy::BlockingPolicy) -> Self {
+        self.blocking_policy = std::sync::Arc::new(policy);
+        self
+    }
+
+    /// The policy that decides which reported warnings fail the document.
+    pub fn blocking_policy(&self) -> &crate::markdown::compose::policy::BlockingPolicy {
+        &self.blocking_policy
     }
 
     /// Enables or disables performance metric collection.
@@ -2740,6 +2777,7 @@ impl ComposeOptions {
             allow_local_code,
             code_fallback_language,
             ignore_invalid_references,
+            allow_missing_transclusions,
             resolve_repo_root,
             source_derivation,
             source_opening,
@@ -2759,6 +2797,7 @@ impl ComposeOptions {
             cache_root,
             cache_namespace,
             perf_enabled,
+            blocking_policy,
             context,
             context_authority,
             replace_parent_wins,
@@ -2922,6 +2961,9 @@ impl ComposeOptions {
             Some(true) => enc.tag(2),
         }
 
+        enc.field("allow_missing_transclusions");
+        enc.bool(*allow_missing_transclusions);
+
         enc.field("resolve_repo_root");
         enc.bool(*resolve_repo_root);
 
@@ -3051,6 +3093,8 @@ impl ComposeOptions {
 
         enc.field("perf_enabled");
         enc.bool(*perf_enabled);
+        enc.field("blocking_policy");
+        enc.str(&blocking_policy.identity());
 
         // Runtime context: complete encoding of every captured value and env
         // entry — including the volatile per-second and system-state fields the
@@ -3255,6 +3299,13 @@ impl ComposeOptions {
             Some(false) => cenc.tag(1),
             Some(true) => cenc.tag(2),
         }
+
+        cenc.field("allow_missing_transclusions");
+        cenc.bool(*allow_missing_transclusions);
+        // A cached result composed under a weaker policy must not stand in
+        // for one whose warnings would block.
+        cenc.field("blocking_policy");
+        cenc.str(&blocking_policy.identity());
 
         cenc.field("resolve_repo_root");
         cenc.bool(*resolve_repo_root);

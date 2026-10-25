@@ -112,6 +112,8 @@ pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+pub mod policy;
+pub mod report_diagnostics;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
 pub use schema_validation::effective_schema_for;
@@ -186,7 +188,7 @@ pub use context::request::{
 pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
 pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
-pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
+pub use context::report::{ComposeFailure, ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
 pub use value_origin::{OverrideLayer, OverrideOrigin};
 pub use perf::{
@@ -256,6 +258,23 @@ impl Markdown {
         let mut result = self.clone();
         let report = result.run_compose_pipeline(request)?;
         Ok((result, report))
+    }
+
+    /// [`compose_with`](Self::compose_with), keeping on failure the warnings
+    /// the composition had already reported.
+    ///
+    /// ## Errors
+    ///
+    /// A boxed [`ComposeFailure`]: the error [`compose_with`](Self::compose_with)
+    /// returns, with the failed documents' warnings, the outer document's
+    /// first. A child that had already succeeded reported into its parent, so
+    /// its warnings appear there.
+    pub fn compose_with_warnings(&self, request: &ComposeRequest) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
+        let mut result = self.clone();
+        match result.run_root_pipeline_collecting(request.clone(), None) {
+            (Ok(report), _) => Ok((result, report)),
+            (Err(error), warnings) => Err(Box::new(ComposeFailure { error, warnings })),
+        }
     }
 
     /// [`compose_with`](Self::compose_with), letting the host choose the

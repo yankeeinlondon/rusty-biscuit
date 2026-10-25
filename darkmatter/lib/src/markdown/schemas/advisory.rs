@@ -38,12 +38,13 @@ impl SchemaAdvisory {
         Self::SOURCE
     }
 
+    /// Code of a schema file without its `$schema` envelope.
+    pub const MISSING_SIMPLIFIED_ENVELOPE_CODE: &'static str = "dm.schema.missing_simplified_envelope";
+
     /// Returns the stable machine-readable diagnostic code.
     pub fn code(&self) -> &'static str {
         match self.kind {
-            SchemaAdvisoryKind::MissingSimplifiedEnvelope => {
-                "dm.schema.missing_simplified_envelope"
-            }
+            SchemaAdvisoryKind::MissingSimplifiedEnvelope => Self::MISSING_SIMPLIFIED_ENVELOPE_CODE,
         }
     }
 

@@ -55,10 +55,10 @@ md clean README.md --schema docs.schema.yaml
 
 # Replace or disable the default Darkmatter baseline schema
 md clean README.md --baseline-schema project-baseline.yaml
-md clean README.md --no-baseline-schema
+md clean README.md --disable baseline-schema
 
 # Disable repository trigger schemas
-md clean README.md --no-schema-triggers
+md clean README.md --disable schema-triggers
 
 # Join wrapped prose, then re-wrap it to 80 columns
 md clean README.md --fixed-width 80
@@ -95,8 +95,9 @@ md README.md --save
 - `--json`: Emit the version-1 diagnostic envelope as the sole stdout payload. The cleaned document, human suggestion report, and save-mode delta report are suppressed.
 - `--schema <PATH>`: Replace the document's inline or referenced `$schema` layer with an explicit SimplifiedSchema file. Baseline and matching trigger layers still apply beneath it.
 - `--baseline-schema <PATH>`: Replace the default Darkmatter baseline with an explicit SimplifiedSchema file.
-- `--no-baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
-- `--no-schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
+- `--disable <ID>`: Stop a feature from running. Repeatable; there is no `all`. See [Policy Flags](./policy.md).
+    - `baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
+    - `schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
 
 `--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
 Fixed-width reflow starts by removing the source wrapping that
@@ -170,8 +171,8 @@ For a non-empty frontmatter block, the effective schema is assembled in this
 order, with later layers taking precedence:
 
 1. The default Darkmatter baseline, an explicit `--baseline-schema`, or no
-   baseline when `--no-baseline-schema` is set.
-2. Matching repository trigger schemas, unless `--no-schema-triggers` is set.
+   baseline when `--disable baseline-schema` is set.
+2. Matching repository trigger schemas, unless `--disable schema-triggers` is set.
 3. The document's inline or referenced `$schema`, replaced by `--schema` when
    that flag is present.
 

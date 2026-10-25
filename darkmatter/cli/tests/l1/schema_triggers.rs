@@ -74,7 +74,7 @@ fn schema_validate_honors_triggers_and_raw_mode() {
         .stdout(predicate::str::contains("owner"));
     process
         .command()
-        .args(["schema", "validate", "--no-schema-triggers"])
+        .args(["schema", "validate", "--disable", "schema-triggers"])
         .arg(&document)
         .assert()
         .success();
@@ -107,7 +107,7 @@ fn compose_honors_triggers_and_raw_mode() {
         .stderr(predicate::str::contains("owner"));
     process
         .command()
-        .args(["compose", "--no-schema-triggers"])
+        .args(["compose", "--disable", "schema-triggers"])
         .arg(&document)
         .assert()
         .success();

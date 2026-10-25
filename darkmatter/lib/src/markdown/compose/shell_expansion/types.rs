@@ -1061,7 +1061,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
-                .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
+                .hint("Raise the timeout, or pass <cyan>--allow shell-timeout</cyan> to warn instead of fail."),
 
             ShellExpansionError::ExecutionFailed {
                 ctx,
@@ -1665,6 +1665,10 @@ pub(crate) struct PipelineRuntime {
     /// children so frontmatter `as_markdown` content, which composes before
     /// the root reaches its gate, triggers the gate first instead.
     preflight_validated: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The warnings each failed document had reported, shared with children
+    /// so the root can return them beside the failure
+    /// ([`Markdown::compose_with_warnings`](crate::markdown::Markdown::compose_with_warnings)).
+    failed_warnings: std::sync::Arc<std::sync::Mutex<Vec<crate::markdown::compose::ComposeWarning>>>,
 }
 
 impl PipelineRuntime {
@@ -1693,6 +1697,7 @@ impl PipelineRuntime {
             root_source: None,
             is_child: false,
             preflight_validated: Default::default(),
+            failed_warnings: Default::default(),
         }
     }
 
@@ -1719,6 +1724,7 @@ impl PipelineRuntime {
             root_source: None,
             is_child: false,
             preflight_validated: Default::default(),
+            failed_warnings: Default::default(),
         }
     }
 
@@ -1735,7 +1741,21 @@ impl PipelineRuntime {
             root_source: self.root_source.clone(),
             is_child: true,
             preflight_validated: std::sync::Arc::clone(&self.preflight_validated),
+            failed_warnings: std::sync::Arc::clone(&self.failed_warnings),
         }
+    }
+
+    /// Keeps the warnings a document reported before it failed. A parent
+    /// fails after its child, and its warnings came first, so they lead.
+    #[inline(never)]
+    pub(crate) fn record_failed_document(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        let mut failed = self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        failed.splice(0..0, warnings);
+    }
+
+    /// The warnings [`Self::record_failed_document`] kept, in report order.
+    pub(crate) fn take_failed_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        std::mem::take(&mut *self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
     /// Whether this runtime composes the request root rather than a child.

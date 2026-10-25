@@ -131,10 +131,10 @@ fn cold_inline_document(name: &str) -> (CliProcessFixture, PathBuf) {
 #[test]
 fn a_cold_assignment_request_reports_its_compile_miss() {
     let (fixture, document) = cold_inline_document("schema-validate-timings-assignment");
-    let args = ["--no-baseline-schema", "review_counter=2"];
+    let args = ["--disable", "baseline-schema", "review_counter=2"];
 
     let quiet = validate(&fixture, &args, &document);
-    let verbose = validate(&fixture, &["-vv", args[0], args[1]], &document);
+    let verbose = validate(&fixture, &["-vv", args[0], args[1], args[2]], &document);
 
     assert_eq!(quiet.status.code(), Some(0), "{}", stderr(&quiet));
     assert_eq!(verbose.status.code(), Some(0));
@@ -148,10 +148,10 @@ fn a_cold_assignment_request_reports_its_compile_miss() {
 fn a_failing_assignment_preparation_keeps_its_error_and_reports_partial_timings() {
     let fixture = CliProcessFixture::named("schema-validate-timings-assignment-failure");
     let document = write(&fixture, "broken.md", "---\n$schema: ./missing-schema.yaml\ntitle: x\n---\n");
-    let args = ["--no-baseline-schema", "title=y"];
+    let args = ["--disable", "baseline-schema", "title=y"];
 
     let quiet = validate(&fixture, &args, &document);
-    let verbose = validate(&fixture, &["-vv", args[0], args[1]], &document);
+    let verbose = validate(&fixture, &["-vv", args[0], args[1], args[2]], &document);
 
     assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
     assert_eq!(verbose.status.code(), Some(2));

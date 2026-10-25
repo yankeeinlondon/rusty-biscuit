@@ -766,13 +766,16 @@ pub(crate) fn execute_prepared_directive(
     )?;
 
     if fresh && let Some(timeout) = execution.timeout_fallback {
-        let warning = ComposeWarning::new(
-            "shell_expansion",
-            format!(
-                "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
-                prepared.effective.origin, prepared.display_command
-            ),
-        );
+        let warning = ComposeWarning {
+            code: Some(crate::markdown::compose::policy::SHELL_TIMEOUT_CODE.to_string()),
+            ..ComposeWarning::new(
+                "shell_expansion",
+                format!(
+                    "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
+                    prepared.effective.origin, prepared.display_command
+                ),
+            )
+        };
         warnings.push(locate_warning(warning, &prepared.effective.origin));
     }
 

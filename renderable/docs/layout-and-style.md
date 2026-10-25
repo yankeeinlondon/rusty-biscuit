@@ -471,7 +471,7 @@ sub-spec #7 of `renderable/features/2026-05-23-style-property/`:
   kebab-case; snake-case aliases parse with deprecation warnings.
 - **#2 page wiring** — applies `style.page.*` onto `DarkmatterPage`
   (`margin`, `padding`, `max-width`, `alignment`, `background`) after CLI
-  layout flags. CLI flags win field-by-field. `md --strict-style` promotes
+  layout flags. CLI flags win field-by-field. `md --deny style` promotes
   unknown and deprecated schema warnings to errors.
 - **#3 component wiring** — applies `style.table.*`, `style.images.*`, and
   `style.block-quote.*` alignment and width/fill settings.

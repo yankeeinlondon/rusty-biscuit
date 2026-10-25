@@ -586,6 +586,14 @@ pub struct ComposeWarning {
     pub diagnostic: Option<Box<crate::markdown::compose::expression::Diagnostic>>,
 }
 
+/// A failed composition with the warnings it had reported before the
+/// failure ([`Markdown::compose_with_warnings`](crate::markdown::Markdown::compose_with_warnings)).
+#[derive(Debug)]
+pub struct ComposeFailure {
+    pub error: crate::markdown::types::MarkdownError,
+    pub warnings: Vec<ComposeWarning>,
+}
+
 /// The issue a coded warning reports, so each issue is reported once.
 ///
 /// A report keys a warning by `(source, code, subject)`. Each coded-warning

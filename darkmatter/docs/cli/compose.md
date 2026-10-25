@@ -49,6 +49,9 @@ md compose doc.md --fm
 md compose doc.md --output html
 md compose doc.md --output json
 
+# One JSON object: the outcome, every diagnostic, and the document
+md compose doc.md --output report-json
+
 # Show output via temp artifact
 md compose doc.md --show
 
@@ -82,16 +85,22 @@ md compose doc.md iteration=1 draft=false name=Alice
 
 - `--state <JSON>`: default values as JSON or JSON5; fills in null/missing frontmatter keys without overriding existing values.
 - `--frontmatter` / `--fm`: include frontmatter in the output (default: body only).
-- `--output <markdown|text|html|json|ast|auto>`: output format (default: `markdown`).
+- `--output <markdown|text|markdown-plus|html|browser|json|ast|auto|report-json>`: output format (default: `markdown`). `report-json` prints the [composition report](./report-json.md) instead of the document, and cannot be combined with `--show` or `--shell`.
 - `--show`: open output via temp artifact.
-- `--allow-missing-hyperlinks`: allow broken hyperlink targets; emit composed content to stdout and report issues on stderr with exit code 0.
-- `--allow-missing-image-refs`: allow broken image reference targets; same behavior as above for images.
-- `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
-- `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
-- `--allow-ctx-override`: allow non-object `ctx` frontmatter. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error. This flag downgrades the error to a warning, and the runtime context is used instead.
-- `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow-host` entry already grants each one. No command runs and no packet is sent.
+- `--allow <ID|all>`: permit a recovery, or reads from an explicitly named host. Repeatable. `all` permits every recovery but never grants a host or authorizes a shell command. See [Policy Flags](./policy.md) for precedence and conflicts.
+    - `missing-hyperlinks`, `missing-image-refs`: keep the content when a hyperlink or image target is missing; issues are reported on stderr and the exit code is 0.
+    - `missing-transclusions`: remove a transclusion directive whose target is missing; issues are reported on stderr and the exit code is 0.
+    - `ctx-override`: replace a non-object `ctx` frontmatter value with the runtime context. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error; this allowance downgrades the error to a warning.
+    - `invalid-frontmatter-assignment`, `reassigned-frontmatter-property`: recover from an invalid or duplicated `set` assignment on a `::file` directive (see [Block Transclusion](../transclusion/block-transclusion.md)).
+    - `shell-timeout`: replace a timed-out shell command's output with an empty string and a warning.
+    - `host=HOST`: grant network access to a host or address (see below).
+- `--deny <ID|all>`: make the selected diagnostics blocking, so compose fails and writes no document. Repeatable. Takes any recovery identifier above, `style` (unknown or deprecated `style:` keys and inline horizontal-rule deprecations), a diagnostic code such as `dm.reference.missing_hyperlink` (`md compose --help` lists them), or `all`. Informational notices never block, and `--deny all` never revokes an `--allow host=HOST`.
+- `--disable <ID>`: stop a feature from running. Repeatable; there is no `all`.
+    - `baseline-schema`: validate without the default Darkmatter baseline frontmatter schema.
+    - `schema-triggers`: skip repository schema-trigger discovery and bare-name schema-root lookup.
+- `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow host=HOST` entry already grants each one. No command runs and no packet is sent.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
-- `--allow-host <HOST>`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
+- `--allow host=HOST`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
     - a hostname or `*.wildcard` pattern allows remote URL reads from that host, and grants no ICMP;
     - an exact IP literal allows remote URL reads from that exact host **and** grants `ping`/`ping_under` to that address (an IPv6 zone constrains the ICMP grant to that interface, spelled the way the host spells it — the interface name on macOS and Linux (`fe80::1%en0`), the numeric interface index on Windows (`fe80::1%12`));
     - a strict CIDR such as `10.1.0.0/16` grants `ping`/`ping_under` to every address in the range of that family, and authorizes no HTTP at all.
@@ -126,6 +135,10 @@ Compose warnings (context merge collisions, partial runtime capture failures, et
 **`--output html|json`**
 
 - Emits HTML or AST JSON from the composed document.
+
+**`--output report-json`**
+
+- Prints one JSON object with `outcome`, `diagnostics`, and `document` (the Markdown, or `null` on failure), and nothing else on stdout. Warnings are in the object rather than on stderr. See [Composition Report](./report-json.md).
 
 **`--show` behavior**
 
@@ -169,24 +182,26 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
   Issues are grouped by category (hyperlinks, images, transclusions, etc.) with the source document shown as a clickable link and broken targets in red.
 
-- **Allow flags** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit code is 0. If any errors remain in non-allowed categories, compose still blocks with exit code 2.
+- **`--allow` allowances** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit code is 0. If any errors remain in non-allowed categories, compose still blocks with exit code 2.
 
   ```bash
   # Compose despite broken links — content to stdout, warnings to stderr
-  md compose doc.md --allow-missing-hyperlinks
+  md compose doc.md --allow missing-hyperlinks
 
   # Compose despite any broken reference
-  md compose doc.md --allow-any-missing-reference
+  md compose doc.md --allow missing-hyperlinks --allow missing-image-refs --allow missing-transclusions
 
   # Pipe composed output while still seeing warnings
-  md compose doc.md --allow-missing-hyperlinks > output.md
+  md compose doc.md --allow missing-hyperlinks > output.md
   ```
+
+- **`--deny` selections** make diagnostics blocking. One found by passive analysis (the call check, reference validation, the lifecycle call check) stops compose before anything runs; one found while composing stops compose before the document is written, without undoing effects that already ran. See [Policy Flags](./policy.md).
 
 - Invalid JSON/JSON5 in `--state` returns an error.
 - Non-object JSON (array/string/number/etc.) in `--state` returns an error.
 - Transform failures return non-zero exit with error details.
 - Remote URL transclusion fails unless the target host is allowed with
-  `--allow-host`. Denied hosts are rejected before any network request is
+  `--allow host=HOST`. Denied hosts are rejected before any network request is
   attempted.
 
 ### Lifecycle Events
@@ -214,7 +229,8 @@ finalize:
 - **Output.** `stdout` actions and lifecycle command output go to stdout in
   run order, so output from `composed` precedes the document and output from
   `finalize` follows it. `stderr`, `info`, `warn`, `success`, and `message`
-  write to stderr.
+  write to stderr. Under `--output report-json` stdout holds only the report,
+  so `stdout` actions and command output go to stderr too.
 - **`skip`** in `initialize` writes no document, runs no `finalize`, and
   exits 0.
 - **Other hosts' actions.** A verb `md` does not run (Claudine's `say`,
@@ -240,17 +256,17 @@ summary. There is no dry-run mode; `--shell` is the only report-only mode.
 
 ```bash
 # Fetch and transclude an allowed remote Markdown document
-md compose doc.md --allow-host example.com
+md compose doc.md --allow host=example.com
 
 # Cache remote artifacts and serve stale content on revalidation failure
 md compose doc.md \
-  --allow-host example.com \
+  --allow host=example.com \
   --cache-root . \
   --remote-freshness fallback
 
 # Force revalidation of cached remote artifacts
 md compose doc.md \
-  --allow-host example.com \
+  --allow host=example.com \
   --cache-root . \
   --remote-refresh
 ```

@@ -34,6 +34,7 @@ pub fn html_artifact(
     md: &Markdown,
     cli: &Cli,
     input_path: Option<&PathBuf>,
+    strict_style: bool,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
     let theme = ResolvedTheme::from_cli(cli, &term);
@@ -45,7 +46,7 @@ pub fn html_artifact(
         cli,
     );
 
-    page = apply_style_frontmatter(page, md, cli, input_path)?;
+    page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
 
     let content = page
         .render_to_browser_document(md)
@@ -63,6 +64,7 @@ pub fn markdown_plus_artifact(
     md: &Markdown,
     cli: &Cli,
     input_path: Option<&PathBuf>,
+    strict_style: bool,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
     let theme = ResolvedTheme::from_cli(cli, &term);
@@ -74,7 +76,7 @@ pub fn markdown_plus_artifact(
         cli,
     );
 
-    page = apply_style_frontmatter(page, md, cli, input_path)?;
+    page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
 
     let content = page
         .render_to_markdown_plus(md)

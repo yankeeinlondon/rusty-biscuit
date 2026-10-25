@@ -43,9 +43,19 @@ impl Markdown {
     /// the root document between its frontmatter and its body.
     pub(crate) fn run_root_pipeline_hooked(
         &mut self,
-        mut options: crate::markdown::compose::ComposeRequest,
+        options: crate::markdown::compose::ComposeRequest,
         hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> MarkdownResult<ComposeReport> {
+        self.run_root_pipeline_collecting(options, hook).0
+    }
+
+    /// [`run_root_pipeline_hooked`](Self::run_root_pipeline_hooked), also
+    /// returning, on failure, the warnings the failed documents had reported.
+    pub(crate) fn run_root_pipeline_collecting(
+        &mut self,
+        mut options: crate::markdown::compose::ComposeRequest,
+        hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
+    ) -> (MarkdownResult<ComposeReport>, Vec<ComposeWarning>) {
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
@@ -119,7 +129,10 @@ impl Markdown {
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
         let node = Self::pipeline_node(&options);
-        let mut report = self.run_compose_pipeline_node(options, &mut runtime, node, hook)?;
+        let mut report = match self.run_compose_pipeline_node(options, &mut runtime, node, hook) {
+            Ok(report) => report,
+            Err(error) => return (Err(error), runtime.take_failed_warnings()),
+        };
         report.cache_stats = Some(runtime.cache.stats());
         let remote_fetch_stats = runtime.remote_fetch.stats();
         report.warnings.extend(remote_fetch_stats.cache_compose_warnings());
@@ -127,7 +140,7 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
-        Ok(report)
+        (Ok(report), Vec::new())
     }
 
     /// Internal recursive pipeline runner shared by root and child documents.
@@ -195,8 +208,12 @@ impl Markdown {
         }
         let nested = super::nested::NestedCompose::install(&mut options, runtime, self);
 
+        // Outside the closure, so a failure can still hand on what it reported.
+        // Boxed and built out of line, like `finish_document`: this frame
+        // recurs once per nested composition, and the depth limit's test runs
+        // at the edge of the 2 MiB test stack.
+        let mut report = new_document_report();
         let result = (|| {
-            let mut report = ComposeReport::new();
             let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
             let mut provenance = prepare_frontmatter_for_compose(self, &options);
@@ -237,6 +254,14 @@ impl Markdown {
                     &self.full_source_context_for_errors(),
                 ),
                 super::call_precheck::PrecheckFailure::Body(error) => error,
+                // A blocking finding is known before anything runs, so it
+                // stops the document here rather than after its effects.
+                super::call_precheck::PrecheckFailure::Blocked { blocking, rest } => {
+                    crate::markdown::types::MarkdownError::BlockedDiagnostics {
+                        blocking,
+                        earlier: report.warnings.iter().cloned().chain(rest).collect(),
+                    }
+                }
             })?;
             report.add_warnings(always_false);
 
@@ -461,7 +486,7 @@ impl Markdown {
                 // interpolation pass 2 so concrete values can select a
                 // different root-union arm as well as activate or deactivate
                 // trigger payloads, then judge the values the first pass
-                // deferred as pending. `--no-schema-triggers` removes trigger
+                // deferred as pending. `--disable schema-triggers` removes trigger
                 // schemas from this pass, never the document and baseline
                 // verdict. Only a caller that re-validates the post-shell
                 // frontmatter itself takes that verdict over; compose then
@@ -552,10 +577,7 @@ impl Markdown {
                             ),
                         )
                     }
-                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => ComposeWarning::new(
-                        "context",
-                        "Document ctx was not an object; replaced with runtime context",
-                    ),
+                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => ctx_override_warning(),
                     context::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
                         ComposeWarning::new(
                             "context",
@@ -669,8 +691,9 @@ impl Markdown {
                 perf.set_capture_timings(options.context().capture_timings().to_vec());
             }
             report.perf = perf.finish();
-            Ok(report)
+            Ok(())
         })();
+        let result = finish_document(result, report, runtime);
 
         let result = match nested {
             Some(nested) => nested.finish(result, runtime),
@@ -682,6 +705,28 @@ impl Markdown {
         }
 
         result
+    }
+}
+
+#[inline(never)]
+fn new_document_report() -> Box<ComposeReport> {
+    Box::default()
+}
+
+/// A document's report on success; on failure, the error, with the warnings
+/// the document had reported kept in `runtime` for the root.
+#[inline(never)]
+fn finish_document(
+    result: MarkdownResult<()>,
+    report: Box<ComposeReport>,
+    runtime: &shell_expansion::types::PipelineRuntime,
+) -> MarkdownResult<ComposeReport> {
+    match result {
+        Ok(()) => Ok(*report),
+        Err(error) => {
+            runtime.record_failed_document(report.warnings);
+            Err(error)
+        }
     }
 }
 
@@ -766,4 +811,14 @@ pub(crate) fn document_state_builder(
         .with_context(options.context().clone())
         .with_allow_ctx_override(options.allow_ctx_override)
         .with_name_coercion_keys(options.name_coercion_keys.clone())
+}
+
+/// The warning of a non-object `ctx` replaced by the runtime context. Out of
+/// line: the pipeline's frame recurs once per nested composition.
+#[inline(never)]
+fn ctx_override_warning() -> ComposeWarning {
+    ComposeWarning {
+        code: Some(super::policy::CTX_OVERRIDE_CODE.to_string()),
+        ..ComposeWarning::new("context", "Document ctx was not an object; replaced with runtime context")
+    }
 }

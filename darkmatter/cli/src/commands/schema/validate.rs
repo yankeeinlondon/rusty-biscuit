@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Environment variable naming a custom baseline schema, read from the
-/// captured request. Used when neither `--schema` nor `--no-baseline-schema`
+/// captured request. Used when neither `--schema` nor `--disable baseline-schema`
 /// is given and `DARKMATTER_NO_BASELINE_SCHEMA` is not truthy.
 pub const BASELINE_SCHEMA_ENV: &str = "BASELINE_SCHEMA";
 
@@ -145,7 +145,7 @@ pub fn run_validate(
 ///
 /// The first matching rule selects the baseline:
 ///
-/// 1. `--no-baseline-schema`: none, ignoring `BASELINE_SCHEMA`.
+/// 1. `--disable baseline-schema`: none, ignoring `BASELINE_SCHEMA`.
 /// 2. `--schema <path>`: that custom baseline, even when
 ///    `DARKMATTER_NO_BASELINE_SCHEMA` is truthy.
 /// 3. A truthy `DARKMATTER_NO_BASELINE_SCHEMA`: none, ignoring

@@ -91,7 +91,7 @@ source. See [Markdown Formatting Rules](./markdown-formatting.md).
 
 Use canonical kebab-case keys: `max-width`, `bg-color`, `block-quote`,
 `local-style`, `left-margin`. Older snake-case spellings such as `max_width`
-and `block_quote` are accepted for compatibility, but `--strict-style` rejects
+and `block_quote` are accepted for compatibility, but `--deny style` rejects
 them as deprecated.
 
 ## Page Layout
@@ -348,20 +348,21 @@ one-off rendering choice.
 
 ## Validation and Troubleshooting
 
-Use `--strict-style` when you want style frontmatter to fail fast on typos or
-deprecated keys:
+Use `--deny style` when you want style frontmatter to fail fast on typos or
+deprecated keys (see [Policy Flags](../cli/policy.md) for the other policy
+verbs):
 
 ```sh
-md guide.md --strict-style
+md guide.md --deny style
 ```
 
-Strict mode rejects:
+`--deny style` rejects:
 
 - Unknown keys such as `style.page.lft-margin`.
 - Deprecated snake-case aliases such as `max_width`.
 - Deprecated horizontal-rule inline aliases.
 
-Invalid values fail even without strict mode. Common examples:
+Invalid values fail even without `--deny style`. Common examples:
 
 | Invalid Value | Why It Fails |
 | --- | --- |

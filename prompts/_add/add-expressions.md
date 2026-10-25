@@ -103,7 +103,7 @@ also the clarification agenda in Phase 2 below.
 8. **Effects and consent** — does the call run a process, launch a shell profile, send
    packets, fetch a URL, or compose nested content? Then it is an **effect**: it must appear
    in compose preflight as a typed record, be gated by the existing consent model
-   (`--allow-host`, shell approval, `IcmpAuthority`), answer a neutral value in discovery
+   (`--allow host=HOST`, shell approval, `IcmpAuthority`), answer a neutral value in discovery
    mode, and never run during passive validation, DMLS hover, or preflight.
 9. **Surfaces** — the function resolves on every expression surface (frontmatter passes,
    body, `when=`, `$()` ternary branches, Claudine loop and lifecycle strings). Frontmatter

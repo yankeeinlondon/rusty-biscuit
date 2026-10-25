@@ -27,6 +27,10 @@ Arguments:
   [INPUT]  Input file path (reads from stdin if not provided, use "-" for explicit stdin)
 ```
 
+Commands that have a policy choice share three verbs, `--allow`, `--deny`, and `--disable`; see [Policy Flags](./policy.md).
+
+`md compose --output report-json` prints the outcome, every diagnostic, and the document as one JSON object; see [Composition Report](./report-json.md).
+
 ## Subcommands
 
 > Use the links to move into a more detailed description of each of the commands

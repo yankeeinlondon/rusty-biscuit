@@ -67,6 +67,8 @@ mod backslash_escape_spans;
 mod binding_contract;
 mod base_schema_end_to_end;
 mod benchmark_fixtures;
+#[cfg(feature = "effects-instrumentation")]
+mod blocking_policy;
 mod blockquote_list_spacing;
 mod clean_compose_equivalence;
 mod clean_counters;
@@ -106,6 +108,8 @@ mod flow_sensitive_narrowing;
 mod compose_call_precheck;
 #[cfg(feature = "effects-instrumentation")]
 mod shared_diagnostics;
+#[cfg(feature = "effects-instrumentation")]
+mod report_diagnostics;
 mod frontmatter_coercion_engine;
 mod frontmatter_surface_projection;
 mod fs_capability;

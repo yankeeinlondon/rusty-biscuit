@@ -1071,7 +1071,7 @@ types:
             category(Network);
             fallible;
             example(ping("192.168.1.1", 250) => true; display-only: result depends on the network and the ICMP grant);
-        ) -> Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow-host, false when there is no reply, and an error when the host cannot send ICMP.
+        ) -> Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP.
     ping_under: |-
         function(
             parameters(address: ip-address, timeout: number, attempts?: number(integer; min(1); max(100)));

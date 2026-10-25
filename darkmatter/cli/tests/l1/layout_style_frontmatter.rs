@@ -125,27 +125,27 @@ fn style_fixture_html_document_has_non_empty_ordered_head() {
 }
 
 #[test]
-fn style_fixture_strict_style_passes_on_schema_clean_doc() {
-    let fixture = CliProcessFixture::named("style_fixture_strict_style_passes_on_schema_clean_doc");
+fn style_fixture_deny_style_passes_on_schema_clean_doc() {
+    let fixture = CliProcessFixture::named("style_fixture_deny_style_passes_on_schema_clean_doc");
     // The fixture only generates `KnownButInactive` warnings (the ul / ol
-    // keys are wired in later sub-specs). `--strict-style` must NOT fail on
+    // keys are wired in later sub-specs). `--deny style` must NOT fail on
     // `KnownButInactive`.
     let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
-        .arg("--strict-style")
+        .args(["--deny", "style"])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "--strict-style must succeed on schema-clean fixture: {}",
+        "--deny style must succeed on schema-clean fixture: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
 #[test]
-fn style_strict_style_fails_on_unknown_key() {
-    let fixture = CliProcessFixture::named("style_strict_style_fails_on_unknown_key");
-    // Spec test #5: `--strict-style` fails on `UnknownKey`. We route through
+fn deny_style_fails_on_unknown_key() {
+    let fixture = CliProcessFixture::named("deny_style_fails_on_unknown_key");
+    // Spec test #5: `--deny style` fails on `UnknownKey`. We route through
     // `--output html` so the frontmatter pipeline (which lives in the
     // terminal / HTML render paths) runs. The markdown-only artifact path
     // intentionally short-circuits to source pass-through.
@@ -163,19 +163,19 @@ fn style_strict_style_fails_on_unknown_key() {
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
-        .arg("--strict-style")
+        .args(["--deny", "style"])
         .output()
         .unwrap();
     assert!(
         !output.status.success(),
-        "--strict-style must fail on unknown key"
+        "--deny style must fail on unknown key"
     );
 }
 
 #[test]
-fn style_strict_style_fails_on_deprecated_key() {
-    let fixture = CliProcessFixture::named("style_strict_style_fails_on_deprecated_key");
-    // `--strict-style` promotes `Deprecated` warnings to errors. The
+fn deny_style_fails_on_deprecated_key() {
+    let fixture = CliProcessFixture::named("deny_style_fails_on_deprecated_key");
+    // `--deny style` promotes `Deprecated` warnings to errors. The
     // canonical key is `style.page.left-margin`; the alias
     // `style.page.left_margin` should trigger a Deprecated warning, which
     // strict mode turns into an error. Route through `--output html` to
@@ -194,20 +194,20 @@ fn style_strict_style_fails_on_deprecated_key() {
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
-        .arg("--strict-style")
+        .args(["--deny", "style"])
         .output()
         .unwrap();
     assert!(
         !output.status.success(),
-        "--strict-style must fail on deprecated snake-case alias"
+        "--deny style must fail on deprecated snake-case alias"
     );
 }
 
 /// Valid `style.markdown` cleanup rules are neither unknown nor inactive
 /// render styles, so strict rendering accepts the shipped control document.
 #[test]
-fn style_strict_style_accepts_markdown_cleanup_rules() {
-    let fixture = CliProcessFixture::named("style_strict_style_accepts_markdown_cleanup_rules");
+fn deny_style_accepts_markdown_cleanup_rules() {
+    let fixture = CliProcessFixture::named("deny_style_accepts_markdown_cleanup_rules");
     let document = biscuit_test_harness::manifest_dir!()
         .join("../lib/tests/fixtures/clean/style-markdown-control.md");
     let output = rendering_builder(&fixture)
@@ -216,12 +216,12 @@ fn style_strict_style_accepts_markdown_cleanup_rules() {
         .arg(&document)
         .arg("--output")
         .arg("html")
-        .arg("--strict-style")
+        .args(["--deny", "style"])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "--strict-style must accept valid style.markdown rules: {}",
+        "--deny style must accept valid style.markdown rules: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -254,7 +254,7 @@ fn style_invalid_markdown_rule_fails_with_its_path() {
 #[test]
 fn style_non_strict_renders_with_unknown_key() {
     let fixture = CliProcessFixture::named("style_non_strict_renders_with_unknown_key");
-    // Without `--strict-style`, an unknown key must NOT fail the render; it
+    // Without `--deny style`, an unknown key must NOT fail the render; it
     // becomes an informational warning. Route through `--output html` to
     // exercise the frontmatter pipeline.
     let tmp = md_file(
@@ -274,7 +274,7 @@ fn style_non_strict_renders_with_unknown_key() {
         .unwrap();
     assert!(
         output.status.success(),
-        "unknown key without --strict-style must still render: {}",
+        "unknown key without --deny style must still render: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }

@@ -679,3 +679,44 @@ mod lifecycle_calls {
         assert!(rejection("composed:\n  - stdout: \"{{ min(true, 5) }}\"\n", None).is_some());
     }
 }
+
+mod bounds {
+    use super::*;
+
+    /// A raw JSON Schema whose `a.a.…` chain is `depth` objects deep, ending
+    /// in a required boolean `leaf`.
+    fn nested_raw_schema(depth: usize) -> String {
+        let mut schema = json!({ "type": "object", "properties": { "leaf": { "type": "boolean" } }, "required": ["leaf"] });
+        for _ in 0..depth {
+            schema = json!({ "type": "object", "properties": { "a": schema }, "required": ["a"] });
+        }
+        schema.to_string()
+    }
+
+    /// Criterion 30's bounds leg: the raw projection's depth bound still holds,
+    /// and a path past it is `unknown`, so its call is neither proven invalid
+    /// nor proven valid.
+    #[test]
+    fn a_path_past_the_projection_depth_bound_stays_unknown() {
+        let dir = TempDir::new().unwrap();
+        for (depth, expected) in [(3, None), (40, Some(Unknown))] {
+            write(dir.path(), "schema.json", &nested_raw_schema(depth));
+            let path = write(dir.path(), "doc.md", "---\n$schema: ./schema.json\n---\nBody\n");
+            let effective = DarkmatterSchemas::new(context_at(dir.path()))
+                .effective_for(&markdown_at(&path))
+                .unwrap()
+                .expect("an effective schema");
+            let declared = DeclaredTypes::for_schema(Some(&effective));
+            let leaf = format!("{}leaf", "a.".repeat(depth));
+            let check = checks(&declared, &format!("min({leaf}, 5)")).remove(0);
+            match expected {
+                // Within the bound the boolean leaf is known, so the call is rejected.
+                None => assert!(check.is_rejected(), "depth {depth}: {:?}", check.category()),
+                Some(category) => {
+                    assert_eq!(check.category(), category, "depth {depth}");
+                    assert!(!check.is_rejected(), "depth {depth}");
+                }
+            }
+        }
+    }
+}

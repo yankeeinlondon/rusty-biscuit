@@ -372,7 +372,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                             "The user declined to approve this shell command."
                         }
                         ShellExpansionError::Timeout { .. } => {
-                            "Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."
+                            "Raise the timeout, or pass <cyan>--allow shell-timeout</cyan> to warn instead of fail."
                         }
                         ShellExpansionError::ExecutionFailed { .. } => unreachable!(),
                         _ => "Check the command and its error handling options.",
