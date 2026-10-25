@@ -72,7 +72,7 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    - when: "!err && file_exists(review) && length(frontmatter(review, 'human_in_the_loop') || []) > 0"
+    - when: "!err && file_exists(review) && is_array(frontmatter(review, 'human_in_the_loop')) && length(frontmatter(review, 'human_in_the_loop')) > 0"
       then:
           - info: |-
                 the first review after the implementation of {{ link(spec) }} found decisions that need the author:
