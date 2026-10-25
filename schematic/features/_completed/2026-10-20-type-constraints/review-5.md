@@ -26,6 +26,9 @@ implemented: false
 description: "A **feature** review of `2026-10-20-type-constraints/spec.md`"
 feature: 2026-10-20-type-constraints/review-5.md
 previous: 2026-10-20-type-constraints/review-4.md
+next: 2026-10-20-type-constraints/review-6.md
+log: /Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-20-type-constraints/log.md
+implemented_by: claude/opus
 ---
 
 # Type constraints review, iteration 5
