@@ -223,6 +223,8 @@ Update alongside code changes:
   Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
 - **Rule 5** — "Should I?" means yes.
   When the only open question is whether to do something in reach (fix a defect you found, add the missing test, update the drifted doc), do it and report it. Ask only when choosing between alternatives with different outcomes.
+- **Rule 6** — Stay in the Session's Worktree.
+  Write every change in the worktree and branch the session started in unless explicitly asked not to. Never create a worktree or branch on your own initiative, even when the current branch has an open PR or another worktree looks busy: work outside the starting worktree is invisible to the author's tooling. If the work seems to belong elsewhere, stop and ask where it should go.
 
 ## Features and Fixes
 

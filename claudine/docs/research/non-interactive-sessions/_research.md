@@ -20,7 +20,7 @@ success:
     - when: "frontmatter(file, 'last_updated') == ctx.today"
       then:
           - shell:
-                command: "md schema validate '{{file}}' --no-trigger-schemas"
+                command: "md schema validate '{{file}}' --disable schema-triggers"
           - info: "The **Non-Interactive Sessions** research on **{{seq.name}}** completed successfully: {{ link(file) }}"
           - message: "🎉  the **Non-Interactive Sessions** research on **{{seq.name}}** completed successfully"
 failure:
@@ -613,7 +613,7 @@ You are done with this task when the Markdown "{{file}}" has been saved with:
 
 1. all research in the body of the document
 2. and all Frontmatter properties have been set
-3. running `md schema validate '{{file}}' --no-trigger-schemas` exits with status 0
+3. running `md schema validate '{{file}}' --disable schema-triggers` exits with status 0
    (indicating that the frontmatter satisfies the topic schema)
 
 - you do not need to run any tests or lints

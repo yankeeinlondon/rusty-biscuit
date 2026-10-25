@@ -13,7 +13,7 @@ success:
       then:
           - error: "Steering research did not produce a current document"
     - shell:
-          command: "md schema validate '{{file}}' --no-trigger-schemas"
+          command: "md schema validate '{{file}}' --disable schema-triggers"
     - shell:
           command: "claudine providers steering check '{{seq.slug}}'"
     - stderr: "Steering schema and relationship checks completed for **{{seq.name}}**; source review and live activation gates remain separate."
@@ -270,7 +270,7 @@ help a token-generation loop that never reaches another tool call.
 
 ## Completion and Review Gates
 
-Run `md schema validate '{{file}}' --no-trigger-schemas` and
+Run `md schema validate '{{file}}' --disable schema-triggers` and
 `claudine providers steering check '{{seq.slug}}'` using a build that includes
 the steering validator. A missing command is a failed gate, not permission to
 skip it. Check the 24 unique

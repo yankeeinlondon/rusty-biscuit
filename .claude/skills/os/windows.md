@@ -204,6 +204,19 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (`/STACK:<bytes>` for msvc, `-Wl,--stack,<bytes>` for gnu), as
   `claudine/cli`, `darkmatter/cli`, and `sniff/cli` do. It covers the main
   thread only; spawned threads keep Rust's 2 MiB default.
+- **A deep-recursion test can overflow only on native Windows although it
+  runs on the same 2 MiB test thread everywhere.** Debug x64 MSVC frames are
+  larger than macOS arm64 frames (the darkmatter `as_markdown` depth-limit
+  test measured 120,352 bytes per level on `build-win-native` against
+  112,224 on macOS), so a chain that fits on macOS aborts with
+  `0xC00000FD`. Measure rather than guess: print a local's address at the
+  recursive entry (`std::hint::black_box(&probe) as *const u8 as usize`) and
+  run `just cross-check <pkg> --os windows --no-capture <test>`; the
+  difference between consecutive lines is the per-level cost. On macOS,
+  `lldb` frame SPs give each function's share. In a debug build every
+  temporary keeps its own slot, so shrink the frames on the chain by moving
+  code that is not live across the recursive call into `#[inline(never)]`
+  helpers and boxing large values held across it; never raise the stack.
 - **Ctrl+C in Claudine goes through one process-wide
   `SetConsoleCtrlHandler` handler** accepting `CTRL_C_EVENT` and
   `CTRL_BREAK_EVENT`; its force-exit rung exits `130` via `ExitProcess`. A
