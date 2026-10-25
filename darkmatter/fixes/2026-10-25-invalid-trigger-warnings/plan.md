@@ -10,11 +10,42 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
-    - claudine-cli
-source_files_during_phase_1: []
+source_files_during_phase_1:
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
-skills_files_updated_during_phase_1: []
+skills_files_updated_during_phase_1:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
 source_files_during_phase_2: []
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
