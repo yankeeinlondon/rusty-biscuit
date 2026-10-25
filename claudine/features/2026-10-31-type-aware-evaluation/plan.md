@@ -9,6 +9,7 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
+    - biscuit-file
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -62,6 +63,85 @@ docs_updated_during_phase_2:
     - darkmatter/docs/inline/call-check.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/tests/l1/structural_validation.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - darkmatter/lib/src/effects/verbs.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/lib/tests/l1/file_predicates.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/cli/tests/l1/compose_file_predicates.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.digest
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
 ---
@@ -400,13 +480,13 @@ Goal: one library narrowing engine, used identically by composition and DMLS.
 
 Single owner (new narrowing module plus the type-environment hook-ins).
 
-- [ ] **Fact model and stable subjects**
+- [x] **Fact model and stable subjects**
   - Facts: non-null (internal, not a schema type), true-implies (suitable for
     type), true-iff (type / exclusion). Stable subjects only: resolved
     variable or constant-member/index path; bare and `fm` paths share a fact
     only when both resolve to the same document binding. Calls and dynamic
     indices are never subjects. Parentheses preserve facts; `!` swaps.
-- [ ] **Truthiness and predicate guards**
+- [x] **Truthiness and predicate guards**
   - Truthiness: true side removes `null`; false side proves nothing.
     `x ? a : b`, `!x ? a : b`, `x && f(x)`, `::block when="x"`.
   - Predicate facts from registration (Phase B slots): true-implies narrows
@@ -419,27 +499,27 @@ Single owner (new narrowing module plus the type-environment hook-ins).
     expanded; with no lookup it stays in every family (the delivered
     conservative result). Test: with `x: [number, node]` and `node` a
     recursive object, the true side of `is_number(x)` is `number` alone.
-- [ ] **Short-circuit and compound flow**
+- [x] **Short-circuit and compound flow**
   - `a && b`: right side gets facts from `a` true. `a || b`: right side gets
     facts from `a` false. Compound guards keep only facts valid on every
     route (`is_number(x) || is_string(x)` → `number | string`;
     `is_number(x) || ready` → nothing). Restore incoming types after the
     region except common facts.
-- [ ] **Impossible branches**
+- [x] **Impossible branches**
   - Keep checking with the incoming type for a contradicted subject; no never
     type. `is_number(flag) ? min(flag, 5) : 0` with `flag: boolean(required)`
     rejects the document, as does a false `::block` with `min(flag, 5)`.
 
 ### Wave 6 — Integration
 
-- [ ] **Hook narrowing into every checking path**
+- [x] **Hook narrowing into every checking path**
   - Composition checking, the compatibility API, DMLS static walk, and
     lifecycle action expressions all call the same engine; conditional
     blocks narrow their bodies; nested blocks compose.
   - Tests: criterion 9 (rows g/h through all three paths), 10 (`x ? …`,
     `x && …`, `::block when="x"` category 1; unguarded category 2), 11
     (test-registered true-implies predicate does not narrow the false branch).
-- [ ] **Fact lifetime in lifecycle flow**
+- [x] **Fact lifetime in lifecycle flow**
   - Facts end at the guarded region and never cross events, loop iterations,
     retries, or proxy handoffs. `set` invalidates facts for the destination
     and overlapping ancestor/descendant paths before later actions; an
@@ -447,7 +527,7 @@ Single owner (new narrowing module plus the type-environment hook-ins).
     a guard recomputes.
   - Tests: criterion 34 (guard, `set`, later read in runtime and DMLS;
     overlapping paths; event re-entry; shadowed `fm` path).
-- [ ] **No mutation, no guard leakage**
+- [x] **No mutation, no guard leakage**
   - Compare state immediately before/after analysis and evaluation in
     fixtures with no authored writes, separately from schema normalization;
     authored bytes unchanged.
@@ -466,7 +546,7 @@ task waits for Wave 5.
 
 ### Wave 7 — Passive structural validation (`biscuit-file`)
 
-- [ ] **Shared passive validator**
+- [x] **Shared passive validator**
   - Add the checks S1 named to `biscuit-file` (public passive API; no
     resolution context, no filesystem/env/network). Covers local relative and
     absolute, Windows, project-relative, vault, recursive, HTTP(S),
@@ -477,14 +557,14 @@ task waits for Wave 5.
     grammar; no second grammar in Darkmatter.
   - Host-independent acceptance: identical results on every OS.
   - Tests in `biscuit-file/`: full corpus, with failing access stubs.
-- [ ] **`file://` adapter**
+- [x] **`file://` adapter**
   - Preserve the existing `file://` input adapter ahead of the shared rules
     (`file://foo/bar` stays supported); do not collapse separators in a way
     that changes UNC or URL meaning. The adapter is not a new scheme.
 
 ### Wave 8 — Darkmatter functions
 
-- [ ] **`is_file_type`**
+- [x] **`is_file_type`**
   - New pure-dispatch function (display category `Filesystem`, works through
     the context-free expression API), declared in
     `darkmatter/schemas/partials/functions.yaml` as
@@ -509,7 +589,7 @@ task waits for Wave 5.
     `42` false); never mutates, resolves, or accesses anything. No
     `is_file` alias.
   - Tests: criteria 13, 35 (no resolution context; validator corpus).
-- [ ] **`file_exists` / `fileexists`**
+- [x] **`file_exists` / `fileexists`**
   - Keep Phase B binding (`file_exists(value: unknown | null)` inspects its
     argument: `file_exists(42)` and `file_exists(null)` are `false`).
     Validate the bound reference before path resolution or remote fetch;
@@ -518,15 +598,15 @@ task waits for Wave 5.
     with one, denied/failed is `false`, success `true`). Alias identical.
     Malformed input is valid input, not category 5.
   - Tests: criteria 14, 35 (`fileexists` parity).
-- [ ] **Always-false warning**
+- [x] **Always-false warning**
   - Shared library analysis (composition and DMLS) warns when an authored
     literal argument is provably malformed; never for a merely `string`-typed
     argument; enabled by default; blocks under `--deny all`; analysis never
     calls `file_exists`; uses the same passive binding and validation.
   - Tests: criterion 15 plus composition-side warning (criterion 35).
-- [ ] **No `file_exists`-specific setting**
+- [x] **No `file_exists`-specific setting**
   - Confirm DMLS config has none and none was added. Test: criterion 18.
-- [ ] **Guarded file arguments**
+- [x] **Guarded file arguments**
   - `is_file_type(source) && frontmatter(source, 'title')` is category 1 with
     `source: unknown`; unguarded is category 4 (silent default; warns under
     `expressions.strict`). The guard rewrites nothing, proves nothing.
@@ -605,6 +685,13 @@ task waits for Wave 5.
     and category 3 as warnings; categories 2 and 4 only under DMLS
     `expressions.strict`. Test: criterion 20 (composes with a warning; fails
     under `--deny all` once Phase 7 lands — assert the severity part now).
+  - Lifecycle action surfaces (`lifecycle_call_checks`, in `md compose` and
+    Claudine's `prepare.rs`) report their category 3 and
+    `dm.expression.always_false_call` warnings through composition from that
+    same list. Phase 4 delivered the always-false warning for frontmatter,
+    body, and `when=` conditions in composition and for every surface in
+    DMLS; its lifecycle-action leg in composition rides this channel
+    (implementation log P4-D4).
 - [ ] **Type-based absence suppression**
   - Replace the catalog-name rule: a direct bare-variable argument to a
     parameter whose declared type explicitly includes `| null` suppresses

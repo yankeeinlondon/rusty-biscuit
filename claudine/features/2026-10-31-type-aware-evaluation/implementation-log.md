@@ -12,6 +12,7 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
+    - biscuit-file
 human_review: false
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
@@ -64,21 +65,102 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
 message_to_agent: |-
-    Phase 2 is done; read "## Phase 2" in this log, especially its decisions.
-    The projection is DeclaredTypes::for_schema(Option<&EffectiveSchema>) (document,
-    triggers, RawDeclarations of the merged JSON, layered_definitions); every consumer
-    now builds it. Shape::union is the single normalization (canonical order prints
-    "number | string"). Call/operator types come from call_check::expression_type,
-    whose ternary and `||` operands already go through TypeScope::assume; Phase 3
-    extends facts there, not a second path. Lifecycle surfaces are call-checked by
-    darkmatter::lifecycle::reject_incompatible_calls (unguarded on purpose, P2-D5).
-    Host globals are typed via DeclaredTypes::with_global_catalog and
-    EventRegistry::register_global_catalog (Claudine registers claudine_globals()).
-    Two guards list DeclaredTypes/TypeScope::unguarded sites with reasons: darkmatter
-    lib/tests/l1/type_scope_ownership_guard.rs and claudine lib/tests/l1/type_scope_ownership_guard.rs;
-    new sites need entries in both where scanned. Keep SiteScope's schema boxed (P2-D8):
-    the nested-composition depth test sits near the 2 MiB stack limit.
+    Phase 4 is done; read "## Phase 4" in this log (P4-D1..D8). For Phase 5:
+    registrations now carry a second analysis rule besides the narrowing fact,
+    RegistrationBuilder::false_for_malformed_reference(parameter) (read with
+    FunctionRegistration::malformed_reference_parameter; file_exists declares
+    it). The call check sets CallCheck::always_false from it, which
+    composition reports and DMLS shows as dm.expression.always_false_call
+    (expression::ALWAYS_FALSE_CALL_CODE). The .facts.json artifact must carry
+    this rule with the other behavior metadata, or a host predicate that
+    declares it would warn at composition but not in the editor.
+    is_file_type registers TrueImplies "file" on parameter "value"; it is the
+    built-in counterpart of the test host predicate is_project_file (same
+    signature `value: unknown | null`). File-reference syntax is
+    biscuit_file::FileReference::new alone; Darkmatter's
+    is_well_formed_reference only adds the file:// adapter. P4-D4: the
+    composition warning for lifecycle-action surfaces is Phase 6's (the plan's
+    Phase 6 "CLI severities" task records it).
+source_files_during_phase_4:
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/tests/l1/structural_validation.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - darkmatter/lib/src/effects/verbs.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/lib/tests/l1/file_predicates.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/cli/tests/l1/compose_file_predicates.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.digest
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Implementation Log for 2026-10-31-type-aware-evaluation (9 phases)
@@ -253,16 +335,16 @@ Later phases add the new test names to the last column.
 | 6 | `LT/design_time_call_check.rs::the_worked_example_rows`; `DT/expression_call_diagnostics.rs::rows_a_to_e_by_default` | rows f, i category 1 (P2) | `LT/variable_type_projection.rs::call_typing::worked_example_rows_f_and_i_are_exact`, `::call_typing::operators_and_calls_are_typed_from_their_operands`, `::call_typing::an_overloaded_call_unions_its_candidate_returns`; `LT/design_time_call_check.rs::categories::the_worked_example_rows` (rows f, i now category 1); `DT/expression_call_diagnostics.rs::settings::rows_f_and_i_are_silent_under_both_settings` |
 | 7 | `LT/design_time_call_check.rs::projection_is_deterministic_and_reads_only_the_schema`; `LT/absent_property_contract.rs::*` | instrumented passivity + unchanged state (P2) | `LT/variable_type_projection.rs::passivity::projection_reads_no_file_and_runs_no_handler`, `::passivity::null_materialization_is_unchanged` |
 | 8 | none (lifecycle actions are not call-checked) | lifecycle `min(flag, 5)` rejection parity (P2, decision D2) | `LT/variable_type_projection.rs::lifecycle_calls::a_lifecycle_call_is_rejected_exactly_like_the_body_call`, `::lifecycle_calls::a_compatible_or_untyped_lifecycle_call_is_not_rejected`; `CT/compose_lifecycle.rs::a_provably_wrong_lifecycle_call_rejects_before_any_event`; `CL/lifecycle/tests/call_check.rs::a_lifecycle_call_is_rejected_like_the_body_call` |
-| 9 | `LT/design_time_call_check.rs::guards_narrow_the_argument`; `DT/expression_call_diagnostics.rs::guards_narrow_rows_g_and_h`; `DT/expression_scopes.rs::expression_branch_rows_agree_with_the_library` | composition assertion on extended scope (P3) | — |
-| 10 | `LT/expression_type_scope.rs::a_conjunction_proves_each_operand_on_its_true_side_only`, `::a_ternary_guard_joins_its_branch_routes`; `DT/expression_scopes.rs::hover_inside_a_body_block_guard_shows_the_library_type` | category 1/2 for `x ?`, `x &&`, `::block when` (P3) | — |
-| 11 | `LT/expression_type_scope.rs::type_predicates_narrow_a_declared_union_on_both_sides`; `DT/type_scope_ownership_guard.rs::*` | true-iff vs true-implies registry; `is_file_type`, host facts, shell hole (P3) | — |
-| 12 | `LT/expression_type_scope.rs::a_child_scope_shares_its_parent_and_never_changes_it` | before/after state fixture (P3) | — |
-| 13 | none (`is_file_type` absent); biscuit-file `parse.rs` unit tests `empty_string_rejected`, `https_url_detected_as_url_kind` | `is_file_type` corpus with failing stubs (P4) | — |
-| 14 | `LT/path_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it`; `LT/context_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it` | `""`/`https://` false without I/O; `file://` corpus (P4) | — |
-| 15 | `DT/expression_call_diagnostics.rs::file_exists_takes_a_number_silently` (adjacent) | always-false literal warning (P4) | — |
-| 16 | `LT/design_time_call_check.rs::the_worked_example_rows` (category 4 machinery) | guarded `frontmatter` category 1 (P4) | — |
+| 9 | `LT/design_time_call_check.rs::guards_narrow_the_argument`; `DT/expression_call_diagnostics.rs::guards_narrow_rows_g_and_h`; `DT/expression_scopes.rs::expression_branch_rows_agree_with_the_library` | composition assertion on extended scope (P3) | `LT/flow_sensitive_narrowing.rs::body_guards::composition_reads_the_same_narrowing`, `::registered_facts::a_true_implies_fact_narrows_only_its_true_side`; `DT/expression_call_diagnostics.rs::narrowing::the_editor_shows_exactly_the_library_categories_at_each_guarded_site` |
+| 10 | `LT/expression_type_scope.rs::a_conjunction_proves_each_operand_on_its_true_side_only`, `::a_ternary_guard_joins_its_branch_routes`; `DT/expression_scopes.rs::hover_inside_a_body_block_guard_shows_the_library_type` | category 1/2 for `x ?`, `x &&`, `::block when` (P3) | `LT/flow_sensitive_narrowing.rs::compound_guards::short_circuit_operands_and_ternaries_see_only_justified_facts`, `::body_guards::a_block_guard_narrows_its_body`; `DT/expression_call_diagnostics.rs::narrowing::the_editor_shows_exactly_the_library_categories_at_each_guarded_site` |
+| 11 | `LT/expression_type_scope.rs::type_predicates_narrow_a_declared_union_on_both_sides`; `DT/type_scope_ownership_guard.rs::*` | true-iff vs true-implies registry; `is_file_type`, host facts, shell hole (P3) | `LT/flow_sensitive_narrowing.rs::registered_facts::a_true_implies_fact_narrows_only_its_true_side`, `::registered_facts::a_registered_fact_narrows_a_shell_template_hole`, `::registered_facts::true_implies_and_false_implies_facts_use_their_type`, `::registered_facts::a_predicate_without_a_fact_narrows_nothing`, `::registered_facts::registration_rejects_invalid_facts`, `::recursive_arms::a_recursive_arm_is_classified_by_its_definition`; `LT/file_predicates.rs::guarded_file_arguments::an_is_file_type_guard_narrows_a_shell_template_hole` and `::an_is_file_type_guard_makes_the_file_argument_category_1` (`is_file_type` leg, P4); host-fact DMLS leg P5 (decision P3-D7) |
+| 12 | `LT/expression_type_scope.rs::a_child_scope_shares_its_parent_and_never_changes_it` | before/after state fixture (P3) | `LT/flow_sensitive_narrowing.rs::body_guards::narrowing_never_changes_a_stored_value` |
+| 13 | none (`is_file_type` absent); biscuit-file `parse.rs` unit tests `empty_string_rejected`, `https_url_detected_as_url_kind` | `is_file_type` corpus with failing stubs (P4) | `biscuit-file/lib/tests/l1/structural_validation.rs::every_supported_kind_is_well_formed_on_every_host`, `::malformed_references_are_rejected_by_construction`; `LT/file_predicates.rs::is_file_type::it_is_true_exactly_for_well_formed_reference_text_without_a_context` |
+| 14 | `LT/path_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it`; `LT/context_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it` | `""`/`https://` false without I/O; `file://` corpus (P4) | `LT/file_predicates.rs::file_exists::malformed_text_is_false_and_well_formed_references_keep_their_outcomes`, `::file_exists::a_valid_remote_reference_without_a_runtime_is_still_an_error`; darkmatter unit `fs_tests::malformed_references_are_false_before_any_access` |
+| 15 | `DT/expression_call_diagnostics.rs::file_exists_takes_a_number_silently` (adjacent) | always-false literal warning (P4) | `DT/expression_call_diagnostics.rs::file_predicates::a_malformed_literal_reference_warns_and_a_string_variable_does_not`; `LT/file_predicates.rs::always_false::only_a_malformed_literal_reference_is_always_false` |
+| 16 | `LT/design_time_call_check.rs::the_worked_example_rows` (category 4 machinery) | guarded `frontmatter` category 1 (P4) | `LT/file_predicates.rs::guarded_file_arguments::an_is_file_type_guard_makes_the_file_argument_category_1`; `DT/expression_call_diagnostics.rs::file_predicates::under_strict_only_the_unguarded_file_argument_warns` |
 | 17 | `LT/function_binding_registry.rs::every_registered_function_has_a_row` (built-ins) | host predicate, catalog, never-invoked counter (P5) | — |
-| 18 | DMLS `config/mod.rs` unit tests (strict only) | assert no `file_exists` setting (P4) | — |
+| 18 | DMLS `config/mod.rs` unit tests (strict only) | assert no `file_exists` setting (P4) | `DT/expression_call_diagnostics.rs::file_predicates::the_configuration_has_no_file_exists_setting` |
 | 19 | `DT/call_check_agreement.rs::composition_and_the_editor_reject_the_same_documents`; `DT/recursive_call_check.rs::the_editor_reports_exactly_the_recursive_call_composition_rejects` | identical fields across composition, report-json, DMLS (P6, P8) | — |
 | 20 | none | category 3 warning; `--deny all` fails (P6, P7) | — |
 | 21 | `LT/unknown_identifier_warning.rs::every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root`, `::a_handled_absence_is_silent_and_renders_the_fallback`; `DT/expression_scopes.rs::undeclared_property_findings_match_the_library_branch_facts`; `absence.rs` unit tests | `\| null` type rule; no name list (P6) | — |
@@ -277,9 +359,9 @@ Later phases add the new test names to the last column.
 | 30 | this log (baseline below) | "after" sample + explanation (P8) | — |
 | 31 | `LT/expression_type_scope.rs::bare_and_fm_reads_share_one_document_binding_unless_a_host_root_shadows_it`, `::an_unavailable_global_stays_unavailable_under_any_guard`; `LT/host_globals_compose.rs::reading_an_unavailable_global_is_a_typed_binding_error_in_body_and_frontmatter` | type-level bare/`fm` agreement (P2) | `LT/variable_type_projection.rs::precedence::bare_and_fm_paths_agree_unless_a_host_global_shadows_the_bare_one` |
 | 32 | `LT/expression_type_scope.rs::constant_paths_and_indices_are_subjects_and_computed_ones_are_not`; `LT/recursive_schema_typed_consumers.rs` | item type + null; terminating recursive path (P2) | `LT/variable_type_projection.rs::nested_paths::constant_indices_project_the_item_type`, `::nested_paths::a_path_through_a_recursive_type_terminates` |
-| 33 | `LT/expression_type_scope.rs::a_disjunction_proves_what_both_routes_prove`, `::negation_swaps_sides_and_parentheses_keep_facts`; `LT/compose_call_precheck.rs::a_dead_ternary_branch_is_checked` | re-assert on extended scope (P3) | — |
-| 34 | `LT/expression_type_scope.rs::a_write_invalidates_its_aliases_ancestors_and_descendants_only`, `::a_join_restores_only_incoming_facts_no_branch_could_have_written`; `CL/lifecycle/executor/tests/guarded_shell_sites.rs::a_set_before_the_shell_ends_the_guard_proof`; `CL/lifecycle/executor/tests/scope_site_conformance.rs::lifecycle_set_shell_negated_guard` | lifecycle guard → `set` → later call, runtime and DMLS (P3) | — |
-| 35 | `CL/lifecycle/executor/tests/scope_site_conformance.rs::file_exists_alias`; `LT/scope_site_conformance.rs::file_exists_guards_are_analyzed_without_running_a_handler` | context-free `is_file_type`; passive validator; `fileexists` parity (P4) | — |
+| 33 | `LT/expression_type_scope.rs::a_disjunction_proves_what_both_routes_prove`, `::negation_swaps_sides_and_parentheses_keep_facts`; `LT/compose_call_precheck.rs::a_dead_ternary_branch_is_checked` | re-assert on extended scope (P3) | `LT/flow_sensitive_narrowing.rs::compound_guards::short_circuit_operands_and_ternaries_see_only_justified_facts`, `::compound_guards::an_impossible_branch_is_checked_with_the_incoming_type`, `::body_guards::composition_reads_the_same_narrowing` |
+| 34 | `LT/expression_type_scope.rs::a_write_invalidates_its_aliases_ancestors_and_descendants_only`, `::a_join_restores_only_incoming_facts_no_branch_could_have_written`; `CL/lifecycle/executor/tests/guarded_shell_sites.rs::a_set_before_the_shell_ends_the_guard_proof`; `CL/lifecycle/executor/tests/scope_site_conformance.rs::lifecycle_set_shell_negated_guard` | lifecycle guard → `set` → later call, runtime and DMLS (P3) | `LT/flow_sensitive_narrowing.rs::lifecycle_fact_lifetime::a_set_ends_the_guard_and_events_never_share_facts`, `::lifecycle_fact_lifetime::overlapping_writes_end_facts_and_siblings_do_not`, `::lifecycle_fact_lifetime::the_lifecycle_rejection_reads_each_site`; `DT/expression_call_diagnostics.rs::narrowing::a_lifecycle_guard_ends_at_a_write_and_its_event`; `CL/lifecycle/tests/call_check.rs::a_guard_narrows_until_a_write_and_never_reaches_a_shadowing_host_global` |
+| 35 | `CL/lifecycle/executor/tests/scope_site_conformance.rs::file_exists_alias`; `LT/scope_site_conformance.rs::file_exists_guards_are_analyzed_without_running_a_handler` | context-free `is_file_type`; passive validator; `fileexists` parity (P4) | `LT/file_predicates.rs::is_file_type::*`, `::file_exists::*`, `::always_false::*`, `::composition::composition_warns_for_each_always_false_call_and_composes_the_guarded_read`; `CT/compose_file_predicates.rs::compose_answers_file_predicates_and_warns_for_an_always_false_call`; `biscuit-file/lib/tests/l1/structural_validation.rs::*` |
 | 36 | `LT/design_time_call_check.rs::criterion_36_pairs`, `::null_is_accepted_only_by_an_explicit_null_arm` | `\| null` suppression incl. host and overloads (P6) | — |
 | 37 | `LT/function_binding_registry.rs::*`; `LT/function_catalog_parity.rs` | registration errors; `.facts.json` matrix (P5) | — |
 | 38 | `CT/clean_schema.rs::test_baseline_schema_flags_conflict`; `CT/schema_validate_baseline_selection.rs::no_baseline_schema_conflicts_with_schema_flag`; `CT/schema_trigger_rename.rs::the_new_flag_disables_triggers_on_compose_validate_and_clean` | registry mappings, unknown/repeated ids, host denial, precedence (P7) | — |
@@ -699,3 +781,403 @@ twin).
 - **Cross-OS:** not run. The changes are pure type computation over
   in-memory schema values plus temp-dir fixtures that follow existing
   portable patterns, with no path comparison or OS-specific code.
+
+## Phase 3
+
+Phase 3 delivers flow-sensitive narrowing (spec §2; criteria 9–12, 33, 34)
+by extending the existing `TypeScope` engine; no second engine exists.
+Composition, the call check, lifecycle surfaces, DMLS, and shell template
+holes all read the same scope.
+
+### What changed
+
+- **Facts live on registrations** (`call_binding/registration.rs`):
+  `NarrowingFact { parameter, index, kind, ty }` with
+  `FactKind::{TrueIff, TrueImplies, FalseImplies}` and
+  `FactType::{NonNull, Type(text)}`, set with
+  `RegistrationBuilder::narrows` and read with
+  `FunctionRegistration::narrowing_fact[_for(count)]`. Built-ins declare
+  theirs on their `FunctionBinding` (`.narrowing(...)`): `is_string`,
+  `is_number`, `is_array` (`unknown[]`), `is_object`, `is_null` (`null`) are
+  true-iff; `file_exists` is true-implies `string`; `is_empty` is
+  false-implies non-null. The static `PREDICATE_FACTS` table is gone and
+  retired in both ownership guards.
+- **`scope/facts.rs` reads the registry** through
+  `functions::inspect_registration` (a thread's test function first, as
+  dispatch resolves it), so a test or host predicate narrows exactly like a
+  built-in. `and`/`or` are recognized through `lazy_function`.
+- **Recursive arms** (`scope/shape.rs::arm_families`): a `TypeExpr::Ref` arm
+  is classified by the top level of its definition body in
+  `DeclaredTypes::definitions()`, one level, never expanded; without the
+  definition it keeps every family (the delivered result).
+  `Shape::of_family`/`without_family` take the definition table, and
+  `Shape::suitable_for` implements true-implies.
+- **Lifecycle call checks are guard-aware**
+  (`lifecycle/validate.rs::lifecycle_call_checks`, `walk_stack_scoped`):
+  each surface is typed at its site, narrowed by the enclosing `when:` items,
+  facts ended by `action_writes`, never across events.
+  `reject_incompatible_calls` is its first category 5. The fact entry and exit
+  rules are one pair of functions (`actions.rs::branch_scopes`,
+  `scope_after_action`) shared with the mutating `walk_scoped`.
+- **Authored locations** (`lifecycle/source_map.rs`): the source map records
+  each scalar's frontmatter location (`AuthoredSegment` keys/indices), and
+  every `LifecycleSurfaceCalls` carries it.
+- **DMLS** (`diagnostics/frontmatter.rs::GuardedStackCalls`): md lifecycle
+  stack scalars take the library's guarded checks, matched by location and
+  ranged with `StackExpression::scalar_range`; a scalar the library does not
+  walk (a `set` shell value), or a lifecycle that does not parse, keeps the
+  previous unguarded per-expression check. `call_check::check_diagnostics`
+  maps already-made checks to editor findings.
+
+### Design Decisions
+
+- **P3-D1. A narrowing fact is a field of `FunctionRegistration`.**
+  - *Decision:* facts are declared with the registration's builder and stored
+    on it (`NarrowingFact`); analysis reads them from whatever registration a
+    call resolves to.
+  - *Alternatives:* keep the static name-keyed table; a separate fact
+    registry keyed by function name.
+  - *Why:* Phase 1 decision D1 and spec §5 ("the same Rust registration API
+    the built-ins use"); a name-keyed table cannot serve host or test
+    functions, and Phase 5's artifact needs per-function kind, type, and
+    parameter position, which the field holds.
+  - *Downsides:* each predicate guard costs one registry lookup.
+- **P3-D2. A third kind, false-implies, for `is_empty`.**
+  - *Decision:* `FactKind::FalseImplies` proves its type on the false side
+    only; `is_empty` registers false-implies non-null.
+  - *Alternatives:* keep `is_empty` as a special case in `facts.rs`.
+  - *Why:* no fact may be keyed on a name; `is_empty`'s fact is neither
+    true-iff nor true-implies.
+  - *Downsides:* Phase 5's artifact records three kinds, not two.
+- **P3-D3. "Suitable for a type" semantics.**
+  - *Decision:* for the bare type of one family, true-implies is
+    `of_family` (as before). Otherwise an arm that is a subtype of the target
+    stays, an arm sharing a family with it becomes the target, other arms are
+    dropped; `unknown` becomes the target; `null` is removed.
+  - *Alternatives:* compute an exact type intersection (no such operation
+    exists); always replace with the target.
+  - *Why:* sound (the result contains every value that satisfies both), never
+    invents members, items, or existence, and makes spec §4's example
+    (`unknown` → `file`) category 1.
+  - *Downsides:* a constrained arm (`string(min(3))`) narrowed by
+    true-implies `file` loses its constraint in the narrowed type.
+- **P3-D4. Facts are validated at registration now.**
+  - *Decision:* `build` rejects a fact on a function that does not return
+    `boolean`, on a parameter no overload declares (`UnknownParameter`
+    `narrows`), on a rest parameter or one at different positions, a union
+    type, and a true-iff type that is not `null` or a bare family.
+  - *Alternatives:* leave all validation to Phase 5.
+  - *Why:* a fact the engine cannot apply must not reach it; the checks are
+    the fact's own shape. Phase 5 still owns name/alias collisions, host
+    registration, and criterion 37's matrix.
+  - *Downsides:* none found.
+- **P3-D5. Lifecycle call checks read the guarded site (supersedes P2-D5).**
+  - *Decision:* `lifecycle_call_checks` types every surface under its
+    enclosing guards; `reject_incompatible_calls` rejects its first category
+    5.
+  - *Alternatives:* keep the unguarded rejection and add a separate guarded
+    walk for warnings.
+  - *Why:* Wave 6 requires lifecycle expressions to use the same engine as
+    composition; one walk serves rejection, DMLS, and the later Phase 6
+    warnings. An impossible guard keeps the incoming type, so P2-D5's
+    guarantee (a category 5 call is rejected under any guard) still holds.
+  - *Downsides:* a lifecycle call that is wrong only on its guard's true side
+    is now rejected, as the same call in a `::block` already was.
+- **P3-D6. DMLS joins the library's surfaces by authored location.**
+  - *Decision:* the lifecycle source map records each scalar's frontmatter
+    path; DMLS parses the md lifecycle (`md_host::parse_lifecycle`) and
+    matches each stack scalar to the library's surface by that path.
+  - *Alternatives:* walk the YAML AST with guards in DMLS (a second engine);
+    match by expression text (ambiguous for repeated text).
+  - *Why:* the editor reports exactly the library's verdict per site.
+  - *Downsides:* DMLS parses the lifecycle once per diagnostics pass; a
+    lifecycle with a parse error falls back to unguarded per-expression
+    checks (the parser's error is the primary finding there).
+- **P3-D7. Criterion 11's `is_file_type` and editor host-fact legs land with
+  those features.**
+  - *Decision:* Phase 3 proves criterion 11 for test-registered predicates in
+    composition's scope and the shell template hole. `is_file_type`
+    registers its fact in Phase 4 (Wave 8), and host facts reach DMLS through
+    Phase 5's `.facts.json` artifact, whose plan tasks already require the
+    composition/DMLS agreement tests.
+  - *Alternatives:* none; `is_file_type` does not exist yet, and a
+    thread-local test function cannot reach a DMLS server.
+  - *Why:* the plan sequences those features after Phase 3; the fact slot they
+    register into is delivered here.
+  - *Downsides:* criterion 11 is complete only after Phases 4 and 5.
+- **P3-D8. The shadowed-`fm` case is tested under Claudine.**
+  - *Decision:* `claudine/lib/src/composition/lifecycle/tests/call_check.rs`
+    covers it at a sequence site, where `seq` is a host global shadowing a
+    document `seq`.
+  - *Alternatives:* a darkmatter-only registry with an invented global.
+  - *Why:* `md`'s events declare only reserved namespaces, which cannot be
+    document properties; Claudine is the real host that shadows one. In a
+    plain document event `seq` is not a host global, so it is the property.
+  - *Downsides:* none.
+- **P3-D9. "Event re-entry" means a fresh, identical walk per event.**
+  - *Decision:* every event's walk starts from the declarations alone, and
+    re-reading a stack recomputes identical results; both are asserted.
+  - *Why:* static analysis has no run history; a re-entered event (retry,
+    loop pass) is analyzed as its own stack.
+  - *Downsides:* none.
+
+### Requirement-to-test mapping
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| true-implies narrows true side only; true-iff both; no handler runs (11, 9) | library public API, F1, L1 | `darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs::registered_facts::a_true_implies_fact_narrows_only_its_true_side` |
+| no fact → no narrowing | library, L1 | `::registered_facts::a_predicate_without_a_fact_narrows_nothing` |
+| true-implies `file` (`unknown` → `file`, category 4 → 1), false-implies non-null | library, L1 | `::registered_facts::true_implies_and_false_implies_facts_use_their_type` |
+| invalid fact registrations rejected (non-boolean, unknown parameter, union, non-family true-iff) | library, L1 | `::registered_facts::registration_rejects_invalid_facts` |
+| shell template hole narrowed by a registered fact (11) | library, L1 | `::registered_facts::a_registered_fact_narrows_a_shell_template_hole` |
+| recursive `Ref` arm classified by its definition | library + schema files on disk, L1 | `::recursive_arms::a_recursive_arm_is_classified_by_its_definition` |
+| short-circuit, negation, compound, calls-as-subjects (10, 33) | library, L1 | `::compound_guards::short_circuit_operands_and_ternaries_see_only_justified_facts` |
+| impossible branch checked with incoming type (33) | library, L1 | `::compound_guards::an_impossible_branch_is_checked_with_the_incoming_type` |
+| `::block when` narrows, nested blocks compose (10) | `BodyGuards` (composition's and DMLS's scope), L1 | `::body_guards::a_block_guard_narrows_its_body` |
+| composition: guarded calls compose; impossible ternary/block rejects (9, 33) | `Markdown::compose_with`, temp dir, L1 | `::body_guards::composition_reads_the_same_narrowing` |
+| no stored value changes; authored bytes unchanged (12) | analysis + composition, L1 | `::body_guards::narrowing_never_changes_a_stored_value` |
+| guard → set → later call; events never share facts; recompute identical (34) | `lifecycle_call_checks`, md registry, L1 | `::lifecycle_fact_lifetime::a_set_ends_the_guard_and_events_never_share_facts` |
+| ancestor/alias write ends fact; sibling does not; `fm` alias (34) | same | `::lifecycle_fact_lifetime::overlapping_writes_end_facts_and_siblings_do_not` |
+| lifecycle rejection reads the guarded site | same | `::lifecycle_fact_lifetime::the_lifecycle_rejection_reads_each_site` |
+| editor = library at each body site, strict severities (9, 10, 33, parity checkpoint) | real LSP session, L1 | `darkmatter/dmls/tests/l1/expression_call_diagnostics.rs::narrowing::the_editor_shows_exactly_the_library_categories_at_each_guarded_site` |
+| editor lifecycle guard ends at set and event (34) | real LSP session, L1 | `::narrowing::a_lifecycle_guard_ends_at_a_write_and_its_event` |
+| Claudine registry: set ends fact; shadowing host global unaffected (34) | Claudine lib, L1 | `claudine/lib/src/composition/lifecycle/tests/call_check.rs::a_guard_narrows_until_a_write_and_never_reaches_a_shadowing_host_global` |
+| built-in facts are on registrations | library unit | `darkmatter/lib/src/markdown/compose/expression/scope/tests.rs::the_built_in_narrowing_facts_are_registered_on_one_argument_predicates` |
+
+Updated existing tests: both `type_scope_ownership_guard.rs` files in
+darkmatter (lib, DMLS) and Claudine's (retired `PREDICATE_FACTS`/
+`PredicateFact`; `NarrowingFact`/`FactKind` owned by `registration.rs`; the
+lifecycle allowlist entries renamed to `lifecycle_call_checks` and
+`branch_scopes`).
+
+The Input Robustness Matrix does not apply: no file format or configuration
+reader changed (the lifecycle source map gained location bookkeeping only).
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["claudine", "darkmatter", "dmls", "test-toolkit"]`,
+  `change_class: package`. Gates were run.
+- **`darkmatter/` `just test`** (library, CLI, DMLS, zed CLI): 11985 run,
+  11984 passed, 1 failed:
+  `dmls::l1 registry_preparation::a_held_preparation_leaves_edits_cancellation_and_other_requests_running`.
+  Rerun alone three times: passed each time. Recorded as
+  **load-sensitive**; it exercises request concurrency in the LSP server,
+  not anything this phase changed.
+- **`darkmatter/` `just lint`:** passed.
+- **`claudine/` `just test`:** 11448 passed (386 slow), 9 skipped.
+- **`claudine/` `just lint`:** passed (the `__eh_frame` linker note on the
+  `claudine` binary is pre-existing and not an error).
+- **`just check-tier-coverage claudine`** and **`darkmatter`:** 0 stranded.
+- **Workspace compile:** `cargo check --workspace` clean; the other
+  darkmatter dependents do not use the changed lifecycle or fact APIs.
+- **Targeted runs during the phase:** the 393 existing narrowing/call-check
+  tests (`expression_type_scope|design_time_call_check|scope::tests|variable_type_projection|compose_call_precheck|scope_site_conformance|call_binding|function_binding_registry`)
+  passed after the fact-model change; the 14 new library tests, the 2 new
+  DMLS tests, the Claudine `call_check` module, and all three ownership
+  guards pass.
+- **Cross-OS:** not run. The changes are type computation over in-memory
+  values plus temp-dir fixtures in existing portable patterns; no path
+  comparison or OS-specific code was touched.
+
+## Phase 4
+
+Phase 4 delivers the file predicates and guarded file arguments (spec §3, §4;
+criteria 13–16, 18, 35, and criterion 11's `is_file_type` leg).
+`biscuit-file`'s `FileReference::new` is the one structural validator;
+Darkmatter adds only the `file://` input adapter in front of it.
+
+### What changed
+
+- **`biscuit-file` structural checks** (`file_reference/parse.rs`), the four
+  Spike S1 named: NUL rejection, a URL host check (literal authority parsed by
+  `url::Url`; a `{{NAME}}` authority accepted unread), `%` on a URL rejected,
+  and empty or rooted vault payloads rejected. All are `InvalidSyntax`.
+  `FileReference::new`'s docs now state it is the passive validator.
+- **`file://` adapter** (`resolve_ctx.rs::normalize_path_arg`, and its copy in
+  `effects/verbs.rs`): strips one `file://` prefix and no longer collapses
+  `/` runs (Phase 1 D5), so `file:////server/share/x` keeps its UNC meaning.
+  `is_well_formed_reference(raw)` = adapter + `FileReference::new(..).is_ok()`.
+- **`is_file_type(value: unknown | null): boolean`** — catalog entry
+  (Filesystem, four inline examples), pure handler in `predicates.rs`, and
+  `.narrowing("value", TrueImplies, Some("file"))` registered together.
+  Lifecycle verb regenerated (`regen-lifecycle-schema`), name added to both
+  `md-lifecycle.yaml` patterns, and `-short`/`-long@darkmatter:lifecycle`
+  references added to `claudine/schemas/action.yaml` (category and both
+  bundles) and `claudine/schemas/lifecycle.yaml` (loop keys). Function table
+  regenerated (`regen-expr-doc`).
+- **`file_exists`** parses the adapted text once: malformed → `false` before
+  any lookup; `Url` kind → remote fetch (unchanged outcomes); otherwise local
+  resolution (unchanged outcomes and errors). Catalog description updated.
+- **Always-false analysis**: `RegistrationBuilder::false_for_malformed_reference(parameter)`
+  (validated: boolean result, one non-rest position in every overload;
+  `RegistrationError::InvalidReferenceRule`), `FunctionRegistration::malformed_reference_parameter`,
+  `FunctionBinding::false_for_malformed_reference` on `file_exists` only.
+  `CallCheck::always_false` / `always_false_finding()` (`AlwaysFalseFinding`)
+  set for a non-rejected call whose literal text argument at that position is
+  malformed. Code `dm.expression.always_false_call`
+  (`expression::ALWAYS_FALSE_CALL_CODE`, defined once in the library).
+  `check_prepared_calls` keeps always-false checks.
+- **Composition** (`call_precheck.rs`): the existing walk records each
+  always-false check (frontmatter leaves, body, `::block`/`::file` `when=`)
+  and `check_document` returns them as coded `ComposeWarning`s (file and
+  line in the Prose message; identity per expression), added to the report
+  in `pipeline/mod.rs`.
+- **DMLS** (`call_check.rs::check_diagnostics`, `codes.rs`): every surface
+  (body, frontmatter, conditions, md lifecycle stacks) shows the warning
+  under both strictness settings, ranged at the literal.
+
+### Design Decisions
+
+- **P4-D1. A denied or failed remote fetch stays an error.**
+  - *Decision:* `file_exists` keeps its existing remote outcomes: a fetched
+    URL is `true`; a denied, failed, or local-only fetch is an error.
+  - *Alternatives:* return `false` for a denied/failed fetch, as spec §3's
+    parenthetical says.
+  - *Why:* spec §3's rule is "valid references keep their existing
+    outcomes". The parenthetical describes the outcomes wrongly: the
+    existing code and its tests (`file_exists_errors_for_policy_denied_remote`,
+    "a denial says nothing about existence") make a denial an error, and the
+    catalog documents it. Keeping the rule keeps the intent.
+  - *Downsides:* a document that wants `false` for an unreachable host must
+    guard the read itself.
+- **P4-D2. The always-false rule is registration metadata.**
+  - *Decision:* `false_for_malformed_reference(parameter)` on the
+    registration; the call check reads it, never a function name. Only
+    `file_exists` declares it.
+  - *Alternatives:* match `file_exists`/`fileexists` by name; derive it from
+    the narrowing fact.
+  - *Why:* Phase 3's rule (never key analysis on a name); a host predicate
+    (Phase 5) can declare it through the same builder. `is_file_type` does
+    not declare it: spec §3 limits the warning to `file_exists`, and
+    `is_file_type("https://") => false` is the predicate's own documented
+    example.
+  - *Downsides:* Phase 5's `.facts.json` must carry this metadata too.
+- **P4-D3. The new code is defined once, in the library.**
+  - *Decision:* `ALWAYS_FALSE_CALL_CODE` in `expression/call_check.rs`;
+    DMLS's `code::EXPRESSION_ALWAYS_FALSE_CALL` is that constant.
+  - *Alternatives:* define it in DMLS like the other call codes.
+  - *Why:* Phase 1's default (a new `dm.expression.*` code in the shared
+    library diagnostics) and Phase 6's direction (codes move to the library).
+  - *Downsides:* until Phase 6 the call codes live in two places.
+- **P4-D4. Composition reports the warning on the precheck surfaces; its
+  lifecycle-action leg rides Phase 6's warning channel.**
+  - *Decision:* composition warns for frontmatter, body, and `when=`
+    conditions now. DMLS warns on every surface, md lifecycle stacks
+    included. Composition's lifecycle actions report through
+    `lifecycle_call_checks` when Phase 6 adds composition warnings for that
+    list (the plan's Phase 6 "CLI severities" task now says so).
+  - *Alternatives:* add a lifecycle warning channel to `md compose` and
+    Claudine's `prepare.rs` now.
+  - *Why:* lifecycle rejection today returns only the first category 5;
+    Phase 6 builds the warning path for that same list (category 3 there
+    too). Building it twice would make two channels.
+  - *Downsides:* until Phase 6, a malformed literal in an md lifecycle
+    action warns in the editor but not at `md compose`.
+- **P4-D5. No alias for `is_file_type`.**
+  - *Decision:* no `isfiletype` alias (and no `is_file`).
+  - *Alternatives:* add `isfiletype` like the older functions.
+  - *Why:* the spec lists no alias; the alias inventory test pins the 75
+    aliases the registry held before the migration.
+  - *Downsides:* `isFileType` is not accepted.
+- **P4-D6. A malformed reference fails a `file` parameter at binding.**
+  - *Decision:* accepted as a consequence: the `file` type's format check is
+    `FileReference::new`, so text such as `"http://[::1"` or
+    `"https://exa mple.com"` passed to `link`/`code_link` is now a binding
+    type error ("fails file") rather than an invalid-file-path error.
+  - *Alternatives:* exempt the binder from the new checks.
+  - *Why:* one grammar; a malformed reference is not a file.
+  - *Downsides:* the error text for those inputs changed
+    (`fs_tests::code_link_errors_name_code_link_with_the_link_cause` updated).
+- **P4-D7. A "file value" is text.**
+  - *Decision:* `is_file_type` is `true` only for strings that pass the
+    validator; runtime has no separate file value.
+  - *Why:* `file`-typed properties are strings at runtime.
+  - *Downsides:* none.
+- **P4-D8. How "failing stubs" prove no access.**
+  - *Decision:* `is_file_type` is evaluated with a lookup that has no
+    resolution context (nothing reachable) and unset template variables;
+    effect-engine and network counters are unchanged. `file_exists` runs
+    against a deny-all remote runtime (a fetch would error; the mock server
+    records no request) and a working directory that is a regular file (a
+    probe would error; armed on Unix only, where probing under a file is an
+    I/O error, while Windows reports NotFound).
+  - *Alternatives:* add filesystem counters to `biscuit-file`.
+  - *Why:* each tripwire turns an access into a visible error, so a `false`
+    result proves the access never happened, without new instrumentation.
+  - *Downsides:* the filesystem tripwire's arming check is Unix-only; the
+    outcome assertion runs everywhere.
+
+### Requirement-to-test mapping
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| structural corpus: every kind well-formed, malformed set rejected, identical on every OS, no context (13, 35) | `biscuit-file` public API, L1 | `biscuit-file/lib/tests/l1/structural_validation.rs::every_supported_kind_is_well_formed_on_every_host`, `::malformed_references_are_rejected_by_construction`, `::the_new_structural_checks_are_syntax_errors`, `::a_url_error_names_the_missing_host` |
+| `file://` adapter strips only its prefix; UNC kept | Darkmatter unit | `resolve_ctx::tests::the_file_scheme_adapter_strips_only_its_prefix` |
+| `is_file_type` corpus, non-text false, no context, no engine/network (13, 35) | Darkmatter public evaluator, L1 | `darkmatter/lib/tests/l1/file_predicates.rs::is_file_type::it_is_true_exactly_for_well_formed_reference_text_without_a_context`, `::is_file_type::it_never_changes_its_argument` |
+| `file_exists`/`fileexists` parity; malformed false; existing/missing/`file://` outcomes kept; null false (14, 35) | public evaluator + temp dir, L1 | `::file_exists::malformed_text_is_false_and_well_formed_references_keep_their_outcomes` |
+| valid remote reference without runtime still errors (14) | public evaluator, L1 | `::file_exists::a_valid_remote_reference_without_a_runtime_is_still_an_error` |
+| malformed false before any access, failing remote + filesystem stubs (14) | handler dispatch, unit | `functions::fs_tests::...::malformed_references_are_false_before_any_access` |
+| always-false only for malformed literals; alias; not for `string` var or `is_file_type` (15, 35) | call check, L1 | `::always_false::only_a_malformed_literal_reference_is_always_false` |
+| rule is registration metadata; validated; handler never runs | registration + call check, L1 | `::always_false::the_rule_is_registered_and_validated` |
+| guarded `frontmatter` category 1, unguarded 4, false side nothing (16) | call check, L1 | `::guarded_file_arguments::an_is_file_type_guard_makes_the_file_argument_category_1` |
+| `is_file_type` narrows a shell template hole (11) | `BodyGuards` + `project_hole`, L1 | `::guarded_file_arguments::an_is_file_type_guard_narrows_a_shell_template_hole` |
+| composition warnings with lines, alias, none for `string` var, guarded read composes, no network (35, 16) | `Markdown::compose_with`, temp dir, L1 | `::composition::composition_warns_for_each_always_false_call_and_composes_the_guarded_read` |
+| `md compose` end to end: predicates, guarded read, one warning with file:line on stderr | CLI binary (`CliProcessFixture`), L1 | `darkmatter/cli/tests/l1/compose_file_predicates.rs::compose_answers_file_predicates_and_warns_for_an_always_false_call` |
+| editor warning on body, `::block` condition, lifecycle action, alias; none for `string` var; both settings (15, 35) | real LSP session, L1 | `darkmatter/dmls/tests/l1/expression_call_diagnostics.rs::file_predicates::a_malformed_literal_reference_warns_and_a_string_variable_does_not` |
+| editor: only the unguarded call warns under strict (16) | real LSP session, L1 | `::file_predicates::under_strict_only_the_unguarded_file_argument_warns` |
+| no `file_exists` setting in DMLS config (18) | DMLS config model, L1 | `::file_predicates::the_configuration_has_no_file_exists_setting` |
+| `is_file_type` row in registry / generated verb / doc table | L1 + unit | `function_binding_registry::every_registered_function_has_a_row` (new row), `lifecycle_schema_generation::the_generated_verbs_are_every_catalog_function_and_side_effect_but_set` (129), `catalog::tests::narrative_doc_function_table_matches_catalog`, `claudine_schemas::generated_verb_keys_equal_the_darkmatter_catalogs` |
+
+Updated existing tests: `fs_tests::absolute_and_file_exists_resolve_relative_to_base_dir`
+(`"\0bad"` is now `false`), `fs_tests::code_link_errors_name_code_link_with_the_link_cause`
+(P4-D6), `resolve_ctx::tests` (adapter), `function_binding_registry` (row),
+`lifecycle_schema_generation` (verb count 128 → 129).
+
+The Input Robustness Matrix does not apply: the reference grammar is a text
+grammar, and no file-format or configuration reader changed.
+
+Further updated by the full-suite gates (expected inventory changes from the
+new function): `scope/tests.rs::the_built_in_narrowing_facts_are_registered_on_one_argument_predicates`
+(adds `is_file_type`), the six `recursive_schema_golden` digests (re-blessed
+with `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`; each embedding grows by the
+`is_file_type` verb types, +390 bytes), and Claudine's
+`context_expressions_function_order_snapshot` (adds `is_file_type(value)`).
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["biscuit-file", "claudine", "darkmatter", "darkmatter-cli", "dmls", "test-toolkit", "claudine-cli"]`,
+  `change_class: package` (the tree still holds Phase 3's uncommitted
+  changes). Gates were run.
+- **`biscuit-file/` `just test`:** 1151 passed. **`just lint`:** passed.
+- **`darkmatter/` `just test`:** 12199 passed (10 skipped) after the two
+  expected inventory updates above. **`just lint`:** passed. The first lint
+  run caught a stranded `#[cfg(feature = "effects-instrumentation")]` from
+  registering `file_predicates` in `tests/l1/main.rs` (it had moved off
+  `flow_sensitive_narrowing`); both modules are now gated.
+- **`claudine/` `just test`:** the first two fail-fast runs each ended on
+  two 30 s timeouts in different CLI tests
+  (`compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive`,
+  `compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory`,
+  then `agent_text_is_data::malformed_structured_agent_values_are_refused_not_saved_as_text`,
+  `authored_text_rendering::header_document_label_and_model_render_exactly_as_authored`)
+  while the host load average was 55–130 from other sessions. The first
+  pair passed alone. Recorded as **load-sensitive**. A
+  `--no-fail-fast` run then completed: 11447 passed, 1 failed (the expected
+  snapshot above), 9 skipped; the snapshot test and its module pass after
+  the update. **`just lint`:** passed (the `__eh_frame` linker note is
+  pre-existing).
+- **`just check-tier-coverage`** for `claudine`, `darkmatter`, and
+  `biscuit-file`: 0 stranded.
+- **Dependents of `biscuit-file`** (the only package whose shared behavior
+  changed for other crates): no test in another package passes a newly
+  rejected form (NUL, a host-less URL, `%` + URL, an empty or rooted vault
+  path) to `FileReference` (searched). The file-reference tests of
+  `content-policy` and `biscuit-terminal` (529) and of `tree-hugger` and
+  `messenger` (100) pass.
+- **Cross-OS:** not run. The new checks are lexical and host-independent
+  (the corpus has no `cfg`). The one OS-sensitive assertion, the filesystem
+  tripwire's arming check, is `cfg(unix)` by design (P4-D8). The adapter
+  change preserves separators, so it can only keep UNC paths intact on
+  Windows.
