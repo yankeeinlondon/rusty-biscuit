@@ -32,6 +32,11 @@ review_iterations: 3
 completed: true
 human_review: false
 pipeline_step: 12
+canonical_docs:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/testing.md
+    - biscuit-speaks/docs/tts-caching.md
 depends-on:
     - 2026-10-19-speak-prepare
     - 2026-10-20-lifecycle-grammar

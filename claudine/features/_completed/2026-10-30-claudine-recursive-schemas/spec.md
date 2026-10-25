@@ -42,6 +42,16 @@ related:
     - 2026-10-28-schema-enhancements
 implemented: true
 implemented_by: "claude/opus"
+canonical_docs:
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/side-effects.md
+    - darkmatter/dmls/docs/hover.md
 ---
 
 # Claudine Lifecycle Schemas Use Recursive Types
