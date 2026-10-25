@@ -7,6 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use sniff::filesystem::query::FileIdentity;
@@ -14,7 +15,7 @@ use sniff::filesystem::query::FileIdentity;
 use super::*;
 use crate::remove::faults::NoFaults;
 use crate::remove::quarantine::rename;
-use crate::remove::test_support::{ManualClock, ScriptedFaults, ScriptedHolders};
+use crate::remove::test_support::{FixedMounts, LiveMounts, ManualClock, MountDuringDeletion, ScriptedFaults, ScriptedHolders};
 
 /// What [`Progress`] was told.
 #[derive(Default)]
@@ -74,6 +75,10 @@ impl Tree {
 
 /// Runs [`delete_tree`] on `tree`'s root with the given seams.
 fn delete(tree: &Tree, clock: &ManualClock, faults: &dyn FsFaults, mounts: &[Mount], holders: &dyn Holders, told: &mut Told) -> Deletion {
+    delete_with(tree, clock, faults, &FixedMounts(mounts.to_vec()), holders, told)
+}
+
+fn delete_with(tree: &Tree, clock: &ManualClock, faults: &dyn FsFaults, mounts: &dyn MountInfo, holders: &dyn Holders, told: &mut Told) -> Deletion {
     let identity = tree.identity();
     let env = Env { clock, faults, mounts, holders, cancelled: &|| false };
     delete_tree(Target { root: &tree.root(), identity: &identity }, &env, told)
@@ -132,7 +137,7 @@ fn a_root_already_gone_is_done_and_a_partial_one_is_finished() {
     assert!(absent(&tree.root()));
     let clock = ManualClock::new();
     let gone = FileIdentity::Unix { device: 0, inode: 0 };
-    let env = Env { clock: &clock, faults: &NoFaults, mounts: &[], holders: &ScriptedHolders::new(), cancelled: &|| false };
+    let env = Env { clock: &clock, faults: &NoFaults, mounts: &FixedMounts::default(), holders: &ScriptedHolders::new(), cancelled: &|| false };
     assert!(matches!(delete_tree(Target { root: &tree.root(), identity: &gone }, &env, &mut Silent), Deletion::Done));
 }
 
@@ -142,7 +147,7 @@ fn a_root_that_is_another_directory_or_a_link_is_never_deleted() {
     let tree = Tree::new();
     let stranger = rename::identity(&tree.outside()).unwrap();
     let clock = ManualClock::new();
-    let env = Env { clock: &clock, faults: &NoFaults, mounts: &[], holders: &ScriptedHolders::new(), cancelled: &|| false };
+    let env = Env { clock: &clock, faults: &NoFaults, mounts: &FixedMounts::default(), holders: &ScriptedHolders::new(), cancelled: &|| false };
 
     let deletion = delete_tree(Target { root: &tree.root(), identity: &stranger }, &env, &mut Silent);
     assert!(matches!(deletion, Deletion::RootReplaced), "{deletion:?}");
@@ -440,7 +445,7 @@ fn cancelling_during_traversal_stops_at_the_next_entry() {
     };
     let identity = tree.identity();
     let clock = ManualClock::new();
-    let env = Env { clock: &clock, faults: &NoFaults, mounts: &[], holders: &ScriptedHolders::new(), cancelled: &cancelled };
+    let env = Env { clock: &clock, faults: &NoFaults, mounts: &FixedMounts::default(), holders: &ScriptedHolders::new(), cancelled: &cancelled };
 
     let deletion = delete_tree(Target { root: &tree.root(), identity: &identity }, &env, &mut Silent);
 
@@ -524,6 +529,57 @@ fn a_nested_mount_is_never_crossed_and_everything_else_is_deleted() {
     assert_eq!(retained, [mount]);
     assert_eq!(fs::read_to_string(point.join("on-the-mount")).unwrap(), "mounted data");
     assert_eq!(walk(&tree.root()), [tree.root().join("target"), point.clone(), point.join("on-the-mount")]);
+}
+
+/// A mount made after deletion began, before it reaches the mount point, is
+/// found by asking the mount information again before entering the
+/// directory: a same-device mount has no other sign.
+#[test]
+fn a_mount_made_during_deletion_is_never_crossed() {
+    let tree = Tree::new();
+    let live = LiveMounts::default();
+    let publish = MountDuringDeletion::new(&live, Path::new("target").join("debug"));
+
+    let deletion = delete_with(&tree, &ManualClock::new(), &publish, &live, &ScriptedHolders::new(), &mut Told::default());
+
+    let point = tree.root().join("target").join("debug");
+    let Deletion::RetainedMounts(retained) = deletion else { panic!("{deletion:?}") };
+    assert_eq!(retained.iter().map(|mount| (mount.mount_point.clone(), mount.source.as_str())).collect::<Vec<_>>(), [(point.clone(), "/srv/bound")]);
+    assert_eq!(walk(&tree.root()), [tree.root().join("target"), point.clone(), point.join("app")]);
+}
+
+/// [`FsFaults`] that, at the first removal of `dir`, refills it and mounts
+/// on it, so only the check before reopening it can see the mount.
+struct MountOnRefill {
+    dir: PathBuf,
+    mounts: LiveMounts,
+    fired: AtomicBool,
+}
+
+impl FsFaults for MountOnRefill {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<io::Error> {
+        if op == FsOp::RemoveDir && path == self.dir && !self.fired.swap(true, Ordering::SeqCst) {
+            fs::write(self.dir.join("refilled"), "written during deletion").unwrap();
+            self.mounts.publish(Mount { mount_point: self.dir.clone(), source: "/srv/bound".into(), fs_type: String::new(), super_options: String::new() });
+        }
+        None
+    }
+}
+
+/// Each reopening of a refilled directory enters it afresh, so it is checked
+/// for a mount again first.
+#[test]
+fn a_directory_mounted_while_it_refills_is_kept() {
+    let tree = Tree::new();
+    let point = tree.root().join("target").join("debug");
+    let live = LiveMounts::default();
+    let faults = MountOnRefill { dir: point.clone(), mounts: live.clone(), fired: AtomicBool::new(false) };
+
+    let deletion = delete_with(&tree, &ManualClock::new(), &faults, &live, &ScriptedHolders::new(), &mut Told::default());
+
+    let Deletion::RetainedMounts(retained) = deletion else { panic!("{deletion:?}") };
+    assert_eq!(retained.iter().map(|mount| &mount.mount_point).collect::<Vec<_>>(), [&point]);
+    assert_eq!(walk(&tree.root()), [tree.root().join("target"), point.clone(), point.join("refilled")]);
 }
 
 #[test]

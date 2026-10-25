@@ -1,7 +1,7 @@
 //! The filesystems mounted inside a checkout, which removal never deletes
 //! across. A mount is found by its mount point in the platform's mount
-//! table, never by comparing device IDs: a Linux bind mount of a directory
-//! on the same filesystem has the same device as its parent.
+//! information, never by comparing device IDs: a Linux bind mount of a
+//! directory on the same filesystem has the same device as its parent.
 //!
 //! [`NativeMounts`] reads the host's table; tests inject a fixed one.
 
@@ -40,6 +40,11 @@ impl Mount {
         self.fs_type == "drvfs"
             || (self.fs_type == "9p" && self.super_options.split([',', ';']).any(|option| option == "aname=drvfs"))
     }
+
+    /// A mount found at `mount_point` whose table entry could not be read.
+    pub(crate) fn unnamed(mount_point: &Path) -> Self {
+        Self { mount_point: mount_point.to_path_buf(), source: "another filesystem".to_string(), fs_type: String::new(), super_options: String::new() }
+    }
 }
 
 /// Where the mount table comes from. Tests inject one, including
@@ -54,6 +59,27 @@ pub trait MountInfo: Sync {
     ///
     /// The table could not be read.
     fn mounts(&self) -> io::Result<Vec<Mount>>;
+
+    /// The mount whose mount point is the directory at `real` now, if any,
+    /// carrying the caller's spelling `spelled` of the same directory as its
+    /// mount point. Deletion asks this before it enters each directory, so a
+    /// mount made while it runs is never crossed. The default looks both
+    /// spellings up in a fresh [`mounts`](Self::mounts) table.
+    ///
+    /// ## Errors
+    ///
+    /// The mount information could not be read.
+    fn mount_at(&self, spelled: &Path, real: &Path) -> io::Result<Option<Mount>> {
+        Ok(look_up(&self.mounts()?, spelled, real))
+    }
+}
+
+/// The entry of `table` at `real` or `spelled`, re-spelled as `spelled`.
+fn look_up(table: &[Mount], spelled: &Path, real: &Path) -> Option<Mount> {
+    table
+        .iter()
+        .find(|mount| mount.mount_point == real || mount.mount_point == spelled)
+        .map(|mount| Mount { mount_point: spelled.to_path_buf(), ..mount.clone() })
 }
 
 /// The host's mount table, read without mounting, unmounting, or elevating:
@@ -80,6 +106,38 @@ impl MountInfo for NativeMounts {
         return windows::mounts();
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         return Err(io::Error::new(io::ErrorKind::Unsupported, "no mount table reader for this platform"));
+    }
+
+    /// Asked once per directory deleted, so it answers from the directory
+    /// itself where the platform can: `statfs` on macOS, and on glibc Linux
+    /// `statx`'s mount-root attribute, reading the table only for a mount's
+    /// details or when the kernel predates the attribute (5.8). Elsewhere on
+    /// Linux and Unix it reads the table.
+    fn mount_at(&self, spelled: &Path, real: &Path) -> io::Result<Option<Mount>> {
+        #[cfg(target_os = "macos")]
+        return macos::mount_at(spelled, real);
+        // A volume mounted on a folder makes that folder a reparse point,
+        // which deletion never enters: it keeps a volume mount point and
+        // removes any other reparse point as an entry. Listing every
+        // volume's paths for each directory would add nothing but cost.
+        #[cfg(windows)]
+        {
+            let _ = (spelled, real);
+            return Ok(None);
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            match linux::is_mount_root(real) {
+                Some(false) => return Ok(None),
+                Some(true) => {
+                    let found = self.mounts().ok().and_then(|table| look_up(&table, spelled, real));
+                    return Ok(Some(found.unwrap_or_else(|| Mount::unnamed(spelled))));
+                }
+                None => {}
+            }
+            Ok(look_up(&self.mounts()?, spelled, real))
+        }
     }
 }
 
@@ -170,6 +228,33 @@ mod tests {
         let table = NativeMounts.mounts().unwrap();
 
         assert!(table.iter().any(|mount| mount.mount_point == Path::new("/")), "{table:?}");
+    }
+
+    /// The per-directory check finds a mount point and passes over a plain
+    /// directory, keeping the caller's spelling.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_native_check_finds_the_root_mount_and_no_plain_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let real = biscuit_file::canonicalize_simplified(&plain).unwrap();
+
+        let root = NativeMounts.mount_at(Path::new("/"), Path::new("/")).unwrap();
+
+        assert_eq!(root.map(|mount| mount.mount_point), Some(PathBuf::from("/")));
+        assert_eq!(NativeMounts.mount_at(&plain, &real).unwrap(), None);
+    }
+
+    #[test]
+    fn the_default_check_reads_the_table_by_either_spelling() {
+        let spelled = Path::new("/var/wts/feat/target");
+        let real = Path::new("/private/var/wts/feat/target");
+        let by_real = FixedMounts(vec![mount(real, "/dev/sdb1")]);
+
+        assert_eq!(by_real.mount_at(spelled, real).unwrap(), Some(mount(spelled, "/dev/sdb1")));
+        assert_eq!(FixedMounts(vec![mount(spelled, "bind")]).mount_at(spelled, real).unwrap(), Some(mount(spelled, "bind")));
+        assert_eq!(by_real.mount_at(&spelled.join("debug"), &real.join("debug")).unwrap(), None, "only the mount point itself");
     }
 
     #[cfg(windows)]

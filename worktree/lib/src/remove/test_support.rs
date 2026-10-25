@@ -3,7 +3,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(windows)]
 use std::process::Command;
@@ -273,6 +274,53 @@ pub struct FixedMounts(pub Vec<Mount>);
 impl MountInfo for FixedMounts {
     fn mounts(&self) -> std::io::Result<Vec<Mount>> {
         Ok(self.0.clone())
+    }
+}
+
+/// A mount table that changes while removal runs; clones share one table.
+#[derive(Debug, Clone, Default)]
+pub struct LiveMounts(Arc<Mutex<Vec<Mount>>>);
+
+impl LiveMounts {
+    pub fn publish(&self, mount: Mount) {
+        self.0.lock().unwrap().push(mount);
+    }
+
+    pub fn unmount_all(&self) {
+        self.0.lock().unwrap().clear();
+    }
+}
+
+impl MountInfo for LiveMounts {
+    fn mounts(&self) -> std::io::Result<Vec<Mount>> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}
+
+/// [`FsFaults`] that injects nothing, but at the first directory read (the
+/// deletion root's) publishes in `mounts` a same-device mount at `relative`
+/// under that directory, spelled as the OS spells it: a mount made after
+/// deletion began, before it reaches the mount point.
+pub struct MountDuringDeletion {
+    mounts: LiveMounts,
+    relative: PathBuf,
+    published: AtomicBool,
+}
+
+impl MountDuringDeletion {
+    pub fn new(mounts: &LiveMounts, relative: impl Into<PathBuf>) -> Self {
+        Self { mounts: mounts.clone(), relative: relative.into(), published: AtomicBool::new(false) }
+    }
+}
+
+impl FsFaults for MountDuringDeletion {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<std::io::Error> {
+        if op == FsOp::ReadDir && !self.published.swap(true, Ordering::SeqCst) {
+            let real = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+            let mount = Mount { mount_point: real.join(&self.relative), source: "/srv/bound".into(), fs_type: "ext4".into(), super_options: String::new() };
+            self.mounts.publish(mount);
+        }
+        None
     }
 }
 

@@ -254,6 +254,45 @@ fn an_interrupt_after_the_move_cancels_and_a_retry_by_name_finishes_silently() {
     assert_eq!(fixture.pending(), 0, "completion leaves no record");
 }
 
+/// The shell condition "this Git call is the lifecycle's `git worktree
+/// unlock`": after the approval is saved, before anything is deleted.
+const UNLOCK: &str = r#"case "$*" in *" worktree unlock "*) true;; *) false;; esac"#;
+
+/// R9 and R19 for a link to the worktree's own checkout: its approval is
+/// saved like a checkout's, so Ctrl-C after the approved unlock keeps the
+/// link, its checkout, and the branch, and a retry by name finishes both
+/// without asking.
+#[test]
+fn an_interrupted_own_link_removal_is_finished_by_a_retry_without_a_question() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    git(&fixture.repo(), &["worktree", "lock", wt.to_str().unwrap()]);
+    let real = fixture.wts().join("real");
+    fs::rename(&wt, &real).unwrap();
+    std::os::unix::fs::symlink(&real, &wt).unwrap();
+    let path = fixture.interrupter("bin", UNLOCK);
+
+    let (status, stderr) = fixture.remove_to_file(&["feat-x", "--force", "--force-branch"], &path);
+
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("The removal was cancelled; run wt remove again to finish it."), "{stderr}");
+    assert!(real.join("README.md").is_file(), "the checkout is kept");
+    assert!(fs::symlink_metadata(&wt).unwrap().file_type().is_symlink(), "the link is kept");
+    assert!(fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 1);
+
+    let finished = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed feat-x (") && stderr.contains("deleted branch feat/x"), "{stderr}");
+    assert!(!stderr.contains("Delete it?") && !stderr.contains("--force"), "asks nothing: {stderr}");
+    assert_no_technical_output(&stderr);
+    assert!(fs::symlink_metadata(&wt).is_err() && !real.exists(), "both are deleted");
+    assert!(!fixture.listed().contains("feat-x"), "{}", fixture.listed());
+    assert!(!fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 0);
+}
+
 /// An interrupted removal whose saved record has since become unreadable is
 /// explained by name, never resumed, and nothing more is deleted: the moved
 /// checkout, the record, and the branch stay as they were (exit 1).

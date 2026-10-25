@@ -93,8 +93,8 @@ fn record_v1_with_report_v6_migrates_its_checkout_approval_and_keeps_its_remote_
     let compact = legacy.to_compact();
     let source = &legacy.record;
     assert_eq!(
-        (&compact.operation_id, &compact.original, &compact.deletion_path, compact.checkout_identity, &compact.repository),
-        (&source.operation_id, &source.original, &source.quarantine, source.checkout_identity, &source.repository)
+        (&compact.operation_id, &compact.original, &compact.deletion_path, compact.target, &compact.repository),
+        (&source.operation_id, &source.original, &source.quarantine, compact::ApprovedTarget::Checkout { identity: source.checkout_identity }, &source.repository)
     );
     assert_eq!((compact.deletion_mode, compact.progress, compact.unlock_needed), (DeletionMode::Moved, Progress::Placed, false));
     assert_eq!((&compact.requested_name, &compact.aliases), (&source.requested_name, &source.aliases));

@@ -1486,6 +1486,26 @@ fn a_changed_branch_tip_between_the_runs_deletes_the_checkout_and_keeps_the_bran
     assert_eq!(git(&fixture.repo(), &["rev-parse", "refs/heads/feat/x"]), moved);
 }
 
+/// R14, R18: the wrapper's second run names, in its final line, an
+/// uncommitted file created after the first run's question, but not one the
+/// question showed.
+#[test]
+fn a_file_created_between_the_runs_is_named_by_the_second_run() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("shown.txt"), "listed by the question\n").unwrap();
+    let (landing, token) = first_run(&fixture, &wt, &["--force"]);
+
+    fs::write(wt.join("after-question.txt"), "late\n").unwrap();
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = flowed(&stderr_of(&output));
+
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("also deleted 1 file changed after you answered: after-question.txt."), "{stderr}");
+    assert!(!stderr.contains("shown.txt"), "{stderr}");
+    assert_checkout_gone(&fixture, &wt);
+}
+
 #[test]
 fn a_new_disposable_ignored_entry_between_the_runs_does_not_refuse() {
     let fixture = Fixture::new();
@@ -3632,6 +3652,31 @@ fn a_locked_worktree_whose_directory_is_gone_is_unlocked_and_its_record_removed_
     assert!(!fixture.branch_exists("feat/x"), "Safe on main");
 }
 
+/// R3 with R11: a locked worktree whose directory was replaced by a file is
+/// described as the file, not refused as a checkout. `--force` unlocks it
+/// and deletes the file and Git's record.
+#[test]
+fn a_locked_worktree_replaced_by_a_file_is_unlocked_and_deleted_with_force() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    git(&fixture.repo(), &["worktree", "lock", wt.to_str().unwrap()]);
+    fs::remove_dir_all(&wt).unwrap();
+    fs::write(&wt, "not a checkout\n").unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).output().unwrap();
+    let stderr = flowed(&stderr_of(&output));
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("⚠ This worktree is locked (git worktree lock)"), "{stderr}");
+    assert!(stderr.contains("⚠ A file is where the worktree's directory should be ("), "{stderr}");
+    assert_eq!(fs::read_to_string(&wt).unwrap(), "not a checkout\n");
+    assert!(listed_block(&fixture, &wt).unwrap().contains("locked"));
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_deleted(&fixture, &wt, "feat/x");
+}
+
 #[test]
 fn a_repaired_worktree_hands_off_and_finishes_with_the_ordinary_checks() {
     let fixture = Fixture::new();
@@ -3808,8 +3853,8 @@ fn a_checkout_replaced_by_a_link_to_itself_is_a_warning_and_force_deletes_both()
 }
 
 /// A wrapper caller standing in the checkout through a link to it (R9's own
-/// link) is inside the worktree. A link saves no record to hand off, so the
-/// run deletes both, then prints `cd:` for the wrapper to move the shell.
+/// link) is inside the worktree. Only a checkout directory is handed off, so
+/// the run deletes both, then prints `cd:` for the wrapper to move the shell.
 #[test]
 fn a_wrapper_caller_inside_a_checkout_reached_through_its_link_is_moved_out_after_the_removal() {
     let fixture = Fixture::new();
@@ -3817,8 +3862,8 @@ fn a_wrapper_caller_inside_a_checkout_reached_through_its_link_is_moved_out_afte
 
     let output = fixture.wt(&wt).env("WT_SHELL_WRAPPER", "1").args(["remove", "feat-x", "--force"]).output().unwrap();
 
-    // A link has no record to hand off: both are deleted (R9), then the
-    // wrapper is told where to move the shell.
+    // A link is not handed off: both are deleted (R9), then the wrapper is
+    // told where to move the shell.
     let stderr = stderr_of(&output);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(output.status.code(), Some(0), "{stderr}");

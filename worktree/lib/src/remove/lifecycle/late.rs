@@ -13,13 +13,21 @@ use std::path::{Path, PathBuf};
 
 use crate::remove::inventory::{Inventory, collect_inventory};
 
-/// The dirty paths of the checkout at `checkout` that `questioned` (the
-/// question's inventory) did not list, checkout-relative, in Git's order.
-/// Empty when no question listed files to compare with, or when `git status`
-/// fails now; neither blocks deletion.
-pub fn unseen(base: &Path, checkout: &Path, questioned: Option<&Inventory>) -> Vec<PathBuf> {
-    let Some(questioned) = questioned else { return Vec::new() };
+/// The dirty paths the question listed from `inventory`, for [`unseen`]; the
+/// shell wrapper's handoff carries them to its second run. `Some(empty)`
+/// means the question showed no dirty files; `None` means it showed no
+/// inventory at all (Git could not read the checkout), so nothing is named.
+pub fn shown(inventory: Option<&Inventory>) -> Option<Vec<PathBuf>> {
+    inventory.map(|inventory| inventory.dirty.iter().map(|entry| entry.path.clone()).collect())
+}
+
+/// The dirty paths of the checkout at `checkout` that `shown` (from
+/// [`shown`]) did not list, checkout-relative, in Git's order. Empty when no
+/// question listed files to compare with, or when `git status` fails now;
+/// neither blocks deletion.
+pub fn unseen(base: &Path, checkout: &Path, shown: Option<&[PathBuf]>) -> Vec<PathBuf> {
+    let Some(shown) = shown else { return Vec::new() };
     let Ok(now) = collect_inventory(base, checkout) else { return Vec::new() };
-    let shown: HashSet<&Path> = questioned.dirty.iter().map(|entry| entry.path.as_path()).collect();
+    let shown: HashSet<&Path> = shown.iter().map(PathBuf::as_path).collect();
     now.dirty.into_iter().filter(|entry| !shown.contains(entry.path.as_path())).map(|entry| entry.path).collect()
 }

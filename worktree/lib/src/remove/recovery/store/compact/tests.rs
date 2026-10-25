@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use super::fault::{self, Fault};
 use super::*;
-use crate::remove::recovery::compact::{BranchAction, BranchStep, DeletionMode, StepApproval, UnboundTarget};
+use crate::remove::recovery::compact::{ApprovedTarget, BranchAction, BranchStep, DeletionMode, StepApproval, UnboundTarget};
 use crate::remove::recovery::record::{BranchBinding, IntendedAction, Phase, QUARANTINE_PREFIX, RecoveryRecord};
 use crate::remove::recovery::store::LockError;
 use crate::remove::test_support::ManualClock;
@@ -56,7 +56,7 @@ fn approval(f: &Fixture, admin: &str) -> CompactRecord {
         original: f.work.join(admin).as_path().into(),
         deletion_path: f.work.join(format!("{QUARANTINE_PREFIX}{admin}-a91c")).as_path().into(),
         deletion_mode: DeletionMode::Moved,
-        checkout_identity: identity(3),
+        target: ApprovedTarget::Checkout { identity: identity(3) },
         repository: binding(f, admin),
         unlock_needed: false,
         branch_steps: vec![BranchStep {
@@ -379,8 +379,8 @@ fn corrupt_foreign_and_unknown_version_records_are_explained_and_kept() {
         serde_json::to_vec(&doc).unwrap()
     };
     let cells: [(&str, Vec<u8>, &str); 4] = [
-        ("corrupt", b"{\"record_version\": 2,".to_vec(), "malformed"),
-        ("unknown version", with("record_version", json!(3)), "version 3"),
+        ("corrupt", b"{\"record_version\": 3,".to_vec(), "malformed"),
+        ("unknown version", with("record_version", json!(4)), "version 4"),
         ("another operation's", with("operation_id", json!("ffffffffffffffffffffffffffffffff")), "operation id"),
         ("malformed field", with("progress", json!("completed")), "malformed"),
     ];
@@ -421,7 +421,7 @@ fn a_legacy_operation_migrates_to_a_compact_record_and_drops_its_journals_and_re
 
     let resumed = resume(&f, &legacy.operation_id, "wt1").unwrap();
     let record = resumed.record().clone();
-    assert_eq!((record.record_version, record.progress, record.deletion_mode), (2, Progress::Placed, DeletionMode::Moved));
+    assert_eq!((record.record_version, record.progress, record.deletion_mode), (COMPACT_RECORD_VERSION, Progress::Placed, DeletionMode::Moved));
     assert_eq!(record.deletion_path, legacy.quarantine);
     assert_eq!(
         record.branch_steps.iter().map(|step| (&step.action, step.state)).collect::<Vec<_>>(),
@@ -494,6 +494,21 @@ fn a_legacy_operation_of_a_replaced_worktree_record_is_never_migrated() {
     assert!(matches!(error, StoreError::Record { reason: RecordInvalid::IdentityMismatch, .. }), "{error:?}");
     assert_eq!(names(&dir), set_of(&LEGACY_FILES));
     assert!(matches!(f.store.read_stored(&legacy.operation_id).unwrap(), Stored::Legacy(_)));
+}
+
+#[test]
+fn a_completed_legacy_operation_is_discarded_unless_its_lock_is_held() {
+    let f = fixture();
+    let held = legacy_record(&f, "wt1", Phase::Completed);
+    save_legacy(&f, &held);
+    let lock = f.store.lock(&held.repository).unwrap();
+    let Stored::Legacy(legacy) = f.store.read_stored(&held.operation_id).unwrap() else { panic!("legacy") };
+    f.store.discard_completed(&held.operation_id, &legacy);
+    assert_eq!(store_names(&f).len(), 1, "another process holds its worktree's lock");
+
+    drop(lock);
+    f.store.discard_completed(&held.operation_id, &legacy);
+    assert!(store_names(&f).is_empty(), "{:?}", store_names(&f));
 }
 
 #[test]

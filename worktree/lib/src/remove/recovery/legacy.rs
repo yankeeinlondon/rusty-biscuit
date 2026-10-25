@@ -13,7 +13,7 @@
 //! reports it and exits 1.
 
 use super::compact::{
-    BranchAction, BranchStep, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepApproval, StepState,
+    ApprovedTarget, BranchAction, BranchStep, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepApproval, StepState,
     UnboundTarget,
 };
 use super::record::{self, BranchBinding, IntendedAction, Phase, RecordInvalid, RecoveryRecord};
@@ -117,7 +117,7 @@ impl LegacyApproval {
             original: legacy.original.clone(),
             deletion_path: legacy.quarantine.clone(),
             deletion_mode: DeletionMode::Moved,
-            checkout_identity: legacy.checkout_identity,
+            target: ApprovedTarget::Checkout { identity: legacy.checkout_identity },
             repository: legacy.repository.clone(),
             unlock_needed: false,
             branch_steps,

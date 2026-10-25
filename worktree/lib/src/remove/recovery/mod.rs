@@ -3,8 +3,9 @@
 //!
 //! Each operation owns `<common-git-dir>/wt-removal/<operation-id>/`, which
 //! holds one compact `record.json` ([`compact::CompactRecord`],
-//! `record_version` 2). It is saved before the first unlock, move, or
-//! deletion, records each step as it finishes, and is the approval a later
+//! `record_version` 3). It is saved before the first unlock, move,
+//! deletion, or unregistration of any kind of target, records each step as
+//! it finishes, and is the approval a later
 //! run finishes from; a finished operation's directory is deleted
 //! ([`store::PendingRemoval`]).
 //!

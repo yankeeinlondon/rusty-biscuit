@@ -1,7 +1,8 @@
-use std::ffi::OsStr;
+use std::ffi::{CString, OsStr};
 use std::io;
 use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use super::Mount;
 
@@ -22,17 +23,32 @@ pub(super) fn mounts() -> io::Result<Vec<Mount>> {
         // A full buffer may have cut the table short.
         if returned < capacity {
             table.truncate(returned);
-            return Ok(table
-                .iter()
-                .map(|entry| Mount {
-                    mount_point: OsStr::from_bytes(&c_bytes(&entry.f_mntonname)).into(),
-                    source: String::from_utf8_lossy(&c_bytes(&entry.f_mntfromname)).into_owned(),
-                    fs_type: String::from_utf8_lossy(&c_bytes(&entry.f_fstypename)).into_owned(),
-                    super_options: String::new(),
-                })
-                .collect());
+            return Ok(table.iter().map(|entry| mount(entry, OsStr::from_bytes(&c_bytes(&entry.f_mntonname)).as_ref())).collect());
         }
         capacity *= 2;
+    }
+}
+
+/// The filesystem `real` is on, from one `statfs`, when `real` is its mount
+/// point.
+pub(super) fn mount_at(spelled: &Path, real: &Path) -> io::Result<Option<Mount>> {
+    let path = CString::new(real.as_os_str().as_bytes())?;
+    // SAFETY: `statfs` is plain data, valid when all-zero.
+    let mut entry = unsafe { std::mem::zeroed::<libc::statfs>() };
+    // SAFETY: `path` is NUL-terminated and `entry` is writable.
+    if unsafe { libc::statfs(path.as_ptr(), &mut entry) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let on_real = c_bytes(&entry.f_mntonname) == real.as_os_str().as_bytes();
+    Ok(on_real.then(|| mount(&entry, spelled)))
+}
+
+fn mount(entry: &libc::statfs, mount_point: &Path) -> Mount {
+    Mount {
+        mount_point: mount_point.to_path_buf(),
+        source: String::from_utf8_lossy(&c_bytes(&entry.f_mntfromname)).into_owned(),
+        fs_type: String::from_utf8_lossy(&c_bytes(&entry.f_fstypename)).into_owned(),
+        super_options: String::new(),
     }
 }
 

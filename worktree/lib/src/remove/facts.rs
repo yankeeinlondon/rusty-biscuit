@@ -19,18 +19,20 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use sniff::filesystem::query::{CoverageStatus, EvidenceKind, Mechanism, NativeString, Outcome, PathUsageReport};
+use sniff::filesystem::query::{CoverageStatus, EvidenceKind, FileIdentity, Mechanism, NativeString, Outcome, PathUsageReport};
 
-use crate::availability::{self, OtherCondition};
+use crate::availability::{self, EntryKind, OtherCondition};
 use crate::copy_record::canonical_worktree_path;
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
 
-use super::admin_entry::{AdminEntry, AssociationError, admin_entry_for, read_back_reference};
+use super::admin_entry::{AdminEntry, AssociationError, admin_entry_for, common_git_dir, read_back_reference};
 use super::handoff::is_within;
 use super::included::{Mark, classify_included};
 use super::inventory::{Inventory, collect_inventory};
 use super::mounts::{self, Mount, MountInfo};
 use super::quarantine::association::leads_to_record;
+use super::quarantine::rename;
+use super::recovery::record::RepositoryBinding;
 use super::repair::RepairGit;
 use super::submodules::{self, Finding, GitDirOwner, SubmoduleReport};
 use super::usage::{CoverageSummary, EvidenceLocation, Holder, UsageSource, holders};
@@ -222,12 +224,28 @@ pub enum Blocker {
     ShellInside { shell: Option<String> },
 }
 
+/// The objects the question describes, identified while it was gathered. A
+/// removal acts only on these: whatever is at the same path later with
+/// another identity is not what the user approved, and `None` approves
+/// nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Identities {
+    /// The entry at the worktree's path, read without following a link: the
+    /// checkout directory, the link, or the file.
+    pub entry: Option<FileIdentity>,
+    /// The checkout an own link leads to.
+    pub resolved: Option<FileIdentity>,
+    /// The repository and [`Facts::admin`].
+    pub repository: Option<RepositoryBinding>,
+}
+
 /// What [`gather`] found.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Facts {
     pub target: Target,
     /// The worktree's Git record, when it was found.
     pub admin: Option<AdminEntry>,
+    pub identities: Identities,
     /// What [`prepare`] made of a checkout it accepted.
     pub prepared: Option<CheckoutState>,
     /// In display order, [`Warning::Locked`] first.
@@ -257,6 +275,7 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
     let mut facts = Facts {
         target: Target::Missing,
         admin: None,
+        identities: Identities { entry: rename::identity(&entry.path).ok(), ..Identities::default() },
         prepared: None,
         warnings: Vec::new(),
         notes: Vec::new(),
@@ -272,11 +291,13 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
     let mut record = None;
 
     // Git never marks a locked worktree prunable, so a locked one whose
-    // directory is gone classifies as healthy; its absence is confirmed
-    // here and it is prepared as the missing checkout it is.
+    // path is gone, holds a file, or cannot be inspected classifies as
+    // healthy. Only a directory (or a link, which classifies without the
+    // marker) is left to Git's answer; anything else is prepared as what
+    // the filesystem shows.
     let marked;
     let prepared_entry = if entry.prunable.is_none()
-        && matches!(availability::inspect(&entry.path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        && !matches!(availability::inspect(&entry.path), Ok(EntryKind::Directory | EntryKind::Link))
     {
         marked = WorktreeEntry { prunable: Some(String::new()), ..entry.clone() };
         &marked
@@ -306,6 +327,7 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
                 && let LinkTarget::Resolved(resolved) = &link.resolved
             {
                 checkout = Some(resolved.clone());
+                facts.identities.resolved = rename::identity(resolved).ok();
             }
             state.push(Warning::Link { resolved: link.resolved.clone(), own: link.own });
             facts.target = Target::Link { link: entry.path.clone(), resolved: link.resolved, own: link.own };
@@ -358,6 +380,7 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
         Err(reason) => facts.warnings.push(Warning::RecordUnreadable { reason: reason.clone() }),
     }
     facts.admin = record.ok();
+    facts.identities.repository = facts.admin.as_ref().and_then(|admin| repository_binding(sources.base, admin).ok());
 
     let Some(checkout) = checkout else {
         facts.warnings.extend(state);
@@ -441,6 +464,17 @@ pub fn gather(sources: &Sources<'_>) -> Facts {
         facts.warnings.push(Warning::SyncedFolder { root: root.clone() });
     }
     facts
+}
+
+/// The repository at `base` and its worktree record `admin`, by identity.
+pub(crate) fn repository_binding(base: &Path, admin: &AdminEntry) -> std::io::Result<RepositoryBinding> {
+    let common_dir = common_git_dir(base).map_err(std::io::Error::other)?;
+    Ok(RepositoryBinding {
+        common_dir_identity: rename::identity(&common_dir)?,
+        common_dir: common_dir.as_path().into(),
+        admin_dir_identity: rename::identity(&admin.dir)?,
+        admin_dir: admin.dir.as_path().into(),
+    })
 }
 
 /// Whether every use `holder` makes of the checkout is standing in a
@@ -790,7 +824,7 @@ impl fmt::Display for Warning {
             ),
             Warning::Uninspectable { path, reason } => write!(
                 f,
-                "The worktree's path {} cannot be inspected: {reason}. Whatever is there will be deleted, with Git's record.",
+                "The worktree's path {} cannot be inspected: {reason}. Nothing there can be removed until it can be inspected.",
                 path.display()
             ),
             Warning::ShellInside => write!(f, "Your shell is inside this worktree; cd out of it afterward."),

@@ -1,11 +1,11 @@
-//! The compact recovery record (`record_version` 2): the approval a confirmed
-//! removal saves before its first unlock, move, or deletion, and the progress
-//! it has made since.
+//! The compact recovery record (`record_version` 3): the approval a confirmed
+//! removal saves before its first unlock, move, deletion, or unregistration,
+//! and the progress it has made since.
 //!
 //! Unlike the legacy record ([`super::record`]), a compact record **is** the
 //! approval. A later `wt remove` of the same checkout finishes the operation
 //! from it without asking again, for as long as the recorded objects (the
-//! checkout's identity, the repository, the worktree record) still match;
+//! [`ApprovedTarget`], the repository, the worktree record) still match;
 //! the record has no expiry. It never authorizes deleting a replacement:
 //! every identity is checked again before it is acted on, and an alias only
 //! finds the record, never a directory.
@@ -28,7 +28,7 @@ use super::record::{QUARANTINE_PREFIX, RecordInvalid, RepositoryBinding};
 use crate::strict_json;
 
 /// The `record_version` of a compact record.
-pub const COMPACT_RECORD_VERSION: u32 = 2;
+pub const COMPACT_RECORD_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,11 +45,12 @@ pub struct CompactRecord {
     pub original: NativeString,
     /// What is deleted: a hidden sibling of `original` named with
     /// [`QUARANTINE_PREFIX`] when [`DeletionMode::Moved`], `original` itself
-    /// when [`DeletionMode::InPlace`].
+    /// when [`DeletionMode::InPlace`], except for an
+    /// [`ApprovedTarget::OwnLink`], whose real checkout it is.
     pub deletion_path: NativeString,
     pub deletion_mode: DeletionMode,
-    /// The checkout directory's identity, which the move preserves.
-    pub checkout_identity: FileIdentity,
+    /// What the question showed at `original`, by identity.
+    pub target: ApprovedTarget,
     pub repository: RepositoryBinding,
     /// The worktree was locked and the user approved unlocking it.
     pub unlock_needed: bool,
@@ -58,12 +59,49 @@ pub struct CompactRecord {
     pub progress: Progress,
 }
 
+/// The objects the removal may act on, each bound to the identity it had
+/// when the question was gathered. An identity is read without following a
+/// final link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ApprovedTarget {
+    /// The checkout directory, moved to `deletion_path` or deleted in place.
+    Checkout { identity: FileIdentity },
+    /// `original` is the link `link`, and `deletion_path` the worktree's own
+    /// checkout `checkout` it leads to; both are deleted, in place.
+    OwnLink { link: FileIdentity, checkout: FileIdentity },
+    /// `original` holds a file or a link to anything else, removed as
+    /// itself; nothing it leads to is touched.
+    Entry { identity: FileIdentity },
+    /// Nothing was at `original`: only Git's record and the branches go.
+    Absent,
+}
+
+impl ApprovedTarget {
+    /// The directory deleted recursively at `deletion_path`.
+    pub fn checkout_identity(&self) -> Option<FileIdentity> {
+        match self {
+            Self::Checkout { identity } | Self::OwnLink { checkout: identity, .. } => Some(*identity),
+            Self::Entry { .. } | Self::Absent => None,
+        }
+    }
+
+    /// What was at `original`; `None` when nothing was.
+    pub fn original_identity(&self) -> Option<FileIdentity> {
+        match self {
+            Self::Checkout { identity } | Self::Entry { identity } | Self::OwnLink { link: identity, .. } => Some(*identity),
+            Self::Absent => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeletionMode {
     /// The checkout is moved to a hidden sibling, then deleted there.
     Moved,
-    /// The checkout could not be moved safely and is deleted where it is.
+    /// The checkout could not be moved safely and is deleted where it is;
+    /// always so for a target other than [`ApprovedTarget::Checkout`].
     InPlace,
 }
 
@@ -174,17 +212,22 @@ impl CompactRecord {
         if original.parent().is_none() {
             return malformed("original has no parent directory");
         }
-        match self.deletion_mode {
-            DeletionMode::Moved => {
+        match (self.deletion_mode, self.target) {
+            (DeletionMode::Moved, ApprovedTarget::Checkout { .. }) => {
                 let hidden = deletion.file_name().is_some_and(|name| name.as_encoded_bytes().starts_with(QUARANTINE_PREFIX.as_bytes()));
                 if deletion.parent() != original.parent() || !hidden {
                     return malformed("a moved checkout's deletion_path is not a hidden sibling of the original");
                 }
             }
-            DeletionMode::InPlace if deletion != original => {
+            (DeletionMode::Moved, _) => return malformed("only a checkout directory is moved"),
+            (DeletionMode::InPlace, ApprovedTarget::OwnLink { .. }) if deletion == original => {
+                return malformed("an own link's deletion_path is the link itself");
+            }
+            (DeletionMode::InPlace, ApprovedTarget::OwnLink { .. }) => {}
+            (DeletionMode::InPlace, _) if deletion != original => {
                 return malformed("an in-place deletion_path is not the original");
             }
-            DeletionMode::InPlace => {}
+            (DeletionMode::InPlace, _) => {}
         }
         let common = absolute(&self.repository.common_dir, "common_dir")?;
         let admin = absolute(&self.repository.admin_dir, "admin_dir")?;

@@ -27,7 +27,7 @@ pub(crate) fn sample() -> CompactRecord {
         original: root.join("wt1").as_path().into(),
         deletion_path: root.join(".wt-remove-wt1-a91c").as_path().into(),
         deletion_mode: DeletionMode::Moved,
-        checkout_identity: identity(3),
+        target: ApprovedTarget::Checkout { identity: identity(3) },
         repository: RepositoryBinding {
             common_dir: common.as_path().into(),
             common_dir_identity: identity(1),
@@ -113,7 +113,9 @@ fn compact_record_robustness_matrix() {
         ("original", "/original", json!(123), Some((json!({}), Invalid)), json!({"display": "relative/wt1"})),
         ("deletion_path", "/deletion_path", json!(123), Some((json!({}), Invalid)), json!({"display": elsewhere})),
         ("deletion_mode", "/deletion_mode", json!(0), Some((json!(""), Invalid)), json!("in_place")),
-        ("checkout_identity", "/checkout_identity", json!(123), Some((json!({}), Invalid)), json!({"kind": "unix", "device": "7"})),
+        ("target", "/target", json!(3), Some((json!({}), Invalid)), json!("teleport")),
+        ("target kind", "/target/checkout", json!("3"), Some((json!({}), Invalid)), json!({"identity": {}, "extra": 1})),
+        ("target identity", "/target/checkout/identity", json!(123), Some((json!({}), Invalid)), json!({"kind": "unix", "device": "7"})),
         ("common_dir", "/repository/common_dir", json!(123), Some((json!({}), Invalid)), json!({"display": "repo.git"})),
         (
             "common_dir_identity",
@@ -156,8 +158,10 @@ fn compact_record_robustness_matrix() {
         cells.push((format!("{field}: every element wrong type"), set(&doc, pointer, json!([123])), Invalid));
     }
     let text = serde_json::to_string(&doc).unwrap();
-    let inner = text.replacen("\"checkout_identity\":{", "\"checkout_identity\":{\"inode\":\"3\",", 1);
-    cells.push(("checkout_identity: duplicate inner key".into(), inner.into_bytes(), Invalid));
+    let inner = text.replacen("\"identity\":{", "\"identity\":{\"inode\":\"3\",", 1);
+    cells.push(("target identity: duplicate inner key".into(), inner.into_bytes(), Invalid));
+    cells.push(("target: unknown variant".into(), set(&doc, "/target", json!({"directory": {"identity": doc["target"]["checkout"]["identity"]}})), Invalid));
+    cells.push(("target: two variants".into(), set(&doc, "/target", json!({"checkout": doc["target"]["checkout"], "absent": null})), Invalid));
     cells.push(("document: trailing content".into(), format!("{text}\n{{}}").into_bytes(), Invalid));
     cells.push(("document: unknown field".into(), set_new(&doc, "surprise"), Invalid));
     cells.push(("document: not JSON".into(), b"record".to_vec(), Invalid));
@@ -182,7 +186,7 @@ fn set_new(doc: &Value, key: &str) -> Vec<u8> {
 
 #[test]
 fn an_unknown_version_is_refused_before_anything_else_is_read() {
-    for version in [0, 1, 3, u64::MAX] {
+    for version in [0, 1, 2, 4, u64::MAX] {
         let bytes = format!(r#"{{"record_version": {version}, "operation_id": 5}}"#);
         assert_eq!(parse(bytes.as_bytes()), Err(RecordInvalid::UnsupportedVersion(version)), "{version}");
     }
@@ -198,6 +202,45 @@ fn an_in_place_deletion_deletes_the_original_and_nothing_else() {
     assert_eq!(parse(&record.to_json()), Ok(record.clone()));
     record.deletion_mode = DeletionMode::Moved;
     assert!(matches!(record.validate(), Err(RecordInvalid::Malformed(_))), "a move to the original moves nothing");
+}
+
+/// Only a checkout directory moves; an own link deletes its real checkout,
+/// which is not the link; anything else is acted on at the original path.
+#[test]
+fn each_target_kind_binds_its_own_deletion_path() {
+    let mut record = sample();
+    record.deletion_mode = DeletionMode::InPlace;
+    let real = root().join("real-wt1");
+    for target in [ApprovedTarget::Entry { identity: identity(4) }, ApprovedTarget::Absent] {
+        record.target = target;
+        record.deletion_path = record.original.clone();
+        assert_eq!(parse(&record.to_json()), Ok(record.clone()), "{target:?}");
+        record.deletion_path = real.as_path().into();
+        assert!(matches!(record.validate(), Err(RecordInvalid::Malformed(_))), "{target:?} acts only at the original");
+        record.deletion_mode = DeletionMode::Moved;
+        assert!(matches!(record.validate(), Err(RecordInvalid::Malformed(_))), "{target:?} is never moved");
+        record.deletion_mode = DeletionMode::InPlace;
+    }
+    record.target = ApprovedTarget::OwnLink { link: identity(5), checkout: identity(6) };
+    record.deletion_path = real.as_path().into();
+    assert_eq!(parse(&record.to_json()), Ok(record.clone()));
+    assert_eq!((record.target.original_identity(), record.target.checkout_identity()), (Some(identity(5)), Some(identity(6))));
+    record.deletion_path = record.original.clone();
+    assert!(matches!(record.validate(), Err(RecordInvalid::Malformed(_))), "the link itself is not its checkout");
+    let mut own: Value = serde_json::from_slice(&{
+        record.deletion_path = real.as_path().into();
+        record.to_json()
+    })
+    .unwrap();
+    for pointer in ["/target/own_link/link", "/target/own_link/checkout"] {
+        let mut absent = own.clone();
+        let (parent, key) = pointer.rsplit_once('/').unwrap();
+        absent.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(key);
+        assert!(parse(&serde_json::to_vec(&absent).unwrap()).is_err(), "{pointer}: absent");
+        assert!(parse(&set(&own, pointer, Value::Null)).is_err(), "{pointer}: null");
+    }
+    *own.pointer_mut("/target").unwrap() = json!("absent");
+    assert!(parse(&serde_json::to_vec(&own).unwrap()).is_err(), "an absent target has no deletion path of its own");
 }
 
 #[test]

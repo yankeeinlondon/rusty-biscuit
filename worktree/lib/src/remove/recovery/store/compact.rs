@@ -205,6 +205,17 @@ impl RecoveryStore {
     }
 }
 
+impl RecoveryStore {
+    /// Deletes operation `id`, a legacy one whose every step finished,
+    /// holding its worktree's lock. Best effort: one whose lock another
+    /// process holds, or that cannot be deleted, stays for a later run.
+    pub fn discard_completed(&self, id: &OperationId, legacy: &LegacyApproval) {
+        debug_assert!(legacy.is_completed());
+        let Ok(_lock) = self.lock(&legacy.record.repository) else { return };
+        let _ = remove_operation_dir(&self.operation_dir(id));
+    }
+}
+
 /// A stored operation this process holds the lock for, from approval or
 /// resumption until [`PendingRemoval::finish`]. Dropping it releases the
 /// lock and keeps the record for the next `wt remove`.

@@ -595,6 +595,7 @@ mod tests {
         Facts {
             target: Target::Checkout { path: PathBuf::from("/tmp/feat-x") },
             admin: None,
+            identities: Default::default(),
             prepared: None,
             warnings,
             notes: Vec::new(),

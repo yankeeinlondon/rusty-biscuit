@@ -14,10 +14,12 @@
 //!   file) is removed as an entry and its target is never touched. FIFOs,
 //!   sockets, and devices are unlinked without being opened, and a hard link
 //!   loses only its own name.
-//! - **No mount is crossed.** A directory listed in the mount table, or on
-//!   another filesystem than the root (checked again before each descent, so
-//!   a tree mounted during deletion is caught too), is kept along with the
-//!   directories above it ([`Deletion::RetainedMounts`]).
+//! - **No mount is crossed.** Before it enters a directory, deletion asks
+//!   the mount information afresh whether that directory is a mount point
+//!   ([`MountInfo::mount_at`], which sees a same-device bind mount) and
+//!   compares its device with the root's, so a tree mounted during deletion
+//!   is caught too. A mount is kept along with the directories above it
+//!   ([`Deletion::RetainedMounts`]).
 //! - **The root must still be the bound directory.** A root that is now a
 //!   link, a file, or another directory is outside the approval
 //!   ([`Deletion::RootReplaced`]), and nothing is deleted.
@@ -52,7 +54,7 @@ pub use wait::{Holder, HolderReport, Holders, UsageHolders, Wait, WaitCause};
 
 use super::clock::{Backoff, Clock, Slept};
 use super::faults::{FsFaults, FsOp};
-use super::mounts::{Mount, mounts_within};
+use super::mounts::{Mount, MountInfo};
 
 /// Failed removals of one directory, each after relisting and deleting what
 /// reappeared, before deletion stops and waits on it (N2).
@@ -74,8 +76,8 @@ pub struct Target<'a> {
 pub struct Env<'a> {
     pub clock: &'a dyn Clock,
     pub faults: &'a dyn FsFaults,
-    /// The host's mount table (see [`mounts_within`]).
-    pub mounts: &'a [Mount],
+    /// Asked before each directory is entered, never read ahead of time.
+    pub mounts: &'a dyn MountInfo,
     pub holders: &'a dyn Holders,
     /// Polled at every entry and by every wait.
     pub cancelled: &'a dyn Fn() -> bool,
@@ -142,9 +144,9 @@ pub fn delete_tree(target: Target<'_>, env: &Env<'_>, progress: &mut dyn Progres
         env,
         progress,
         root: target.root,
+        real_root: biscuit_file::canonicalize_simplified(target.root).unwrap_or_else(|_| target.root.to_path_buf()),
         root_volume: platform::volume(target.identity),
         expected: target.identity,
-        nested: mounts_within(env.mounts, target.root).into_iter().cloned().collect(),
         failures: Vec::new(),
         failed: HashSet::new(),
         retained: Vec::new(),
@@ -270,9 +272,10 @@ struct Run<'a, 'p> {
     env: &'a Env<'a>,
     progress: &'p mut dyn Progress,
     root: &'a Path,
+    /// `root` spelled as the OS spells it, as native mount tables do.
+    real_root: PathBuf,
     expected: &'a FileIdentity,
     root_volume: u64,
-    nested: Vec<Mount>,
     failures: Vec<Failure>,
     /// Paths of `failures`, never tried again.
     failed: HashSet<PathBuf>,
@@ -335,12 +338,12 @@ impl Run<'_, '_> {
             let file_type = metadata.file_type();
             let step = if file_type.is_symlink() || platform::is_reparse_point(&metadata) {
                 if file_type.is_dir() && platform::is_volume_mount(&full) {
-                    return self.retain(&full);
+                    return self.retain(Mount::unnamed(&full));
                 }
                 self.remove(FsOp::RemoveFile, parent, parent_full, &full, &|| platform::remove_file(parent, name, &full, &identity))
             } else if file_type.is_dir() {
-                if platform::volume(&identity) != self.root_volume || self.nested.iter().any(|mount| mount.mount_point == full) {
-                    return self.retain(&full);
+                if platform::volume(&identity) != self.root_volume {
+                    return self.retain(Mount::unnamed(&full));
                 }
                 self.directory(parent, parent_full, name, &full, &metadata, &identity, false)
             } else {
@@ -356,11 +359,16 @@ impl Run<'_, '_> {
     }
 
     /// Empties the directory `name` of `parent`, then removes it, relisting
-    /// what reappears up to [`REFILL_PASSES`] times.
+    /// what reappears up to [`REFILL_PASSES`] times. Every open below the
+    /// root is preceded by a mount check, since each one enters the
+    /// directory afresh.
     #[allow(clippy::too_many_arguments)]
     fn directory(&mut self, parent: &Dir, parent_full: &Path, name: &OsStr, full: &Path, metadata: &Metadata, identity: &FileIdentity, is_root: bool) -> Step {
         let mut refills = 0;
         loop {
+            if !is_root && let Some(mount) = self.mount_at(full) {
+                return Step::Done(self.retain(mount));
+            }
             let dir = match self.open_dir(parent, name, full, metadata, identity) {
                 Ok(dir) => dir,
                 Err(step) => return step,
@@ -528,13 +536,14 @@ impl Run<'_, '_> {
         }
     }
 
-    fn retain(&mut self, full: &Path) -> Left {
-        let mount = self
-            .nested
-            .iter()
-            .find(|mount| mount.mount_point == full)
-            .cloned()
-            .unwrap_or_else(|| Mount { mount_point: full.to_path_buf(), source: "another filesystem".to_string(), fs_type: String::new(), super_options: String::new() });
+    /// The mount at `full` now. Mount information that cannot be read is
+    /// no mount, as when the removal began; the device check still applies.
+    fn mount_at(&self, full: &Path) -> Option<Mount> {
+        let real = self.real_root.join(full.strip_prefix(self.root).unwrap_or(full));
+        self.env.mounts.mount_at(full, &real).ok().flatten()
+    }
+
+    fn retain(&mut self, mount: Mount) -> Left {
         if !self.retained.contains(&mount) {
             self.retained.push(mount);
         }

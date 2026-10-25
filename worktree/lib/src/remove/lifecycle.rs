@@ -7,10 +7,14 @@
 //! `2026-10-22-confirmed-remove-always-deletes`, each recorded in the
 //! operation's compact record ([`CompactRecord`]) before the next starts:
 //!
-//! 1. **Save the approval.** The record binds the checkout's identity, the
-//!    repository, the worktree's Git record, and the approved branch steps.
-//!    It is durable before anything is unlocked, moved, or deleted; when it
-//!    cannot be saved nothing is changed ([`Refusal::NotSaved`]).
+//! 1. **Save the approval.** The record binds the objects the question
+//!    showed ([`ApprovedTarget`]), the repository, the worktree's Git record,
+//!    and the approved branch steps, each by the identity
+//!    [`gather`](super::facts::gather) read before the question; anything at
+//!    those paths with another identity now refuses ([`Refusal::Replaced`]).
+//!    The record is durable, and the operation's lock held, before anything
+//!    is unlocked, moved, deleted, or unregistered; when it cannot be saved
+//!    nothing is changed ([`Refusal::NotSaved`]).
 //! 2. **Unlock** a locked worktree, with `git worktree unlock`, when the
 //!    question showed the lock.
 //! 3. **Place** the checkout: move it to its hidden quarantine, or mark it
@@ -31,11 +35,15 @@
 //! 8. **Finish**: the record is deleted, so a completed removal leaves
 //!    nothing.
 //!
+//! A worktree that is not a checkout directory takes the same steps without
+//! placement: a link to its own checkout deletes that checkout in place and
+//! then the link; a file or a link to anything else is removed as itself;
+//! a checkout already gone has nothing to delete. A path that could not be
+//! identified before the question is not removed at all.
+//!
 //! An interrupted operation is finished by [`resume::finish_pending`], which
 //! reads the paths and the registration as they are rather than trusting
-//! the record's progress marker. A worktree that is not a checkout
-//! directory (gone, a file, or a link) has no content to delete in steps
-//! 3–5 and is handled in one short pass that saves no record.
+//! the record's progress marker.
 
 pub mod branches;
 pub mod late;
@@ -45,7 +53,7 @@ pub mod resume;
 mod tests;
 
 pub use branches::{BranchOutcome, BranchResult, Revalidate};
-pub use resolve::{Candidate, Resolved, ResolveError, resolve, resolve_in};
+pub use resolve::{Candidate, PendingRemovals, Resolved, ResolveError, resolve, resolve_in};
 pub use resume::{finish_handoff, finish_pending};
 
 use std::ffi::OsStr;
@@ -63,7 +71,7 @@ use crate::worktree::WorktreeEntry;
 use super::admin_entry::{AdminEntry, BackReferenceError, admin_entry_in, common_git_dir, read_back_reference, same_location};
 use super::clock::Clock;
 use super::delete::{self, Deletion, Failure, UsageHolders, Wait};
-use super::facts::{Facts, LinkTarget, Target, Warning};
+use super::facts::{self, Facts, LinkTarget, Target, Warning};
 use super::faults::FsFaults;
 use super::mounts::{Mount, MountInfo};
 use super::quarantine::association::{Faults, MoveError, MoveErrorClass, MovePlan, MoveRefusal, plan_move};
@@ -71,7 +79,7 @@ use super::quarantine::placement::{Placement, in_place_for_refusal, place_with};
 use super::quarantine::rename;
 use super::recovery::OperationId;
 use super::recovery::compact::{
-    BranchAction, BranchStep, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepApproval, StepState,
+    ApprovedTarget, BranchAction, BranchStep, COMPACT_RECORD_VERSION, CompactRecord, DeletionMode, Progress, StepApproval, StepState,
 };
 use super::recovery::lock::{LockError, OperationLock};
 use super::recovery::record::RepositoryBinding;
@@ -95,8 +103,9 @@ pub struct Request<'a> {
     /// The name the user typed; saved so a later run finds the operation.
     pub requested_name: &'a str,
     /// What the question showed ([`gather`](super::facts::gather)). Its
-    /// target decides the steps, its lock warning approves unlocking, and
-    /// its inventory is what [`late`] compares against.
+    /// target decides the steps, its identities bind what they act on, its
+    /// lock warning approves unlocking, and its inventory is what [`late`]
+    /// compares against.
     pub facts: &'a Facts,
     /// Local before remote; at most one of each.
     pub branches: &'a [ApprovedBranch],
@@ -173,7 +182,9 @@ pub enum Refusal {
     Move(MoveError),
     #[error(transparent)]
     Git(WorktreeError),
-    /// What a pending operation would delete is no longer what it approved.
+    /// What the removal would act on is no longer what the question showed
+    /// or the operation approved, or could not be identified before the
+    /// question.
     #[error("{0}")]
     Replaced(String),
     #[error("the removal was cancelled before anything was deleted")]
@@ -213,11 +224,10 @@ pub enum CheckoutResult {
     Stopped(String),
 }
 
-/// A removal that got past saving its approval (or needed none).
+/// A removal that got past saving its approval.
 #[derive(Debug)]
 pub struct Finished {
-    /// `None` for a removal that saved no record.
-    pub id: Option<OperationId>,
+    pub id: OperationId,
     /// The worktree's path, as the user knows it.
     pub path: PathBuf,
     pub checkout: CheckoutResult,
@@ -234,7 +244,7 @@ pub struct Finished {
 }
 
 impl Finished {
-    fn new(id: Option<OperationId>, path: &Path) -> Self {
+    fn new(id: OperationId, path: &Path) -> Self {
         Self {
             id,
             path: path.to_path_buf(),
@@ -335,63 +345,141 @@ pub(crate) fn run_with(request: &Request<'_>, env: &Env<'_>, seams: &mut Seams<'
     if request.facts.blocker.is_some() {
         return refuse(Refusal::ShellInside);
     }
-    match &request.facts.target {
-        Target::Checkout { .. } => checkout(request, env, seams),
-        Target::Link { own: true, resolved: LinkTarget::Resolved(real), .. } => Ok(without_record(request, env, Some(real))),
-        Target::Link { .. } | Target::NotADirectory | Target::Uninspectable | Target::Missing | Target::Vanished => {
-            Ok(without_record(request, env, None))
-        }
-    }
-}
-
-/// The checkout directory, bound before its approval is saved.
-struct Bound {
-    original: PathBuf,
-    identity: FileIdentity,
-    common_dir: PathBuf,
-    admin: AdminEntry,
-}
-
-impl Bound {
-    fn repository(&self) -> io::Result<RepositoryBinding> {
-        Ok(RepositoryBinding {
-            common_dir: self.common_dir.as_path().into(),
-            common_dir_identity: rename::identity(&self.common_dir)?,
-            admin_dir: self.admin.dir.as_path().into(),
-            admin_dir_identity: rename::identity(&self.admin.dir)?,
-        })
-    }
-}
-
-/// Binds the checkout at `entry.path` to its own Git record without a move
-/// plan, for a checkout that will be deleted in place.
-fn bind_in_place(base: &Path, entry: &WorktreeEntry) -> Result<Bound, Refusal> {
-    let original = entry.path.clone();
-    match availability::inspect(&original) {
-        Ok(EntryKind::Directory) => {}
-        Ok(_) => return Err(Refusal::Ineligible(MoveRefusal::NotARealDirectory(original))),
-        Err(error) => return Err(Refusal::Ineligible(MoveRefusal::Uninspectable(format!("{}: {error}", original.display())))),
-    }
-    let identity = rename::identity(&original).map_err(|error| Refusal::Git(WorktreeError::Io(error)))?;
-    let common_dir = common_git_dir(base).map_err(Refusal::Git)?;
-    let admin = admin_entry_in(&common_dir, &original).map_err(|error| Refusal::Ineligible(MoveRefusal::Association(error)))?;
-    Ok(Bound { original, identity, common_dir, admin })
-}
-
-fn checkout(request: &Request<'_>, env: &Env<'_>, seams: &mut Seams<'_>) -> Result<Removal, Crashed> {
     match approve(request, env) {
         Approval::Saved(saved) => {
             let (pending, plan) = *saved;
             seams.at(Boundary::Begun)?;
-            let finished = Finished::new(Some(pending.id().clone()), pending.record().original.as_path());
+            let finished = Finished::new(pending.id().clone(), pending.record().original.as_path());
             let operation = Operation { base: request.base, env, pending, finished, fresh: true };
-            operation.run(Progress::Approved, plan, Some(request.facts), seams)
+            let shown = late::shown(request.facts.inventory.as_ref());
+            operation.run(Progress::Approved, plan, shown.as_deref(), seams)
         }
         // An earlier run of this worktree's removal exited (R16, R19):
-        // finish that one, with its own approval.
-        Approval::Earlier(other) => resume::resume_with(request.base, &other, env, seams, None),
-        Approval::Refused(refusal) => Ok(Removal::Refused(Box::new(refusal))),
+        // finish that one, with its own approval. Its question is not this
+        // run's, so no late change is named.
+        Approval::Earlier(other) => resume::resume_with(request.base, &other, env, seams, None, None),
+        Approval::Refused(refusal) => refuse(refusal),
     }
+}
+
+/// What an approval binds, checked against the question's identities.
+struct Bound {
+    original: PathBuf,
+    deletion_path: PathBuf,
+    deletion_mode: DeletionMode,
+    target: ApprovedTarget,
+    /// The move to make; `None` deletes in place.
+    plan: Option<MovePlan>,
+}
+
+/// Binds what `request` approved to what is there now, before anything is
+/// saved or changed. Every object is compared with the identity the
+/// question's facts read: one that changed since, or that the facts could
+/// not identify, refuses.
+fn bind(request: &Request<'_>, env: &Env<'_>, id: &OperationId) -> Result<(Bound, RepositoryBinding), Refusal> {
+    let Request { base, entry, facts, .. } = *request;
+    let path = &entry.path;
+    let changed = |what: &Path| Refusal::Replaced(format!("{} changed after the question, so nothing was removed", what.display()));
+    let unidentified = || Refusal::Replaced(format!("{} could not be identified before the question, so nothing was removed", path.display()));
+    let Some(gathered) = &facts.identities.repository else {
+        return Err(Refusal::Replaced(format!(
+            "Git's record of {} could not be identified before the question, so nothing was removed",
+            path.display()
+        )));
+    };
+    let is = |at: &Path, identity: FileIdentity| rename::identity(at).is_ok_and(|found| found == identity);
+    let in_place = |target: ApprovedTarget, deletion_path: PathBuf| Bound {
+        original: path.clone(),
+        deletion_path,
+        deletion_mode: DeletionMode::InPlace,
+        target,
+        plan: None,
+    };
+    let (bound, admin) = match &facts.target {
+        Target::Checkout { .. } => {
+            let identity = facts.identities.entry.ok_or_else(unidentified)?;
+            if !is(path, identity) {
+                return Err(changed(path));
+            }
+            let (bound, admin) = bind_checkout(request, id, env)?;
+            if bound.target != (ApprovedTarget::Checkout { identity }) {
+                return Err(changed(path));
+            }
+            (bound, admin)
+        }
+        Target::Link { own: true, resolved: LinkTarget::Resolved(real), .. } => {
+            let (Some(link), Some(checkout)) = (facts.identities.entry, facts.identities.resolved) else { return Err(unidentified()) };
+            if !is(path, link) {
+                return Err(changed(path));
+            }
+            if !is(real, checkout) {
+                return Err(changed(real));
+            }
+            (in_place(ApprovedTarget::OwnLink { link, checkout }, real.clone()), gathered.admin_dir.as_path().to_path_buf())
+        }
+        Target::Link { .. } | Target::NotADirectory | Target::Uninspectable => {
+            let identity = facts.identities.entry.ok_or_else(unidentified)?;
+            if !is(path, identity) {
+                return Err(changed(path));
+            }
+            (in_place(ApprovedTarget::Entry { identity }, path.clone()), gathered.admin_dir.as_path().to_path_buf())
+        }
+        Target::Missing | Target::Vanished => {
+            if !absent(path) {
+                return Err(Refusal::Replaced(format!("{} appeared after the question, so nothing was removed", path.display())));
+            }
+            (in_place(ApprovedTarget::Absent, path.clone()), gathered.admin_dir.as_path().to_path_buf())
+        }
+    };
+    let changed_record = || changed(gathered.admin_dir.as_path());
+    let current = facts::repository_binding(base, &AdminEntry { dir: admin }).map_err(|_| changed_record())?;
+    let same = current.common_dir_identity == gathered.common_dir_identity
+        && current.admin_dir_identity == gathered.admin_dir_identity
+        && current.admin_name() == gathered.admin_name();
+    if !same {
+        return Err(changed_record());
+    }
+    Ok((bound, current))
+}
+
+/// Binds a checkout directory: planned for the move, or bound in place
+/// where it cannot be moved. Returns the admin directory it is bound to.
+fn bind_checkout(request: &Request<'_>, id: &OperationId, env: &Env<'_>) -> Result<(Bound, PathBuf), Refusal> {
+    let Request { base, entry, facts, .. } = *request;
+    let (identity, admin, plan) = match plan_move(base, entry, id) {
+        Ok(plan) => (plan.identity, plan.admin.dir.clone(), Some(plan)),
+        // R10, R13: the question said Git cannot read the checkout, so a
+        // `.git` the move cannot follow is no reason to stop; the checkout
+        // is bound by its Git record's back-reference and deleted in place.
+        Err(refusal) if in_place_for_refusal(&refusal).is_some() || unreadable_by_git(facts, &refusal) => {
+            let (identity, admin) = bind_in_place(base, entry)?;
+            (identity, admin, None)
+        }
+        Err(refusal) => return Err(Refusal::Ineligible(refusal)),
+    };
+    let original = entry.path.clone();
+    let moved = plan.as_ref().filter(|_| nested_mounts(env.mounts, &original).is_empty());
+    let (deletion_path, deletion_mode) = match moved {
+        Some(plan) => (plan.quarantine.clone(), DeletionMode::Moved),
+        None => (original.clone(), DeletionMode::InPlace),
+    };
+    Ok((Bound { original, deletion_path, deletion_mode, target: ApprovedTarget::Checkout { identity }, plan }, admin))
+}
+
+/// Binds the checkout at `entry.path` to its own Git record without a move
+/// plan, for a checkout that will be deleted in place: its identity and its
+/// admin directory.
+fn bind_in_place(base: &Path, entry: &WorktreeEntry) -> Result<(FileIdentity, PathBuf), Refusal> {
+    let original = &entry.path;
+    match availability::inspect(original) {
+        Ok(EntryKind::Directory) => {}
+        Ok(_) => return Err(Refusal::Ineligible(MoveRefusal::NotARealDirectory(original.clone()))),
+        Err(error) => return Err(Refusal::Ineligible(MoveRefusal::Uninspectable(format!("{}: {error}", original.display())))),
+    }
+    let identity = rename::identity(original).map_err(|error| Refusal::Git(WorktreeError::Io(error)))?;
+    let common_dir = common_git_dir(base).map_err(Refusal::Git)?;
+    let admin = admin_entry_in(&common_dir, original).map_err(|error| Refusal::Ineligible(MoveRefusal::Association(error)))?;
+    Ok((identity, admin.dir))
 }
 
 /// Saves the approval of `request` as a pending operation and returns its
@@ -432,53 +520,34 @@ enum Approval {
 
 fn approve(request: &Request<'_>, env: &Env<'_>) -> Approval {
     let refuse = Approval::Refused;
-    let Request { base, entry, requested_name, facts, branches } = *request;
+    let Request { entry, requested_name, facts, branches, .. } = *request;
     let id = match OperationId::generate() {
         Ok(id) => id,
         Err(error) => return refuse(Refusal::Git(error)),
     };
-    let (bound, plan, mut in_place) = match plan_move(base, entry, &id) {
-        Ok(plan) => {
-            let bound = Bound { original: plan.original.clone(), identity: plan.identity, common_dir: plan.common_dir.clone(), admin: plan.admin.clone() };
-            (bound, Some(plan), false)
-        }
-        // R10, R13: the question said Git cannot read the checkout, so a
-        // `.git` the move cannot follow is no reason to stop; the checkout
-        // is bound by its Git record's back-reference and deleted in place.
-        Err(refusal) if in_place_for_refusal(&refusal).is_some() || unreadable_by_git(facts, &refusal) => match bind_in_place(base, entry) {
-            Ok(bound) => (bound, None, true),
-            Err(refusal) => return refuse(refusal),
-        },
-        Err(refusal) => return refuse(Refusal::Ineligible(refusal)),
+    let (bound, repository) = match bind(request, env, &id) {
+        Ok(bound) => bound,
+        Err(refusal) => return refuse(refusal),
     };
-    let mounts = nested_mounts(env.mounts, &bound.original);
-    in_place |= !mounts.is_empty();
-    let repository = match bound.repository() {
-        Ok(repository) => repository,
-        Err(error) => return refuse(Refusal::Git(WorktreeError::Io(error))),
-    };
-    let store = match RecoveryStore::open(&bound.common_dir) {
+    let store = match RecoveryStore::open(repository.common_dir.as_path()) {
         Ok(store) => store,
-        Err(error) => return refuse(Refusal::Store(error)),
+        Err(error) => return refuse(Refusal::NotSaved(error)),
     };
     let lock = match take_lock(&store, &repository, env) {
         Ok(lock) => lock,
         Err(error) => return refuse(error),
     };
-    let (deletion_path, deletion_mode) = match (&plan, in_place) {
-        (Some(plan), false) => (plan.quarantine.clone(), DeletionMode::Moved),
-        _ => (bound.original.clone(), DeletionMode::InPlace),
-    };
+    let Bound { original, deletion_path, deletion_mode, target, plan } = bound;
     let record = CompactRecord {
         record_version: COMPACT_RECORD_VERSION,
         operation_id: id.clone(),
         created_at_ms: now_ms(),
         requested_name: requested_name.to_string(),
-        aliases: aliases(entry, &bound.original, requested_name),
-        original: bound.original.as_path().into(),
+        aliases: aliases(entry, &original, requested_name),
+        original: original.as_path().into(),
         deletion_path: deletion_path.as_path().into(),
         deletion_mode,
-        checkout_identity: bound.identity,
+        target,
         repository,
         unlock_needed: facts.warnings.iter().any(|warning| matches!(warning, Warning::Locked { .. })),
         branch_steps: branches
@@ -531,9 +600,10 @@ fn aliases(entry: &WorktreeEntry, original: &Path, requested_name: &str) -> Vec<
 }
 
 /// The mounts strictly inside the checkout at `spelled`, re-spelled under
-/// it. Native tables spell real paths, so the checkout is resolved the same
-/// way to find them. An unreadable table is no mounts here: the engine's
-/// device check still never crosses one, and the question warned.
+/// it, for the choice between moving and deleting in place. Native tables
+/// spell real paths, so the checkout is resolved the same way to find them.
+/// An unreadable table is no mounts here: deletion still checks each
+/// directory before entering it, and the question warned.
 fn nested_mounts(mounts: &dyn MountInfo, spelled: &Path) -> Vec<Mount> {
     let Ok(table) = mounts.mounts() else { return Vec::new() };
     let real = biscuit_file::canonicalize_simplified(spelled).unwrap_or_else(|_| spelled.to_path_buf());
@@ -569,22 +639,28 @@ impl Operation<'_> {
     /// Runs every step after `from`, which a resumed operation reads from
     /// the paths and Git rather than from the record's marker. An approved
     /// unlock the marker does not show as done is made in any case (it is a
-    /// no-op once the lock is gone). `plan` is the move to make; `facts` is
-    /// the question this run showed, for [`late`].
+    /// no-op once the lock is gone). Only a checkout directory is placed.
+    /// `plan` is the move to make; `shown` is the dirty paths the question
+    /// listed ([`late::shown`]), `None` when no question's list reached
+    /// this run.
     pub(crate) fn run(
         mut self,
         from: Progress,
         plan: Option<MovePlan>,
-        facts: Option<&Facts>,
+        shown: Option<&[PathBuf]>,
         seams: &mut Seams<'_>,
     ) -> Result<Removal, Crashed> {
+        let target = self.record().target;
+        if target == ApprovedTarget::Absent {
+            self.finished.checkout = CheckoutResult::AlreadyRemoved;
+        }
         if self.record().progress < Progress::Unlocked {
             if let Err(stopped) = self.unlock() {
                 return Ok(self.stop(stopped));
             }
             seams.at(Boundary::Unlocked)?;
         }
-        if from < Progress::Placed {
+        if matches!(target, ApprovedTarget::Checkout { .. }) && from < Progress::Placed {
             match self.place(plan, seams) {
                 Ok(boundary) => seams.at(boundary)?,
                 Err(Ended::Refused(refusal)) => return Ok(self.close(refusal)),
@@ -592,18 +668,32 @@ impl Operation<'_> {
             }
         }
         let root = self.record().deletion_path.as_path().to_path_buf();
-        if let Some(facts) = facts {
-            self.finished.late_changes = late::unseen(self.base, &root, facts.inventory.as_ref());
+        if from < Progress::ContentRemoved && target.checkout_identity().is_some() {
+            self.finished.late_changes = late::unseen(self.base, &root, shown);
         }
         if from < Progress::ContentRemoved {
-            match self.delete(&root, seams) {
-                Deleted::Done => {}
+            let deleted = match target {
+                ApprovedTarget::Checkout { .. } => self.delete(&root, seams),
+                // The real checkout first, so the link is the last thing
+                // that finds the operation.
+                ApprovedTarget::OwnLink { link, .. } => match if absent(&root) { Deleted::Done } else { self.delete(&root, seams) } {
+                    Deleted::Done => self.remove_bound(link),
+                    other => other,
+                },
+                ApprovedTarget::Entry { identity } => self.remove_bound(identity),
+                ApprovedTarget::Absent => Deleted::Done,
+            };
+            match deleted {
+                Deleted::Done => {
+                    if let Err(error) = self.pending.advance(Progress::ContentRemoved) {
+                        return Ok(self.stop(not_recorded(error)));
+                    }
+                }
                 Deleted::Kept(result) => {
                     self.finished.checkout = result;
                     return Ok(Removal::Finished(Box::new(self.finished)));
                 }
                 Deleted::Replaced(refusal) => return Ok(self.close(refusal)),
-                Deleted::NotRecorded(sentence) => return Ok(self.stop(sentence)),
             }
             seams.at(Boundary::ContentRemoved)?;
         }
@@ -647,20 +737,16 @@ impl Operation<'_> {
         Ok(if moved { Boundary::Moved } else { Boundary::MarkedInPlace })
     }
 
-    /// Deletes the placed checkout.
+    /// Deletes the placed checkout, or an own link's real checkout.
     fn delete(&mut self, root: &Path, seams: &mut Seams<'_>) -> Deleted {
-        let identity = self.record().checkout_identity;
-        let mounts = nested_mounts(self.env.mounts, root);
+        let identity = self.record().target.checkout_identity().expect("only a checkout directory is deleted");
         let holders = UsageHolders(self.env.usage);
-        let env = delete::Env { clock: self.env.clock, faults: self.env.faults, mounts: &mounts, holders: &holders, cancelled: self.env.cancelled };
+        let env = delete::Env { clock: self.env.clock, faults: self.env.faults, mounts: self.env.mounts, holders: &holders, cancelled: self.env.cancelled };
         let mut progress = Reported { notify: self.env.notify, hook: &mut *seams.hook, deleted: None };
         let deletion = delete::delete_tree(delete::Target { root, identity: &identity }, &env, &mut progress);
         self.finished.entries = progress.deleted;
         match deletion {
-            Deletion::Done => match self.pending.advance(Progress::ContentRemoved) {
-                Ok(()) => Deleted::Done,
-                Err(error) => Deleted::NotRecorded(not_recorded(error)),
-            },
+            Deletion::Done => Deleted::Done,
             Deletion::RetainedMounts(mounts) => Deleted::Kept(CheckoutResult::RetainedMounts(mounts)),
             Deletion::Permanent { failures, retained_mounts } => Deleted::Kept(CheckoutResult::Permanent { failures, retained_mounts }),
             Deletion::Cancelled { waiting_on } => Deleted::Kept(CheckoutResult::Cancelled { waiting_on }),
@@ -671,13 +757,38 @@ impl Operation<'_> {
         }
     }
 
+    /// Removes the entry at the original path as itself while it is still
+    /// the approved `identity`; one that changed since is kept.
+    fn remove_bound(&self, identity: FileIdentity) -> Deleted {
+        let original = self.record().original.as_path();
+        let failed = |cause: io::Error| {
+            Deleted::Kept(CheckoutResult::Permanent { failures: vec![Failure { path: original.to_path_buf(), cause }], retained_mounts: Vec::new() })
+        };
+        match rename::identity(original) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Deleted::Done,
+            Err(error) => failed(error),
+            Ok(found) if found != identity => Deleted::Replaced(Refusal::Replaced(format!(
+                "{} changed after the question, so it was kept",
+                original.display()
+            ))),
+            Ok(_) => match remove_entry(original) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => failed(error),
+                _ => Deleted::Done,
+            },
+        }
+    }
+
     /// Removes Git's registration of the deleted checkout, then its copy
     /// record. Git's record is gone already after a crash just past this.
     fn unregister(&mut self) -> Result<(), String> {
         let record = self.record();
-        let registered = record.deletion_path.as_path().to_path_buf();
         let original = record.original.as_path().to_path_buf();
+        let registered = match record.deletion_mode {
+            DeletionMode::Moved => record.deletion_path.as_path().to_path_buf(),
+            DeletionMode::InPlace => original.clone(),
+        };
         let admin = record.repository.admin_dir.as_path().to_path_buf();
+        let admin_identity = record.repository.admin_dir_identity;
         if record.deletion_mode == DeletionMode::Moved {
             match rename::identity(&original) {
                 Ok(_) => self.finished.original_kept = Some(original.clone()),
@@ -686,6 +797,9 @@ impl Operation<'_> {
             }
         }
         if !absent(&admin) {
+            if rename::identity(&admin).ok() != Some(admin_identity) {
+                return Err(format!("Git's record {} is no longer this worktree's, so it was kept", admin.display()));
+            }
             remove_registration(self.base, &registered, &admin)?;
         }
         if let Some(warning) = crate::copy_record::delete_for(self.base, &original) {
@@ -740,7 +854,6 @@ enum Deleted {
     Kept(CheckoutResult),
     /// The root is not the approved checkout; the operation is closed.
     Replaced(Refusal),
-    NotRecorded(String),
 }
 
 /// How placement ended a run early.
@@ -808,95 +921,14 @@ fn remove_registration(base: &Path, registered: &Path, admin: &Path) -> Result<(
     Ok(())
 }
 
-/// A worktree with no checkout directory to delete through a record: gone
-/// (R12, R17), a file or an unreadable path (R11), or a link (R9). With
-/// `own_checkout`, the link leads to this worktree's own checkout, which is
-/// deleted in place first. Short and idempotent, so it saves no record: an
-/// interrupted run leaves a state the next question describes.
-fn without_record(request: &Request<'_>, env: &Env<'_>, own_checkout: Option<&PathBuf>) -> Removal {
-    let Request { base, entry, facts, branches, .. } = *request;
-    let path = entry.path.clone();
-    let mut finished = Finished::new(None, &path);
-    let Some(admin) = &facts.admin else {
-        return Removal::Refused(Box::new(Refusal::Replaced(format!("Git's record of {} could not be found", path.display()))));
-    };
-    if facts.warnings.iter().any(|warning| matches!(warning, Warning::Locked { .. }))
-        && availability::inspect(&admin.dir.join("locked")).is_ok()
-        && let Err(stopped) = unlock(base, &path, &admin.dir)
-    {
-        finished.checkout = CheckoutResult::Stopped(stopped);
-        return Removal::Finished(Box::new(finished));
-    }
-    if let Some(real) = own_checkout {
-        let identity = match rename::identity(real) {
-            Ok(identity) => Some(identity),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => {
-                finished.checkout = CheckoutResult::Stopped(format!("{} could not be inspected: {error}", real.display()));
-                return Removal::Finished(Box::new(finished));
-            }
-        };
-        if let Some(identity) = identity {
-            let mounts = nested_mounts(env.mounts, real);
-            let holders = UsageHolders(env.usage);
-            let delete_env = delete::Env { clock: env.clock, faults: env.faults, mounts: &mounts, holders: &holders, cancelled: env.cancelled };
-            let mut hook = |_| false;
-            let mut progress = Reported { notify: env.notify, hook: &mut hook, deleted: None };
-            let deletion = delete::delete_tree(delete::Target { root: real, identity: &identity }, &delete_env, &mut progress);
-            finished.entries = progress.deleted;
-            let result = match deletion {
-                Deletion::Done => None,
-                Deletion::RetainedMounts(mounts) => Some(CheckoutResult::RetainedMounts(mounts)),
-                Deletion::Permanent { failures, retained_mounts } => Some(CheckoutResult::Permanent { failures, retained_mounts }),
-                Deletion::Cancelled { waiting_on } => Some(CheckoutResult::Cancelled { waiting_on }),
-                Deletion::RootReplaced => Some(CheckoutResult::Stopped(format!(
-                    "{} is no longer the worktree that was approved for removal, so it was not deleted",
-                    real.display()
-                ))),
-            };
-            if let Some(result) = result {
-                finished.checkout = result;
-                return Removal::Finished(Box::new(finished));
-            }
-        }
-    }
-    let had_content = !matches!(facts.target, Target::Missing | Target::Vanished);
-    if had_content && let Err(failure) = remove_entry(&path) {
-        finished.checkout = CheckoutResult::Permanent { failures: vec![failure], retained_mounts: Vec::new() };
-        return Removal::Finished(Box::new(finished));
-    }
-    if let Err(stopped) = remove_registration(base, &path, &admin.dir) {
-        finished.checkout = CheckoutResult::Stopped(stopped);
-        return Removal::Finished(Box::new(finished));
-    }
-    if let Some(warning) = crate::copy_record::delete_for(base, &path) {
-        finished.warnings.push(format!("could not delete the copy record: {warning}"));
-    }
-    if matches!(facts.target, Target::Missing | Target::Vanished) {
-        finished.checkout = CheckoutResult::AlreadyRemoved;
-    }
-    let remote_deleted = branches.iter().any(|branch| matches!(branch.action, BranchAction::Remote { .. }));
-    for branch in branches {
-        let step = BranchStep { action: branch.action.clone(), approval: branch.approval, state: StepState::Pending };
-        let outcome = branches::run(base, &step, env.revalidate, true, remote_deleted);
-        finished.branches.push(BranchResult { target: branches::target(&step.action), outcome });
-    }
-    Removal::Finished(Box::new(finished))
-}
-
 /// Removes the entry at `path` as itself: a link (a junction or other
 /// reparse point on Windows) is never followed, and a file is unlinked.
-fn remove_entry(path: &Path) -> Result<(), Failure> {
-    let removed = match availability::inspect(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => Err(error),
-        Ok(EntryKind::Directory) => return Ok(()),
-        Ok(EntryKind::Link) => remove_link(path),
-        Ok(EntryKind::File) => std::fs::remove_file(path),
-    };
-    match removed {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(Failure { path: path.to_path_buf(), cause: error }),
-        _ => Ok(()),
+fn remove_entry(path: &Path) -> io::Result<()> {
+    match availability::inspect(path)? {
+        // Never deleted as an entry; Git's record of it is then kept.
+        EntryKind::Directory => Ok(()),
+        EntryKind::Link => remove_link(path),
+        EntryKind::File => std::fs::remove_file(path),
     }
 }
 

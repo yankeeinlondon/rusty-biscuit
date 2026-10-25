@@ -10,11 +10,11 @@
 //! refused, never resolved by picking one; a saved name is a lookup key and
 //! grants no filesystem authority.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sniff::filesystem::query::FileIdentity;
 
-use crate::availability::{self, EntryKind};
 use crate::error::WorktreeError;
 use crate::remove::admin_entry::{common_git_dir, same_location};
 use crate::remove::quarantine::rename;
@@ -113,6 +113,43 @@ pub fn resolve_in(base: &Path, entries: Vec<WorktreeEntry>, name: &str) -> Resul
     }
 }
 
+/// The checkouts a `wt remove` has started and not finished, by the path
+/// Git lists each at, with the name its removal was started with. Other
+/// commands leave these alone: `wt list` runs no `git status` in one, and
+/// `--ff` never moves files in one.
+#[derive(Debug, Clone, Default)]
+pub struct PendingRemovals(HashMap<PathBuf, String>);
+
+impl PendingRemovals {
+    /// The entries of `entries` that a stored operation of `base`'s
+    /// repository is removing, matched as [`resolve_in`] matches them. Best
+    /// effort: a store or record that cannot be read marks nothing.
+    pub fn read(base: &Path, entries: &[WorktreeEntry]) -> Self {
+        let Ok((pending, _)) = pending_operations(base) else { return Self::default() };
+        Self(
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let op = pending.iter().find(|op| op.is_checkout_of(entry))?;
+                    Some((entry.path.clone(), op.requested_name.clone()))
+                })
+                .collect(),
+        )
+    }
+
+    /// The name the removal of the checkout Git lists at `path` was started
+    /// with, when one is pending.
+    pub fn name_for(&self, path: &Path) -> Option<&str> {
+        self.0.get(path).map(String::as_str)
+    }
+}
+
+impl FromIterator<(PathBuf, String)> for PendingRemovals {
+    fn from_iter<I: IntoIterator<Item = (PathBuf, String)>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
 /// What resolution reads of a stored operation, in either format.
 struct Pending {
     id: OperationId,
@@ -122,7 +159,9 @@ struct Pending {
     /// Where Git lists the checkout once it is moved (the original when it is
     /// deleted in place).
     deletion_path: PathBuf,
-    identity: FileIdentity,
+    /// What the operation approved at `original`; `None` when nothing was
+    /// there.
+    identity: Option<FileIdentity>,
 }
 
 impl Pending {
@@ -134,7 +173,7 @@ impl Pending {
                 aliases: record.aliases,
                 original: record.original.as_path().to_path_buf(),
                 deletion_path: record.deletion_path.as_path().to_path_buf(),
-                identity: record.checkout_identity,
+                identity: record.target.original_identity(),
             },
             Stored::Legacy(legacy) => Self {
                 id,
@@ -142,30 +181,31 @@ impl Pending {
                 aliases: legacy.record.aliases,
                 original: legacy.record.original.as_path().to_path_buf(),
                 deletion_path: legacy.record.quarantine.as_path().to_path_buf(),
-                identity: legacy.record.checkout_identity,
+                identity: Some(legacy.record.checkout_identity),
             },
         }
     }
 
     /// Whether the live registration `entry` is this operation's checkout:
     /// at its deletion path, or at the original path when that holds the
-    /// unmoved checkout itself or nothing (Git still lists the original
-    /// after a crash between the rename and its record, and after the
-    /// checkout vanished). Anything else at the original is not this
-    /// operation's.
+    /// approved object itself (the unmoved checkout, the link, the file) or
+    /// nothing (Git still lists the original after a crash between the
+    /// rename and its record, and after the checkout vanished). Anything
+    /// else at the original is not this operation's.
     fn is_checkout_of(&self, entry: &WorktreeEntry) -> bool {
         let at = |path: &Path| same_location(&entry.path, path);
-        let unmoved_or_gone = || match availability::inspect(&entry.path) {
-            Ok(EntryKind::Directory) => rename::identity(&entry.path).is_ok_and(|identity| identity == self.identity),
+        let unmoved_or_gone = || match rename::identity(&entry.path) {
+            Ok(identity) => self.identity == Some(identity),
             Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-            Ok(_) => false,
         };
         (at(&self.deletion_path) && self.deletion_path != self.original) || (at(&self.original) && unmoved_or_gone())
     }
 }
 
-/// Every readable stored operation of the repository, and the first record
-/// that could not be read. Reading never creates the store.
+/// Every readable stored operation of the repository with something left to
+/// finish, and the first record that could not be read. Reading never creates
+/// the store; a legacy operation whose every step finished is deleted
+/// instead ([`RecoveryStore::discard_completed`]).
 fn pending_operations(base: &Path) -> Result<(Vec<Pending>, Option<StoreError>), ResolveError> {
     let common = common_git_dir(base).map_err(ResolveError::Git)?;
     if matches!(std::fs::symlink_metadata(common.join(STORE_DIR)), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
@@ -176,6 +216,9 @@ fn pending_operations(base: &Path) -> Result<(Vec<Pending>, Option<StoreError>),
     let mut unreadable = None;
     for op in store.operations().map_err(ResolveError::Store)? {
         match op.record {
+            // Nothing is left to finish; an earlier `wt` kept its record and
+            // report after finishing, and only a resume would delete them.
+            Ok(Stored::Legacy(legacy)) if legacy.is_completed() => store.discard_completed(&op.id, &legacy),
             Ok(stored) => pending.push(Pending::of(op.id, stored)),
             Err(error) => {
                 unreadable.get_or_insert(error);

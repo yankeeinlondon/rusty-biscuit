@@ -264,6 +264,7 @@ fn ff_notice(result: &FfResult) -> Option<FfNotice> {
         }
         FfRefusal::Changed => FfNotice::Changed,
         FfRefusal::UnavailableHolder(path) => FfNotice::UnavailableHolder(path.clone()),
+        FfRefusal::RemovingHolder { path, name } => FfNotice::RemovingHolder { path: path.clone(), name: name.clone() },
         FfRefusal::Other => FfNotice::Failed,
     })
 }

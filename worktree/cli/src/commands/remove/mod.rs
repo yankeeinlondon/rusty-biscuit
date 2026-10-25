@@ -336,8 +336,8 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let lost = matches!(actions.branch, Some(BranchStep::Delete { approved: true })).then(|| branch.lost_commit_count());
     let moving = caller.shell_wrapper && is_within(&cwd, &entry.path);
     // Only a checkout directory is handed off. The shell can also stand in
-    // the real checkout behind a link to it, which has no record to hand
-    // off; it is deleted now and the wrapper moves the shell out afterward.
+    // the real checkout behind a link to it; that is deleted now and the
+    // wrapper moves the shell out afterward.
     if moving && matches!(gathered.target, Target::Checkout { .. }) {
         return hand_off(&terminal, &request, &branch, &actions, &cwd);
     }
@@ -600,7 +600,8 @@ fn hand_off(
     let token = handoff::new_token()?;
     let path = handoff::handoff_path(request.base, &token)
         .map_err(|_| WorktreeError::Io(std::io::Error::other("user cache directory unavailable")))?;
-    let record = OperationHandoff::new(id, canonical(request.base), canonical(&request.entry.path), now());
+    let shown = lifecycle::late::shown(request.facts.inventory.as_ref());
+    let record = OperationHandoff::new(id, canonical(request.base), canonical(&request.entry.path), now(), shown);
     handoff::write_operation(&path, &record)?;
 
     eprintln!();
@@ -651,7 +652,8 @@ fn no_longer_safe(reconfirmation: &Reconfirmation) -> String {
 /// The first run saved the approval as a pending operation; this run checks
 /// that the caller left the worktree and that the repository is the same,
 /// then finishes the operation with every branch protection rechecked. It
-/// compares nothing about the checkout's content and asks nothing.
+/// compares nothing about the checkout's content and asks nothing; the final
+/// line names uncommitted files the first run's question did not show (R14).
 pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
     let cwd = std::env::current_dir()?;

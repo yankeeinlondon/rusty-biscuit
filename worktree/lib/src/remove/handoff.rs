@@ -7,7 +7,9 @@
 //! `cd`, the wrapper runs `wt remove --handoff <token>`, which consumes the
 //! handoff (deleting it before anything else, so it cannot be replayed),
 //! checks that the caller has left the worktree, and finishes the operation.
-//! No content of the checkout is compared between the runs.
+//! No content of the checkout is compared between the runs: the record also
+//! carries the dirty paths the question showed, only so the second run's
+//! final line can name uncommitted files the question did not (R14).
 //!
 //! Records sit beside the comparison cache as
 //! `<repo hash>.handoff-<token>.json` and expire after
@@ -17,7 +19,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use sniff::filesystem::query::NativeString;
 
 use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
@@ -54,8 +57,9 @@ pub(crate) fn is_token(token: &str) -> bool {
 
 /// The [`OperationHandoff::format_version`] this build writes. A record of
 /// any other version (including an earlier `wt`'s content-comparing format,
-/// version 4) is [`HandoffError::Missing`] to [`consume_operation`].
-pub const OPERATION_HANDOFF_VERSION: u32 = 5;
+/// version 4, and version 5, which did not carry the question's dirty
+/// paths) is [`HandoffError::Missing`] to [`consume_operation`].
+pub const OPERATION_HANDOFF_VERSION: u32 = 6;
 
 /// How long an [`OperationHandoff`] stays valid (R18).
 pub const OPERATION_HANDOFF_TTL: Duration = Duration::from_secs(10 * 60);
@@ -76,11 +80,32 @@ pub struct OperationHandoff {
     pub target: PathBuf,
     /// Seconds since the Unix epoch.
     pub created_at: u64,
+    /// The checkout-relative dirty paths the question listed, one per file
+    /// it showed; `null` when it showed no inventory (Git could not read the
+    /// checkout), so the second run names no late change. Required: a
+    /// record without the field, or with any element that is not a path,
+    /// is [`HandoffError::Missing`].
+    #[serde(deserialize_with = "required")]
+    pub shown_dirty: Option<Vec<NativeString>>,
+}
+
+/// Reads an `Option` field that must be present (`null` is `None`); serde
+/// would otherwise read a missing one as `None`.
+fn required<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Vec<NativeString>>, D::Error> {
+    Option::deserialize(deserializer)
 }
 
 impl OperationHandoff {
-    pub fn new(operation: OperationId, repo: PathBuf, target: PathBuf, created_at: u64) -> Self {
-        Self { format_version: OPERATION_HANDOFF_VERSION, operation, repo, target, created_at }
+    /// `shown` is the question's dirty paths, as
+    /// [`late::shown`](super::lifecycle::late::shown) reads them.
+    pub fn new(operation: OperationId, repo: PathBuf, target: PathBuf, created_at: u64, shown: Option<Vec<PathBuf>>) -> Self {
+        let shown_dirty = shown.map(|paths| paths.into_iter().map(NativeString::from).collect());
+        Self { format_version: OPERATION_HANDOFF_VERSION, operation, repo, target, created_at, shown_dirty }
+    }
+
+    /// [`Self::shown_dirty`] as paths, for the late-change comparison.
+    pub fn shown(&self) -> Option<Vec<PathBuf>> {
+        self.shown_dirty.as_ref().map(|paths| paths.iter().map(|path| path.as_path().to_path_buf()).collect())
     }
 }
 
@@ -174,7 +199,7 @@ mod tests {
     fn operation_handoff(dir: &Path, created_at: u64) -> OperationHandoff {
         let target = dir.join("wt");
         fs::create_dir_all(&target).unwrap();
-        OperationHandoff::new(OperationId::parse(&"c".repeat(32)).unwrap(), dir.join("base"), target, created_at)
+        OperationHandoff::new(OperationId::parse(&"c".repeat(32)).unwrap(), dir.join("base"), target, created_at, Some(vec!["src/a.rs".into()]))
     }
 
     /// R18 / N9: the token carries the operation id, survives a second
@@ -238,6 +263,58 @@ mod tests {
             fs::write(&path, serde_json::to_vec(&edited).unwrap()).unwrap();
             assert_eq!(consume_operation(&path, 0), Err(HandoffError::Missing), "{key}");
         }
+    }
+
+    /// R14: the question's dirty paths are required. `null` (no inventory
+    /// was shown) and `[]` (none were dirty) are distinct valid values;
+    /// absent, another type, or any element that is not a path is
+    /// [`HandoffError::Missing`].
+    #[test]
+    fn the_questions_dirty_paths_have_one_outcome_per_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.json");
+        let valid = serde_json::to_value(operation_handoff(dir.path(), 0)).unwrap();
+        let consume = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut edited = valid.clone();
+            edit(&mut edited);
+            fs::write(&path, serde_json::to_vec(&edited).unwrap()).unwrap();
+            consume_operation(&path, 0)
+        };
+        let set = |value: serde_json::Value| move |handoff: &mut serde_json::Value| handoff["shown_dirty"] = value.clone();
+
+        assert_eq!(consume(&|_| {}).unwrap().shown(), Some(vec![PathBuf::from("src/a.rs")]));
+        assert_eq!(consume(&set(serde_json::json!(null))).unwrap().shown(), None);
+        assert_eq!(consume(&set(serde_json::json!([]))).unwrap().shown(), Some(Vec::new()));
+        let absent = |handoff: &mut serde_json::Value| {
+            handoff.as_object_mut().unwrap().remove("shown_dirty");
+        };
+        assert_eq!(consume(&absent), Err(HandoffError::Missing), "absent");
+        for invalid in [
+            serde_json::json!("src/a.rs"),
+            serde_json::json!(1),
+            serde_json::json!({"display": "src/a.rs"}),
+            serde_json::json!([{"display": "src/a.rs"}, 1]),
+            serde_json::json!(["src/a.rs", "src/b.rs"]),
+            serde_json::json!([null]),
+        ] {
+            assert_eq!(consume(&set(invalid.clone())), Err(HandoffError::Missing), "{invalid}");
+        }
+    }
+
+    /// A dirty path that is not UTF-8 survives the handoff byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_dirty_path_round_trips() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.json");
+        let name = PathBuf::from(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+        let mut handoff = operation_handoff(dir.path(), 0);
+        handoff.shown_dirty = Some(vec![name.clone().into()]);
+
+        write_operation(&path, &handoff).unwrap();
+
+        assert_eq!(consume_operation(&path, 0).unwrap().shown(), Some(vec![name]));
     }
 
     /// No content is compared: only where the caller stands and which
