@@ -97,23 +97,6 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
-message_to_agent: |-
-    Phase 4 is done; read "## Phase 4" in this log (P4-D1..D8). For Phase 5:
-    registrations now carry a second analysis rule besides the narrowing fact,
-    RegistrationBuilder::false_for_malformed_reference(parameter) (read with
-    FunctionRegistration::malformed_reference_parameter; file_exists declares
-    it). The call check sets CallCheck::always_false from it, which
-    composition reports and DMLS shows as dm.expression.always_false_call
-    (expression::ALWAYS_FALSE_CALL_CODE). The .facts.json artifact must carry
-    this rule with the other behavior metadata, or a host predicate that
-    declares it would warn at composition but not in the editor.
-    is_file_type registers TrueImplies "file" on parameter "value"; it is the
-    built-in counterpart of the test host predicate is_project_file (same
-    signature `value: unknown | null`). File-reference syntax is
-    biscuit_file::FileReference::new alone; Darkmatter's
-    is_well_formed_reference only adds the file:// adapter. P4-D4: the
-    composition warning for lifecycle-action surfaces is Phase 6's (the plan's
-    Phase 6 "CLI severities" task records it).
 source_files_during_phase_4:
     - biscuit-file/lib/src/file_reference/parse.rs
     - biscuit-file/lib/src/file_reference/mod.rs
@@ -161,6 +144,105 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/host_functions/project.yaml
+    - darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_5:
+    - darkmatter/docs/topics/host-functions.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_call_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/src/composition/prepare.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+message_to_agent: |-
+    Phase 6 is done; read "## Phase 6" in this log (P6-D1..D7). For Phase 7:
+    every call finding is the library's shared record,
+    darkmatter::markdown::compose::expression::{ExpressionDiagnostic,
+    Diagnostic, DiagnosticSource, Severity} (expression/diagnostics.rs); the
+    call codes INCOMPATIBLE_CALL_CODE / UNCERTAIN_CALL_CODE live there now.
+    Composition warnings carry it in ComposeWarning.diagnostic, a rejection
+    in MarkdownError::call_diagnostic(). --deny all / --deny <code> should
+    key on those codes (ComposeWarning.code) and must not change a record's
+    severity (spec: blocking changes outcome only). md compose's lifecycle
+    call warnings are spliced into report.warnings in both paths
+    (compose.rs plain path and LifecycleCompose.call_warnings), so a deny
+    policy over report.warnings sees them. Criterion 20's "--deny all fails
+    a category 3 document" is the remaining leg; the fixture in
+    darkmatter/cli/tests/l1/compose_call_warnings.rs is ready for it. Absence
+    handling is now type-based (handles_absence_at); x && y operands are
+    handled (P6-D3).
 ---
 
 # Implementation Log for 2026-10-31-type-aware-evaluation (9 phases)
@@ -1181,3 +1263,395 @@ with `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`; each embedding grows by the
   tripwire's arming check, is `cfg(unix)` by design (P4-D8). The adapter
   change preserves separators, so it can only keep UNC paths intact on
   Windows.
+
+## Phase 5
+
+Phase 5 delivers one function contract for host extensions (spec §5;
+criteria 17, 37): host functions registered through the built-ins'
+registration API, the generated `.facts.json` companion artifact, its DMLS
+reader, and the removal of Claudine's independent expression scans.
+
+### What changed
+
+- **Host functions** (`darkmatter/lib/src/markdown/compose/expression/host/`):
+  `HostFunctionCatalog::load` reads a host's signature catalog with the
+  built-ins' strict loader and records its version (BLAKE3 hex of the raw
+  bytes, `biscuit-hash`). `HostFunctions::builder(catalog).function(name,
+  aliases, configure, handler).build()` compiles every registration with
+  `FunctionRegistration::builder_from_types` + `build_with` (the built-ins'
+  API) and rejects, before any evaluation: duplicate canonical names or
+  aliases, a collision with a built-in name or alias, a catalog function
+  without a registration and the reverse, a lazy host function, and every
+  existing `RegistrationError` (a fact on a nonexistent parameter, a
+  narrowing fact on a non-boolean function, …).
+- **Two ways to make them visible**: `install_host_functions` (process-wide,
+  additive, collision-checked; the runtime host's path) and
+  `HostFunctions::enter` (a thread-scoped, `!Send` guard; the editor's
+  per-document path). `functions/mod.rs`'s lookups (`inspect_registration`,
+  `is_dispatchable`, `call_function`, `is_context_function`,
+  `lazy_function`) consult test functions → entered sets → installed sets →
+  built-ins, so host calls bind, type-check, and narrow exactly as built-ins.
+- **Facts artifact**: `HostFunctions::facts_artifact()` writes
+  `<stem>.facts.json` (`facts_artifact_path`): `format_version` 1,
+  `catalog_hash`, and per function `aliases`, `facts` (parameter, position,
+  kind, type), `lazy`, `conversion_recovery`, `source_exclusions`, and
+  `malformed_reference` (Phase 4's always-false rule). Keys sorted at every
+  level; deterministic bytes.
+- **Reader**: `HostFunctions::analysis_only(catalog, FactsArtifact)` parses
+  with a duplicate-key-rejecting visitor, rejects trailing content and
+  unknown fields, walks the value by hand (absent ≠ null ≠ wrong type), and
+  rebuilds each registration through the same builder. A function whose
+  metadata cannot be trusted is *incomplete*: dispatchable, but it has no
+  registration for analysis (no category, no narrowing), and
+  `incomplete_host_calls(expr)` lists its calls
+  (`dm.expression.incomplete_analysis`, `host::INCOMPLETE_ANALYSIS_CODE`).
+- **Discovery**: `schemas::catalog::host_function_catalogs(context)` finds
+  function catalogs (`kind: schema` + `categories:` + `types:`) in the same
+  schema roots as host global catalogs and reads the artifact beside each by
+  name; results are cached by path, catalog hash, and artifact bytes (the
+  loader leaks).
+- **DMLS**: enters each document's host sets around diagnostics, reports
+  incomplete calls as warnings on every call-diagnostic surface (including
+  guarded lifecycle stacks), and reports a function catalog that fails to
+  load as `dm.schema.host_catalog`.
+- **Claudine scans moved** onto one new Darkmatter API,
+  `expression::static_access_reads(&Expr) -> Vec<StaticAccessRead>`
+  (`absence.rs`: variable, typed `AccessStep`s, `static_path()`):
+  `looping/config.rs` (`collect_identifiers`,
+  `collect_value_template_identifiers`, `is_reserved_identifier` deleted;
+  `reserved.rs::EXPRESSION_RESERVED_ROOTS` deleted),
+  `lifecycle/bindings.rs::removed_loop_read`, `bindings/rename.rs::read`, and
+  `sequence/preflight/shape.rs` (`target_identity_path_in_expr`,
+  `static_member_path`, `member_root` deleted). What remains in Claudine only
+  filters the library's reads by Claudine's own names.
+  `claudine/lib/tests/l1/type_scope_ownership_guard.rs` now fails on a new
+  `Expr::Variable(`/`SpannedExprKind::Variable(` match in `claudine/lib/src`
+  without a reviewed entry (four entries: `dispatch/matcher.rs`,
+  `dispatch/template.rs`, `prewarm/classify.rs` ×2).
+- **Claudine host functions**: none exist; see P5-D1. A guard test keeps
+  `claudine/schemas/` free of function catalogs and artifacts until one is
+  wired.
+- **Docs**: new `darkmatter/docs/topics/host-functions.md`, linked from
+  `darkmatter-expressions.md`; `dmls/docs/diagnostics.md` lists the new code.
+
+### Design Decisions
+
+- **P5-D1. Claudine ships no host function catalog or artifact.**
+  - *Decision:* Claudine registers no host expression function, so it ships
+    no `functions.yaml`/`.facts.json` and installs nothing. The guard
+    `claudine/lib/tests/l1/host_catalog.rs::claudine_ships_no_host_function_catalog_and_no_facts_artifact`
+    fails if a function catalog or an artifact appears in `claudine/schemas/`
+    without its registration and freshness test.
+  - *Alternatives:* invent a Claudine function to exercise the path; ship an
+    empty catalog and artifact.
+  - *Why:* the Phase 1 audit found no Claudine expression function, and the
+    spec asks Claudine for none (§5 describes how a host *may* extend the
+    language). The registration, generator, freshness, and reader paths are
+    proven end to end by the test host (`is_project_file`, `project_label`)
+    in Darkmatter and DMLS. An invented or empty catalog would be discovered
+    by DMLS for every Claudine document and add nothing.
+  - *Downsides:* the plan's "emit the artifact in the Claudine build" has no
+    Claudine artifact to emit until Claudine gains a function; the guard
+    makes that addition fail until it is wired.
+- **P5-D2. Runtime install is process-wide; editor analysis is thread-scoped.**
+  - *Decision:* `install_host_functions` for a runtime host (group workers
+    and other threads see it), `HostFunctions::enter` for DMLS, which
+    analyzes documents from different schema roots in one process.
+  - *Alternatives:* thread a host set through every analysis and evaluation
+    API; one mechanism for both.
+  - *Why:* every consumer already resolves functions by name through
+    `functions/mod.rs`; a lookup layer there reaches all of them without
+    changing any signature, as the test-function layer already does.
+  - *Downsides:* two installation paths; a set entered on one thread is not
+    visible on another (the guard is `!Send`, so it cannot cross an await).
+- **P5-D3. Artifact encoding details** (subagent sub-decisions adopted):
+  host aliases are a registration fact recorded in the artifact, not in the
+  catalog; the non-null fact type is the string `"<non-null>"`
+  (`NON_NULL_FACT_TYPE`); `facts` is a list but more than one element makes
+  the function incomplete (a registration holds one fact; no silent
+  last-wins); `conversion_recovery`, `malformed_reference`, and `facts`
+  distinguish absent (incomplete) from `null` (none); unknown fields are
+  rejected (top level → whole artifact, in an entry → that function), so an
+  additive change needs a `format_version` bump; an artifact entry for a
+  function missing from the catalog, or an artifact alias colliding with a
+  built-in, invalidates the whole artifact.
+  - *Alternatives:* `null` for non-null (conflicts with "null is an error"),
+    ignoring unknown fields.
+  - *Why:* every load-bearing shape has exactly one outcome, per the plan's
+    matrix.
+  - *Downsides:* stricter than a forward-compatible reader.
+- **P5-D4. An incomplete function dispatches by canonical name only.**
+  - *Decision:* aliases are not salvaged from a bad artifact entry.
+  - *Why:* the aliases are part of the untrusted metadata.
+  - *Downsides:* calling an incomplete function through an alias reports an
+    unknown function rather than incomplete analysis.
+- **P5-D5. Among function catalogs, an earlier schema root wins a name.**
+  - *Decision:* same file-name shadowing as host global catalogs; DMLS
+    enters sets so the earlier root wins a function name. Duplicate names
+    across two different catalog files are not reported.
+  - *Downsides:* a duplicate across catalogs is silent in the editor.
+- **P5-D6. One read inventory API for Claudine, on the unspanned `Expr`.**
+  - *Decision:* `static_access_reads` returns each read with typed selector
+    steps; consumers stop where they need to. Parentheses are looked through
+    everywhere, so `(fm)['_loop_count']` is now `RemovedGrammar` (it passed
+    silently before; the documented rule says any read fails). Loop control
+    variables exclude `is_reserved_namespace` roots (fm, ctx, env, current)
+    rather than the old local list (true/false/fm/env), so a bare `ctx.*`
+    read no longer seeds a frontmatter key named `ctx`.
+  - *Alternatives:* extend `static_variable_reads` (spanned, absence-aware);
+    a joined-string path (loses `ctx.agent[0]` and `fm['a.b']`).
+  - *Why:* D3; walkers' surfaces carry `Expr`. A test asserts the two read
+    inventories visit the same variables in the same order.
+  - *Downsides:* two read inventories exist in the library; the two widened
+    edge cases above.
+- **P5-D7. `md compose` gets no host-function end-to-end test.**
+  - *Decision:* composition is proven in-process with an installed test
+    host; the `md` binary has no host functions to register.
+  - *Why:* a host function exists only in a host's process.
+  - *Downsides:* none; the grammar did not change.
+- **Inventory correction (Phase 1 surface table):**
+  `prewarm/classify.rs::frontmatter_reads` is a hand walk over `fm` reads,
+  not only `static_variable_reads` roots. It stays out of scope per D3 and
+  carries a reviewed guard entry naming it as a candidate for
+  `static_access_reads`.
+
+### Requirement-to-test mapping
+
+Lib: `darkmatter/lib/tests/l1/host_functions.rs`; DMLS:
+`darkmatter/dmls/tests/l1/host_function_diagnostics.rs`.
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| registration rejects duplicates, alias/built-in collisions, parity gaps both ways, fact on nonexistent parameter, non-boolean narrowing, lazy, installed collision — before evaluation (37) | library public API, L1 | `host_functions::registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluation` |
+| generator output equals the committed artifact byte for byte; deterministic | library + fixture file, L1 | `host_functions::the_committed_facts_artifact_is_fresh_and_deterministic` |
+| Input Robustness Matrix: control row + 50 one-edit cells (absent/null/wrong-type per load-bearing field, element and every-element, `facts: []` valid, `functions: {}`, duplicate key, trailing content, hash mismatch, unknown version, missing file, extra function) → incomplete, reason distinguishes absent/null, no category, no narrowing, 0 handler entries | library reader, L1 | `host_functions::the_facts_artifact_reader_walks_the_input_robustness_matrix` |
+| strict parser, sorted keys, artifact path | library unit | `host::artifact::tests::*` |
+| installed host: guarded `frontmatter` cat 1, unguarded cat 4, `project_label(42)` cat 5 and rejected by `compose_with`, real note composes, counters 0 after analysis and only evaluated calls enter (17, 37) | compatibility API + `Markdown::compose_with`, temp dir, L1 | `host_functions::installed_host_functions_get_the_built_in_checks_and_run_only_when_evaluated` |
+| function catalog never a global catalog, trigger, or document schema | library, temp schema root, L1 | `host_functions::a_function_catalog_in_a_schema_root_is_never_a_document_schema` |
+| editor control (strict): guarded silent, unguarded uncertain, `project_label(42)` incompatible, no incomplete (17, 37) | real LSP session, L1 | `host_function_diagnostics::the_host_catalog_and_its_artifact_check_host_calls_like_built_ins` |
+| editor: missing artifact / hash mismatch / artifact lacking a function → incomplete analysis, no category or narrowing (37) | real LSP session, L1 | `::a_missing_host_facts_artifact_reports_incomplete_analysis`, `::a_host_facts_artifact_for_another_catalog_version_reports_incomplete_analysis`, `::a_host_facts_artifact_lacking_a_function_reports_it_incomplete` |
+| editor: function catalog load failure reported | real LSP session, L1 | `::a_host_function_catalog_that_fails_to_load_is_reported` |
+| `static_access_reads` paths, positions, parity with absence reads | library unit | `absence::tests::access_reads_keep_each_static_path…`, `::access_reads_visit_every_position_in_source_order`, `::access_reads_and_absence_reads_visit_the_same_variables` |
+| loop control variables over every read shape (written first, passed on the old code) | Claudine lib unit | `looping/config/tests.rs::extract_control_variables_visits_every_read_shape` (+ 8 existing `extract_control_variables_*`) |
+| retired loop read in every position, incl. `(fm)` | Claudine lib unit | `lifecycle/bindings/tests.rs::a_retired_loop_read_is_found_in_every_read_position` |
+| retired sequence globals: static prefix of the first read | Claudine lib unit | `bindings/rename/tests.rs::the_removed_path_is_the_static_prefix_of_the_first_read` |
+| target identity paths in every read position | Claudine lib unit | `sequence/preflight/tests.rs::target_identity_paths_are_found_in_every_read_position` |
+| no new hand walk of variable reads in Claudine | source guard, L1 | `claudine/lib/tests/l1/type_scope_ownership_guard.rs` (new rule + self-test) |
+| Claudine ships no unwired function catalog/artifact | repository files, L1 | `claudine/lib/tests/l1/host_catalog.rs::claudine_ships_no_host_function_catalog_and_no_facts_artifact` |
+
+The reader was mutation-checked: disabling the hash check makes the matrix
+test fail. The reader grep (`serde(default)`, conflated `Option`,
+`filter_map(.. as_str())`, `unwrap_or_default()`, `.ok()`) finds nothing on
+a load-bearing field.
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["claudine", "darkmatter", "dmls", "test-toolkit"]`,
+  `change_class: package`. Gates were run.
+- **`darkmatter/` `just test`** (library, CLI, DMLS, zed CLI): 12216 passed,
+  10 skipped. **`just lint`:** passed.
+- **`claudine/` `just test`:** 11454 passed (51 slow), 9 skipped.
+  **`just lint`:** passed.
+- **`just check-tier-coverage`** for `claudine` and `darkmatter`: 0 stranded.
+- **Dependents:** `cargo check --workspace` is clean. The Darkmatter changes
+  add APIs and a lookup layer that is empty unless a host installs or enters
+  a set, so the other dependents' behavior is unchanged. Claudine (the
+  dependent that uses the changed read APIs) passed its full suite.
+- **Cross-OS:** `just cross-check dmls --os windows` passed (1382 tests),
+  covering schema-root discovery of function catalogs and their artifacts.
+  The fixtures are byte-compared, and `.gitattributes` (`* text=auto eol=lf`)
+  keeps them LF on Windows.
+- **Targeted runs during the phase** (subagents, scoped):
+  `cargo nextest run -p darkmatter --features effects-instrumentation --test l1 -E 'test(/host_functions|function_binding_registry|flow_sensitive_narrowing|file_predicates|design_time_call_check|type_scope_ownership_guard/)'`
+  (229 passed); the lib unit filter `functions::|call_binding|catalog::|scope::|host::|absence`
+  (368 + 17 passed); DMLS `expression_call_diagnostics|host|type_scope_ownership_guard|call_check`
+  (38 passed); Claudine lib `looping|loop_config|bindings|rename|binding_checks|removed|shape|target_identity`
+  (411 passed) and `preflight|looping|prepare|lifecycle::bindings|prewarm`
+  (699 passed); Claudine CLI `compose_removed_grammar|loop_gate_ambient|sequence_errors_cli|…`
+  (93 passed). No failures in the full runs; nothing was recorded as
+  load-sensitive.
+
+## Phase 6
+
+Phase 6 delivers the shared diagnostics model (spec §6; criteria 19–22, 36):
+one library-owned record for every call finding, category 3 warnings at
+composition (body, frontmatter, conditions, and lifecycle stacks), the
+type-based absence rule that replaces the function-name list, and privacy.
+
+### What changed
+
+- **Shared record** (`darkmatter/lib/src/markdown/compose/expression/diagnostics.rs`,
+  new): `INCOMPATIBLE_CALL_CODE` and `UNCERTAIN_CALL_CODE` moved here from
+  DMLS unchanged; `Severity` (`error`/`warning`/`info`); `call_severity`, the
+  one category→severity ladder (moved from `dmls/.../call_check.rs::severity`);
+  `ExpressionDiagnostic` (code, severity, message, span relative to the
+  analyzed expression, expected/actual type) from `CallCheck::diagnostics(strict)`,
+  `IncompleteHostCall::diagnostic()`, and `expression_call_diagnostics`; the
+  located `Diagnostic` / `DiagnosticSource` (file, one-based line, one-based
+  character column), already in the report shape spec §8 fixes and
+  `Serialize`; `one_based_position`.
+- **Composition** (`call_precheck.rs`): the precheck records every finding
+  `CallCheck::diagnostics(false)` shows (category 3, always-false) plus
+  incomplete host calls, and turns each into a `ComposeWarning` whose new
+  `diagnostic` field (boxed, P6-D8) is the record located at the authored argument
+  (frontmatter through `FrontmatterExpressionLocation::project`, body through
+  `BodyOrigin`, conditions by their text after the directive). The old
+  always-false-only path is gone; the always-false origin was the `{{`, not
+  the expression, and now is the argument (`expression_start`).
+  `MarkdownError::call_diagnostic()` gives a rejection's record (first
+  category 5 finding) located in its anchored `{{ … }}` or condition.
+- **Condition rejections now carry file lines.** The precheck's
+  `condition_rejection` used the body-only context and a body-relative
+  line (`doc.md` line 2 for a block on file line 7, in the rendered excerpt
+  too). It now uses `full_source_context_for_errors()` and
+  `frontmatter_line_count() + line`. Runtime condition evaluation errors are
+  unchanged (outside this phase's surface).
+- **Lifecycle surfaces** (`lifecycle/validate.rs`): `reject_incompatible_calls`
+  gained `authored: Option<&str>` (the loaded text) and returns
+  `Ok(Vec<ComposeWarning>)`, the surfaces' located warnings;
+  `LifecycleSurfaceCalls` gained `text` (the scalar the spans index). `md
+  compose` threads them through both paths (plain and `lifecycle::run`,
+  `LifecycleCompose.call_warnings`) ahead of composition's warnings; Claudine's
+  `prepare.rs` passes `source.original_text` and puts them first in
+  `PreparedComposition.warnings` (both preparation paths).
+  `Markdown::loaded_text()` is new.
+- **DMLS** (`diagnostics/call_check.rs`): now an adapter. `CallDiagnostic` is
+  the library's `ExpressionDiagnostic`; `lsp_diagnostic` maps severity and
+  puts `{expected_type, actual_type}` in the LSP `data`. `codes.rs` reads both
+  call codes from the library.
+- **Absence by type** (`absence.rs`, `call_binding/registration.rs`):
+  `AbsenceScope::call_argument(function, index, count)` asks
+  `FunctionRegistration::handles_absence_at(index, count)`; the
+  `ABSENCE_PREDICATES` group and `functions::is_absence_predicate` are
+  removed. The evaluator computes it per argument and only when observing.
+- **Docs**: `docs/inline/call-check.md` (category 3 warns at composition,
+  "One diagnostic, everywhere" table, lifecycle leg), `docs/inline/interpolation.md`
+  (the type rule with its three limits), `docs/topics/schemas/parsing/grammar.md`,
+  `dmls/docs/diagnostics.md` (`data` fields, the absence rule).
+
+### Design Decisions
+
+- **P6-D1. A `| null` parameter handles absence only if the function's
+  result does not declare `null`.**
+  - *Decision:* `handles_absence_at` requires, in every overload taking that
+    many arguments, an explicit `null` in the parameter **and** a return type
+    without an explicit `null`.
+  - *Alternatives:* the bare spec rule (any `| null` parameter); change
+    `trim`/`lower`'s signatures to non-null.
+  - *Why:* criterion 21 requires `is_empty(trim(x))` to keep warning for `x`,
+    but `trim` declares `text: string | null`, so the bare rule would silence
+    it (and `lower(x)`). A function that returns `null` for `null` passes the
+    absence on to its caller rather than handling it; this is the reading
+    that meets every literal criterion. Changing signatures would make
+    `trim(null)` a binding error.
+  - *Downsides:* a host function `f(x: string | null): string | null` does
+    not suppress; documented in `interpolation.md`.
+- **P6-D2. `is_number(x)` is silent, as its signature dictates.**
+  - *Decision:* the plan lists `is_number(x)` among the calls that warn, but
+    the catalog declares `is_number(x: unknown | null): boolean`, and the
+    spec says `is_number(x)` warns "unless its signature declares `| null`".
+    It does, so it is silent. The plain-`unknown` row is covered by a
+    test-registered `unknown_arg(v: unknown)`.
+  - *Alternatives:* change `is_number` to `unknown` (then `is_number(null)`
+    would not bind; a breaking runtime change).
+  - *Why:* the spec's own conditional; criterion 36 needs only "a plain
+    `unknown` parameter", which no built-in has.
+  - *Downsides:* none beyond the plan text.
+- **P6-D3. The rule applies uniformly, including `&&`/`||` in the condition
+  grammar.** `and`/`or` declare `unknown | null` operands and return
+  `boolean`, so `x && x.name` and a frontmatter `known || fm_rhs` (condition
+  grammar) no longer warn for the direct operand. The interpolation
+  grammar's `known || rhs_var` is a fallback that may return `null`, so it
+  still warns. The spec says the rule is "broader than absence predicates by
+  design"; three existing tests' rows were updated (`unknown_identifier_warning`,
+  DMLS `expression_scopes`, `lsp_session` operand doc), keeping their
+  branch-fact intent by moving the covered read inside `lower(…)`.
+  - *Downsides:* a misspelled `&&` operand is no longer flagged, exactly as a
+    misspelled ternary condition already was not.
+- **P6-D4. The located record is computed where the position is known, not
+  stored in `CallCheck`.** Warnings are located by the precheck/lifecycle
+  walk; a rejection is located by `MarkdownError::call_diagnostic()` from the
+  error's existing anchor (`SourceRef::OnDiskSpan`, or the condition's line).
+  A construct whose authored bytes differ from its expression (an escape
+  inside the `{{ … }}`) is located at the construct's start.
+  - *Alternatives:* a position field on `CallCheck`; a new error variant.
+  - *Why:* the anchors already exist and are authored-frame; no analysis type
+    gains surface state.
+  - *Downsides:* an unanchored rejection (no on-disk source) has
+    `source: None`.
+- **P6-D5. The shared message is the finding's message; the warning row
+  keeps a location prefix.** `Diagnostic.message` equals DMLS's message
+  (for a literal call it is the finding message, not the binder's error,
+  which the rendered rejection still shows). `ComposeWarning.message` is
+  `` `fn(…)` at file:line: <finding text> `` for the terminal.
+- **P6-D6. `Diagnostic.source.file` is the document path as its source
+  names it** (`ComposeSource::File`, `SourceContext::display`), the Phase 1
+  ruling's "path as given". Columns are one-based characters; DMLS's
+  position encoding is the adapter's concern (the parity tests use ASCII).
+- **P6-D8. `ComposeWarning.diagnostic` is `Option<Box<Diagnostic>>`.**
+  - *Decision:* the record is boxed.
+  - *Alternatives:* inline `Option<Diagnostic>`.
+  - *Why:* inline, it made `darkmatter::l1 nested_composition::self_composition_reaches_the_depth_limit`
+    overflow its stack (reproduced alone, not load-related): `ComposeWarning`
+    is held by value in frames that recur once per `as_markdown` nesting
+    level, so its size multiplies by the 16-level depth limit. Boxed, the
+    test passes again. Most warnings carry no record.
+  - *Downsides:* one allocation per call warning; consumers read it with
+    `as_deref()`.
+- **P6-D7. Lifecycle warnings lead the composition's warnings** (their check
+  runs before composition), in `LifecycleSignal::ALL` then authored order.
+
+### Requirement-to-test mapping
+
+| Behavior | Boundary / tier | Test |
+|---|---|---|
+| 19: same category 5 call → identical code, severity, message, line/column, expected/actual from composition and DMLS (body and frontmatter) | real LSP session + in-process compose of the same file, L1 | `dmls::l1 expression_call_diagnostics::shared_fields::a_rejected_call_reports_the_editor_fields` |
+| 19: category 3 warnings identical in composition and DMLS | same | `::shared_fields::a_category_3_warning_reports_the_editor_fields` |
+| 19: rejection record located on body, frontmatter, `::block when`, escaped scalars (outside/inside the construct) | `compose_with`, temp dir, L1 | `darkmatter::l1 shared_diagnostics::a_rejected_call_yields_its_located_diagnostic_on_every_surface` |
+| 20 (severity): category 3 composes with located warnings (frontmatter, body) | `compose_with`, L1 | `shared_diagnostics::a_category_3_call_composes_with_a_located_warning` |
+| 20: `md compose` exits 0 with one stderr warning per category 3 argument, body and lifecycle `when`, with file:line; category 5 fails with empty stdout | spawned `md`, `CliProcessFixture`, L1 | `darkmatter-cli::l1 compose_call_warnings::*` |
+| lifecycle surface warning located inside the event scalar | library API, L1 | `shared_diagnostics::a_lifecycle_surface_reports_the_same_located_warning` |
+| Claudine receives the located lifecycle warning | Claudine lib unit | `composition::lifecycle::tests::call_check::a_category_3_lifecycle_call_returns_its_located_warning` |
+| transcluded child warning located in the child | `compose_with`, L1 | `shared_diagnostics::a_transcluded_child_warning_is_located_in_the_child` |
+| 21: `is_null`/`is_empty`/`file_exists`/alias silent; `is_empty(trim(x))`, `lower(x)`, bare read warn (composition) | `compose_with`, L1 | `darkmatter::l1 unknown_identifier_warning::a_parameter_declaring_null_handles_a_direct_missing_argument` |
+| 21/36: `min(x, 5)` not suppressed; its binding error stays visible; arity error case | `compose_with` + static reads, L1 | `unknown_identifier_warning::a_non_null_parameter_handles_nothing_and_its_binding_error_stays_visible` |
+| 36: explicit null / plain `unknown` / optional non-null / mixed overloads / all-null overloads, static and runtime | test-registered functions, L1 | `unknown_identifier_warning::only_an_explicit_null_in_every_overload_handles_a_missing_argument` |
+| 36: host function with `unknown \| null` suppresses; `project_label(name: string)` does not | installed test host, L1 | `darkmatter::l1 host_functions::a_host_parameter_declaring_null_handles_a_missing_argument` |
+| 21: DMLS agrees | real LSP session, L1 | `dmls::l1 expression_scopes::undeclared_property_findings_follow_the_parameter_types` |
+| 21: `AbsenceScope` has no function-name list | source guard, L1 | `unknown_identifier_warning::absence_handling_names_no_function` |
+| absence rule unit rows | lib unit | `absence::tests::only_arguments_bound_to_a_parameter_declaring_null_are_handled`, `::static_reads_apply_the_suppression_rules_to_every_branch` |
+| 22: no frontmatter, env, or file-content value in any record; no handler entered (dead-branch call included); no network attempt | `compose_with` + test hook counters + effects counter, L1 | `shared_diagnostics::diagnostics_hold_no_evaluated_value_and_run_nothing` |
+| severity ladder, one-based positions | lib unit | `expression::diagnostics::tests::*` |
+
+Criterion 22's report leg and criterion 19's `report-json` leg are Phase 8's;
+the `Diagnostic` record already serializes in the report's field names.
+Criterion 20's `--deny all` leg is Phase 7's.
+
+The Input Robustness Matrix does not apply: no file-format reader changed.
+
+### Gates
+
+- **Scope calculator:** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["claudine", "darkmatter", "darkmatter-cli", "dmls", "test-toolkit"]`,
+  `change_class: package` (the tree still holds Phase 5's uncommitted work
+  too). Gates were run.
+- **`darkmatter/` `just test`** (library, CLI, DMLS, zed CLI): 12231 passed,
+  10 skipped. The first run stopped on
+  `nested_composition::self_composition_reaches_the_depth_limit` (stack
+  overflow, reproduced alone); fixed by P6-D8, then the full rerun passed.
+  **`just lint`:** passed.
+- **`claudine/` `just test`:** 11455 passed (33 slow), 9 skipped.
+  **`just lint`:** passed.
+- **`just check-tier-coverage`** for `claudine` and `darkmatter`: 0 stranded.
+- **Dependents:** `cargo check --workspace` is clean. Only `darkmatter-cli`
+  and Claudine call `reject_incompatible_calls` or read compose warnings'
+  call diagnostics; both suites passed in full. No other package reads
+  `ComposeWarning` or the absence advisory.
+- **Cross-OS:** not run. The change adds no path, process, or OS-specific
+  code; positions count `\n` (a CRLF line ends in `\r`, which does not move a
+  column), and fixtures are written by the tests with LF.
+- **Targeted runs during the phase:** darkmatter `absence|undeclared|warn|identifier|missing`
+  (lib + L1), `shared_diagnostics`, `compose_call_precheck|file_predicates|design_time_call_check|host_functions|flow_sensitive`;
+  DMLS `shared_fields|undeclared|expression`; CLI `compose_call_warnings|compose_lifecycle|compose_file_predicates`;
+  Claudine `lifecycle::tests::call_check`. Nothing was load-sensitive.

@@ -144,6 +144,88 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/fixtures/host_functions/project.yaml
+    - darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_5:
+    - darkmatter/docs/topics/host-functions.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_call_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/src/composition/prepare.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Type-aware Evaluation, Narrowing, and Diagnostics Implementation Plan
@@ -620,7 +702,7 @@ task waits for Wave 5.
 
 ### Wave 9 — Registration and the facts artifact
 
-- [ ] **Registration validation**
+- [x] **Registration validation**
   - Registration rejects duplicate canonical names/aliases, built-in
     collisions, a fact referencing a nonexistent parameter, and a narrowing
     fact on a non-boolean function — all before evaluation. Runtime and
@@ -628,14 +710,14 @@ task waits for Wave 5.
     and global catalogs are registered for their roles and never applied as a
     document schema.
   - Tests: criterion 37 (registration half).
-- [ ] **Facts artifact writer (host build)**
+- [x] **Facts artifact writer (host build)**
   - Generate `<catalog stem>.facts.json` beside the host signature catalog
     from Rust registration: canonical name, per-fact parameter position, kind,
     type, plus laziness, conversion recovery, and source-type exclusions; the
     catalog content hash (`biscuit-hash`) and `format_version`. Deterministic
     byte output (sorted keys); the same generator path serves the test-host
     registration so a stale committed artifact is detectable.
-- [ ] **Facts artifact reader (DMLS)**
+- [x] **Facts artifact reader (DMLS)**
   - Discover by naming convention whenever a registered signature catalog is
     loaded; read as inert data; verify hash and version. Missing, unreadable,
     mismatched, malformed, or incomplete artifacts produce an
@@ -645,17 +727,17 @@ task waits for Wave 5.
 
 ### Wave 10 — Claudine
 
-- [ ] **Claudine function registration and artifact**
+- [x] **Claudine function registration and artifact**
   - Register Claudine's host functions through the same Rust API as built-ins
     with `Catalog` declarations in the host catalog file; emit the artifact in
     the Claudine build and keep a freshness check.
-- [ ] **Remove independent scans** — parallelizable with the previous task
+- [x] **Remove independent scans** — parallelizable with the previous task
   (disjoint files; coordinator integrates)
   - Move `claudine/lib/src/composition/looping/config.rs` and
     `composition/lifecycle/validate.rs` onto Darkmatter library APIs or
     remove them; Claudine keeps no definition of variable visibility or types.
     Run Claudine's L1 suite (`just test` in `claudine/`) for regressions.
-- [ ] **Host predicate end-to-end**
+- [x] **Host predicate end-to-end**
   - Test-registered `is_project_file(value: unknown | null): boolean` with a
     true-implies `file` fact: category 1 in `is_project_file(source) &&
     frontmatter(source, 'title')` in composition and DMLS; a counter proves the
@@ -668,7 +750,7 @@ task waits for Wave 5.
 
 ### Wave 11 — Diagnostic model and absence rule
 
-- [ ] **Shared diagnostic record**
+- [x] **Shared diagnostic record**
   - Library owns code, severity, message, authored source range, expected and
     actual type. Composition, CLI, and DMLS adapt, never re-derive. Move
     Phase B's `dm.expression.incompatible_call` and
@@ -680,7 +762,7 @@ task waits for Wave 5.
     outcome, not code or severity.
   - Tests: criterion 19 (same category 5 call from composition and DMLS —
     the `report-json` leg is added in Phase 8).
-- [ ] **CLI severities**
+- [x] **CLI severities**
   - Composing commands report category 5 as errors (rejecting the document)
     and category 3 as warnings; categories 2 and 4 only under DMLS
     `expressions.strict`. Test: criterion 20 (composes with a warning; fails
@@ -692,7 +774,7 @@ task waits for Wave 5.
     body, and `when=` conditions in composition and for every surface in
     DMLS; its lifecycle-action leg in composition rides this channel
     (implementation log P4-D4).
-- [ ] **Type-based absence suppression**
+- [x] **Type-based absence suppression**
   - Replace the catalog-name rule: a direct bare-variable argument to a
     parameter whose declared type explicitly includes `| null` suppresses
     `dm.expression.undeclared_property`. Plain `unknown` does not; optional
@@ -706,7 +788,7 @@ task waits for Wave 5.
   - Tests: criteria 21, 36 (`is_null(x)`, `is_empty(x)`, `file_exists(x)`
     silent; `min(x, 5)`, `is_empty(trim(x))`, `is_number(x)` warn; mixed
     overload; host function with `| null`; `AbsenceScope` has no name list).
-- [ ] **Privacy**
+- [x] **Privacy**
   - Diagnostics gain no evaluated argument values, environment values, or
     file contents; producing one never triggers evaluation or I/O. Instrumented
     test: criterion 22 (report leg added in Phase 8).
