@@ -28,7 +28,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 2
+completed: true
 human_review: false
 pipeline_step: 21
 formerly: 2026-09-16-expression-type-system
@@ -40,6 +41,8 @@ related:
     - 2026-10-27-darkmatter-lifecycle-ownership
     - 2026-10-29-recursive-schema-types
     - 2026-09-15-dasherized-identifiers
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Type-aware Evaluation, Narrowing, and Diagnostics

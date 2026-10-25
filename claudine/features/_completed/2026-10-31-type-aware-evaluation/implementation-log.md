@@ -329,20 +329,6 @@ skills_files_updated_during_phase_7:
     - .claude/skills/darkmatter/frontmatter.md
     - .claude/skills/darkmatter/remote-cache.md
     - .claude/skills/darkmatter/schema.md
-message_to_agent: |-
-    Phase 8 is done; read "## Phase 8" in this log (P8-D1..D11). For Phase 9:
-    the user-facing report doc is darkmatter/docs/cli/report-json.md (new,
-    linked from docs/cli/compose.md and index.md); the codes it lists live in
-    darkmatter::markdown::compose::report_diagnostics and schemas/mod.rs
-    (SCHEMA_*_CODE), and DMLS's codes.rs now reads them from the library, so
-    dmls/docs/diagnostics.md may want a line saying the schema/YAML codes are
-    shared. New public API to document: Markdown::compose_with_warnings ->
-    Result<_, Box<ComposeFailure>>. The pipeline node frame is still at the
-    2 MiB test-stack edge (P8-D11 fixed it with out-of-line helpers); rerun
-    nested_composition::self_composition_reaches_the_depth_limit after any
-    pipeline edit. Traceability rows 19, 22, 28, 29, 30, 39 are filled; rows
-    20, 21, 23-27, 36-38 still show "—" in the Phase 1 table although their
-    tests are in the Phase 6/7 mapping tables: Wave 17 should fill them in.
 source_files_during_phase_8:
     - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
     - darkmatter/lib/src/markdown/compose/mod.rs
@@ -372,6 +358,253 @@ docs_created_during_phase_8:
     - darkmatter/docs/cli/report-json.md
 skills_files_updated_during_phase_8:
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_9:
+    - claudine/docs/research/agent-cli/_research.md
+    - claudine/docs/research/non-interactive-sessions/_research.md
+    - claudine/docs/research/reasoning-level/_research.md
+    - claudine/docs/research/steering/_research.md
+docs_updated_during_phase_9:
+    - darkmatter/README.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/compose-requests.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - claudine/docs/topics/schemas.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/structural_validation.rs
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - claudine/docs/research/agent-cli/_research.md
+    - claudine/docs/research/non-interactive-sessions/_research.md
+    - claudine/docs/research/reasoning-level/_research.md
+    - claudine/docs/research/steering/_research.md
+    - claudine/lib/src/composition/error/lifecycle_authoring.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/enums.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/policy.rs
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/artifact.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/compose/report.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_call_warnings.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_file_predicates.rs
+    - darkmatter/cli/tests/l1/compose_icmp.rs
+    - darkmatter/cli/tests/l1/compose_lifecycle.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_report_json.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_shell_template.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/literal_glob_hint.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/policy_verbs.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/cli/tests/l1/standalone_baseline.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/effects/verbs.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/error.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/markdown/block/hr_parser.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/test_hooks.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/raw.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/suffix.rs
+    - darkmatter/lib/src/markdown/compose/icmp.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/remote.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/schemas/advisory.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+    - darkmatter/lib/tests/fixtures/host_functions/project.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.digest
+    - darkmatter/lib/tests/l1/blocking_policy.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/file_predicates.rs
+    - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+documentation:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/remote-cache.md
+    - .claude/skills/darkmatter/schema.md
+    - biscuit-file/docs/topics/file-references.md
+    - claudine/docs/topics/schemas.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/fm-shell-expansion.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/rendering/disclosure.md
+    - darkmatter/docs/rendering/hr.md
+    - darkmatter/docs/rendering/style.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/topics/compose-requests.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/docs/topics/layouts-and-style.md
+    - darkmatter/docs/topics/markdown-formatting.md
+    - darkmatter/docs/topics/remote-url-references.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/topics/transclusion.md
+    - darkmatter/docs/transclusion/block-transclusion.md
+    - prompts/_add/add-expressions.md
+    - renderable/README.md
+    - renderable/docs/layout-and-style.md
+completed_phase: 9
+implemented: true
+pipeline_refreshed:
+    - 2026-11-01-map-and-filter
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-31-type-aware-evaluation (9 phases)
@@ -554,17 +787,17 @@ Later phases add the new test names to the last column.
 | 14 | `LT/path_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it`; `LT/context_function_contracts.rs::file_exists_inspects_its_argument_without_converting_it` | `""`/`https://` false without I/O; `file://` corpus (P4) | `LT/file_predicates.rs::file_exists::malformed_text_is_false_and_well_formed_references_keep_their_outcomes`, `::file_exists::a_valid_remote_reference_without_a_runtime_is_still_an_error`; darkmatter unit `fs_tests::malformed_references_are_false_before_any_access` |
 | 15 | `DT/expression_call_diagnostics.rs::file_exists_takes_a_number_silently` (adjacent) | always-false literal warning (P4) | `DT/expression_call_diagnostics.rs::file_predicates::a_malformed_literal_reference_warns_and_a_string_variable_does_not`; `LT/file_predicates.rs::always_false::only_a_malformed_literal_reference_is_always_false` |
 | 16 | `LT/design_time_call_check.rs::the_worked_example_rows` (category 4 machinery) | guarded `frontmatter` category 1 (P4) | `LT/file_predicates.rs::guarded_file_arguments::an_is_file_type_guard_makes_the_file_argument_category_1`; `DT/expression_call_diagnostics.rs::file_predicates::under_strict_only_the_unguarded_file_argument_warns` |
-| 17 | `LT/function_binding_registry.rs::every_registered_function_has_a_row` (built-ins) | host predicate, catalog, never-invoked counter (P5) | — |
+| 17 | `LT/function_binding_registry.rs::every_registered_function_has_a_row` (built-ins) | host predicate, catalog, never-invoked counter (P5) | `LT/host_functions.rs::installed_host_functions_get_the_built_in_checks_and_run_only_when_evaluated`, `::registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluation`; `DT/host_function_diagnostics.rs::the_host_catalog_and_its_artifact_check_host_calls_like_built_ins` (P5) |
 | 18 | DMLS `config/mod.rs` unit tests (strict only) | assert no `file_exists` setting (P4) | `DT/expression_call_diagnostics.rs::file_predicates::the_configuration_has_no_file_exists_setting` |
 | 19 | `DT/call_check_agreement.rs::composition_and_the_editor_reject_the_same_documents`; `DT/recursive_call_check.rs::the_editor_reports_exactly_the_recursive_call_composition_rejects` | identical fields across composition, report-json, DMLS (P6, P8) | `CT/compose_report_json.rs::a_rejected_call_reports_the_shared_record` (report == library `error_diagnostics`); `DT/expression_call_diagnostics.rs::shared_fields::a_rejected_call_reports_the_editor_fields`, `::a_category_3_warning_reports_the_editor_fields` (report records == editor, P8 leg) |
-| 20 | none | category 3 warning; `--deny all` fails (P6, P7) | — |
-| 21 | `LT/unknown_identifier_warning.rs::every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root`, `::a_handled_absence_is_silent_and_renders_the_fallback`; `DT/expression_scopes.rs::undeclared_property_findings_match_the_library_branch_facts`; `absence.rs` unit tests | `\| null` type rule; no name list (P6) | — |
+| 20 | none | category 3 warning; `--deny all` fails (P6, P7) | `LT/shared_diagnostics.rs::a_category_3_call_composes_with_a_located_warning`, `::a_lifecycle_surface_reports_the_same_located_warning`; `CT/compose_call_warnings.rs::*`, `::deny_all_fails_the_category_3_document` (P6, P7) |
+| 21 | `LT/unknown_identifier_warning.rs::every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root`, `::a_handled_absence_is_silent_and_renders_the_fallback`; `DT/expression_scopes.rs::undeclared_property_findings_match_the_library_branch_facts`; `absence.rs` unit tests | `\| null` type rule; no name list (P6) | `LT/unknown_identifier_warning.rs::a_parameter_declaring_null_handles_a_direct_missing_argument`, `::a_non_null_parameter_handles_nothing_and_its_binding_error_stays_visible`, `::absence_handling_names_no_function`; `DT/expression_scopes.rs::undeclared_property_findings_follow_the_parameter_types` (P6) |
 | 22 | `DT/no_side_effects.rs::expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers` | instrumented report privacy/passivity (P6, P8) | `LT/report_diagnostics.rs::report_diagnostics_hold_no_value_and_read_nothing`; `CT/compose_report_json.rs::the_report_holds_no_value_or_file_content` |
-| 23 | none | precedence and conflict usage errors (P7) | — |
-| 24 | `CT/compose_shell.rs::test_compose_allow_shell_timeout_emits_warning`; `CT/compose_refs_and_missing.rs::test_compose_scalar_ctx_with_allow_override_succeeds`; `CT/compose_state_set.rs::test_set_overlay_permissive_reassigned_warns_and_rightmost_wins`, `::test_set_overlay_permissive_invalid_warns`; `CT/compose_remote_caching.rs::test_compose_remote_allowed_host_fetches_url` (no missing-reference allow tests exist) | port each to `--allow <id>`; `--allow all` grants no host/shell (P7) | — |
-| 25 | `CT/schema_trigger_rename.rs::the_old_flag_is_a_usage_error_naming_the_new_one`, `::completions_offer_only_the_new_flag`; `LT/trigger_spelling_guard.rs::no_active_file_spells_a_renamed_trigger_form` | every removed flag on every command; spelling guard (P7) | — |
-| 26 | `CT/layout_style_frontmatter.rs::style_strict_style_fails_on_unknown_key`, `::style_strict_style_fails_on_deprecated_key`, `::style_strict_style_accepts_markdown_cleanup_rules` | `--deny style`; info never blocks (P7) | — |
-| 27 | `LT/compose_call_precheck.rs::a_proven_bad_call_rejects_before_any_expression_runs`, `::a_bad_body_call_rejects_before_frontmatter_runs` | stop-before-effect / no rollback under `--deny` (P7) | — |
+| 23 | none | precedence and conflict usage errors (P7) | `CT/policy_verbs.rs::a_specific_denial_beats_allow_all_in_either_order`, `::a_specific_recovery_beats_deny_all_in_either_order`, `::opposite_selections_are_usage_errors_in_either_order_before_any_effect`, `::a_recovery_denied_by_its_code_conflicts_with_its_allowance` (P7) |
+| 24 | `CT/compose_shell.rs::test_compose_allow_shell_timeout_emits_warning`; `CT/compose_refs_and_missing.rs::test_compose_scalar_ctx_with_allow_override_succeeds`; `CT/compose_state_set.rs::test_set_overlay_permissive_reassigned_warns_and_rightmost_wins`, `::test_set_overlay_permissive_invalid_warns`; `CT/compose_remote_caching.rs::test_compose_remote_allowed_host_fetches_url` (no missing-reference allow tests exist) | port each to `--allow <id>`; `--allow all` grants no host/shell (P7) | `CT/policy_verbs.rs::each_missing_reference_allowance_recovers_its_own_kind_only`, `::allow_all_recovers_a_shell_timeout_as_an_empty_string`, `::allow_all_grants_no_unnamed_host`, `::allow_all_authorizes_no_shell_command`; ported legacy tests (P7 mapping); `LT/blocking_policy.rs::each_recovery_reports_under_its_registered_code` (P7) |
+| 25 | `CT/schema_trigger_rename.rs::the_old_flag_is_a_usage_error_naming_the_new_one`, `::completions_offer_only_the_new_flag`; `LT/trigger_spelling_guard.rs::no_active_file_spells_a_renamed_trigger_form` | every removed flag on every command; spelling guard (P7) | `CT/policy_verbs.rs::every_removed_flag_is_a_usage_error_naming_its_replacement`, `::completions_offer_the_registry_identifiers_per_command`; `CT/schema_trigger_rename.rs::the_old_flag_is_a_usage_error_naming_the_new_one`, `::completions_offer_only_the_new_flag`; legacy-spelling grep re-run in `## Phase 9` (P7, P9) |
+| 26 | `CT/layout_style_frontmatter.rs::style_strict_style_fails_on_unknown_key`, `::style_strict_style_fails_on_deprecated_key`, `::style_strict_style_accepts_markdown_cleanup_rules` | `--deny style`; info never blocks (P7) | `CT/policy_verbs.rs::deny_style_and_deny_all_block_a_style_issue_on_every_render_path`; `CT/layout_style_frontmatter.rs::deny_style_fails_on_unknown_key`, `::deny_style_fails_on_deprecated_key`, `::deny_style_accepts_markdown_cleanup_rules`; darkmatter-cli unit `render::tests::a_denied_style_blocks_schema_issues_and_inline_rules_but_never_a_notice` (P7) |
+| 27 | `LT/compose_call_precheck.rs::a_proven_bad_call_rejects_before_any_expression_runs`, `::a_bad_body_call_rejects_before_frontmatter_runs` | stop-before-effect / no rollback under `--deny` (P7) | `CT/policy_verbs.rs::a_passive_blocking_diagnostic_stops_before_initialize`, `::a_blocking_diagnostic_found_after_an_effect_stops_later_work_without_rollback`; `LT/blocking_policy.rs::a_blocking_call_warning_stops_the_document_before_any_expression_runs`, `::a_transcluded_child_blocks_before_its_own_expressions_run` (P7) |
 | 28 | `CT/schema_trigger_rename.rs::compose_reports_an_invalid_trigger_field_by_location_and_composes_nothing` (partial) | no stdout document in all modes; no viewer/file publish (P7, P8) | `CT/compose_report_json.rs::deny_all_reports_the_blocking_warning_once_and_no_document` (report leg; human/json legs P7) |
 | 29 | none | report-json success/failure schema (P8) | `CT/compose_report_json.rs::success_reports_the_document_and_leaves_other_outputs_unchanged`, `::a_category_3_warning_is_reported_once_with_every_field`, `::a_rejected_call_reports_the_shared_record`, `::an_unreadable_input_is_one_failure_with_null_fields` |
 | 30 | this log (baseline below) | "after" sample + explanation (P8) | this log (`## Phase 8` → Performance "after"); `LT/variable_type_projection.rs::bounds::a_path_past_the_projection_depth_bound_stays_unknown` |
@@ -573,9 +806,9 @@ Later phases add the new test names to the last column.
 | 33 | `LT/expression_type_scope.rs::a_disjunction_proves_what_both_routes_prove`, `::negation_swaps_sides_and_parentheses_keep_facts`; `LT/compose_call_precheck.rs::a_dead_ternary_branch_is_checked` | re-assert on extended scope (P3) | `LT/flow_sensitive_narrowing.rs::compound_guards::short_circuit_operands_and_ternaries_see_only_justified_facts`, `::compound_guards::an_impossible_branch_is_checked_with_the_incoming_type`, `::body_guards::composition_reads_the_same_narrowing` |
 | 34 | `LT/expression_type_scope.rs::a_write_invalidates_its_aliases_ancestors_and_descendants_only`, `::a_join_restores_only_incoming_facts_no_branch_could_have_written`; `CL/lifecycle/executor/tests/guarded_shell_sites.rs::a_set_before_the_shell_ends_the_guard_proof`; `CL/lifecycle/executor/tests/scope_site_conformance.rs::lifecycle_set_shell_negated_guard` | lifecycle guard → `set` → later call, runtime and DMLS (P3) | `LT/flow_sensitive_narrowing.rs::lifecycle_fact_lifetime::a_set_ends_the_guard_and_events_never_share_facts`, `::lifecycle_fact_lifetime::overlapping_writes_end_facts_and_siblings_do_not`, `::lifecycle_fact_lifetime::the_lifecycle_rejection_reads_each_site`; `DT/expression_call_diagnostics.rs::narrowing::a_lifecycle_guard_ends_at_a_write_and_its_event`; `CL/lifecycle/tests/call_check.rs::a_guard_narrows_until_a_write_and_never_reaches_a_shadowing_host_global` |
 | 35 | `CL/lifecycle/executor/tests/scope_site_conformance.rs::file_exists_alias`; `LT/scope_site_conformance.rs::file_exists_guards_are_analyzed_without_running_a_handler` | context-free `is_file_type`; passive validator; `fileexists` parity (P4) | `LT/file_predicates.rs::is_file_type::*`, `::file_exists::*`, `::always_false::*`, `::composition::composition_warns_for_each_always_false_call_and_composes_the_guarded_read`; `CT/compose_file_predicates.rs::compose_answers_file_predicates_and_warns_for_an_always_false_call`; `biscuit-file/lib/tests/l1/structural_validation.rs::*` |
-| 36 | `LT/design_time_call_check.rs::criterion_36_pairs`, `::null_is_accepted_only_by_an_explicit_null_arm` | `\| null` suppression incl. host and overloads (P6) | — |
-| 37 | `LT/function_binding_registry.rs::*`; `LT/function_catalog_parity.rs` | registration errors; `.facts.json` matrix (P5) | — |
-| 38 | `CT/clean_schema.rs::test_baseline_schema_flags_conflict`; `CT/schema_validate_baseline_selection.rs::no_baseline_schema_conflicts_with_schema_flag`; `CT/schema_trigger_rename.rs::the_new_flag_disables_triggers_on_compose_validate_and_clean` | registry mappings, unknown/repeated ids, host denial, precedence (P7) | — |
+| 36 | `LT/design_time_call_check.rs::criterion_36_pairs`, `::null_is_accepted_only_by_an_explicit_null_arm` | `\| null` suppression incl. host and overloads (P6) | `LT/unknown_identifier_warning.rs::only_an_explicit_null_in_every_overload_handles_a_missing_argument`, `::a_non_null_parameter_handles_nothing_and_its_binding_error_stays_visible`; `LT/host_functions.rs::a_host_parameter_declaring_null_handles_a_missing_argument` (P6) |
+| 37 | `LT/function_binding_registry.rs::*`; `LT/function_catalog_parity.rs` | registration errors; `.facts.json` matrix (P5) | `LT/host_functions.rs::registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluation`, `::the_committed_facts_artifact_is_fresh_and_deterministic`, `::the_facts_artifact_reader_walks_the_input_robustness_matrix`; `DT/host_function_diagnostics.rs::a_missing_host_facts_artifact_reports_incomplete_analysis`, `::a_host_facts_artifact_for_another_catalog_version_reports_incomplete_analysis`, `::a_host_facts_artifact_lacking_a_function_reports_it_incomplete` (P5) |
+| 38 | `CT/clean_schema.rs::test_baseline_schema_flags_conflict`; `CT/schema_validate_baseline_selection.rs::no_baseline_schema_conflicts_with_schema_flag`; `CT/schema_trigger_rename.rs::the_new_flag_disables_triggers_on_compose_validate_and_clean` | registry mappings, unknown/repeated ids, host denial, precedence (P7) | `CT/policy_verbs.rs::unknown_and_empty_identifiers_are_usage_errors`, `::identifiers_a_verb_or_command_does_not_take_are_usage_errors`, `::verbs_a_command_does_not_declare_are_usage_errors`, `::repeated_identical_selections_are_harmless`, `::disabling_the_baseline_conflicts_with_an_explicit_baseline`, `::a_host_is_an_allowance_only`, `::a_disabled_baseline_stays_disabled_under_deny_all`, `::an_independently_denied_diagnostic_still_blocks_a_recovered_command`; `CT/clean_schema.rs::test_baseline_schema_flags_conflict`; `CT/schema_validate_baseline_selection.rs::disable_baseline_schema_conflicts_with_schema_flag` (P7) |
 | 39 | none | report-json failure kinds, transcluded positions, non-compose rejection (P8) | `CT/compose_report_json.rs::*` (input-read, schema, YAML parse, runtime, transcluded, lifecycle, reference, non-compose rejection); `LT/report_diagnostics.rs::*` |
 
 ### Spike S1: biscuit-file structural-validation gap
@@ -2266,3 +2499,227 @@ configuration loader changed (the report is a writer).
   wrote (root) or `canonicalize_simplified` (children), never raw
   `canonicalize`.
 
+
+## Phase 9
+
+Documentation, skills, final traceability, and gates. No Rust source changed.
+
+### What changed
+
+- **Traceability.** Rows 17, 20, 21, 23–27, 36–38 of the Phase 1 table now
+  name their tests (copied from the Phase 5, 6, and 7 mapping tables). Every
+  criterion 1–39 maps to at least one test; criterion 30 also maps to this
+  log's Phase 8 "after" sample.
+- **Darkmatter docs.**
+  - `docs/topics/darkmatter-expressions.md`: a Mermaid diagram of how a
+    site's type scope is built (declarations → enclosing guards → writes →
+    the consumers that read it).
+  - `docs/cli/policy.md`: a Mermaid diagram of the precedence rules (the
+    conflict check first, then specific beats `all`).
+  - `docs/topics/compose-requests.md`: "Keeping the warnings of a failed
+    composition", documenting `Markdown::compose_with_warnings` and
+    `ComposeFailure` with an example.
+  - `docs/lsp/configuration.md` (`[expressions]`): the two call warnings that
+    ignore `strict` (`always_false_call`, `incomplete_analysis`) and that no
+    `file_exists` setting exists.
+  - `dmls/docs/diagnostics.md`: drift fixed. It said "there is no shared
+    cross-crate constant module", but `codes.rs` reads the YAML parse,
+    `dm.schema.*`, and expression call codes from the library (Phase 8). It
+    now says shared codes come from the library and how to add one.
+  - `README.md`: guards and host functions, the policy verbs, and
+    `report-json`, each linking its topic page.
+- **Claudine docs.** `docs/topics/schemas.md` gains "What Claudine adds to
+  expression checking": the `globals.yaml` host catalog types `seq`/`loop`/
+  `group` for the call check, Claudine registers no expression function (and
+  the three pieces adding one requires, with the guard that enforces it), and
+  Claudine's read inventory now comes from Darkmatter's
+  `static_access_reads`/`static_variable_reads` instead of hand walks.
+- **Live research contracts fixed.** Four Claudine research fleet documents
+  (`claudine/docs/research/{agent-cli,non-interactive-sessions,reasoning-level,steering}/_research.md`)
+  still ran `md schema validate '{{file}}' --no-trigger-schemas`, which is a
+  usage error, so those contracts' shape checks could never pass. They now
+  use `--disable schema-triggers`. See P9-D1.
+- **biscuit-file.** The public passive validation API did not change in this
+  phase; Phase 4 documented it in `docs/topics/file-references.md`. The
+  skill gains a line naming `FileReference::new(s).is_ok()` as the passive
+  structural validator and Darkmatter's one entry point to it
+  (`resolve_ctx::is_well_formed_reference`).
+- **Skills.** `.claude/skills/claudine/SKILL.md` links the new Claudine docs
+  section; `.claude/skills/biscuit-file/SKILL.md` as above. The darkmatter
+  skill was already current (Phases 2–8 kept it so); `rust-testing` needs no
+  change (no new test pattern); no repo-wide convention changed, so
+  `CLAUDE.md` is untouched.
+- **Dependencies.** No `Cargo.toml` or `Cargo.lock` changed during this
+  feature (`git log 6c1322cde~1..HEAD -- '*Cargo.toml' Cargo.lock` is
+  empty), so `docs/dependencies.md` needs no change.
+
+### Checks run for Wave 17
+
+- **Legacy spellings.** `git grep` for every removed flag outside
+  `features/`, `fixes/`, `reviews/`, root `docs/research/`, and the frozen
+  `recursive_schema_frozen` fixtures finds only `darkmatter/cli/src/main.rs`
+  (`REMOVED_FLAGS`), the tests that assert rejection (`policy_verbs.rs`,
+  `schema_trigger_rename.rs`, `trigger_spelling_guard.rs`), and `policy.md`'s
+  removed-flag table, after the four research contracts above were fixed.
+- **Facts artifacts.** The only committed `.facts.json` is
+  `darkmatter/lib/tests/fixtures/host_functions/project.facts.json`; its
+  freshness test (`host_functions::the_committed_facts_artifact_is_fresh_and_deterministic`)
+  passes in the gate run below. Claudine ships none (P5-D1).
+- **Matrix reader smells.** `host/artifact.rs` and `host/mod.rs` have no
+  `#[serde(default)]`, no conflated `Option` (absent and `null` go through
+  `required`/`nullable`, which differ), no `unwrap_or_default()`, and no
+  `filter_map(.. as_str())`; the one `.ok()` converts an already-validated
+  `u64` to `usize` inside an error-returning `position`.
+- **Docs name no feature or fix.** The pages created by this feature
+  (`policy.md`, `report-json.md`, `host-functions.md`) and this phase's
+  edits name no `{date}-{name}`. Older references in pages that Phase 7
+  touched only for flag spellings (`fm-shell-expansion.md`, `caching.md`,
+  `style.md`, `renderable/docs/layout-and-style.md`) predate this feature and
+  were left alone (Rule 3).
+
+### Design Decisions
+
+- **P9-D1. Fix the live research contracts' flag; do not widen the spelling
+  guard.**
+  - *Decision:* replace `--no-trigger-schemas` with `--disable
+    schema-triggers` in the four Claudine research contracts and leave
+    `trigger_spelling_guard.rs`'s scope unchanged.
+  - *Alternatives:* leave them (historical research); widen the guard to scan
+    `claudine/docs/research/*/_research.md` for every removed flag.
+  - *Why:* these files are not history: they are the executed fleet
+    contracts (`.claude/skills/claudine/research-contracts.md` documents the
+    same command with `--disable schema-triggers`), and the removed flag is a
+    usage error, so their shape gate always failed. The guard deliberately
+    skips every `research/` folder and `_research.md` file because most of
+    that material is historical; widening it would need a per-file
+    live/historical split that belongs to the research workflow, not this
+    feature. A wrong flag in a contract fails loudly the first time the fleet
+    runs.
+  - *Downsides:* nothing stops a removed flag from reappearing in a research
+    contract until a fleet run catches it.
+- **P9-D2. Keep the two "planned" narrowing items.**
+  - *Decision:* `darkmatter-expressions.md`'s "Planned" list (narrowing an
+    object from a guard on one of its members; DMLS narrowing of Claudine
+    lifecycle `then:`/`else:` bodies) stays as written.
+  - *Alternatives:* remove the markers.
+  - *Why:* neither is built (Phase 3 recorded both as outside this spec's
+    criteria), so the docs correctly mark them planned.
+  - *Downsides:* none.
+
+### Requirement-to-test mapping
+
+No behavior changed in this phase, so it adds no test. Wave 17's mapping of
+every criterion 1–39 to its tests is the Phase 1 traceability table, now
+complete. The four research-contract edits change a command string in
+documents that Claudine's research parity tests read; those tests passed in
+the gate run below.
+
+### Gates
+
+- **Scope calculator** (run after every edit, frontmatter included):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["claudine", "claudine-cli", "claudine-gen", "darkmatter", "darkmatter-cli", "dmls"]`,
+  `change_class: package`. Gates were run.
+- **`darkmatter/` `just test`:** 12287 passed (2 slow), 10 skipped.
+  **`just lint`:** passed.
+- **`claudine/` `just test`:** 11455 passed (8 slow), 9 skipped.
+  **`just lint`:** passed. **`just check-tier-coverage claudine`:** 0 stranded.
+- **`biscuit-file/` `just test`:** 1151 passed. **`just lint`:** passed.
+- **`just test-l2`:** not run; no L2 test reads anything this phase changed.
+- **Dependents:** no Rust source changed in this phase; the full suites of
+  every package the calculator scheduled passed above.
+- **Load-sensitive / pre-existing failures:** none.
+- **Cross-OS:** not run. Documentation and four command strings only; no
+  path, process, or `#[cfg]` code. No `#[cfg(windows)]` behavior was added
+  anywhere in this feature without a path-comparison review (the Phase 4
+  structural validator is host-independent by design and its corpus runs on
+  every host).
+
+## Final Summary
+
+**Implementation complete, ready for review.** All nine phases are done and
+every acceptance criterion 1–39 is traceable to passing tests (Phase 1
+table).
+
+- **Departures from the spec**, each recorded where it was made:
+  Claudine ships no host function catalog or facts artifact, because it has
+  no host function; the path is proven by Darkmatter's test host instead
+  (P5-D1). `md compose` has no host-function end-to-end test, because the `md`
+  binary registers none (P5-D7). Narrowing an object from a guard on one of
+  its members, and DMLS narrowing of Claudine lifecycle bodies, remain
+  documented as planned (P3, P9-D2).
+- **Rulings taken:** the design decisions under each phase (P2-D… through
+  P9-D2) settle every ambiguity. None needs the author (`decisions_for_author: []`).
+- **Drift found and resolved in this phase:** `dmls/docs/diagnostics.md`
+  still said no cross-crate code module existed (fixed to match `codes.rs`).
+  Four live Claudine research contracts used a flag that has been a usage
+  error since the trigger rename (fixed; P9-D1). The Phase 1 traceability
+  table had 11 empty rows (filled).
+- **Not done by design:** nothing committed, the feature directory not
+  moved, and `just complete` not run.
+
+## Pipeline Refresh
+
+This spec is step 21, the last step of `claudine/docs/rollout-strategy.md`'s
+pipeline, and no active spec names it in `depends-on`. One active spec names
+it under `related` and builds on what it delivered, so it was checked too:
+
+- `2026-11-01-map-and-filter`: **changed.** Its plan has started (Phase 1
+  done), so only unstarted Phase 2 changed. The spec's Decisions gains a
+  reconciliation entry, and the plan gains a reconciliation section before
+  Wave 3: the callback local must fit the flow-sensitive `TypeScope` (no
+  document fact reaches a same-named local; local facts end with the body);
+  `static_access_reads` (now Claudine's only read inventory) must skip
+  locals as well as `static_variable_reads`; new codes are defined in the
+  library and added to `COMPOSE_DIAGNOSTIC_CODES` so `--deny`, `--help`,
+  `report-json`, and DMLS share them; the type-based absence rule makes
+  `map(missing, …)` silent; callback parameters stay `unknown`. No outcome
+  was dropped or narrowed.
+
+## Review 1
+
+### Design Decisions
+
+- **Decision:** no implementation decision requires human review. Keep the
+  existing empty-catalog and test-host choices: neither Claudine nor `md`
+  registers host expression functions, so their empty artifacts and an
+  impossible shipped-host CLI case add no evidence.
+  - **Alternatives considered:** generate empty catalogs/artifacts; add a
+    production host function solely for a test; ask the author to approve
+    the existing recorded decisions.
+  - **Why:** the public library and separately running editor already prove
+    the promised host registration and artifact delivery. No irreversible
+    contract choice lacks a recommendation.
+  - **Downsides:** there is no built-in application example exercising a
+    nonempty host function registry; the test host remains that example.
+
+- **Decision:** retain the recorded remote `file_exists` behavior, including
+  errors for denied or failed fetches, and leave member-discriminant object
+  refinement outside this feature. Complete Claudine lifecycle narrowing in
+  DMLS within this feature rather than leaving it planned.
+  - **Alternatives considered:** reverse existing remote outcomes; require
+    object-discriminant inference; retain the planned editor limitation.
+  - **Why:** the remote section contradicts its own preserve-existing rule,
+    which the implementation already resolved with evidence. Stable-subject
+    narrowing does not require refining a parent object from a member.
+    Runtime/editor agreement and criterion 34 do require the host lifecycle
+    editor path, so that deferral cannot stand.
+  - **Downsides:** denied remote access still cannot be used as a false
+    existence result. DMLS needs passive host lifecycle information rather
+    than assuming every document uses the Markdown host.
+
+- **Decision:** preserve nullable-parameter suppression for direct arguments
+  regardless of return type, while keeping the required warning for a
+  variable nested inside another call such as `is_empty(trim(x))`. Represent
+  that distinction with call-site nesting context, not return-type exclusion.
+  - **Alternatives considered:** retain the Phase 6 blanket exclusion of
+    nullable-returning functions; suppress every nested null-admitting call;
+    change `trim`/`lower` signatures.
+  - **Why:** the explicit any-function scope and criterion 36 require direct
+    nullable arguments to be handled; criterion 21 separately preserves the
+    nested example. A global return-type restriction narrows the former
+    promise to solve the latter example and is therefore undelivered scope,
+    not a decision requiring author approval.
+  - **Downsides:** absence analysis must retain whether the variable belongs
+    to the expression's direct argument or a nested call. Return nullability
+    alone is no longer a sufficient implementation shortcut.
