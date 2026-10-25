@@ -635,9 +635,8 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 }
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
-/// literal (`|`) or folded (`>`) block scalar, a multi-line quoted scalar, a
-/// tag, and an empty value instead of giving up, and does not require every
-/// line to belong to the value.
+/// multi-line quoted scalar, a tag, and an empty value instead of giving up,
+/// and does not require every line to belong to the value.
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.

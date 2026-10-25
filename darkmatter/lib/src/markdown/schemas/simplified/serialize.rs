@@ -262,8 +262,9 @@ fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_a
 }
 
 /// Renders a constraint list without its parentheses. `ty` is the target
-/// type, `None` for a reference or inline object. `alphanumeric` options lead
-/// in canonical form, and redundant ones disappear with it.
+/// type, `None` for a reference or inline object. Concrete `alphanumeric`
+/// options are canonicalized; unresolved references retain their assertions
+/// until the resolver can compare them with the target's option set.
 fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) -> String {
     let mut out = String::new();
     let options = constraints
@@ -273,8 +274,12 @@ fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) ->
             _ => None,
         })
         .flatten()
-        .collect::<AlphanumericOptions>()
-        .canonical();
+        .collect::<AlphanumericOptions>();
+    let options = if ty == Some(SimplifiedType::Alphanumeric) {
+        options.canonical()
+    } else {
+        options
+    };
     out.push_str(&options.keywords().collect::<Vec<_>>().join(","));
     for c in constraints
         .iter()

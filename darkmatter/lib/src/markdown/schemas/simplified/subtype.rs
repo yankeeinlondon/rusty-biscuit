@@ -4,7 +4,10 @@
 //! accepts also satisfy the underlying type B?" from typed, **resolved** atoms.
 //! Only a type and its identity (`alphanumeric` options, `enum` members, a
 //! `literal` value) count; ordinary constraints, presence and timing markers,
-//! defaults, and descriptions are ignored. The relation is bounded reasoning
+//! defaults, and descriptions are ignored, including inside structured types.
+//! Structured identity retains property names, positional optionality, and
+//! nested type identities; it does not widen object or array shapes.
+//! The relation is bounded reasoning
 //! over the listed types: it never inspects user regexes, converts scalars,
 //! reads files, or resolves imports, and it is no substitute for runtime
 //! value checks or shell quoting. Because it ignores presence, passing an
@@ -21,7 +24,7 @@ use std::collections::BTreeSet;
 use super::alphanumeric::AlphanumericOptions;
 use super::definitions::{DefKey, DefinitionTable};
 use super::query::flattened_alternatives;
-use super::types::{Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr};
+use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
 
 /// Whether every non-null value accepted by the underlying type of `a` is
 /// accepted by the underlying type of `b`.
@@ -123,7 +126,7 @@ impl<'t> Comparison<'t> {
     }
 
     fn subtype(&mut self, a: &PropertyAtom, b: &PropertyAtom) -> bool {
-        if a.is_array == b.is_array && identity(a) == identity(b) {
+        if same_atom_identity(a, b) {
             return true;
         }
         if let Some(arms) = scalar_union_arms(a) {
@@ -393,9 +396,71 @@ impl PartialEq for Identity<'_> {
                 Self::Primitive { ty, options, members, literal },
                 Self::Primitive { ty: other_ty, options: other_options, members: other_members, literal: other_literal },
             ) => ty == other_ty && options == other_options && members == other_members && literal == other_literal,
-            (Self::Structured(left), Self::Structured(right)) => left == right,
+            (Self::Structured(left), Self::Structured(right)) => same_structured_identity(left, right),
             _ => false,
         }
+    }
+}
+
+fn same_atom_identity(left: &PropertyAtom, right: &PropertyAtom) -> bool {
+    left.is_array == right.is_array && identity(left) == identity(right)
+}
+
+fn same_alternatives(left: &[PropertyAtom], right: &[PropertyAtom]) -> bool {
+    left.iter().all(|left| right.iter().any(|right| same_atom_identity(left, right)))
+        && right.iter().all(|right| left.iter().any(|left| same_atom_identity(left, right)))
+}
+
+fn same_definition_identity(left: &PropertyDef, right: &PropertyDef) -> bool {
+    fn arms(def: &PropertyDef) -> &[PropertyAtom] {
+        match def {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(arms) => arms,
+        }
+    }
+    same_alternatives(arms(left), arms(right))
+}
+
+fn same_shape_identity(left: &SchemaShape, right: &SchemaShape) -> bool {
+    left.properties.len() == right.properties.len()
+        && left.properties.iter().all(|(key, def)| {
+            right.properties.get(key).is_some_and(|other| same_definition_identity(def, other))
+        })
+        && left.pattern_keys.len() == right.pattern_keys.len()
+        && left.pattern_keys.iter().zip(&right.pattern_keys).all(|(left, right)| {
+            left.key == right.key && same_definition_identity(&left.def, &right.def)
+        })
+}
+
+fn same_structured_identity(left: &TypeExpr, right: &TypeExpr) -> bool {
+    match (left, right) {
+        (TypeExpr::InlineObject(left), TypeExpr::InlineObject(right)) => same_shape_identity(left, right),
+        (TypeExpr::Union(left), TypeExpr::Union(right)) => same_alternatives(left, right),
+        (TypeExpr::Ref(left), TypeExpr::Ref(right)) => left == right,
+        (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => {
+            left.elements.len() == right.elements.len()
+                && left.elements.iter().zip(&right.elements).all(|(left, right)| {
+                    left.optional == right.optional && same_definition_identity(&left.def, &right.def)
+                })
+                && match (left.spread.as_deref(), right.spread.as_deref()) {
+                    (Some(left), Some(right)) => same_atom_identity(left, right),
+                    (None, None) => true,
+                    _ => false,
+                }
+        }
+        (TypeExpr::Function(left), TypeExpr::Function(right)) => {
+            let left_parameters = left.parameters.as_slice();
+            let right_parameters = right.parameters.as_slice();
+            left.fallible == right.fallible
+                && same_definition_identity(&left.returns, &right.returns)
+                && left_parameters.len() == right_parameters.len()
+                && left_parameters.iter().zip(right_parameters).all(|(left, right)| {
+                    left.optional == right.optional
+                        && left.rest == right.rest
+                        && same_definition_identity(&left.def, &right.def)
+                })
+        }
+        _ => false,
     }
 }
 
@@ -445,6 +510,62 @@ mod tests {
         assert_subtype("number(min(1); required)", "number(max(2))", true);
         assert_subtype("string(pattern('^a'))", "string(min(9))", true);
         assert_subtype("string[](min(1))", "string(eager)[](max(3))", true);
+    }
+
+    #[test]
+    fn nested_identity_ignores_ordinary_constraints_and_annotations() {
+        for (left, right) in [
+            ("{ p: string(min(1); required) }", "{ p: string }"),
+            ("{ p: enum(a, b) }[]", "{ p: enum(b, a) }[]"),
+            ("{ p: alphanumeric(block-leading-dash) }", "{ p: alphanumeric }"),
+            ("{ <string>: string(min(1)) }", "{ <string>: string }"),
+            ("(string(min(1)) | number)[]", "(number | string)[]"),
+            ("tuple([string(min(1)), number?])", "tuple([string, number?])"),
+            ("tuple([string, ...number(min(1))[]])", "tuple([string, ...number[]])"),
+            (
+                "function(parameters(value: string(min(1))); returns(number))",
+                "function(parameters(input: string); returns(number(min(3))))",
+            ),
+        ] {
+            assert_subtype(left, right, true);
+            assert_subtype(right, left, true);
+        }
+    }
+
+    #[test]
+    fn nested_identity_retains_type_and_container_boundaries() {
+        for (left, right) in [
+            ("{ p: literal(3) }", "{ p: literal(4) }"),
+            ("{ p: enum(a, b) }", "{ p: enum(a) }"),
+            ("{ p: alphanumeric(allow-dashes) }", "{ p: alphanumeric }"),
+            ("{ p: string[] }", "{ p: string }"),
+            ("{ p: string }", "{ q: string }"),
+            ("{ <string>: string }", "{ <string>: number }"),
+            ("{ <starting::a>: string }", "{ <starting::b>: string }"),
+            ("(string | number)[]", "string[]"),
+            ("tuple([string?])", "tuple([string])"),
+            ("tuple([string, ...number[]])", "tuple([string])"),
+            (
+                "function(parameters(value?: string); returns(number))",
+                "function(parameters(value: string); returns(number))",
+            ),
+            (
+                "function(parameters(value: string); returns(number))",
+                "function(parameters(value: string); returns(boolean))",
+            ),
+            (
+                "function(parameters(...values: string); returns(number))",
+                "function(parameters(value: string); returns(number))",
+            ),
+            (
+                "function(parameters(void); returns(number); fallible)",
+                "function(parameters(void); returns(number))",
+            ),
+            ("{ p: unresolved }", "{ p: unresolved }"),
+        ] {
+            assert_subtype(left, right, false);
+            assert_subtype(right, left, false);
+        }
     }
 
     #[test]

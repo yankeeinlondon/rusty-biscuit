@@ -1426,15 +1426,15 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 // reference, including `required` and `generated`. Postfix composes outward:
 // `Name[]@file` becomes an array of the inlined type, and
 // `Name(constraints)@file` merges the use-site constraints into the inherited
-// ones (`apply_import_postfix`). Expansion is eager, bounded, and
-// cycle-checked (named types form a DAG in v1); `to_json_schema` still rejects
-// any import that survives.
+// ones (`apply_import_postfix`). Acyclic definitions expand inline; descending
+// cycles become references to shared definitions. `to_json_schema` rejects
+// any unresolved import that survives.
 //
-// Each namespace's unexpanded table is parsed once per expansion and shared
-// through an `Arc`: the cache, every later import of that file, and every
-// `@this` hold the same immutable allocation. Only the selected definition is
-// cloned, so each use site expands and modifies its own copy. The sharing
-// ends with `expand_document_imports`; nothing persists across calls.
+// Each namespace's unexpanded table is shared through an `Arc`: the engine
+// cache, every later import of that file, and every `@this` hold the same
+// immutable allocation. Use-site modifiers apply to independent definition
+// copies. Engine caches end with the expansion; parsed file revisions and
+// shipped tables can outlive it in the bounded process memos below.
 
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
@@ -3393,31 +3393,12 @@ fn reconcile_property_defaults(
     Ok((value, array))
 }
 
-/// Whether two defaults lower to the same JSON value. Integral floats equal
-/// integers (`3.0` is `3`); a string never equals a number. Mirrors the
-/// converter's `normalize_json_number` so a merge accepts exactly the
-/// defaults that lower identically.
+/// Whether two defaults lower to the same JSON value. Sharing the converter's
+/// normalization keeps integer boundaries and nested values identical.
 fn defaults_equal(left: &Value, right: &Value) -> bool {
-    normalized_default(left) == normalized_default(right)
-}
+    use super::simplified::convert::normalize_json_number;
 
-fn normalized_default(value: &Value) -> Value {
-    match value {
-        Value::Number(n) if n.is_i64() || n.is_u64() => value.clone(),
-        Value::Number(n) => n
-            .as_f64()
-            .filter(|f| {
-                f.is_finite() && f.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(f)
-            })
-            .map_or_else(|| value.clone(), |f| Value::from(f as i64)),
-        Value::Array(items) => Value::Array(items.iter().map(normalized_default).collect()),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(key, item)| (key.clone(), normalized_default(item)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+    normalize_json_number(left.clone()) == normalize_json_number(right.clone())
 }
 
 // ── Import-tree traversal helpers (fast-path detection) ─────────────────────
@@ -5812,8 +5793,12 @@ mod shared_type_tables {
 
             // Two later imports, selecting distinct names and spelling the
             // reference differently, reach the same canonical cache entry.
+            engine.dependencies.clear();
             let for_a = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            assert!(engine.dependencies.contains(&canonical), "a cache hit records its dependency");
+            engine.dependencies.clear();
             let for_b = engine.resolve_namespace("types.yaml", &root).unwrap();
+            assert!(engine.dependencies.contains(&canonical), "an alternate spelling records its dependency");
             assert!(for_a.named_types.contains_key("A"), "tagged={tagged}");
             assert!(for_b.named_types.contains_key("B"), "tagged={tagged}");
             for later in [&for_a, &for_b] {
@@ -5882,6 +5867,23 @@ mod shared_type_tables {
         }
     }
 
+    #[test]
+    fn a_whole_file_reference_cannot_supply_a_cached_named_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("types.yaml"), "$schema: ./actual.yaml\n").unwrap();
+        std::fs::write(dir.path().join("actual.yaml"), "$schema:\n  name: string\n").unwrap();
+        let mut engine = engine(dir.path());
+        let root = root_namespace(dir.path(), IndexMap::new());
+
+        let error = engine.resolve_namespace("./types.yaml", &root).err().expect("a reference is no namespace");
+        let SchemaError::SchemaDocument { path, message } = error else {
+            panic!("expected a schema-document error, got {error:?}");
+        };
+        assert_eq!(path, dir.path().join("types.yaml"));
+        assert_eq!(message, "whole-file reference schema documents cannot supply named imports");
+        assert!(engine.namespace_cache.is_empty(), "a rejected namespace must not enter the cache");
+    }
+
     // ── Use-site independence ────────────────────────────────────────────
 
     #[test]
@@ -5932,6 +5934,38 @@ mod shared_type_tables {
         );
         assert_eq!(resolved.json_schema["required"], json!(["name", "primary", "backup"]));
         assert!(resolved.imports.is_empty());
+    }
+
+    #[test]
+    fn array_modifiers_do_not_change_another_use_of_the_shared_type() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            write_types(dir.path(), tagged, "  name: 'string(required)'\n");
+            for reference in ["./types.yaml", "this"] {
+                let resolved = resolve_root(
+                    dir.path(),
+                    &format!(
+                        "name: 'string(required)'\n\
+                         many: 'name[](min(2))@{reference} -> names'\n\
+                         one: name@{reference}\n"
+                    ),
+                );
+                let properties = &resolved.json_schema["properties"];
+                assert_eq!(
+                    properties["many"],
+                    json!({
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "description": "names",
+                    }),
+                    "tagged={tagged}, reference={reference}: array modifiers stay at their use site"
+                );
+                assert_eq!(properties["one"], json!({"type": "string"}));
+                assert_eq!(properties["name"], json!({"type": "string"}));
+                assert_eq!(resolved.json_schema["required"], json!(["name", "many", "one"]));
+            }
+        }
     }
 
     #[test]

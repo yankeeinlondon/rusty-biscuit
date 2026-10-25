@@ -2368,10 +2368,9 @@ fn number_to_json(n: f64) -> Value {
     json_number(n).map_or_else(|| Value::String(format!("{n}")), Value::Number)
 }
 
-/// Normalises numeric values inside a default literal so integral floats
-/// render as integers. Recurses into arrays/objects defensively even though
-/// the grammar only emits scalars.
-fn normalize_json_number(value: Value) -> Value {
+/// Normalizes numeric literals for both lowering and inherited-default
+/// equality, including values supplied through the programmatic schema API.
+pub(crate) fn normalize_json_number(value: Value) -> Value {
     match value {
         // An integer-typed number is already exact.
         Value::Number(n) if n.is_i64() || n.is_u64() => Value::Number(n),
