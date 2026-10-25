@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 hash: ef46db3751d8e999-c8cf561420e0e67a
 last_updated: 2026-09-17
 ---
@@ -6,7 +7,9 @@ last_updated: 2026-09-17
 
 Claudine reads and acts on a number of YAML frontmatter properties across its composition, lifecycle notification, linking, and prompt-reporting subsystems. This document catalogs every property that has special meaning, with links to deeper topic docs and the source-level symbols that implement each behavior.
 
-Claudine's [schemas](schemas.md) type these properties. When a document sets a lifecycle event, `loop`, `prompt`, `agent`, or `model` to a non-null value, the `claudine.yaml` trigger schema applies, both in the editor and in the launch verdict, with or without a `$schema`. Every property it declares is optional, and an invalid value fails the launch rather than being dropped, unless the authored `$schema` redeclares that property (see [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict)). Keys this page does not list are application data and are never a schema error.
+Claudine's [schemas](schemas.md) type these properties. When a document sets a lifecycle event, `loop`, `prompt`, `agent`, or `model` to a non-null value, the `claudine.yaml` trigger schema applies, both in the editor and in the launch verdict, with or without a `$schema`. Every property it declares is optional, and an invalid value fails the launch rather than being dropped, unless the authored `$schema` redeclares that property (see [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict)). The sequence trigger separately types a non-null `sequence` and its root metadata.
+Claudine's document schemas leave other keys open for application data; an
+authored application schema can impose its own restrictions on that data.
 
 ## Composition Core
 

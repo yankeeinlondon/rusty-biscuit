@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Flow Control Reference
 
 The detailed rules behind the lifecycle flow-control directives. Read [Flow Control](flow-control.md) first. This page assumes you know what each directive is for and only records the edge cases, error names, and guarantees.
@@ -25,7 +29,7 @@ The `loop:` iteration condition (`while`/`until`) is a separate mechanism. It do
 
 ### Containers
 
-Sequences and groups have no live provider session, so `resume` raises the no-session error. `retry` reruns the container from the beginning after every old child settles, without repeating `initialize` or finalizing the abandoned attempt. Child results and outcome records reset; runtime mutations survive. A container's `retry.with` values enter its runtime state, rather than the document-only one-attempt overlay described below. Nothing rolls back disk edits or other external effects. `proxy` hands the container's position to a target and skips the source's remaining events, including `finalize`.
+Sequences and groups have no live provider session, so `resume` raises the no-session error. `retry` reruns the container from the beginning after every old child settles, without repeating `initialize` or finalizing the abandoned attempt. For a container without a loop, child results and outcome records reset while runtime mutations survive. For a looping container, only the current pass restarts: its runtime mutations and output slice return to their state at pass entry, preserving completed passes. The retry overlay is applied after that restoration, and the loop count does not advance; see [Retry inside a looping container](looping.md#retry-inside-a-looping-container). A container's `retry.with` values enter its runtime state, rather than the document-only one-attempt overlay described below. Nothing rolls back disk edits or other external effects. `proxy` hands the container's position to a target and skips the source's remaining events, including `finalize`.
 
 An unhandled child failure propagates to the nearest container's `failure` event after child cleanup. A sequence stops unless recovery succeeds. A group with `fail_fast: false` handles leg failures; its own preparation/event errors and Ctrl-C still fail or cancel it. With default `fail_fast: true`, it stops admission, cancels opted-in running legs, waits for the rest, and fails atomically for in-memory results/mutations. See [Sequences](sequences.md#parallel-groups).
 
@@ -94,7 +98,11 @@ The target must exist. A missing target fails with a typed `Unresolvable file re
 - on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays));
 - on `prep` it parameterizes the **called target**, with `proxy`'s shape, typing, and evaluation rules. It is the target's only caller values: the caller's own setters do not reach a `prep` target (see [`prep`](#prep)).
 
-`resume` takes no `with:`: it continues a live session rather than reading a document anew. A sequence's prompt task takes a `with:` with the same shape, typing, and file rules ([Task inputs](sequences.md#task-inputs-with)).
+`resume` takes no `with:`. It continues the existing provider session, while
+still rereading and validating the active document before sending its follow-up
+message. Use `set` for invocation-local values that must survive that refresh.
+A sequence's prompt task takes a `with:` with the same shape, typing, and file
+rules ([Task inputs](sequences.md#task-inputs-with)).
 
 ```yaml
 success:

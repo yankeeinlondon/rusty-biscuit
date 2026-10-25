@@ -1,8 +1,13 @@
+---
+kind: canonical-documentation
+---
+
 # Numbers
 
-Every Darkmatter number is a finite `f64`: frontmatter values, raw schema
-bounds, expression literals, text converted to a number, function arguments
-and results, and every calculation. There is no separate integer type;
+Darkmatter stores every number as a finite 64-bit floating-point value
+(`f64`). This includes frontmatter values, raw schema bounds, expression
+literals, text converted to a number, function arguments and results, and
+every calculation. There is no separate integer type;
 `number(integer)` is a constraint on the value: a whole number below 2^64 in
 magnitude. This page is the one description of the numeric model; schema and
 expression pages link here.

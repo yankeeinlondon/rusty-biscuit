@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Hover Effects
 
 Hover (`textDocument/hover`) is how DMLS explains the symbol under the cursor without navigating away from it — a schema property's type and description, a `ctx.*` variable, a directive's semantics, a wiki link's target, and so on. This page describes how hover content is produced, the hard limits on how it can look, and the formatting rules DMLS applies within those limits.

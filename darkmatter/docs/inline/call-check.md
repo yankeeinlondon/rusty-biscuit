@@ -1,4 +1,8 @@
-# Call Check
+---
+kind: canonical-documentation
+---
+
+# Checking Function Calls Before Composition
 
 Before Darkmatter evaluates anything in a document, it checks every function
 call the document authors against the types its schema declares. A call that
@@ -93,10 +97,11 @@ $schema:
 | 4 | Type not known | `min(untyped, 5)` | composes; the value decides when it runs | silent |
 | 5 | Can never bind | `min(flag, 5)`, `min("pear", 5)`, `min(1)` | **rejected** | error |
 
-Only category 5 stops `md compose`. Category 3 composes too, but each such
+By default, only category 5 stops `md compose`. Category 3 composes too, but each such
 argument is reported as a `dm.expression.uncertain_call` warning on stderr,
 exactly as the editor shows it. Categories 1, 2, and 4 are silent; the editor's
-strict setting also warns for 2 and 4 (see
+strict setting also warns for 2 and 4. A [blocking policy](../cli/policy.md)
+can make warnings stop composition without changing their severity (see
 [DMLS Diagnostics](../../dmls/docs/diagnostics.md#severity)). The idea is that a
 document with no types gets no warnings, and adding types buys more checking.
 
@@ -218,7 +223,7 @@ Only a call that is **proven** wrong (category 5) rejects the document:
 | `min(size, 5)`, `number("pear", 7)`, `number(flag, 7)` | not rejected (`number`'s `7` is a valid fallback) |
 | `min(word, 5)`, `length(word)` with `word: boolish(required)` | not rejected; `word` may hold text such as `"1"` |
 | `min(untyped, 5)` (no schema entry) | not rejected; its value is checked when it runs |
-| `min(maybe \|\| 0, 5)`, `min(length(count), 5)` | not rejected; the argument's type is not known before it runs |
+| `min(maybe \|\| 0, 5)`, `min(length(count), 5)` | not rejected; `\|\| 0` removes the nullable number's null option, and `length` declares a number result |
 
 Silence is not a promise: a call the check accepts can still fail at runtime
 with its own type error, for example a constraint the value does not meet.

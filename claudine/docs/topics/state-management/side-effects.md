@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Side Effects
 
 A **side effect** is an operation that changes something: a value held in memory, a Markdown file, a log, or a remote service. For example, a workflow might mark a document as `done` after an agent finishes its task.
@@ -60,6 +63,25 @@ Frontmatter is the YAML metadata between `---` lines at the start of a Markdown 
 | `decrement_frontmatter` | Subtracts one from a number and returns the new number. A missing property becomes `-1`.            |
 | `append_frontmatter`    | Adds a value to the end of an array and returns the updated array.                                  |
 | `prepend_frontmatter`   | Adds a value to the beginning of an array and returns the updated array.                            |
+
+`set_frontmatter` takes a file, a property name, and a value. The value may
+be null: that stores an explicit null rather than deleting the key. Use
+`delete_frontmatter` when the key itself should disappear.
+
+```yaml
+success:
+  - set_frontmatter: ["state.md", "reviewer", null]
+```
+
+`merge_frontmatter` takes only a file and an object; there is no property-name
+argument. For example, if frontmatter declares
+`changes: { status: done, reviewer: null }`, the following action merges those
+two properties. A scalar or list in place of that object is rejected.
+
+```yaml
+success:
+  - merge_frontmatter: ["state.md", "{{ changes }}"]
+```
 
 When a Claudine lifecycle action or sequence `side_effect:` writes a value
 with `set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, or

@@ -24,7 +24,10 @@ those model fields do not authorize retired task YAML. Its `PrewarmHandle` trave
 (`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
 `prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
 bootstrap, the loop bootstrap, and harness re-materialization. Sequence
-preflight calls `submit_sequence_preflight`; internal legacy task stages are
+preflight calls `submit_sequence_preflight` for prompt documents and the root
+and nested sequence/group lifecycles. Containers resubmit from their lexical
+bootstrap and start-time snapshots, using their captured `ctx`/`env`; they
+share the same invocation worker and de-duplication. Internal legacy task stages are
 reconsidered by `submit_task_stacks` wherever the task's context is
 established (`run_step_task`, `open_member_run`, `open_leg_run` in
 `cli/src/commands/wrap/sequence/task_run.rs`), against the step's effective

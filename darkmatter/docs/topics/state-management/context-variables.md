@@ -1,8 +1,12 @@
+---
+kind: canonical-documentation
+---
+
 # Context Variables
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
-Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](./darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
+Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](../darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
 
 ## Overcoming `ctx` Conflicts
 

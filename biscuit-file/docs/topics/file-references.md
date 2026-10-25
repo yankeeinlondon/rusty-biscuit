@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 blast_radius:
 - biscuit-file/lib/src/file_reference/mod.rs
 - biscuit-file/lib/src/file_reference/parse.rs

@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Host Expression Functions
 
 A program that embeds Darkmatter (a **host**, such as Claudine) can add its
@@ -62,6 +66,7 @@ let functions = HostFunctions::builder(catalog)
         Arc::new(|call| Ok(serde_json::json!(call.args().text(0).is_some_and(|t| t.ends_with(".md"))))),
     )
     .build()?;
+std::fs::write("schemas/project.facts.json", functions.facts_artifact())?;
 install_host_functions(functions)?;
 ```
 
@@ -100,7 +105,8 @@ The editor runs in its own process and cannot run the host's Rust
 registration, so the signature catalog alone would leave it without the
 behavior facts: `is_project_file(source)` would narrow in composition but not
 in the editor. The host closes that gap by writing a **facts artifact**, a
-JSON file generated from its registration:
+JSON file generated from its registration. Write it before passing the
+function set to `install_host_functions`, which takes ownership of that set:
 
 ```rust
 std::fs::write("schemas/project.facts.json", functions.facts_artifact())?;

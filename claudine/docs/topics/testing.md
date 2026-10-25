@@ -1,6 +1,12 @@
+---
+kind: canonical-documentation
+---
+
 # Testing
 
-Claudine's default verification path is the package-area `just` recipes, which run package-scoped nextest when `cargo-nextest` is installed and fall back to `cargo test` otherwise:
+Use the package-area `just` recipes with `cargo-nextest` installed for
+Claudine's verification. Nextest runs each test in its own process, preserving
+the suite's isolation assumptions:
 
 ```bash
 cargo --version
@@ -9,7 +15,11 @@ just test
 just lint
 ```
 
-The root nextest config marks tests as slow after 5 seconds in the default profile and after 10 seconds in CI. CI also writes JUnit output to `test-results.xml`.
+Keep every test at or below five seconds on the development host. A passing
+assertion does not excuse a test that exceeds that budget; shorten setup or
+schedule independent cases separately without dropping coverage. Runner
+termination thresholds are separate from this requirement. CI also writes
+JUnit output to `test-results.xml`.
 
 Additional expectations for the Claudine test suite:
 

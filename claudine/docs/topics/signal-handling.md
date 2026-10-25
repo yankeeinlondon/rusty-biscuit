@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Claudine Signal Handling
 
 This is the canonical reference for how Claudine handles process signals
@@ -5,7 +9,7 @@ This is the canonical reference for how Claudine handles process signals
 raise.
 Other docs link here rather than duplicating the model.
 
-The signal story has two distinct surfaces:
+The signal story has three distinct surfaces:
 
 1. **User-driven Ctrl+C** (`SIGINT`) during a compose / inline-compose /
    sequence run, including the slow prep phase before the agent child is

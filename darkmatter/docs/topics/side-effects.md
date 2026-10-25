@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Side Effects
 
 > **Status: v1 catalog implemented.** The frontmatter, file/directory, and
@@ -17,9 +20,8 @@ by hard boundaries.
 | Invoked by | the compose pipeline | a lifecycle host (`md compose`, Claudine) |
 | Module | `compose::expression` | `effects` (separate) |
 
-Composing a document's body is **pure**: the body and its frontmatter values
-never trigger a side effect. Side effects run only as actions of a
-[lifecycle event](./lifecycle/index.md), which a host fires at well-defined
+Evaluating an expression does not call the effects engine. Its operations
+run only as actions of a [lifecycle event](./lifecycle/index.md), which a host fires at well-defined
 moments. `md compose` is such a host, so an `ensure_file` in `initialize` can
 create the file the body then includes:
 
@@ -28,9 +30,14 @@ initialize:
     - ensure_file: ["notes.md", "# Notes"]   # creates notes.md only if it is missing
 ```
 
-Every other surface (`md render`, `md schema validate`, the library compose
-API without a host run, DMLS) stays passive and runs no side effect.
-Darkmatter owns the engine; the host drives it.
+`md render`, `md schema validate`, DMLS, and the library compose API without
+a lifecycle host do not dispatch these operations. Darkmatter owns the
+engine; the host drives it.
+
+This boundary concerns the effects engine. Composition can also execute
+shell directives when enabled; see [the compose command](../cli/compose.md)
+for that separate behavior. Schema validation and editor requests never
+execute either kind of operation.
 
 ## The Read/Write Seam
 

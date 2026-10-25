@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 blast_radius:
   - claudine/cli/src/commands/sequence.rs
   - claudine/cli/src/commands/compose/mod.rs
@@ -15,7 +16,7 @@ prompt document, a shell command, or a group of tasks. Later steps can read
 what earlier steps produced.
 
 This page covers the command: how to call it, how it chooses providers, and
-its flags. How steps, tasks, state, groups, and `outputs` behave is in
+its flags. How steps, tasks, state, groups, and `seq.outputs` behave is in
 [Sequences](../topics/flow-control/sequences.md).
 
 ## Usage
@@ -180,10 +181,13 @@ provider at all.
 A body step composes the sequence document itself, so its `agent` is the
 document's. A group has no `agent`: each task in it chooses its own.
 
-**The model** follows its own order: `--model` first, then a `MODEL` or
-provider-specific model variable in the environment, then the task's own
-`model`, then the enclosing document's `model`, then the provider's
-default. An inherited model goes only with the provider it belongs to: a
+**The model** follows its own order: `--model` first, then the selected
+provider's model environment variable (for example, `CLAUDE_MODEL`), then
+the generic `MODEL`, then the task's own `model`, then a compatible inherited
+or review-selected model, and finally the provider's default. Environment
+values come from the map captured for that document, so a later task can see
+a file-backed environment change without changing an earlier task's choice.
+An inherited model goes only with the provider it belongs to: a
 task that switches provider gets that provider's own default, and its
 process gets no stale `MODEL`.
 

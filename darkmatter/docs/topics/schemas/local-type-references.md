@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Local Type References
 
 A schema can define reusable named types and use them by name. A type defined
@@ -169,6 +172,30 @@ from the higher-precedence schema.
 
 For how presence inheritance interacts with optional values and `generated`,
 see [Presence travels with the type](./authoring-schemas.md#presence-travels-with-the-type).
+
+## Descriptions and Editor Assistance
+
+A reference also inherits the named type's description. A description at the
+use site replaces that prose without changing the inherited constraints:
+
+```yaml
+kind: schema
+types:
+    label: string(min(3)) -> A human-readable label
+    title: label(max(80)) -> The title shown above the article
+```
+
+`title` still accepts 3 to 80 characters, but its description is the
+article-specific one. A property written simply as `title: label` keeps the
+original description.
+
+In DMLS, completion offers local names bare and uses `@this` only when a name
+collides with a built-in. Hover shows the selected definition, and
+go-to-definition opens its defining key. If two declarations introduce
+contradictory constraints, the diagnostic identifies the consuming reference
+and links to both declarations. Editing an imported definition refreshes the
+documents that use it. See [DMLS Schema Support](./dmls-schema-support.md#named-type-references)
+for the diagnostics and editor limits.
 
 ## Recursive Named Types
 

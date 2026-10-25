@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Context Variables
 
 Context variables let a Markdown prompt use facts about the machine and project

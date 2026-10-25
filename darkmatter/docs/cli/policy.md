@@ -1,4 +1,8 @@
-## Overview
+---
+kind: canonical-documentation
+---
+
+# Diagnostic Policy
 
 Three verbs control how strict an `md` command is. Every command that has a
 policy choice uses the same three, with the same identifiers:

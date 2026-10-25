@@ -1,69 +1,101 @@
+---
+kind: canonical-documentation
+---
+
 # Schema Triggers in Darkmatter
 
-A `schema-trigger` file defines a schema that applies only when its matching
-conditions pass. Conditions are set in the `match` property. The filename of
-this topic retains the earlier terminology; the document kind is
-`schema-trigger`.
+A schema trigger applies a frontmatter schema only to documents that match its
+conditions. Put a YAML file with `kind: schema-trigger` in one of the document's
+[schema roots](./definition.md#schema-roots). Its `match` property selects the
+documents, and its `$schema` property supplies their schema.
 
-The Boolean model is implemented: a top-level `match:` list is AND, and a
-`group:` is OR (see
-[Repository Trigger Schemas](./definition.md#repository-trigger-schemas) for
-the conditions that load today). The rest of this topic describes the intended
-contract, not current implementation: the full predicate family listed in
-[Authoring Schemas](./authoring-schemas.md#schema-triggers), such as the
-`expression`, `can_execute`, and `file_exists` conditions below, is
-**planned**; its exact syntax and observation/refresh contracts remain under
-design review.
-
-Trigger matching is passive: it checks whether a schema applies without running
-commands or starting runtime actions. Use expressions for document values and
-dedicated conditions for files or host information. Read
-[Passive Activation Expressions](./authoring-schemas.md#passive-activation-expressions)
-for the authoring rules, or
-[How Schema Activation Is Evaluated](./schema-activation.md) for the shared
-evaluation and failure-handling details.
-
-An activated trigger's schema takes precedence over always-on schema
-definitions and the Darkmatter base schema, but the document's own `$schema`
-takes precedence over the trigger. For each conflicting property, the winning
-definition supplies both its type and its description. See
-[Schema Layering](./authoring-schemas.md#schema-layering) for the shared ordering
-and guidance on keeping active schema stacks small.
-
-The `match` property is composed of 1:M _matchers_ which are either:
-
-- a match expression, or 
-- a _group_ of match expressions
-
-_Grouped_ match expressions are evaluated with a logical OR operation but all others are joined with an AND operation.
-
-Let's look at this through an example:
+For example, this trigger applies to a report that declares either a prompt
+or a list of steps:
 
 ```yaml
 kind: schema-trigger
-name: example
-description: an example
-$schema:
-    name: string
-    quantity: number
 match:
-    - in_repo
-    - expression: "is_number(quantity) && quantity > 5"
+    - kind: literal(report; required)
     - group:
-        - expression: "name == 'Bob'"
-        - can_execute: "netscape"
-        - timezone: "America/Los_Angeles"
-        - file_exists: "./path/to/file/found-it.md"
+          - prompt: string(required)
+          - steps: unknown[](required)
+$schema:
+    title: string(required)
+    summary: string
 ```
 
-In the example:
+A document with `kind: report` and `prompt: Write a summary` selects this
+schema; it must then supply a string `title`. A document with only
+`kind: report` does not select it. The matching conditions do not insert
+properties or run the prompt.
 
-- we have 6 match expressions to evaluate, 4 of which are in a group where only one of the members has to pass for it's leg to be valid
-- looked at from the top level array's standpoint we have 3 match expressions which ALL must evaluate to `true` for the schema to be activated.
+## Combining conditions
 
+A top-level list means **AND**: every entry must match. A `group` means
+**OR**: at least one alternative must match. A mapping's sibling property
+conditions also mean AND. The example therefore requires `kind: report`
+**and** either a string `prompt` or an array `steps`.
 
-There is no published schema for a `schema-trigger` document yet: the
-predicate grammar above is unfinished and is not an implemented contract.
+Nested conditions can use `all`, `group`, `none`, or
+`min-match: { count, of }`. Write an explicit `group` for alternatives;
+an anonymous nested list is an error. The retired `any` combinator is also
+an error that points to `group` as its replacement.
 
-For unconditional exported schemas and importable types-only libraries, see
+Property conditions use passive SimplifiedSchema types and constraints. A
+condition without `required` allows the property to be absent, but checks its
+value when present. A required concrete type establishes presence. A
+null-admitting type, such as `unknown(required)`, still permits omission and
+cannot establish presence; use `unknown[](required)` when an array must exist.
+Every possible way to satisfy the complete match must require a property or a
+path match, so a trigger cannot accidentally match every document through
+optional conditions alone. Empty condition mappings are rejected.
+
+## Selecting by path
+
+`$path` matches a document path with glob references. A positive pattern admits
+the path, and any matching `!` pattern excludes it:
+
+```yaml
+kind: schema-trigger
+match:
+    $path:
+        - "^docs/**"
+        - "!**/_*.md"
+$schema:
+    title: string(required)
+```
+
+This selects documents under the applicable `docs` tree, except files whose
+name starts with `_`. See [Path Matching](./definition.md#matching-a-path-with-path)
+for root selection and allowed reference forms. Matching is passive: it never
+executes an expression or shell command, fetches a URL, or writes a document.
+
+## Discovery and precedence
+
+The document's schema roots are searched in order. A trigger filename in an
+earlier root shadows the same filename in later roots. A malformed file that
+claims the trigger kind fails discovery rather than silently falling back to a
+later file. The retired trigger-kind spelling is rejected with guidance naming
+`schema-trigger`.
+
+Matching trigger payloads override the baseline; the document's own `$schema`
+overrides matching triggers. A trigger can put its payload directly under
+`$schema`, as above, or reference another schema file. See
+[Repository Trigger Schemas](./definition.md#repository-trigger-schemas) for
+merging, diagnostics, and discovery details.
+
+Use `md schema triggers document.md` to inspect the roots, shadowed files,
+matching conditions, and defeat reasons. `md compose`, `md schema validate`,
+and `md clean` accept `--disable schema-triggers` to turn off discovery; this
+does not disable the baseline or the document's explicit schema.
+
+## Planned predicates
+
+Dedicated conditions for arbitrary document expressions, executables, files,
+repository facts, operating systems, time zones, and time remain **planned**.
+Their syntax and observation rules are not current trigger grammar. The
+[authoring guide](./authoring-schemas.md#schema-triggers) distinguishes those
+proposals from supported schema and path conditions.
+
+For unconditional schema exports and importable type libraries, see
 [External Schemas](./authoring-schemas.md#external-schemas).

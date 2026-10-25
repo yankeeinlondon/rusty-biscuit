@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Composition Lifecycle
 
 A Claudine composition document can react to the key moments of its own run:
@@ -188,12 +192,16 @@ flowchart TD
 ### Which event a failure selects
 
 Claudine reports where a failure happened and whether the provider launched;
-the engine picks the event. A failure while preparing fires `blocked` only
-while no provider has launched. Every other failure fires `failure`.
+the engine picks the event. These routes apply after the document's lifecycle
+has started. Initial provider resolution and other checks performed before
+that point can fail with no lifecycle event, including no `initialize` or
+`finalize`. A check reached inside an active run is different: a preparation
+failure fires `blocked` while no provider has launched. Every other failure
+fires `failure`.
 
 | What failed | Event |
 |---|---|
-| Composition, preflight, or a Claudine preflight check: a denied shell audit, the launch schema verdict, agent resolution, an include missing after `initialize` | `blocked` |
+| Composition, preflight, or an in-run Claudine check: a denied shell audit, the launch schema verdict, agent resolution, an include missing after `initialize` | `blocked` |
 | Internal setup before the provider launched, such as materializing the document or parsing a proxy target's lifecycle | `blocked` |
 | A refused proxy handoff (a cycle, a target that does not resolve, no owning coordinator) before the provider launched, **even when `start` already fired** | `blocked` |
 | Launch construction, the part of an attempt before the provider is spawned, after `start` | `failure` |
@@ -420,8 +428,10 @@ or not that branch will be selected:
 - expression syntax of every `when` and every `{{ … }}` span, including each
   span inside mixed text such as `"status {{ fm.title }}"`. Spans are parsed,
   never evaluated: `"status {{ fm. }}"` is refused in a branch that is never
-  selected, while a span that parses but would fail when evaluated
-  (`"{{ no_such_fn(1) }}"`) is accepted and only fails if its branch runs;
+  selected. An unknown function in an ordinary action operand
+  (`"{{ no_such_fn(1) }}"`) is not called in an unselected branch and fails if
+  that branch runs. Shell approval performs additional passive checks on its
+  expressions, including unknown function names;
 - the late-binding globals each expression reads (`err`, `group`, …);
 - nested spans inside quoted literals
   ([`LifecycleNestedSpanInLiteral`](#lifecyclenestedspaninliteral));
@@ -435,6 +445,14 @@ or not that branch will be selected:
 `initialize` refuses a `shell` action, and a `set` value written as a
 whole-value `$( … )`, even in a branch that can never be selected
 (`LifecycleActionPlacement`).
+
+Preparation also checks calls to known functions against the effective schema,
+under the enclosing guards. A call that can never bind, such as `min(flag, 5)`
+when `flag` is declared `boolean(required)`, rejects the document even inside
+`when: "false"`. This check reads declarations; it does not evaluate the
+function or select a branch. A value-dependent failure that cannot be proved
+from those declarations remains an event-time error. See
+[Call Check](../../../../darkmatter/docs/inline/call-check.md).
 
 ### What a guard proves to the actions it selects
 
@@ -644,7 +662,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (short form `shell: "…"` and long-form `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions, and inside a loop the iteration's `loop` values). A command approved as its bytes is byte-identical to the executed command, including sequence task commands, which run the bytes sequence approval fixed. Sequence approval resolves those under the launch environment; a task whose own captured environment would change the text is refused before it runs (see [Sequences — Phase 1](sequences.md#phase-1--static-preflight)). A `shell` action's child process starts from the document's environment, so `$X` in the command reads the value `{{ env.X }}` resolved. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document. A command approved by its shape instead keeps its placeholders and reads them when it runs; see [Shell actions approved by their shape](#shell-actions-approved-by-their-shape).
+`shell` commands (short form `shell: "…"` and long-form `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions, and inside a loop the iteration's `loop` values). A command approved as its bytes is byte-identical to the executed command, including sequence task commands, which run the bytes sequence approval fixed. Sequence approval resolves those under the launch environment; a task whose own captured environment would change the text is refused before it runs (see [Sequences — Phase 1](sequences.md#phase-1--static-preflight)). A `shell` action's child process starts from the document's environment, so `$X` in the command reads the value `{{ env.X }}` resolved. A read of `err`, `timing`, or `current` inside a shell command is rejected at prepare time, even in a branch that would never run: these values cannot be approved before their event. `group` outside a group is also refused. Within a sequence group, `group.*` is instead a late value approved only by a typed template and checked at execution; `fm.group` still reads the document's own property. A command approved by its shape instead keeps its placeholders and reads them when it runs; see [Shell actions approved by their shape](#shell-actions-approved-by-their-shape).
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
@@ -709,14 +727,12 @@ attempt's audio queues behind it. There is no way to cancel it.
 
 ### Speech is prepared ahead of time (pre-warm)
 
-Synthesizing a phrase takes time: roughly 0.2–0.8 s for macOS `say`, 0.5–3 s
-for Kokoro on a CPU, and 1–3 s for gTTS, Echogarden, and cloud providers. A
-`say` in `success` that fires at the end of a twenty-minute run does not need
-to wait for that, because its text was usually known before the agent started.
-So Claudine **pre-warms** it: while it prepares the document, it hands every
-phrase it can already resolve to a background worker that synthesizes it into
-the TTS audio cache. When the event fires, `say` resolves the same text with
-the same voice settings, finds the cached audio, and publishes it at once.
+Claudine can prepare lifecycle speech before its event fires. When the text
+of a `success` message is already known while the agent is starting, a
+background worker can synthesize it into the audio cache during the run. This
+is called **pre-warm**. If preparation finishes and the event resolves the same
+text and playback settings, `say` reuses that audio instead of synthesizing it
+again. Audible speech can still wait behind other jobs in the Playa queue.
 
 ```yaml
 success:
@@ -741,7 +757,7 @@ looks inside dictionary bundles, named arguments
 at any depth. It does not evaluate a `when` guard: the guard decides whether a
 phrase plays, not what it says. Phrases in `initialize` are skipped, since
 `initialize` fires moments after preparation and a warm cache gains nothing
-there.
+there. Hook-event `speak` actions are not part of this walk.
 
 A collected phrase is pre-warmed only when it is **ready early**, which is
 stricter than the general [early-binding](#binding-time-early-vs-late) rule:
@@ -752,7 +768,7 @@ stricter than the general [early-binding](#binding-time-early-vs-late) rule:
 | reads only frontmatter (`fm.x`, `fm['x']`, or a bare document property) | yes | `say: "{{ title }} is done"` |
 | reads `ctx` or `env` | yes, from the values the document captured | `say: "done on {{ ctx.branch }}"` |
 | combines those with operators, indexing, `\|\|` fallbacks, or `? :` | yes | `say: "{{ fm.name \|\| 'the job' }} finished"` |
-| reads `err`, `timing`, `current`, `loop`, or `group` (or any global added later) | no | `say: "took {{ timing.total_ms }} ms"` |
+| reads `err`, `timing`, `current`, `seq`, `loop`, or `group` (or any global added later) | no | `say: "took {{ timing.total_ms }} ms"` |
 | contains **any** function call, even in a branch that would not run | no | `say: "done at {{ date(ctx.today, 'long') }}"` |
 | contains a shell expansion (`$( … )` or a backtick) | no | ``say: "on $(hostname)"`` |
 | resolves to empty or whitespace-only text | no | `say: "{{ fm.missing }}"` |
@@ -774,8 +790,12 @@ frontmatter value are spoken as written, never evaluated a second time.
 One worker belongs to the whole command: a `compose`, `inline-compose`,
 `sequence`, or provider-wrapper invocation. It starts on the first phrase
 submitted, works through phrases one at a time, and is cancelled when the
-command finishes or is interrupted. Cancellation does not wait for unfinished
-synthesis; anything already cached stays cached for the next run.
+command finishes or is interrupted. Shutdown discards queued work and cancels
+the active preparation instead of draining the queue. It allows up to 250 ms
+for cancellation cleanup to acknowledge completion, without waiting for the
+phrase to finish synthesizing. Anything already cached stays cached for the
+next run. A `prep` call runs its target as a separate invocation with its own
+worker; the calling invocation retains its existing worker.
 
 ```mermaid
 flowchart LR
@@ -798,15 +818,18 @@ Phrases are submitted at each point where Claudine reads a document:
   and a `proxy` target (after its `with:` overlay is applied, so the target's
   phrases use the overlaid values; the caller never collects them);
 - in a sequence, **preflight**, which submits the early phrases of every
-  prompt document the sequence reaches before step one launches, without
-  composing a body, resolving a new reference, or fetching remote content.
-  Each prompt is submitted again when it is actually prepared.
+  prompt document the sequence reaches before step one launches. This also
+  includes the root sequence and nested sequence/group lifecycle stacks. The
+  walk uses the existing graph: it does not compose a body, resolve a new
+  reference, or fetch remote content. Each prompt is submitted again when it
+  is actually prepared; a container is reconsidered from its own bootstrap
+  and start-time state, once its captured context is available.
 
 Submission never waits for synthesis, so none of these delays `initialize`,
 preflight, or the provider launch.
 
-Each distinct pair of resolved text and voice configuration is prepared at
-most once per command, across every task, iteration, retry, and handoff. A
+Each distinct pair of resolved text and playback TTS configuration is prepared
+at most once per command, across every task, iteration, retry, and handoff. A
 phrase whose text changes (for example because `initialize` rewrote the
 document with `set_frontmatter`) is a new pair and is prepared again; an
 unchanged phrase is not. A failed preparation is not retried by pre-warm; the
@@ -848,7 +871,7 @@ Pre-warm also does nothing under `--dry-run` or when `PLAYA_DRY_RUN` is `1`,
 
 #### Limits
 
-- A phrase that reads a late root (`err`, `timing`, `current`, `loop`,
+- A phrase that reads a late root (`err`, `timing`, `current`, `seq`, `loop`,
   `group`) is never pre-warmed.
 - A lifecycle `set` (in `initialize` or any later event) changes the run's
   state, not the document Claudine re-reads. A phrase that reads a key `set`
@@ -866,6 +889,10 @@ Pre-warm also does nothing under `--dry-run` or when `PLAYA_DRY_RUN` is `1`,
 - Providers that write no audio file (eSpeak, SAPI), or whose default voice
   cannot be resolved safely ahead of time, gain nothing; preparing for them
   succeeds without doing any work.
+- Preparation does not choose a fallback provider on failure; event-time
+  playback keeps its normal fallback behavior. See
+  [TTS caching](../../../../biscuit-speaks/docs/tts-caching.md#preparing-speech)
+  for the library contract.
 - The audio cache has no eviction or expiry.
 
 ### Messages and notifications are delivered before exit
@@ -1825,9 +1852,11 @@ it starts a new attempt. Recovery is prohibited after cancellation.
 
 
 Container retry starts another attempt without repeating initialize or running
-the abandoned attempt's finalize. It clears child results while retaining
-runtime writes, including evaluated `retry.with` values. A container has no
-provider session, so resume raises the no-session error. Proxy transfers its
-place to the target without finalizing the source. Results publish after
-finalize succeeds. See [Sequences](sequences.md#container-lifecycle-and-recovery)
-for examples, result shapes, and failure propagation.
+the abandoned attempt's finalize. Without `loop:`, it clears child results and
+retains runtime writes. With `loop:`, it restores outputs and runtime writes to
+the current pass's entry, preserving earlier passes. Evaluated `retry.with`
+values apply afterward in both cases. A container has no provider session, so
+resume raises the no-session error. Proxy transfers its place to the target
+without finalizing the source. Results publish after finalize succeeds. See
+[Sequences](sequences.md#container-lifecycle-and-recovery) for examples, result
+shapes, and failure propagation.

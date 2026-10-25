@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Lifecycle Events
 
 A **lifecycle event** is a frontmatter key whose value is a list of actions
@@ -107,6 +111,46 @@ finalize:                 # a dictionary: one entry per verb
     info: "done"
     set: { finished: true }
 ```
+
+### Lists, compact dictionaries, and named arguments
+
+Use a list when order matters. A compact dictionary always runs `set` first,
+then communication (`stdout`, `stderr`, `info`, `warn`, `success`, `message`,
+`notify`, `effect`, `say`), then `shell`, then other verbs in ascending name
+order, and finally its flow-control directive. A host decides which of these
+verbs it provides; the [supported verbs](#what-md-runs-and-what-it-skips) still
+apply under `md`. In the `finalize` dictionary above, `finished` is set before
+`info` runs, regardless of their written order.
+
+The short form supplies a verb's arguments directly. The named form is useful
+for optional parameters:
+
+```yaml
+composed:
+    - shell:
+          command: "git status --short"
+          on_error: "could not read Git status"
+          no_error: true
+```
+
+A mapping under a verb is its named-argument form, except `set`, whose mapping
+is always the data to write. A dictionary containing several verbs uses short
+forms; put multiple named forms into separate list items. Unknown parameters
+of a supported verb are errors. A dictionary at an event root cannot carry
+`when`, `then`, or `else`; use a list item for a condition.
+
+`no_error: true` tolerates an operation that fails after its arguments were
+evaluated, such as a command returning a nonzero status. It does not suppress
+an expression error or grant permission to execute a command. It belongs
+inside a named action, as above, or beside the verbs of a compact dictionary,
+where it applies to each eligible action. Do not write both forms on one
+action, or place it beside a conditional's `then`/`else`. It never applies to
+`set`: a failed mutation stops the stack.
+
+Omitting an ordinary event, writing `null`, or giving it `[]` or `{}` means
+no actions. An explicitly written `then` or `else` body must contain an action;
+those empty forms are errors in a branch. `cancelled` is different: its value
+must be a stack, so use `[]` or `{}` rather than `null`.
 
 ### Conditions: `when`, `then`, `else`
 
@@ -218,7 +262,10 @@ for another host with all of its actions, use that host.
 The composed document is written after `composed` and before `finalize`.
 `stdout` actions and the output of lifecycle commands share stdout with the
 document, in run order; every other communication verb (`stderr`, `info`,
-`warn`, `success`, `message`) writes to stderr.
+`warn`, `success`, `message`) writes to stderr. With
+`--output report-json`, stdout contains only the structured report; lifecycle
+`stdout` actions and command output go to stderr instead. See the
+[`md compose` reference](../../cli/compose.md#lifecycle-events).
 
 ```yaml
 composed:
@@ -406,7 +453,14 @@ directives, and loop are documented in
 
 ### Driving a run from Rust
 
-The `darkmatter::lifecycle` module holds the engine. A host:
+The `darkmatter::lifecycle` module owns parsing, action validation, ordered
+execution, run accounting, failure routing, and recovery admission. It does
+not depend on Claudine. A host supplies effects and application checks through
+Darkmatter's interfaces; speech configuration, provider selection, and approval
+prompts stay in Claudine. Claudine's lifecycle module adapts and re-exports the
+shared implementation rather than carrying another parser or executor.
+
+A host:
 
 1. builds an `EventRegistry` (`EventRegistry::md()` for Darkmatter's five
    events; `EventRegistry::new(host)` plus `rename`, `register`, and

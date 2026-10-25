@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Workspace Indexing
 
 This page explains how DMLS (`darkmatter/dmls`) finds out what is in a

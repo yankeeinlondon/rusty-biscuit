@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Composition Looping
 
 The idea of a "loop" is a fundamental [flow control](./flow-control.md) primitive. In Claudine we support _looping_ for Markdown (and YAML) authors with the `loop` frontmatter property. This property serves as both a [lifecycle event](./lifecycle.md) while also acting as a [flow control](./flow-control.md) device.
@@ -479,7 +483,8 @@ A loop has no fail-fast switch (see [Frontmatter shape](#frontmatter-shape)), an
 | An `error` in `success` that nothing recovers | The loop ends; the error names the pass and the reason. |
 | The pass cannot complete (for example, a refused `proxy`: missing target, cycle, hop limit) | The loop ends with that error, reported once. |
 | An explicit `error` in the gate | The loop owner fails with `LifecycleLoopGateFailed`, naming the pass; the condition is not read. |
-| The condition cannot be parsed or evaluated, or an action fails | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
+| The condition cannot be parsed or evaluated, or an action cannot be staged | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
+| A container action is refused when writing runtime state | `LoopActionWriteRefused` names the action and the pass; the staged writes are not committed. |
 
 To keep repeating past a failure, recover it in the pass's own `failure` event (`retry`), and to tolerate a group leg's failure, use the group's `fail_fast: false`.
 

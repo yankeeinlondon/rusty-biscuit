@@ -1,7 +1,17 @@
+---
+kind: canonical-documentation
+---
+
 # Sequences in Claudine
 
 A **sequence** runs an ordered list of *steps*. Each step composes and executes
 one unit of work, and later steps can see what earlier steps produced.
+
+Use a sequence when work must happen in order, and a group when independent
+tasks can run concurrently. Either can contain the other. Each container has
+its own lifecycle and returns one value to its parent: an array for a sequence,
+or a dictionary keyed by leg name for a group. Read the active container through
+`seq` or `group`; ordinary document properties remain under `fm`.
 
 ![sequence overview](sequence-overview.png)
 
@@ -221,6 +231,27 @@ sequence:
 
 `params:` is not a task field. On a step it is ordinary step data, read as
 `seq.params` like any other key.
+
+Evaluation installs the mapping as a whole. If one value fails, none of its
+other values becomes visible to the child, and no child launches. For example,
+the following task fails at `with.notes`; it does not first install `phase`:
+
+```yaml
+sequence:
+    - name: review
+      prompt: review.md
+      with:
+          phase: 2
+          notes: "{{ no_such_function() }}"
+```
+
+The child receives the evaluated values as data. Text produced by an expression
+is not evaluated again just because it contains `{{ ... }}` or `$( ... )`.
+File values retain their authoring origin through retry and proxy transitions;
+the target's effective schema decides whether and how to resolve them. See
+[Caller File Provenance and Materialization](../composition.md#caller-file-provenance-and-materialization)
+for eager files, missing lazy files, remote URLs, and ambiguous file/string
+unions.
 
 ### Task guards (`when:`)
 
@@ -503,10 +534,14 @@ sequence: "$(ls -1 src)"             # the command must be approved at preflight
 
 ### Empty lists
 
-A static empty `sequence: []` is an authoring error. A **dynamic** source that
-resolves to zero steps is a graceful no-op: Claudine prints a "resolved to 0
-steps" notice to stderr and exits `0`. A clean repo legitimately makes
-`{{ ctx.dirty_files }}` empty.
+Both an authored `sequence: []` and a dynamic source that resolves to no steps
+are valid. The container runs its own lifecycle without starting a child and
+returns `[]`. A nested empty sequence therefore contributes one empty array
+to its parent's results, rather than disappearing like a skipped task.
+
+For example, a clean repository can legitimately make
+`sequence: "{{ ctx.dirty_files }}"` empty. The root command reports that it
+resolved to zero steps and succeeds unless its own lifecycle fails.
 
 ### Formal sequence documents
 
@@ -595,8 +630,9 @@ Claudine walks the **entire task graph**:
   - **The first task** (the first step's task, or every leg of a first-step
     group, or the first child recursively through nested first-step sequences)
     resolves each command now, under the launch environment and the
-    caller's values, and approves those bytes. They are what runs. If a later
-    pass of an outer loop changes a value such a command reads (a loop action
+    caller's values, and offers exact approval plus shape approval for valid
+    placeholders. If exact approval is selected, those bytes are what runs.
+    If a later pass of an outer loop changes a value such a command reads (a loop action
     or a runtime `set`), the changed command is refused before it runs
     (`SequenceShellApprovalChanged`, naming `changed: <value>`); it is never
     silently replaced by the approved bytes.
@@ -1162,9 +1198,12 @@ flowchart TD
 
 `retry.max_attempts` counts additional attempts. Initialize runs once; a retry
 starts another preparation and `start`, without finalizing the abandoned
-attempt. Child results and group outcome summaries reset, while runtime writes
-survive. `retry.with` values become runtime writes and never modify the source
-file. Finalize runs once after the last attempt.
+attempt. For a container without `loop:`, child results and group outcome
+summaries reset while runtime writes survive. A looping container instead
+restores its outputs and runtime writes to the current pass's entry, preserving
+completed passes; see [Retrying a looping container](looping.md#retry-inside-a-looping-container).
+In either case, evaluated `retry.with` values apply after that reset and never
+modify the source file. Finalize runs once after the last attempt of the pass.
 
 ```yaml
 failure:

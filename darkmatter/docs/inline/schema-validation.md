@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Schema Validation
 
 Schema validation lets a Markdown document declare the **shape of its frontmatter** and have Darkmatter enforce it. You describe the expected properties once — using a friendly single-line grammar called **SimplifiedSchema** — and Darkmatter checks every document against it, reporting a styled error that names the offending property instead of letting a downstream tool fail cryptically.
@@ -185,6 +188,23 @@ Policy's editor schema, `content_policy`. It is compiled into the library, so
 an installed `md` or `dmls` uses it outside a checkout with no schema files on
 disk. `md compose`, `md schema validate`, and DMLS all apply it by default.
 
+For example, this document needs no `$schema` declaration:
+
+```yaml
+---
+content_policy:
+  - rule: ValidFor(3mo)
+    action: archive
+---
+```
+
+`md schema validate notes.md` accepts it and rejects `action: delete` at that
+field's location. This is a passive declaration check: it does not assess
+freshness, read a watched file, or change `last_updated`. Content Policy's
+[editor guide](../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
+explains the accepted forms and the additional rules its declaration parser
+enforces.
+
 `md schema validate` picks its baseline from the first rule that applies:
 
 | # | Input | Baseline | Example |
@@ -329,6 +349,39 @@ compile cache: miss
 
 If that first resolution fails, its error is printed as usual and the breakdown
 covers the work done up to it.
+
+### Comparing cold and warm validation
+
+From `darkmatter/`, run the schema-only benchmark to investigate a change:
+
+```sh
+just bench-schema --save-baseline local-before
+# Make the change, then compare the same cases.
+just bench-schema --baseline local-before
+```
+
+The `schema_validation/claudine_cold` and `claudine_warm` groups each cover
+three cases: no matching trigger, document lifecycle events, and a sequence
+with a nested group. They use frozen schemas under
+`lib/benches/fixtures/claudine-schemas/`, rather than the live Claudine bundle,
+so changing the application does not quietly change the workload. The
+`resolve_frozen` cases compare recursive and depth-five unrolled lifecycle
+schemas, with resolution, file reads, and validator compilation measured
+separately. Existing corpus cases remain available in the same benchmark.
+
+A cold iteration clears the relevant process caches outside the measured
+work; constructing a fresh `DarkmatterSchemas` alone would still reuse those
+caches. A warm iteration reuses prior work. The benchmark checks that the two
+paths give the same verdict and that cold work builds validators where needed,
+while warm work reuses them. Ordinary filesystem caches may stay warm.
+
+Use the stage report above to explain a difference before treating it as an
+improvement. A structural validator may be shared between documents, but a
+schema that judges files or `match()` conditions must retain its document's
+resolution context, including below references. Editing dependencies or
+adding a nearer schema candidate must invalidate affected resolution. Reuse
+never transfers source locations from one document's diagnostics to another.
+Elapsed-time comparisons are development measurements, not test thresholds.
 
 ## CLI: `md schema detect`
 

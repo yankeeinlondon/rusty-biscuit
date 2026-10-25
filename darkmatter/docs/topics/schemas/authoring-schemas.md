@@ -1,5 +1,5 @@
 ---
-kind: topic
+kind: canonical-documentation
 area: schema
 tags:
     - schema
@@ -239,9 +239,11 @@ Do not define the variant as `draft_owner: owner`: an alias inherits
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,
 accepts a missing generated property even when it is required, because the host
-supplies the value later. Validation of the effective values at run time
-enforces `required` and checks supplied values as usual (see
-[Universal Constraints](./definition.md#universal-constraints)).
+supplies the value later. Runtime checks use two phases: launch requires an
+inherited `required` value immediately only when it is also `eager`;
+completion requires it after the work finishes. Supplied values are checked
+at both phases. A type that admits `null` remains optional regardless of
+these markers. See [Universal Constraints](./definition.md#universal-constraints).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 

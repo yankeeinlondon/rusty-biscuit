@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # DMLS Diagnostics
 
 Diagnostics are how DMLS reports problems in a document — broken links, missing
@@ -197,7 +200,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.expression.uncertain_call` | **Warning.** A call argument that might not bind, such as typed text passed to a number (`min(count, 5)` with `count: string`). With `expressions.strict`, also an argument that may be `null` where the parameter rejects it, or whose type is unknown. |
 | `dm.expression.always_false_call` | **Warning**, matching `md compose`, which reports the same warning and still composes. A `file_exists` (or `fileexists`) call whose argument is literal text that is not a well-formed file reference (`file_exists("https://")`, `file_exists("")`), so the call can only return `false`; ranged at the literal. A variable argument, even one of type `string`, never warns, and nothing is read to decide it. Shown under both `expressions.strict` settings. |
 | `dm.expression.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. A call to a host function whose facts DMLS cannot trust: the facts artifact (`<catalog stem>.facts.json` beside the host's function catalog in the document's schema roots) is absent, unreadable, invalid, generated from another version of the catalog, or lacks a valid entry for the function. The call is still a known function, but it gets no argument-type category and its guard narrows nothing, because only the host's runtime knows its facts. The message names the function and the reason. Ranged on the whole call, on every surface that gets call diagnostics. Regenerating the artifact clears it. See [Host Expression Functions](../../docs/topics/host-functions.md). |
-| `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked where the Claudine extension types it as an expression: an event's or `loop.gate`'s list items and the items of their `then`/`else` bodies; deeper guards are accepted loosely, and Claudine itself checks them before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
+| `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked wherever the selected host's recursive lifecycle schema types it as an expression, including nested `then`/`else` bodies. The editor does not enforce the five-level conditional limit; the runtime parser rejects a sixth level before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Every schema-validation diagnostic (`dm.schema.type_mismatch`,
 `dm.schema.constraint`, `dm.schema.missing_required`, `dm.schema.unknown_key`,
@@ -416,12 +419,22 @@ suppress its code; the category number stays visible in the message.
 | Error, category 5 | `min(flag, 5)` with `flag: boolean(required)` | Pass a value of the parameter's type, or correct the schema if the declared type is wrong (`flag: number(required)`). |
 | Error, a literal that cannot convert | `number("pear")` | Fix the literal, or give a fallback the function returns instead: `number("pear", 7)` is silent and returns `7`. |
 | Error, wrong argument count | `min(1)` | Supply the arguments the signature in the message lists: `min(1, 5)`. |
-| Warning, category 3 | `min(count, 5)` with `count: string` | Declare the type the function needs: `count: number`, or `count: numberlike` to keep numeric text as written. Or convert with a fallback, `min(number(count, 0), 5)`, which is silent by default (in strict mode the result of `number(…)` has an unknown type, category 4). |
+| Warning, category 3 | `min(count, 5)` with `count: string` | Declare the type the function needs: `count: number`, or `count: numberlike` to keep numeric text as written. Or convert with a fallback, `min(number(count, 0), 5)`, whose outer `min` call receives the declared `number` result of `number(…)`. The inner call is checked separately; a function result is not unknown merely because the call has not run. |
 | Warning, category 3, a union | `min(foo, 5)` with `foo` declared as `[string(required), number(required)]` | Narrow it with a guard: `is_number(foo) ? min(foo, 5) : 0`. |
 | Strict warning, category 2 | `min(maybe, 5)` with `maybe: number` | Make the property required (`maybe: number(required)`), or guard the call: `maybe != null ? min(maybe, 5) : 5`. |
 | Strict warning, category 4 | `min(untyped_var, 5)` | Declare the variable in `$schema`: `untyped_var: number(required)`. |
 
 ## Ranging
+
+For supported YAML nodes, a diagnostic starts at the same source byte as the
+location reported by `md schema validate` and `md compose`. The coordinate
+formats differ: CLI lines and UTF-8 byte columns start at 1, while LSP lines
+and characters start at 0. DMLS converts source bytes into the encoding
+negotiated with the editor, UTF-8 or UTF-16. For example, a `😀` before a
+value takes four UTF-8 bytes but two UTF-16 units. Subtracting one from a CLI
+column works for a UTF-8 client; a UTF-16 client needs the source line to
+convert that column. See [Problem Locations](../../docs/topics/schemas/definition.md#problem-locations)
+for the CLI's source-selection and fallback rules.
 
 Ranges come from the concrete syntax tree, never from parsing the message text:
 
@@ -434,7 +447,7 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
 - In a standalone schema document, a `dm.schema.invalid_type_definition`
   grammar error ranges the **offending token** inside the definition, even
   when the value continues onto later lines. Here `bogus` is underlined on
-  line 5, not the whole value from line 4:
+  line 4, rather than across the whole value starting on line 3:
 
   ```yaml
   kind: schema
@@ -444,7 +457,7 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   ```
 
   When the token cannot be placed exactly — for example, a sibling uses a
-  presentation the schema grammar does not support, such as a block scalar —
+  presentation the schema grammar does not support, such as a tagged value —
   the diagnostic falls back to the definition's whole value. It is never given
   an empty or guessed range.
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target

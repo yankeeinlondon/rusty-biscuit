@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Features
 
 The Darkmatter Language Server (`dmls`) brings IDE-grade intelligence to
@@ -122,9 +126,14 @@ Darkmatter's **SimplifiedSchema**:
   [Diagnostics](./diagnostics.md), [Hover](./hover.md), and
   [Autocomplete](./autocomplete.md#lifecycle-stacks).
 
-Claudine (and any other tool) activates as **pure configuration**: point a
-`[schema.extensions.*]` entry at a schema file and a set of globs. There is no
-Claudine-specific code in the server.
+Host support is data-driven. A document selects its schemas through discovered
+triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
+The host catalog supplies global types, and its lifecycle artifact supplies
+event names and action rules. For Claudine, make the files under
+`claudine/schemas/` available in the document's schema roots; an installed
+Claudine executable alone does not install those editor files. See
+[Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
+through Darkmatter's library and does not execute Claudine or its actions.
 
 ### Layer 3 — Darkmatter DSL
 

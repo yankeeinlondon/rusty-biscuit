@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Configuration
 
 DMLS, the Darkmatter language server, reads its settings from a

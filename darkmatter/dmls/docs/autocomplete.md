@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Autocomplete
 
 Autocomplete (the LSP `textDocument/completion` capability) offers context-aware
@@ -78,6 +82,11 @@ comes from the library's `alternatives_for_def`:
   unknown, or conflicting tag keeps every alternative's keys.
 
 ```yaml
+$schema:
+    step:
+      - "{ kind: literal(say; required), text: string(required) }"
+      - "{ kind: literal(shell; required), run: string(required) }"
+    steps: step[]
 steps:
   - kind: say
     # offers `text`, not `run`

@@ -14,7 +14,7 @@ prompt: |-
     If it can be made aesthetically tasteful it would also be nice to see a table that on one dimension shows the features an LSP can provide and on the other dimension shows the parts of the Darkmatter DSL which are supported. Regardless of how you present it, it's important to provide the reader with a view on how much "coverage" we currently provide to schemas in DMLS.
 
     If you want to visualize some aspects of your research you should feel free to use Mermaid code blocks.
-kind: topic
+kind: canonical-documentation
 area: schema
 tags:
     - schema
@@ -92,25 +92,30 @@ DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`
 
 ### Claudine documents
 
-Claudine's schemas are an ordinary set of disk files, five of them in
+Claudine's trigger bundle consists of seven ordinary disk files in
 `claudine/schemas/`:
 
 | File | Kind | Holds |
 |---|---|---|
 | `action.yaml` | library (`kind: schema`) | the lifecycle action types and the dictionary-bundle types |
-| `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types and the `loop:` block type |
+| `lifecycle.yaml` | library (`kind: schema`) | the recursive lifecycle stack families and the `loop:` block type |
+| `sequence-types.yaml` | library (`kind: schema`) | recursive sequence tasks and group containers |
 | `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
+| `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` |
 
 DMLS needs no configuration for them. A document whose package area is
 `claudine/` finds them through the package-area root, so a misspelled verb, a
 malformed long form, or a `shell` action in `initialize` is a diagnostic with
 no `$schema` in the document. Anywhere else, put a complete bundle of regular
-files (all five, so their relative imports resolve) in the repository root's
+files (all seven, so their relative imports resolve) in the repository root's
 `schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
 symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
-a trigger activates by placement and match, never by reference.
+a trigger activates by placement and match, never by reference. Copy the
+companion `globals.yaml` host catalog and `globals.lifecycle.json` artifact too
+for Claudine-specific expression globals and event analysis; they are separate
+from the seven-file trigger bundle.
 
 DMLS reads these files **only from disk**: it has no Claudine dependency and
 registers no embedded bundle. The `claudine` binary carries its own embedded

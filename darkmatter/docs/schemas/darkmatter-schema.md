@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Darkmatter Base Frontmatter Schema
 
 The `darkmatter` library exposes a base frontmatter schema for Darkmatter-owned
@@ -10,8 +13,10 @@ The schema is authored in the same `SimplifiedSchema` language that Markdown
 authors can use with the `$schema` frontmatter property, so the baseline behaves
 like an ordinary schema file.
 
-The library compiles in the file below, and this page transcludes it so the
-documentation and validation source stay in lock step. The schemas it imports
+The baseline is the resolved `fm` definition of Darkmatter's global catalog,
+authored in the partial shown below. The library compiles in the catalog and
+its partials, and this page transcludes the authored definition so the
+documentation and validation source stay in sync. The schemas it imports
 are compiled in too, so the baseline is prepared without reading the disk, and
 works the same in an installed binary as in a checkout (see
 [The Built-in Baseline](../topics/schemas/definition.md#the-built-in-baseline)).
@@ -28,7 +33,9 @@ works the same in an installed binary as in a checkout (see
   the property to a document that omits it, and checking it is passive: no
   watched file is read, no policy is renewed, and no date is stamped. Content Policy's
   [editor guide](../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
-  lists what the schema checks and the values only evaluation rejects.
+  lists what the schema checks and the additional declaration rules the
+  policy parser enforces. As with other optional baseline properties,
+  `content_policy: null` passes schema validation; the policy parser rejects it.
 - The lifecycle events `md compose` runs (`initialize`, `composed`, `failed`,
   `cancelled`, and `finalize`), typed with md's actions from the shipped
   [`md-lifecycle.yaml`](../../schemas/partials/md-lifecycle.yaml) partial,

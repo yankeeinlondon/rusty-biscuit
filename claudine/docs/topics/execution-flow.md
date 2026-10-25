@@ -1,22 +1,8 @@
 ---
-prompt: |-
-  Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
-
-  - identify the precise steps that each command takes to produce it's results
-  - describe each step in the process
-  - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
-
-  After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-09-17
-hash: 7738d51f4cfa73e2-a4d63f95f040887d
+kind: canonical-documentation
 ---
-Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
-The existing `composition.md` file is 540 lines. The user wants me to return the replacement Markdown body content only (no frontmatter delimiters). I'll produce the complete replacement body with the detailed execution flows and a Future Improvements section.
-
-Here is the replacement Markdown body content:
-
----
+# Composition Execution Flow
 
 Claudine supports the ability to _compose_ content by leveraging the Darkmatter library's powerful composition features and routing the result through a wrapper-grade execution pipeline.
 
@@ -725,7 +711,10 @@ name. An unhandled child failure stops its sequence and propagates outward;
 only groups accept `fail_fast` (default `true`). A failed atomic group
 publishes neither results nor leg mutations. File edits are never rolled back.
 Container `retry` restarts children with empty accumulators and retained
-runtime writes; `proxy` hands off without finalizing the source container.
+runtime writes when the container has no loop. In a looping container it
+restores the current pass's runtime writes and outputs to pass entry, retaining
+completed passes; the count does not advance. A retry overlay applies after
+restoration. `proxy` hands off without finalizing the source container.
 
 Ctrl-C stops admission and interrupts every active descendant. Cleanup finishes
 from children to parents (`cancelled`, then `finalize`) before exit `130`.

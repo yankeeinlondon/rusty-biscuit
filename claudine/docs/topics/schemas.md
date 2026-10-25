@@ -1,16 +1,23 @@
 ---
-kind: overview
+kind: canonical-documentation
 type: schemas
 ---
 # Schema Support in Claudine
 
-Claudine inherits and extends the powerful schema system that [Darkmatter](^darkmatter/docs/topics/schemas/index.md) provides. This schema system allows you to get rich LSP support from [DMLS](^darkmatter/docs/topics/dmls.md) (aka, Darkmatter's LSP for Markdown and YAML).
+Claudine schemas check the frontmatter that controls a prompt and describe it
+in your editor. A misspelled action or a value of the wrong type can be caught
+before a provider starts, even when the document declares no `$schema`.
+Claudine uses [Darkmatter's schema system](^darkmatter/docs/topics/schemas/index.md);
+[DMLS](^darkmatter/docs/topics/dmls.md), the Darkmatter language server, reads
+the same schemas for diagnostics, completion, and hover.
 
-This document will provide you a breadth wide overview of schemas but there is a lot of powerful features under the hood. If you want to dig into these details use the links [Schema Details](#schema-reference-docs) section.
+Start below with a document's own schema, then see how Claudine's automatic
+schemas apply at launch and in the editor. The [reference links](#schema-reference-docs)
+cover the full type language and validation rules.
 
 ## Defining Schemas
 
-You can think of schema's as being defined at three levels:
+A schema can apply at three levels:
 
 1. Local to where you are working
 2. Across the Repo
@@ -69,8 +76,10 @@ rest of the
   disk copy of the schemas is reachable (see
   [How a Document Reaches the Schemas](#how-a-document-reaches-the-schemas)).
 - **At launch.** `claudine compose`, `claudine inline-compose`, and
-  `claudine sequence` judge the same schemas before anything runs. An invalid Claudine control fails the
-  launch: no `start` stack runs and no provider starts. See
+  `claudine sequence` judge these schemas before `start` and provider launch.
+  A document's shell-free `initialize` runs before the stabilized launch
+  verdict; an invalid Claudine control then fails the launch, so no `start`
+  stack runs and no provider starts. See
   [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict).
 
 ```yaml
@@ -81,9 +90,9 @@ start:
 ---
 ```
 
-The lifecycle parser in `claudine/lib/src/composition/lifecycle/` remains the
-authority on what can run. The schemas catch most mistakes early, but a
-document they accept can still be rejected by the parser (see
+The lifecycle parser, shared with Darkmatter and configured by Claudine,
+remains the authority on what can run. The schemas catch most mistakes early,
+but a document they accept can still be rejected by the parser (see
 [What only the parser checks](#what-only-the-parser-checks)).
 
 ### The seven files
@@ -99,8 +108,10 @@ document they accept can still be rejected by the parser (see
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
 A library reaches a document only through a trigger's imports, so the seven
-files work as one bundle. Copy all of them together. The bundle does not need
-Darkmatter's schema files beside it (see
+files work as one bundle. Copy all of them together. For editor analysis of
+Claudine's host globals and lifecycle events, also copy `globals.yaml` and
+`globals.lifecycle.json`; these describe the host rather than adding document
+properties. The bundle does not need Darkmatter's schema files beside it (see
 [Verb shapes are Darkmatter's](#verb-shapes-are-darkmatters)).
 
 ### When the schemas apply
@@ -544,6 +555,42 @@ A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
 Markdown, so no schema judges it; the task parser checks it when the
 sequence is prepared.
 
+### Keeping recursive schemas small and quick to validate
+
+For schema maintainers, recursive references serve two purposes: they keep
+the same rules at every nesting level, and they avoid copying each recursive
+family into every place that uses it. The resolver stores recursive types in
+JSON Schema's `$defs` section and points to them with local `$ref` values.
+Non-recursive named types still expand at each use, so adding another
+reference to a large action bundle can increase the final schema noticeably.
+Reuse the recursive families rather than adding a fixed number of copied
+container or conditional levels.
+
+The embedded-bundle regression test
+`embedded_trigger_payloads_resolve_within_two_megabytes` in
+`lib/tests/l1/claudine_schemas_embedded.rs` checks three cases: the
+`claudine.yaml` trigger, the `sequence.yaml` trigger, and both together. Each
+resolved effective schema must fit within **2,000,000 UTF-8 bytes** of compact
+JSON, including `$defs` and the built-in baseline. The test resolves the
+embedded bundle in isolation, with no user schemas or disk bundle, so its
+result describes the shipped schemas. This is a deterministic size check,
+not a time limit.
+
+To investigate validation time, choose a representative Markdown sequence
+with nested containers and a reachable disk bundle, then run:
+
+```sh
+md schema validate path/to/sequence.md -vv
+```
+
+The report separates discovery, trigger matching, resolution, validator
+compilation, and validation. A one-shot validation under 200 milliseconds on
+the development Mac is a development goal, not a guaranteed latency or a
+test threshold. Record the document, command, machine load, and stage
+breakdown when comparing a change. See
+[validation timing and cold/warm comparisons](../../../darkmatter/docs/inline/schema-validation.md#comparing-cold-and-warm-validation)
+for the existing benchmark workflow.
+
 ### Malformed templates in any action
 
 Every string the lifecycle parser reads as a template is checked for syntax
@@ -574,8 +621,9 @@ verdict alike, because no rendering can repair it.
 The schema cannot express these rules; the lifecycle parser enforces them
 before anything runs:
 
-- a directive (`stop`, `retry`, `proxy`, …) placed last in its list, and at
-  most one directive per bundle
+- an unconditional ending directive (`stop`, `retry`, `proxy`, …) placed
+  last in its list, and at most one directive per bundle; `prep` returns, so
+  another item may follow it
 - `skip` only in `initialize`
 - no `when` beside the actions of a root or body dictionary, or at the
   `loop:` root, and `gate:` never beside loose loop verbs (a conditional's
@@ -595,7 +643,8 @@ lifecycle stack can execute.
 
 The reverse also holds: the parser does not type-check a literal operand, so
 `pr_list: three` passes the parser. The schema rejects it, and because the
-launch verdict runs the schema, the launch fails before anything runs.
+launch verdict runs the schema, no `start` stack or provider runs. Shell-free
+initialization may already have run before that verdict.
 
 ### Generated verbs have typed arguments
 
@@ -928,7 +977,7 @@ and `claudine`.
 
 ```sh
 mkdir -p ~/schemas
-cp claudine/schemas/*.yaml ~/schemas/
+cp claudine/schemas/*.yaml claudine/schemas/globals.lifecycle.json ~/schemas/
 ```
 
 These routes do **not** work:
@@ -1022,8 +1071,8 @@ parser still enforces the execution rules.
     - [Schema Types](^darkmatter/docs/topics/schemas/schema-types.md)
     - [Schema Constraints](^darkmatter/docs/topics/schemas)
     - [Schema Triggering](^darkmatter/docs/topics/schemas/)
-- [CLI Validation]()
-- [CLI Observation]()
+- [CLI Validation](../../../darkmatter/docs/topics/schemas/definition.md#cli-md-schema-validate)
+- [CLI Schema Detection](../../../darkmatter/docs/topics/schemas/definition.md#cli-md-schema-detect)
 - [DMLS Support for Schemas](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md)
 - Schemas
     - Darkmatter ([all global namespaces](^darkmatter/schemas/darkmatter.yaml))

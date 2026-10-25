@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Interpolation
 
 The Darkmatter compose pipeline provides interpolation of frontmatter, context, and environment values into a document.

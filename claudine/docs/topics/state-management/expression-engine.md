@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Expression Engine
 
 Expressions let a Markdown document calculate values and choose which content

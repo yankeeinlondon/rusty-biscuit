@@ -1,4 +1,8 @@
-## Overview
+---
+kind: canonical-documentation
+---
+
+# Composition Reports
 
 `md compose --output report-json` composes a document and prints one JSON
 object that says whether it worked, lists every diagnostic the run reported,

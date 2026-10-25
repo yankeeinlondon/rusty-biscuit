@@ -1,14 +1,21 @@
+---
+kind: canonical-documentation
+---
+
 # Pre-Flight Shell Approval
 
-Before the compose pipeline executes any shell command, every command must pass through a security approval flow. This pre-flight check ensures that no malicious or accidentally harmful command runs without explicit authorization.
+A shell template lets you approve a command whose arguments may change between runs. For example, `template just clean --out {{ string }}/build` permits the same command structure with a different output directory. Each value is checked before it fills one argument; it cannot add shell syntax.
+
+Every command still passes through pre-flight approval. This page explains exact, program-wide, and typed-template rules, what the approval prompt offers, and the checks that remain when an approved command runs.
 
 ## Why This Exists
 
-Shell commands can appear in three places during Darkmatter composition:
+Shell commands can appear in these places during Darkmatter composition:
 
 1. **`::shell` directives** — inline shell expansion in the document body
 2. **`::shell-block` / `::end-block` directives** — multi-command sequential execution
 3. **Frontmatter `$(cmd)` expressions** — shell expansion in top-level frontmatter string values
+4. **Lifecycle actions** — `shell` and whole-value `$( … )` commands in lifecycle `set` actions; see [Lifecycle](../topics/lifecycle/index.md). Initialization remains shell-free.
 
 Without pre-flight approval, an unguarded shell directive could execute destructive or unintended commands during what should be a safe document composition.
 
@@ -221,8 +228,8 @@ operator, or ordered redirection changes it. For example, `tool "{{ x }}"`
 and `tool {{ x }}` share a shape; `tool prefix-{{ x }}` needs a rule retaining
 that literal prefix. Adjacent holes such as `{{ x }}{{ y }}` stay in one word.
 
-Only a bare top-level property (`out` or `fm.out`) gets its declaration from
-the effective schema of the document that owns the command. Named declarations
+Before considering guard refinements, only a bare top-level property (`out`
+or `fm.out`) gets its declaration from the effective schema of the document that owns the command. Named declarations
 resolve there, including in a transcluded child with its own schema. Other
 expressions (`env.OUT`, `last(seq.outputs)`, `out || 'dist'`), undeclared properties,
 and schemas without a SimplifiedSchema projection use a broad `string` hole.
@@ -243,9 +250,10 @@ A `template` hole holds one type with its options and nothing else:
 `{{ string }}` or a narrower string-like type such as
 `{{ alphanumeric(allow-slashes) }}`. A literal containing spaces, quotes,
 braces, or shell characters is double-quoted, with `\\`, `\"`, `\{`, `\}`,
-`\n`, `\r`, and `\t` as escapes; `"{{ x }}"` inside quotes is literal text, so
-write it `"\{\{ x \}\}"`. A line the loader cannot read is skipped with a
-warning naming the file and line, and the other rules still load. These
+`\n`, `\r`, and `\t` as escapes. To store literal braces rather than a
+placeholder, escape them: `"\{\{ x \}\}"` represents the literal argument
+`{{ x }}`. Unescaped braces inside a quoted rule literal are rejected.
+A line the loader cannot read is skipped with a warning naming the file and line, and the other rules still load. These
 template lines are skipped:
 
 | Line | Why |
@@ -292,6 +300,11 @@ dir: "a b"
 With `exact ls a b/build` this runs `ls` with the two arguments `a` and
 `b/build`. With `template ls {{ string }}/build` it runs `ls` with the one
 argument `a b/build`.
+
+A single argument can still select a program option. For example, a value
+beginning with `-` may be treated as a flag by its program. Use `--` before
+value arguments where the program supports it, and choose a restrictive type
+when approving a reusable operation.
 
 When the bytes are split into words, a quoted empty word (`""` or `''`) is
 one empty argument, and the exact key spells it `""`. An unquoted placeholder
@@ -388,7 +401,7 @@ lists only the choices the command is eligible for, numbered in this order:
 
 | Choice | Listed when | Saves |
 |--------|-------------|-------|
-| Allow this exact command | every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
+| Allow this exact command | resolved-byte approval is eligible and every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
 | Allow this command shape | the command has a placeholder and valid template grammar | `template <shape>` to `.darkmatter-shell-whitelist`; the command runs as a template |
 | Allow this program with any arguments | every program word is fixed | `prefix <program>` for each distinct program of the chain |
 | Allow once | always | nothing; this run only (for a command with no exact choice, its shape for this run) |

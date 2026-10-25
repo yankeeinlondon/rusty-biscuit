@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Configuring Actions
 
 Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions that run sequentially. Most actions do not block the pipeline; only `call` can return a response to influence agent behavior on blocking events.

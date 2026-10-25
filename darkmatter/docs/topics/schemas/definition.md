@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
@@ -77,6 +80,9 @@ $schema:
 ```
 
 ### Types
+
+For a practical introduction with worked examples, see
+[Choosing Schema Types](./schema-types.md).
 
 | Type         | Accepts                                                                                                | Notes                                                                                                                                                                           |
 |--------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -171,8 +177,9 @@ is deliberately capped at these authored presentations:
   block sequences; and
 - mapping-value anchors and scalar aliases used by the shipped schema corpus.
 
-The last two YAML spellings are what serializers and editors that wrap lines
-tend to produce. Each means exactly what its conventional spelling means.
+Serializers often produce indentless lists, and editors may wrap plain values
+onto continuation lines. Each presentation has the same meaning as its
+conventionally indented or single-line equivalent.
 
 **Indentless sequences.** Wherever the grammar accepts a sequence, its items
 may sit at the parent key's column. The list ends at the next line at that
@@ -225,7 +232,7 @@ $schema:
 
 The value ends at the first line that is not indented past its key (here
 `next`) or at a comment line. Folding never makes an invalid expression valid;
-`string(min(1)` continued onto `bogus(2))` is still an unknown constraint.
+`string(min(1);` continued onto `bogus(2))` still has an unknown constraint.
 
 **Ranges.** Source maps and `suggest(...)` candidate spans are byte ranges into
 the original file, with its line endings left as authored (LF or CRLF). A token
@@ -750,8 +757,11 @@ that a key be present. Use a concrete type for that, such as
 `value: [string(required), number, boolean, object, "unknown[]"]`.
 
 An expression variable that no frontmatter key, caller input, or schema
-property declares is of type `unknown`. That is a description, not a static
-check: an invalid operation on such a value is still a runtime error.
+property declares is of type `unknown`. A function argument with this type
+cannot be proven incompatible before execution. DMLS can warn about that
+uncertainty when `expressions.strict` is enabled; ordinary composition does
+not reject it on that basis. The actual value must still satisfy the function
+at runtime. See [Expression Type Checking](../darkmatter-expressions.md).
 
 **`null`** accepts an explicit `null` or omission and rejects every other
 value. It lowers to `{"type": "null"}`.
@@ -1372,22 +1382,52 @@ Rules:
 - An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
 
-> **Implementation note:** each target file's named types are parsed once
-> per revision of its contents and shared, unexpanded, by every import of
-> that file, in this resolution and later ones; the file is still read every
-> time, so an edit is seen at once. The document's own table is shared by
-> every `@this`. Each use site
-> still receives its own copy of the selected definition, so a constraint,
-> description, or `[]` on one import never affects another:
->
-> ```yaml
-> $schema:
->     primary: name(required)@./types.yaml  # required here only
->     backup:  name@./types.yaml            # unaffected by `primary`
-> ```
->
-> The sharing ends when that resolution finishes: nothing is kept between
-> calls, and it reduces copying without promising a fixed end-to-end speedup.
+#### Shared Tables and Independent Imports
+
+Importing several names from one file does not copy that file's entire type
+library for each reference. Within one import-expansion operation, the resolver
+keeps one immutable table of the file's unexpanded definitions. The first
+lookup, later lookups, and `@this` lookups inside that file share the same
+table. The root document has its own table, copied once before expansion so
+local references can still read its original definitions. Declaration order is
+preserved.
+
+Each use receives its own selected definition before its constraints,
+description, and array modifier are applied. For example, given a type library
+whose `name` is an optional string:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    name: string
+```
+
+```yaml
+$schema:
+    primary: name(required)@./types.yaml
+    backup:  name@./types.yaml
+```
+
+`primary` is required, while `backup` remains optional. Neither use changes
+`name` in the library. A reference written inside an imported definition reads
+that definition's own file for `@this` and bare local names, even if the root
+document declares a type with the same name. Recursive types share their
+compiled bodies as described in [Recursive Named Types](#recursive-named-types);
+use-site modifiers still do not mutate those bodies.
+
+There are two cache lifetimes. The expansion's namespace cache ends with that
+operation. Separately, a bounded cache in the running process retains parsed
+file tables by the path read and a hash of the file's contents. A new expansion
+reads the file before consulting that cache, so edits and deletions are
+observed; a cache hit saves parsing, rather than suppressing the read. The
+cache holds successful parses only. Expansion state, dependency tracking, and
+use-site modifications remain local to each operation.
+
+This sharing reduces copying and repeated parsing. It does not remove file
+resolution, selected-definition copying, or expansion work, and it does not
+promise a fixed end-to-end speedup. Schemas without named references skip the
+import-expansion machinery.
 
 #### Reserved Darkmatter References (`Name@darkmatter:<stem>`)
 
@@ -1543,6 +1583,12 @@ Every level is checked against the same definition: each `item` needs a
 `children` or `children: null` four levels down fails at that node. The schema
 has no depth setting; a document may nest as deeply as its values do. A tool
 that needs a nesting limit enforces it in its own parser.
+
+This describes finite values, not unlimited resources. Existing parser and
+conversion limits still apply, and exhausting a traversal limit is an error;
+it never makes an unchecked remainder valid. Acyclic named types continue to
+be inlined, so recursion removes repeated copies of cyclic bodies without
+promising compact output for every possible schema.
 
 #### Supported cycles
 
@@ -2041,7 +2087,7 @@ reports the same error at the reference.
 | `U(max(10))`, `U(pattern(^a))`, `U(unique)`, `U(default(x))`, `U(max(2))[]` | A value constraint without `[]`, or before it, would have to apply to every arm. Put it on the arms instead. | `Constraint { keyword, array_level: false }` |
 | `U[](pattern(^a))`, `U[](integer)` | After `[]`, only list constraints apply. | `Constraint { keyword, array_level: true }` |
 | `U[]` where an arm is already a list, such as `[string[], number]` | Checked after imported and nested union arms are expanded, so an array arm behind an import is caught too. | `ArrayArm { arm }` |
-| `U[]` where an arm carries a `default(...)` | The arm's default cannot become the list's default; see [Defaults](#defaults-on-named-union-references). | `ScalarDefault { arm, value }` |
+| `U[]` where an arm carries a scalar `default(...)` | A scalar default cannot become the list's default; see [Defaults](#defaults-on-named-union-references). | `ScalarDefault { arm, value }` |
 
 ```text
 p: constraint `max` cannot apply to a union-typed type (named type `choice`)
@@ -2068,8 +2114,10 @@ $schema:
 A list *inside* an object arm is fine: `[string, "{ tags: string[] }"]` may be
 referenced as `U[]`, because no arm's outer value is a list.
 
-Only a **named** union takes these postfixes. An anonymous union cannot be
-followed by `[]`, and an `(A | B)[]` spelling is not supported.
+For an unnamed union, group the alternatives before adding `[]`:
+`(string | number)[](min(1))`. It uses the same array-of-union representation
+as a named `U[]`; see [The `|` Operator and Grouping](#the--operator-and-grouping).
+The reference-specific restrictions above describe modifiers on a named type.
 
 #### Item versus container scope
 
@@ -2129,15 +2177,21 @@ $schema:
   way.
 - A `default(...)` written after `[]` at the use site lowers exactly as on any
   other array.
+- A caller constructing schema definitions through the Rust API can supply
+  an actual JSON array as an arm's default. That array becomes the containing
+  list's default. Multiple inherited and use-site defaults must be equal;
+  conflicting defaults fail schema preparation. This does not add a
+  list-valued default spelling to the authoring grammar.
 - Darkmatter never inserts a default value into a document.
 
 #### Lowering
 
 A list of a union lowers to an array whose `items` is the union's `anyOf`.
-Nested unions flatten into one `anyOf`, arm order and arm descriptions are
-kept, and items get no `null` arm. An optional property wraps the whole array
-in the usual `anyOf: [{ type: null }, …]`, so a missing or `null` property is
-allowed while a `null` item is not. A use-site description sits on that
+Nested unions flatten into one `anyOf`, and arm order and arm descriptions are
+kept. Items get no automatic `null` wrapper: an item accepts `null` only when
+an authored arm admits it, such as `null` or `unknown`. An optional property
+wraps the whole array in the usual `anyOf: [{ type: null }, …]`, so a missing or `null` property is
+allowed independently of whether an item arm admits `null`. A use-site description sits on that
 wrapper. The `content_policy` property of the
 [example below](#example-a-content-policy-list) lowers to:
 
@@ -2157,9 +2211,11 @@ wrapper. The `content_policy` property of the
 }
 ```
 
-`U(required)` lowers to the union's `anyOf` with no `null` arm and the
-property in the parent's `required` list. A nested arm that carries its own
-postfix flattens exactly like a bare one, so coercion, literal-discriminant
+When `U` does not itself admit null, `U(required)` lowers to the union's
+`anyOf` without an optional-property wrapper and puts the property in the
+parent's `required` list. Null-admitting unions follow the
+[presence exception](#null-admitting-properties) above. A nested arm that
+carries its own postfix flattens exactly like a bare one, so coercion, literal-discriminant
 selection, and error reporting see one list of alternatives:
 
 - its `required`, `generated`, and `eager` markers belong to the containing
@@ -2490,8 +2546,10 @@ content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy
 ```
 
 The property is optional and has no default, so a document without it stays
-valid and nothing inserts it; a present value must be a non-empty list whose
-items each match a `policy` entry (see
+valid and nothing inserts it. A non-null value must be a non-empty list whose
+items each match a `policy` entry. Explicit `null` keeps the schema's normal
+optional-property behavior, although Content Policy's declaration parser
+rejects it (see
 [Example: a content policy list](#example-a-content-policy-list)).
 
 The baseline and every schema it imports are compiled into the library, so an
@@ -3310,9 +3368,25 @@ the unknown-key problem keeps the path `/start/0/then/1` and is reported at line
 
 Flow collections (`{…}`, `[…]`) written on one line are located node by node too. With `m: {a: 1, b: x}` on line 2, an unknown key `b` is at 2:11 and a wrong value `x` at 2:14.
 
+Paths identify decoded mapping keys. A key `"a/b"` has the JSON Pointer
+segment `a~1b`, and `"a~b"` has `a~0b`; both still locate their authored key
+or value correctly. The segment `0` selects a key inside a mapping and an
+item inside a list. An empty key is `/`, distinct from the empty pointer for
+the document root.
+
 **Scalars are one node.** A block scalar (`|`, `>`) or a quoted scalar is located at its start (the indicator or the opening quote). A problem inside its decoded content, such as a `yaml` or `json` value whose embedded document is wrong, reports that start; no position inside the scalar is invented.
 
-**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation means aliases (`*a`) and anchors used as values, merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
+**Changes keep their editing location.** Validation uses the original source
+even after an assignment, interpolation, or library call replaces a value.
+For a file whose second line is `count: 1`, validating the assignment
+`count=abc` against `count: number` reports line 2, column 8, where `1` was
+authored. It does not claim that `abc` appeared there. A new nested field uses
+its nearest authored ancestor: adding `b` to an existing `m: {a: 1}` locates a
+problem at the start of that flow mapping. A newly added top-level property
+has no authored node or non-root ancestor, so JSON reports `null` for both
+`line` and `column`.
+
+**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation includes aliases (`*a`), merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
 
 ```mermaid
 flowchart TD
@@ -3327,7 +3401,13 @@ flowchart TD
 
 **Documents without loaded text.** Locations need the text the document was parsed from. A `Markdown` document built in code has no such text, so its locations refer to the serialized YAML of its frontmatter. Source-free validation reports no locations: `EffectiveSchema::validate`, or `validate_with_positions` given the empty `PositionMap::new()`. A library caller holding bare YAML can build a map with `schemas::validate::build_position_map(yaml)`; its lines are relative to that slice, so line 1 is the first YAML line rather than the `---`.
 
-The same locations appear in `md compose`'s [schema-failure block](#error-rendering), and the DMLS language server highlights the same nodes in an editor.
+A position map belongs to one source snapshot. Normal document validation
+builds it once and shares it across all problems, including root-union arms.
+Lookup does not run expressions, resolve references, or modify frontmatter;
+the path, diagnostic identity, and validation outcome remain independent of
+whether a precise location is available.
+
+The same locations appear in `md compose`'s [schema-failure block](#error-rendering), and the DMLS language server highlights the same supported nodes in an editor. Editor positions use zero-based lines and the negotiated UTF-8 or UTF-16 encoding; see [DMLS diagnostic ranging](../../../dmls/docs/diagnostics.md#ranging) before comparing them with CLI columns.
 
 ### Behavior Without `$schema`
 
@@ -3589,7 +3669,12 @@ assert!(!is_subtype(&atom("literal(4)"), &atom("enum('4')"))); // structure, not
 
 Only the type and its canonical options count. Ordinary constraints (`min`,
 `max`, `pattern`, …), presence, the optional `null` wrapper, and coercion are
-outside the relation.
+outside the relation. Those exclusions apply inside structured types too:
+changing an inline object's child `min(...)` constraint does not change its
+type identity. Field names and child types, tuple positions and their optional
+markers, and other structural details still count. This does not make an
+object with a different field shape a subtype merely because some fields
+agree.
 
 | `a` | `b` | `a` ⊆ `b`? |
 |---|---|---|
@@ -4007,6 +4092,13 @@ condition mapping (`{}`) is a load error wherever it appears, including as a
 child of a combinator: `none: [{}]` would otherwise make the trigger
 unmatchable, and `all: [{}, …]` would hide a dropped condition. A load error
 names the field it is about, from `match` down: `` `match[1].group[0]` ``.
+
+Use a concrete type for a presence gate, such as `prompt: string(required)`
+or `steps: unknown[](required)`. `unknown(required)` and its alias
+`any(required)` admit omission and null, so neither establishes presence.
+A concrete type also limits which non-null values select the trigger:
+`steps: unknown[](required)` does not match `steps: false`. Write the type for
+the values that the target document actually accepts.
 
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger

@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Lifecycle Error Handling
 
 This page explains what happens when a [lifecycle](./index.md) run goes
@@ -220,7 +224,7 @@ outcome (`failure`).
 
 | Failure | Event |
 |---|---|
-| Composition, preflight, or a host preflight check (a refused shell, launch-schema validation, agent resolution, a missing include) | `failed` (`blocked`) |
+| Composition, preflight, or a host check inside the run (a refused shell, launch-schema validation, agent resolution, a missing include) | `failed` (`blocked`) |
 | An internal setup failure before the operation started (materialization, parsing a hand-off target) | `failed` (`blocked`) |
 | A refused hand-off or a refused recovery before the operation started, even after `composed` (`start`) fired | `failed` (`blocked`) |
 | Building the launch, after `composed` (`start`) | `failure` |
@@ -228,8 +232,12 @@ outcome (`failure`).
 | The operation fails, or its completion check fails | `failure` |
 | A refused hand-off or recovery after the operation started | `failure` |
 
-A host check registered to run before the run starts fires no event at all
-when it fails.
+A host check made before the run starts fires no event when it fails. The
+check site chooses this boundary (`CheckStage::BeforeRun` or `InRun`); the
+check's name does not decide it. For example, Claudine's initial provider
+selection can fail before `initialize`, whereas provider selection reached
+inside an active sequence is an in-run preflight failure. Only the latter
+routes through `blocked` and `finalize`.
 
 Because of the third row, `failed` (`blocked`) can follow `composed`
 (`start`) under such a host. It never does under `md`.

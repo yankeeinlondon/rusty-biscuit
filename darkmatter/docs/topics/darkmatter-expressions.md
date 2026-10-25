@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Darkmatter Expressions
 
 Darkmatter exposes a single expression language used in two kinds of surface:
@@ -8,6 +12,12 @@ Darkmatter exposes a single expression language used in two kinds of surface:
 Both kinds share the same lexer, parser, and evaluator, so the operator
 set, truthiness rules, helper functions, and access semantics described here
 are identical everywhere.
+
+Before evaluating a document, Darkmatter checks calls against the available
+schema declarations and enclosing guards. The [call-check guide](../inline/call-check.md)
+explains which calls are rejected and which receive warnings. For command-line
+control of those warnings, see [diagnostic policy](../cli/policy.md); scripts
+can collect the result with [composition reports](../cli/report-json.md).
 
 ### Availability across every surface
 
@@ -25,7 +35,7 @@ surface that runs it:
 | `::block` / `::file` / `::code` conditions | `when="..."` |
 | Reference-graph conditional extraction | `when="..."` |
 | Public condition API | `evaluate_condition_against(...)` |
-| Claudine loop conditions | `until=` / `while=` / `action=` |
+| Claudine loop conditions and action operands | `until:` / `while:` and expressions under `action:` |
 | Claudine hook conditions | `when=` |
 
 This is the **availability invariant**: a read-side function or `fm.*`
@@ -127,9 +137,11 @@ title: Notes
 ```
 
 Every root is classified the same way, in this order. A host such as Claudine
-can register extra globals (see [Host Bindings](#host-bindings)); plain
-`md compose` registers none, so for it every unreserved root is a document
-property.
+can register extra globals (see [Host Bindings](#host-bindings)); the
+document host supplies those declarations for the current evaluation scope.
+Lifecycle events also declare `err` and `timing`; Claudine adds `seq`,
+`loop`, and `group` in their applicable scopes. An undeclared, unreserved root
+is a document property.
 
 ```mermaid
 flowchart TD
@@ -260,7 +272,9 @@ is_number(flag) ? min(flag, 5) : 0   flag: boolean(required) can never be a numb
 
 ```md
 ---
-release_tag: string | null
+$schema:
+  release_tag: string
+release_tag: v1.2.3
 ---
 ::block when="release_tag"
 ::shell git tag {{ release_tag }}      <!-- release_tag is present here -->
@@ -486,11 +500,16 @@ namespace.
 | --- | --- | --- |
 | `fm` / `fm.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
-| `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
+| `env.*` | the document's captured environment (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 
-`env` does not change during a composition: every `env.*` read in a request
-sees the same captured map.
+Each document captures `env` once. Loop iterations, retries, resumes, and
+transcluded content reuse that map; a new document captures its own. A host
+may select provider identity after frontmatter resolves through the explicit
+[frontmatter hook](compose-requests.md#choosing-the-bodys-environment-from-the-frontmatter).
+In that case frontmatter keeps the values it already read, and the body and
+its transclusions use the selected identity. No expression refreshes `env`
+from the live process.
 
 ### The lazy `current` namespace
 
@@ -531,7 +550,7 @@ old expression still parses but reads the document.
 | --- | --- | --- |
 | `{{ current_env.HOME }}` | the live process value of `HOME` | member `HOME` of the frontmatter property `current_env` (usually absent) |
 
-Rewrite `current_env.` to `env.` to read the request's captured environment.
+Rewrite `current_env.` to `env.` to read the document's captured environment.
 An old `current_env.X` with no `current_env` property renders empty and is
 reported as the advisory `dm.expression.undeclared_property`.
 
@@ -1076,9 +1095,11 @@ is not a well-formed reference can only return `false`:
 ```
 
 Composition reports a `dm.expression.always_false_call` warning for it, with
-the file and line, and still composes the document; DMLS shows the same
-warning at the literal. Only an authored literal is judged; a variable of
-type `string` never is. Finding it reads no file and runs no function.
+the file and line. The document still composes under the default policy;
+`--deny all` or `--deny dm.expression.always_false_call` makes the warning
+blocking. DMLS shows the same warning at the literal. Only an authored literal
+is judged; a variable of type `string` never is. Finding it reads no file and
+runs no function.
 
 #### Filesystem Helpers
 

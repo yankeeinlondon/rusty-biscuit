@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Darkmatter Compose Pipeline
 
 ## High Level Flow

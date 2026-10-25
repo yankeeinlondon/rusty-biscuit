@@ -1,6 +1,13 @@
-## Overview
+---
+kind: canonical-documentation
+---
 
-The `compose` command runs markdown through the transform pipeline and outputs the composed result.
+# `md compose`
+
+The `compose` command assembles a Markdown document by evaluating its expressions,
+applying transforms, and including referenced content. It writes the composed
+result and, when the root declares lifecycle events, runs those events around
+composition.
 
 It is used for document assembly workflows like:
 

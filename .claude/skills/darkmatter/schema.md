@@ -141,7 +141,7 @@ source snapshot, shared by every problem and root-union arm):
   node.
 - The alignment witness: `PositionMap::project` accepts the locator's tree
   only when its mappings match the parsed `MappingOrders` and it holds no
-  alias. Otherwise (aliases/anchors, `<<`, unquoted `{{ }}`, multi-line or
+  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`, multi-line or
   commented flow collections) it falls back to top-level key line, column 1.
   Positions never change validity.
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
@@ -493,7 +493,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   value constraints without `[]` (`U(max(10))`), non-list constraints after
   `[]`, `[]` when a flattened arm's outer value is an array (looks through
   imports and nested postfixed unions; arrays inside object arms are fine),
-  and any arm `default` under `[]`. A list before `[]` parses into the atom's
+  and a scalar arm `default` under `[]`. A list before `[]` parses into the atom's
   `constraints` (the list after `[]` into `array_constraints`, as on a
   primitive); on a union only the markers are accepted there and join the
   container (`U(eager)[]` == `U[](eager)`), a value constraint is a
@@ -507,9 +507,11 @@ References; Choosing an Arm: Reporting versus Changing Data).
   property, on `U` and `U[]` alike (`phase.rs` counts arms under `[]` as
   `is_required` does). `eager` there is property timing and never makes a
   lazy `file` arm eager; only an arm declared `file(eager)` probes files.
-- Defaults: `default([...])` is a string in the grammar, so every arm default
-  under `[]` fails as `ScalarDefault`; do not document list defaults as
-  working. No default is ever inserted.
+- Defaults: `default([...])` is a string in the grammar, so every authored arm
+  default under `[]` fails as `ScalarDefault`. The Rust API can supply an
+  actual JSON-array arm default, which hoists to the list; inherited and
+  use-site defaults must agree under shared numeric normalization. This adds
+  no list-valued default spelling to the grammar. No default is ever inserted.
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
   and `atom.is_array` for `U[]`; the parser produces the same atom for the
@@ -518,7 +520,8 @@ References; Choosing an Arm: Reporting versus Changing Data).
   list of a union); the crate-private `is_required`/`is_generated`/
   `has_default` read through arms.
 - Lowering (`convert.rs`): `type: array` + `items.anyOf` of the flattened
-  arms; items get no null arm; the optional `anyOf: [null, …]` wrapper (and a
+  arms; items get no automatic null arm (an explicit `null`/`unknown` arm can
+  admit null); the optional `anyOf: [null, …]` wrapper (and a
   use-site description) goes on the property only. A nested postfixed arm
   flattens into the one `anyOf`, its markers hoisted to the property.
 - Consumers must not read `properties` off an `anyOf` wrapper. Use
@@ -630,8 +633,10 @@ needs `@this`.
 - `SimplifiedType::Unknown` is canonical; `any` parses to it
   (`SimplifiedType::aliases()`), and serialization, `md schema about`
   (`alias: any`), and DMLS say `unknown`. It lowers to `{}`, never coerces,
-  and keeps nested nulls. An undeclared expression variable is described as
-  unknown-typed; no static check follows from that.
+  and keeps nested nulls. An undeclared expression variable is unknown-typed;
+  call checking assigns an unknown argument category 4 (a warning only under
+  DMLS `expressions.strict`), rather than rejecting it as proven incompatible.
+  Runtime binding still validates its actual value.
 - `null` lowers to `{"type":"null"}`. YAML null scalars (`null`/`Null`/`NULL`/
   `~`, empty value, empty item) and the string `"null"` spell it at property,
   union-arm, nested, and named positions; a quoted `""` is still "expected a

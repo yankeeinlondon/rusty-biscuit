@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Compose Requests
 
 Every Darkmatter call that resolves a file reference runs inside a **compose
