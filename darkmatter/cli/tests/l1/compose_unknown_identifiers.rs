@@ -112,3 +112,30 @@ fn compose_renders_an_underscored_path_literally() {
     assert!(run.stderr.contains("`some_root` at"), "{}", run.stderr);
     assert!(run.stderr.contains("_part.md:1"), "{}", run.stderr);
 }
+
+/// A direct argument to a `string | null` parameter handles its absence
+/// whatever the function returns, so `--deny all` does not block it; the
+/// same call nested in another call's argument still warns and is blocked.
+#[test]
+fn deny_all_accepts_a_direct_nullable_argument_and_blocks_a_nested_one() {
+    let handled = compose(
+        "deny_all_accepts_a_direct_nullable_argument",
+        "doc.md",
+        "---\ntitle: T\n---\n[{{ trim(x) }}] [{{ lower(y) }}] {{ is_null(z) }}\n",
+        &["--deny", "all"],
+    );
+    assert_eq!(handled.code, Some(0), "stderr: {}", handled.stderr);
+    assert_eq!(handled.stdout.trim_end(), "[] [] true");
+    assert!(!handled.stderr.contains("undeclared"), "{}", handled.stderr);
+
+    let nested = compose(
+        "deny_all_blocks_a_nested_nullable_argument",
+        "doc.md",
+        "---\ntitle: T\n---\n{{ is_empty(trim(w)) }}\n",
+        &["--deny", "all"],
+    );
+    assert_ne!(nested.code, Some(0), "stdout: {}", nested.stdout);
+    let stderr = common::unwrapped(&nested.stderr);
+    assert!(stderr.contains("dm.expression.undeclared_property"), "{stderr}");
+    assert!(stderr.contains("w at"), "the nested read names `w`: {stderr}");
+}

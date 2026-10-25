@@ -567,8 +567,9 @@ message). The moving parts:
   short-circuited operand is never read, so it never warns. Handled
   (intentional-absence policy, never a presence proof): a fallback primary
   (and every operand of a primary `a || b || "d"` chain), a ternary
-  condition, and a direct argument bound to a parameter declaring `| null`
-  in a function whose result does not (`AbsenceScope::call_argument` →
+  condition, and a direct argument bound to a parameter declaring `| null`,
+  whatever the function returns, of a call that is not itself another
+  non-logical call's argument (`AbsenceScope::call_argument` →
   `FunctionRegistration::handles_absence_at`, per argument, every overload
   taking that many arguments). Also handled: a
   read the shared branch facts prove present — the scope carries a
@@ -577,7 +578,9 @@ message). The moving parts:
   operands' true side, an `or`/`||` operand their false side;
   `TypeScope::guards_path_or_ancestor` covers the proven path and below, never
   a sibling. "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all
-  warn (`lower` returns `null` for `null`, so it passes the absence on), and
+  warn (the inner call is `is_empty`'s argument, so it handles nothing;
+  `AbsenceScope.consumed_by_call`, never the return type), `lower(x)` and
+  `is_null(x) && y` do not (`and`/`or` are operators), and
   `x ? "a" : x` warns for the false branch.
   `when=` and `$()` ternary conditions are gates, not absence checks: a bare
   unknown `when="x"` warns.

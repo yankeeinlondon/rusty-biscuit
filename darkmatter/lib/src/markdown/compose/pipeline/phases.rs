@@ -59,56 +59,18 @@ impl Markdown {
                 Ok(())
             }
             ComposeOperation::PageBlocks => {
-                inline::page_blocks::run_stage(self, state, options, runtime, report, body)
+                inline::page_blocks::run_stage(self, state, options, runtime, report, body, schemas)
             }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    inline::interpolation::run_stage(self, state, options, runtime, report, body)
+                    inline::interpolation::run_stage(self, state, options, runtime, report, body, schemas)
                         .map_err(|e| e.with_on_disk_source(&self.full_source_context_for_errors()))?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
                 inline::shell_expansion::run_stage(self, state, schemas, options, runtime, report, perf, body)
             }
-            ComposeOperation::ShellBlocks => {
-                let sb_ctx = self.full_source_context_for_errors();
-                let line_offset = self.frontmatter_line_count();
-                body.data.ensure_describes(&self.content)?;
-                let lookup = super::super::context::effective_state::ResolvingLookup::new(
-                    state,
-                    options.expression_resolution_context(&runtime.remote_fetch),
-                );
-                let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
-                let templates = body
-                    .authored
-                    .as_ref()
-                    .filter(|authored| authored.text().contains("::shell-block"))
-                    .map(|authored| shell_blocks::BlockTemplates {
-                        authored,
-                        guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
-                        scope: shell_expansion::site::SiteScope::new(
-                            options,
-                            schemas.effective_for(self),
-                        ),
-                        evaluator: &evaluator,
-                        ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
-                    });
-                let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
-                    &self.content,
-                    Some(&body.data),
-                    templates.as_ref(),
-                    options,
-                    &mut runtime.shell,
-                    &sb_ctx,
-                    line_offset,
-                )?;
-                body.advance(&self.content, &edits, &new_content)?;
-                self.content = new_content;
-                report.shell_blocks_applied += stage_report.shell_blocks_applied;
-                report.shell_approvals_used += stage_report.shell_approvals_used;
-                report.warnings.extend(stage_report.warnings);
-                Ok(())
-            }
+            ComposeOperation::ShellBlocks => self.run_shell_blocks_operation(state, options, runtime, report, body, schemas),
             ComposeOperation::LinkResolve => {
                 let before = self.content.clone();
                 let edits = link_resolve::link_resolve_with_edits(self, options, report)?;
@@ -116,6 +78,61 @@ impl Markdown {
             }
             _ => Ok(()),
         }
+    }
+
+    /// The [`ComposeOperation::ShellBlocks`] arm of
+    /// [`run_inline_pre_operation`](Self::run_inline_pre_operation).
+    ///
+    /// Out of line so its evaluator and templates stay out of the dispatch
+    /// frame, which the interpolation stage's nested compositions recur
+    /// through.
+    #[inline(never)]
+    fn run_shell_blocks_operation(
+        &mut self,
+        state: &EffectiveState,
+        options: &crate::markdown::compose::ComposeRequest,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+        body: &mut BodyProvenance,
+        schemas: &super::super::schema_validation::PreparedSchemas,
+    ) -> MarkdownResult<()> {
+        let sb_ctx = self.full_source_context_for_errors();
+        let line_offset = self.frontmatter_line_count();
+        body.data.ensure_describes(&self.content)?;
+        let lookup = super::super::context::effective_state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
+        let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
+        let templates = body
+            .authored
+            .as_ref()
+            .filter(|authored| authored.text().contains("::shell-block"))
+            .map(|authored| shell_blocks::BlockTemplates {
+                authored,
+                guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
+                scope: shell_expansion::site::SiteScope::new(
+                    options,
+                    schemas.effective_for(self),
+                ),
+                evaluator: &evaluator,
+                ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
+            });
+        let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
+            &self.content,
+            Some(&body.data),
+            templates.as_ref(),
+            options,
+            &mut runtime.shell,
+            &sb_ctx,
+            line_offset,
+        )?;
+        body.advance(&self.content, &edits, &new_content)?;
+        self.content = new_content;
+        report.shell_blocks_applied += stage_report.shell_blocks_applied;
+        report.shell_approvals_used += stage_report.shell_approvals_used;
+        report.warnings.extend(stage_report.warnings);
+        Ok(())
     }
 
     pub(crate) fn run_inline_post_operation(
@@ -200,6 +217,7 @@ impl Markdown {
         &mut self,
         operations: &[ComposeOperation],
         state: &EffectiveState,
+        schemas: &super::super::schema_validation::PreparedSchemas,
         options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
@@ -266,7 +284,9 @@ impl Markdown {
         // Borrow the document into a transclusion engine for the prepare and
         // resolve stages. The borrow ends before the apply stage mutates
         // `self.content` below.
-        let engine = TransclusionEngine::new(self);
+        let markdown: &Markdown = self;
+        let engine = TransclusionEngine::new(markdown);
+        let mut watch = super::ReportWatch::new(report, options, super::FinalVerdict { markdown, state, schemas });
 
         for operation in operations {
             match operation {
@@ -291,6 +311,7 @@ impl Markdown {
                             &mut prepared,
                             &mut next_order,
                             resolved_cache.as_ref(),
+                            watch.as_mut(),
                         )?;
                     }
                 }
@@ -322,6 +343,7 @@ impl Markdown {
                             &mut prepared,
                             &mut next_order,
                             None,
+                            watch.as_mut(),
                         )?;
                     }
                 }
@@ -351,6 +373,14 @@ impl Markdown {
         if let Some(start) = prepare_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionPrepare, start.elapsed());
         }
+
+        // Preparing evaluated every directive's `when=`; a blocking warning
+        // it reported stops the document before any child composes.
+        super::stop_if_blocked(
+            report,
+            options,
+            Some(super::FinalVerdict { markdown: self, state, schemas }),
+        )?;
 
         if prepared.is_empty() {
             return Ok(());

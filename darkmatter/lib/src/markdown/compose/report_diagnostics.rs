@@ -85,7 +85,10 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 ///
 /// - A policy stop reports the warnings before the stop, then the blocking
 ///   ones, each with its own severity.
-/// - A rejected call reports its located call record.
+/// - A rejected call, in the document or its lifecycle, reports its located
+///   call record; a lifecycle rejection first reports the lifecycle warnings
+///   found before it. (A document rejection's earlier warnings travel beside
+///   the error, in [`ComposeFailure::warnings`](super::ComposeFailure).)
 /// - A schema failure reports one record per problem.
 /// - Any other Darkmatter error reports one record classified by its
 ///   innermost typed error; a foreign error reports [`INPUT_READ_CODE`] for an
@@ -98,6 +101,11 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
         }
         if let Some(shell) = as_shell_error(error) {
             return shell_error_diagnostics(shell);
+        }
+        if let Some(lifecycle) = error.downcast_ref::<crate::lifecycle::error::LifecycleError>()
+            && let Some(diagnostic) = lifecycle.call_diagnostic()
+        {
+            return lifecycle.earlier_warnings().iter().map(warning_diagnostic).chain([diagnostic.clone()]).collect();
         }
         if let Some(expression) = error
             .downcast_ref::<ExpressionError>()

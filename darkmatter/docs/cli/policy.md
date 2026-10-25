@@ -110,6 +110,25 @@ md compose doc.md --deny missing-hyperlinks --allow all   # same
 md compose doc.md --deny all --allow ctx-override
 ```
 
+The conflict check runs first, over the whole command line; then each
+recoverable problem is decided like this:
+
+```mermaid
+flowchart TD
+    O[Parse options] --> C{"the same identifier (or its code)<br/>in --allow and --deny,<br/>or --allow all with --deny all?"}
+    C -- yes --> U[Usage error, exit 2; nothing runs]
+    C -- no --> P[A recoverable problem is found]
+    P --> D{"named by --deny?"}
+    D -- yes --> B[Not recovered: the warning blocks]
+    D -- no --> A{"named by --allow?"}
+    A -- yes --> R[Recovered: reported, never blocks]
+    A -- no --> AD{"--deny all?"}
+    AD -- yes --> B
+    AD -- no --> AL{"--allow all?"}
+    AL -- yes --> R
+    AL -- no --> F[Not recovered: the command fails]
+```
+
 Opposite selections of the same specificity are usage errors (exit status 2),
 reported before the command reads its input or runs anything:
 
@@ -139,9 +158,11 @@ flowchart TD
     B --> C[initialize event, when the document has a lifecycle]
     C --> D[Each document's call check, before its expressions run]
     D -->|blocking| F2[Fail; earlier effects stay]
-    D --> E[Compose: expressions, shells, transclusions]
-    E -->|blocking warning| F3[Fail before writing; effects stay]
-    E --> W[Write the document, open a viewer for --show]
+    D --> E[Compose: each stage, command, expression, condition, and child in order]
+    E -->|blocking warning| F3[Fail before the next one runs; effects stay]
+    E --> L[Last stages: undeclared reads judged, links normalized]
+    L -->|blocking warning| F4[Fail before writing]
+    L --> W[Write the document, open a viewer for --show]
 ```
 
 - **Passive checks** read the document without running it. A blocking
@@ -151,9 +172,42 @@ flowchart TD
 - **The call check** runs for each document (each transcluded child too) just
   before its expressions are evaluated, so a blocking call warning stops that
   document before it runs anything.
-- **Other warnings** (an undeclared property, a recovered timeout) are found
-  while composing. A blocking one stops the command before the document is
-  written; shells and lifecycle actions that already ran are not undone.
+- **Runtime warnings** (an undeclared property, an unknown `ctx` group, the
+  notice that a repeated volatile command reused its result) are found while
+  composing. A blocking one stops the document before its next stage,
+  command, expression, or condition: a `::shell` after the read never runs, a
+  `::file` whose `when=` warned composes no child, a transcluded child stops
+  before its own shells, and an expression or condition evaluated after the
+  read never runs, so an `as_markdown(…)` there composes nothing. A nested
+  `as_markdown` child that stops stops the calling document too, even inside
+  an `||` fallback. In a lifecycle run the failure goes to `failed`;
+  `composed` and the write never happen.
+- **"Next" follows evaluation order, which is not always reading order.**
+  Body `{{ … }}` spans, and the spans inside one frontmatter value, are
+  evaluated from the end of the text backward; frontmatter keys (a key that
+  reads another waits for it), `::block` conditions, and `::file` `when=`
+  conditions in document order. An expression evaluated before the warning
+  is known still runs.
+- **A frontmatter read is judged when the frontmatter is final**, after its
+  `$( … )` commands and the schema that may declare the property. A blocking
+  undeclared read in frontmatter therefore stops the body, not the frontmatter
+  commands or expressions that run beside it.
+- **Nothing is undone or interrupted.** Commands that already ran stay done,
+  and a transcluded child already composing beside the one that stopped
+  finishes. A warning from the last stages (an undeclared read only
+  reconciled at the end, link normalization) stops the command before the
+  document is written.
+
+```sh
+# .darkmatter-shell-whitelist holds: prefix touch
+printf '{{ missing }}\n\n::shell touch marker\n' > doc.md
+md compose doc.md --deny all   # fails on dm.expression.undeclared_property; no marker
+md compose doc.md              # succeeds with the warning; creates marker
+
+# The later span is evaluated first, so the nested shell never runs either.
+printf '{{ as_markdown("::shell touch marker") }}\n\n{{ missing }}\n' > doc.md
+md compose doc.md --deny all   # fails on dm.expression.undeclared_property; no marker
+```
 
 A failed command never writes the composed document to stdout, in any
 `--output` mode, and never opens a viewer for `--show`.
@@ -185,6 +239,8 @@ The registry of identifiers lives in `darkmatter-cli`
 identifiers mean: `darkmatter::markdown::compose::policy` holds the
 diagnostic codes (`COMPOSE_DIAGNOSTIC_CODES`) and the `BlockingPolicy` a
 caller installs with `ComposeOptions::with_blocking_policy`. A composition
-under a policy that blocks a call warning fails with
+under a policy that blocks a call warning, or a runtime warning before its
+next stage, command, or child, fails there with
 `MarkdownError::BlockedDiagnostics`, which carries the blocking warnings and
-the earlier non-blocking ones.
+the earlier non-blocking ones. A warning reported by the last stages is left
+in the report for the caller to check, as `md` does before writing.

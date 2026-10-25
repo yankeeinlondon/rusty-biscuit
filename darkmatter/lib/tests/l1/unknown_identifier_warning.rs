@@ -195,12 +195,15 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         // Registered aliases resolve through the same function catalog.
         ("{{ isnull(x) }}", "true", &[]),
         ("{{ isEmpty(x) }}", "true", &[]),
-        // Nested: the predicate no longer directly guards the read.
+        // Nested: a call that is another call's argument hands its result
+        // on, so its own direct argument is no longer handled.
         ("{{ is_empty(trim(x)) }}", "true", &["x"]),
         ("{{ is_empty(lower(x)) }}", "true", &["x"]),
-        // A text transform passes a missing value through as null (ledger
-        // row 31); `length(x)` would now be a type error (row 18).
-        ("{{ upper(x) }}", "", &["x"]),
+        // A text transform's `string | null` parameter handles a direct
+        // missing argument, which renders empty, whatever it returns.
+        ("{{ upper(x) }}", "", &[]),
+        ("{{ trim(x) }}", "", &[]),
+        ("{{ lower(x) }}", "", &[]),
         // A chain that is itself a primary handles every operand.
         ("{{ x || y || \"d\" }}", "d", &[]),
         // "Direct" only: a comparison in the condition is an ordinary operand.
@@ -242,13 +245,14 @@ fn static_reads_use_the_shared_branch_facts() {
     use darkmatter::markdown::compose::expression::{parse_spanned, static_variable_reads};
 
     let rows: &[(&str, &[&str])] = &[
-        // A direct `&&` operand is handled: `and` declares `unknown | null`
-        // and returns `boolean`. `lower` passes `null` through, so only the
-        // earlier operand's facts cover its argument.
+        // A direct `&&` operand is handled: `and` declares `unknown | null`.
+        // `and` is an operator, not a consuming call, so `lower`'s own
+        // `string | null` parameter still handles its argument.
         ("x && x.name", &[]),
         ("x && lower(x.name)", &[]),
         ("is_string(x) && lower(x)", &[]),
-        ("lower(x) && lower(x)", &["x", "x"]),
+        ("lower(x) && lower(x)", &[]),
+        ("is_null(x) && is_empty(trim(y))", &["y"]),
         ("x && y ? y : z", &["z"]),
         ("x ? x : \"none\"", &[]),
         ("x ? \"some\" : x", &["x"]),
@@ -259,8 +263,9 @@ fn static_reads_use_the_shared_branch_facts() {
         // `null` is a reserved root: listed as a read here, never warned by
         // a consumer.
         ("x != null && lower(x.name)", &["x", "null"]),
-        // `null != ''`, so the left operand leaves the right one unproven.
-        ("x != '' && lower(x.name)", &["x", "x"]),
+        // `null != ''`, so the left operand proves nothing; `lower`'s own
+        // parameter handles the right one.
+        ("x != '' && lower(x.name)", &["x"]),
         ("x == null ? 'none' : x.name", &["x", "null"]),
     ];
     for (source, expected) in rows {
@@ -568,19 +573,38 @@ fn a_root_read_only_inside_a_false_block_never_warns_even_with_preflight_discove
 // ── Absence handled by type (criteria 21, 36) ────────────────────────────────
 
 /// Criterion 21, composition side: a direct argument to a built-in whose
-/// parameter declares `| null` (and whose result does not) is handled;
-/// `is_empty(trim(x))` is not direct, so it still warns, and so does a bare
-/// read. Each root is distinct so the warnings name exactly the unhandled
-/// ones.
+/// parameter declares `| null` is handled, whether the result may be null
+/// (`trim`, `lower`) or not; `is_empty(trim(x))` is not direct, so it still
+/// warns, and so does a bare read. Each root is distinct so the warnings
+/// name exactly the unhandled ones.
 #[test]
 fn a_parameter_declaring_null_handles_a_direct_missing_argument() {
     let (content, report) = compose_doc(concat!(
         "---\ntitle: t\n---\n",
         "{{ is_null(a) }} {{ is_empty(b) }} {{ file_exists(c) }} {{ isnull(d) }} ",
-        "{{ is_empty(trim(e)) }} {{ lower(f) }} [{{ g }}]\n",
+        "{{ is_empty(trim(e)) }} {{ lower(f) }} [{{ g }}] [{{ trim(h) }}]\n",
     ));
-    assert_eq!(content, "true true false true true  []");
-    assert_eq!(warned_roots(&report), ["e", "f", "g"]);
+    assert_eq!(content, "true true false true true  [] []");
+    assert_eq!(warned_roots(&report), ["e", "g"]);
+}
+
+/// Criterion 21 in frontmatter: a direct nullable argument in an
+/// interpolated value is handled exactly as in the body, whatever the
+/// function returns, and a nested one still warns at its key.
+#[test]
+fn a_frontmatter_value_handles_a_direct_nullable_argument() {
+    let (content, report) = compose_doc(concat!(
+        "---
+",
+        "title: \"{{ trim(a) }}{{ lower(b) }}\"\n",
+        "probe: \"{{ is_null(c) }}\"\n",
+        "nested: \"{{ is_empty(trim(d)) }}\"\n",
+        "---
+[{{ title }}] {{ probe }} {{ nested }}\n",
+    ));
+    assert_eq!(content, "[] true true");
+    assert_eq!(warned_roots(&report), ["d"], "{:#?}", report.warnings);
+    assert!(unknown_identifiers(&report)[0].message.contains("(frontmatter key 'nested')"), "{:#?}", report.warnings);
 }
 
 /// Criteria 21 and 36: `min(x, 5)` is not suppressed. At runtime the missing
@@ -607,7 +631,9 @@ fn a_non_null_parameter_handles_nothing_and_its_binding_error_stays_visible() {
 }
 
 /// Criterion 36 for every parameter shape, through test-registered
-/// functions: an explicit `| null` handles the argument; a plain `unknown`,
+/// functions: an explicit `| null` handles the argument, whatever the
+/// function returns, unless the call is itself another call's argument; a
+/// plain `unknown`,
 /// an optional non-null parameter, or overloads that disagree at that
 /// position do not; overloads that all declare `null` there do. The rule is
 /// the same at runtime and in the static walk.
@@ -624,6 +650,7 @@ fn only_an_explicit_null_in_every_overload_handles_a_missing_argument() {
     };
     let _guards = [
         register("nullable_arg", "function(parameters(v: string | null); returns(boolean))"),
+        register("nullable_pass", "function(parameters(v: string | null); returns(string | null))"),
         register("unknown_arg", "function(parameters(v: unknown); returns(boolean))"),
         register("optional_arg", "function(parameters(a: number, b?: number); returns(boolean))"),
         register(
@@ -637,6 +664,8 @@ fn only_an_explicit_null_in_every_overload_handles_a_missing_argument() {
     ];
     for (source, handled) in [
         ("nullable_arg(x)", true),
+        ("nullable_pass(x)", true),
+        ("is_empty(nullable_pass(x))", false),
         ("unknown_arg(x)", false),
         ("optional_arg(1, x)", false),
         ("mixed_overloads(x)", false),

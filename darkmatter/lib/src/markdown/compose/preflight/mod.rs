@@ -419,6 +419,31 @@ impl Markdown {
     }
 }
 
+/// The warnings a failed discovery-pass document had reported, shared by
+/// every clone of a request so the caller can report them beside the
+/// failure ([`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings)).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PreflightFailureWarnings(
+    std::sync::Arc<std::sync::Mutex<Vec<crate::markdown::compose::ComposeWarning>>>,
+);
+
+impl PreflightFailureWarnings {
+    /// Keeps a failed document's warnings, after any already kept.
+    pub(crate) fn record(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(warnings);
+    }
+
+    /// Keeps a document's warnings ahead of those its failed descendants
+    /// kept, as the compose pass orders a failed parent's.
+    pub(crate) fn prepend(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).splice(0..0, warnings);
+    }
+
+    pub(crate) fn take(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
 #[cfg(test)]
 mod acceptance_tests {
     //! Acceptance tests for the approval/execution split (tech-design T2–T4).

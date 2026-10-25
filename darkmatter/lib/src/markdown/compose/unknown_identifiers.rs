@@ -12,7 +12,10 @@
 //! Each document's pipeline calls [`reconcile`] once, after every stage has
 //! run and before its report merges into a parent's: a root that is a key of
 //! the final effective state or declared by the effective schema is dropped,
-//! and each remaining root is reported once for the document.
+//! and each remaining root is reported once for the document. Under a
+//! blocking policy the pipeline also reads the pending verdict
+//! ([`pending_warnings`]) before each body stage, once the state and schema
+//! are final, so a blocking undeclared read stops the document there.
 
 use super::context::report::{CandidateLocus, UnknownRootCandidate};
 use super::schema_validation::PreparedSchemas;
@@ -40,18 +43,48 @@ pub(crate) fn reconcile(
     schemas: &PreparedSchemas,
 ) {
     let candidates = report.unknown_root_candidates.take();
-    if options.defer_expression_failures {
-        return;
+    for warning in undeclared_warnings(&candidates, markdown, options, state, schemas) {
+        report.add_warning(warning);
     }
-    let unknown: Vec<UnknownRootCandidate> = candidates
-        .into_iter()
+}
+
+/// The warnings [`reconcile`] would report for the candidates `report` holds
+/// now, leaving them in place.
+///
+/// Its verdict is final only once `state` and `schemas` are: after the
+/// frontmatter stages, when no later stage of the document adds a key or
+/// changes which schema applies.
+pub(crate) fn pending_warnings(
+    report: &ComposeReport,
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+    state: &EffectiveState,
+    schemas: &PreparedSchemas,
+) -> Vec<ComposeWarning> {
+    undeclared_warnings(report.unknown_root_candidates.as_slice(), markdown, options, state, schemas)
+}
+
+/// The undeclared-property warnings `candidates` would report, under the
+/// same verdict as [`reconcile`].
+pub(crate) fn undeclared_warnings(
+    candidates: &[UnknownRootCandidate],
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+    state: &EffectiveState,
+    schemas: &PreparedSchemas,
+) -> Vec<ComposeWarning> {
+    if options.defer_expression_failures {
+        return Vec::new();
+    }
+    let unknown: Vec<&UnknownRootCandidate> = candidates
+        .iter()
         .filter(|candidate| {
             !state.data().contains_key(&candidate.root)
                 && !options.caller_input_records().contains_key(&candidate.root)
         })
         .collect();
     if unknown.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // `required` is not consulted: a required property left unset already
@@ -67,6 +100,7 @@ pub(crate) fn reconcile(
     let display = document.as_deref().map(|path| abbreviate_path(path, home));
     let source = markdown.full_source_context_for_errors();
 
+    let mut warnings = Vec::new();
     for candidate in unknown {
         if schema
             .as_ref()
@@ -82,7 +116,7 @@ pub(crate) fn reconcile(
             CandidateLocus::BodyLine(_) | CandidateLocus::Document => (None, None),
         };
         let message = message(&candidate.root, display.as_deref(), line, key);
-        report.add_warning(ComposeWarning::undeclared_property(
+        warnings.push(ComposeWarning::undeclared_property(
             candidate.stage,
             message,
             &candidate.root,
@@ -90,6 +124,7 @@ pub(crate) fn reconcile(
             line,
         ));
     }
+    warnings
 }
 
 /// Locates a directive whose `when=` read an undeclared root, given its

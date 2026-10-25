@@ -12,7 +12,8 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, RequestSnapshot};
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use test_toolkit::argv_recorder::ARGV_RECORDER_FILE;
 
 /// The report on stdout: exactly one JSON object and nothing else.
 fn report_of(output: &std::process::Output) -> Value {
@@ -45,13 +46,21 @@ fn codes(report: &Value) -> Vec<&str> {
 }
 
 /// How `md` names a transcluded document: by its resolved path. The root is
-/// named as the command line gave it.
+/// named by its argument rejoined segment by segment, never canonicalized, so
+/// it matches [`given`] only for a path spelled with the platform separator:
+/// write the root through [`cwd_file`].
 fn resolved(path: &Path) -> String {
     biscuit_file::canonicalize_simplified(path).unwrap().display().to_string()
 }
 
 fn given(path: &Path) -> String {
     path.display().to_string()
+}
+
+/// `name` under the fixture `cwd`, joined with the platform separator; a
+/// literal `"cwd/{name}"` keeps its `/` on Windows, where `md` reports `\`.
+fn cwd_file(name: &str) -> PathBuf {
+    Path::new("cwd").join(name)
 }
 
 const CATEGORY_3: &str = "---\n$schema:\n  label: string\nlabel: \"7\"\n---\nBody {{ min(label, 5) }}\n";
@@ -77,7 +86,7 @@ fn success_reports_the_document_and_leaves_other_outputs_unchanged() {
 #[test]
 fn a_category_3_warning_is_reported_once_with_every_field() {
     let fixture = CliProcessFixture::named("report_json_warning");
-    let document = fixture.write_file("cwd/doc.md", CATEGORY_3);
+    let document = fixture.write_file(cwd_file("doc.md"), CATEGORY_3);
 
     let output = run_report(&fixture, &document);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -105,7 +114,7 @@ fn a_category_3_warning_is_reported_once_with_every_field() {
 #[test]
 fn a_rejected_call_reports_the_shared_record() {
     let fixture = CliProcessFixture::named("report_json_rejected");
-    let document = fixture.write_file("cwd/doc.md", CATEGORY_5);
+    let document = fixture.write_file(cwd_file("doc.md"), CATEGORY_5);
 
     let output = run_report(&fixture, &document);
     assert_eq!(output.status.code(), Some(1));
@@ -123,6 +132,47 @@ fn a_rejected_call_reports_the_shared_record() {
     assert_eq!(report["diagnostics"][0]["expected_type"], "number");
     assert_eq!(report["diagnostics"][0]["actual_type"], "boolean");
     assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 6, "column": 13 }));
+}
+
+/// The lifecycle leg of criterion 19: a lifecycle rejection reports the
+/// library's located record (DMLS's leg, one test per surface, is
+/// `expression_call_diagnostics::shared_fields`), and no effect launches.
+#[test]
+fn a_rejected_lifecycle_call_reports_the_shared_record() {
+    use darkmatter::lifecycle::md_host;
+
+    let fixture = CliProcessFixture::named("report_json_lifecycle_rejected");
+    let document = fixture.write_file(
+        cwd_file("doc.md"),
+        "---\ncomposed:\n  - ensure_file: [\"marker\", \"{{ min(true,5) }}\"]\n---\nBody\n",
+    );
+
+    let output = run_report(&fixture, &document);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report = report_of(&output);
+
+    let markdown = Markdown::try_from(document.as_path()).unwrap();
+    let frontmatter: Value =
+        markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    let config = md_host::parse_lifecycle(&frontmatter, &document, None).expect("the lifecycle parses");
+    let error = darkmatter::lifecycle::reject_incompatible_calls(
+        &frontmatter,
+        &config,
+        &document,
+        markdown.loaded_text(),
+        md_host::registry(),
+        None,
+    )
+    .expect_err("rejected");
+    let expected = serde_json::to_value(error_diagnostics(&error)).unwrap();
+
+    assert_eq!(report, json!({ "outcome": "failure", "diagnostics": expected, "document": null }));
+    assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
+    assert_eq!(report["diagnostics"][0]["expected_type"], "number");
+    assert_eq!(report["diagnostics"][0]["actual_type"], "literal true");
+    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 3, "column": 37 }));
+    assert!(!document.with_file_name("marker").exists(), "no lifecycle effect ran");
 }
 
 #[test]
@@ -149,7 +199,7 @@ fn schema_and_parse_failures_are_located_in_the_frontmatter() {
         ("schema.md", "---\ncount: hello\n$schema:\n  count: number(required)\n---\nbody\n", "dm.schema.type_mismatch", 2, 8),
         ("yaml.md", "---\ntitle: [unclosed\n---\nbody\n", "dm.frontmatter.yaml_parse", 3, 1),
     ] {
-        let document = fixture.write_file(format!("cwd/{name}"), content);
+        let document = fixture.write_file(cwd_file(name), content);
         let output = run_report(&fixture, &document);
         assert_eq!(output.status.code(), Some(1), "{name}");
         assert!(output.stderr.is_empty(), "{name}: {}", String::from_utf8_lossy(&output.stderr));
@@ -165,7 +215,7 @@ fn schema_and_parse_failures_are_located_in_the_frontmatter() {
 #[test]
 fn an_earlier_warning_survives_a_runtime_failure() {
     let fixture = CliProcessFixture::named("report_json_runtime");
-    let document = fixture.write_file("cwd/doc.md", &format!("{CATEGORY_3}\n{{{{ 1 / 0 }}}}\n"));
+    let document = fixture.write_file(cwd_file("doc.md"), &format!("{CATEGORY_3}\n{{{{ 1 / 0 }}}}\n"));
 
     let output = run_report(&fixture, &document);
     assert_eq!(output.status.code(), Some(1));
@@ -174,6 +224,57 @@ fn an_earlier_warning_survives_a_runtime_failure() {
     assert_eq!(codes(&report), ["dm.expression.uncertain_call", "dm.expression.evaluation_failure"], "{report:#}");
     assert_eq!(report["diagnostics"][1]["source"], json!({ "file": given(&document), "line": 8, "column": 1 }));
     assert_eq!(report["diagnostics"][1]["expected_type"], Value::Null);
+}
+
+/// `(code, line)` of every diagnostic, in report order.
+fn code_lines(report: &Value) -> Vec<(&str, Option<u64>)> {
+    report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| (diagnostic["code"].as_str().unwrap(), diagnostic["source"]["line"].as_u64()))
+        .collect()
+}
+
+/// A warning found before a rejected call stays in the failure report,
+/// ahead of the rejection; a successful report lists passive warnings in
+/// authored order, whichever surface holds them; a lifecycle rejection
+/// keeps the lifecycle warnings before it.
+#[test]
+fn passive_warnings_keep_their_authored_order_through_a_rejection() {
+    let fixture = CliProcessFixture::named("report_json_passive_history");
+    for (name, content, outcome, expected) in [
+        (
+            "rejected.md",
+            "{{ file_exists(\"\") }}\n\n{{ min(true, 5) }}\n",
+            "failure",
+            vec![("dm.expression.always_false_call", Some(1)), ("dm.expression.incompatible_call", Some(3))],
+        ),
+        (
+            "block_then_rejected.md",
+            "::block when='file_exists(\"\")'\nx\n::end-block\n\n{{ min(true, 5) }}\n",
+            "failure",
+            vec![("dm.expression.always_false_call", Some(1)), ("dm.expression.incompatible_call", Some(5))],
+        ),
+        (
+            "ordered.md",
+            "{{ file_exists(\"\") }}\n\n::block when='file_exists(\"\")'\nx\n::end-block\n",
+            "success",
+            vec![("dm.expression.always_false_call", Some(1)), ("dm.expression.always_false_call", Some(3))],
+        ),
+        (
+            "lifecycle.md",
+            "---\ncomposed:\n  - stdout: '{{ file_exists(\"\") }}'\n  - stdout: '{{ min(true, 5) }}'\n---\nBody\n",
+            "failure",
+            vec![("dm.expression.always_false_call", Some(3)), ("dm.expression.incompatible_call", Some(4))],
+        ),
+    ] {
+        let document = fixture.write_file(format!("cwd/{name}"), content);
+        let output = run_report(&fixture, &document);
+        let report = report_of(&output);
+        assert_eq!(report["outcome"], outcome, "{name}: {report:#}");
+        assert_eq!(code_lines(&report), expected, "{name}: {report:#}");
+    }
 }
 
 /// Positions in transcluded content name the child file and its own line.
@@ -189,6 +290,50 @@ fn transcluded_findings_are_located_in_the_child() {
         assert_eq!(report["outcome"], outcome, "{report:#}");
         assert_eq!(codes(&report), [code], "{report:#}");
         assert_eq!(report["diagnostics"][0]["source"], json!({ "file": resolved(&child), "line": 6, "column": 13 }), "{report:#}");
+    }
+}
+
+/// A child rejected during the pre-flight walk, which `md compose` runs
+/// before composing, reports what the compose pass would: every warning of
+/// the parent (its passive check covers the whole parent before any child
+/// composes), then the child's earlier warning and its rejection, each at
+/// its authored position in its own file.
+#[test]
+fn a_rejected_child_keeps_its_parent_warnings_first() {
+    let fixture = CliProcessFixture::named("report_json_transcluded_history");
+    let child = fixture.write_file("cwd/child.md", "{{ file_exists(\"https://\") }}\n\n{{ min(true, 5) }}\n");
+    let body = "{{ file_exists(\"\") }}\n\n::file ./child.md\n\n{{ file_exists(\"http://\") }}\n";
+    // The plain route, and the lifecycle route, whose pre-flight walk is the
+    // same; its four frontmatter lines move the parent's body down.
+    for (name, frontmatter, offset) in [("plain.md", "", 0), ("lifecycle.md", "---\ncomposed:\n  - stdout: done\n---\n", 4)] {
+        let parent = fixture.write_file(cwd_file(name), &format!("{frontmatter}{body}"));
+        let output = run_report(&fixture, &parent);
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        let report = report_of(&output);
+        assert_eq!(report["outcome"], "failure", "{name}: {report:#}");
+        let records: Vec<(&str, &str, u64)> = report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic["code"].as_str().unwrap(),
+                    diagnostic["source"]["file"].as_str().unwrap(),
+                    diagnostic["source"]["line"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        let (parent, child) = (given(&parent), resolved(&child));
+        assert_eq!(
+            records,
+            [
+                ("dm.expression.always_false_call", parent.as_str(), 1 + offset),
+                ("dm.expression.always_false_call", parent.as_str(), 5 + offset),
+                ("dm.expression.always_false_call", child.as_str(), 1),
+                ("dm.expression.incompatible_call", child.as_str(), 3),
+            ],
+            "{name}: {report:#}"
+        );
     }
 }
 
@@ -216,6 +361,55 @@ fn deny_all_reports_the_blocking_warning_once_and_no_document() {
         assert_eq!(codes(&report), ["dm.expression.uncertain_call"], "{name}: {report:#}");
         assert_eq!(report["diagnostics"][0]["severity"], "warning", "{name}");
         assert!(output.stderr.is_empty(), "{name}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+}
+
+/// A runtime warning that blocks stops the command before its later effects:
+/// the `::shell` after the undeclared read never runs, and in a lifecycle run
+/// neither does `composed`. Without the denial the same documents run both.
+///
+/// The shell effect is the native argv recorder creating `marker`, because
+/// Windows has no `touch` on the fixture's minimal `PATH`.
+#[test]
+fn a_blocking_runtime_warning_stops_the_later_shell() {
+    const BODY: &str = "{{ missing }}\n\n::shell argv-recorder marker\n";
+    let lifecycle = format!("---\ncomposed:\n  - ensure_file: [\"composed-marker\", \"x\"]\n---\n{BODY}");
+    for (name, content) in [("plain.md", BODY.to_string()), ("lifecycle.md", lifecycle)] {
+        let fixture = CliProcessFixture::named(&format!("report_json_runtime_stop_{name}"));
+        std::fs::copy(
+            biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"),
+            fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .expect("the recorder fixture binary is built with `test-fixtures`");
+        fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact argv-recorder marker\n");
+        let document = fixture.write_file(format!("cwd/{name}"), &content);
+        let marker = fixture.cwd().join("marker");
+        let composed = fixture.cwd().join("composed-marker");
+        let compose = |extra: &[&str]| {
+            fixture
+                .command()
+                .env(ARGV_RECORDER_FILE, &marker)
+                .args(["compose", "--output", "report-json"])
+                .args(extra)
+                .arg(&document)
+                .output()
+                .unwrap()
+        };
+
+        let output = compose(&["--deny", "all"]);
+        assert_eq!(output.status.code(), Some(1), "{name}: {}", String::from_utf8_lossy(&output.stderr));
+        let report = report_of(&output);
+        assert_eq!(report["outcome"], "failure", "{name}");
+        assert_eq!(report["document"], Value::Null, "{name}");
+        assert_eq!(codes(&report), ["dm.expression.undeclared_property"], "{name}: {report:#}");
+        assert!(!marker.exists(), "{name}: the shell after the blocking warning ran");
+        assert!(!composed.exists(), "{name}: `composed` ran after the blocking warning");
+
+        let output = compose(&[]);
+        assert_eq!(output.status.code(), Some(0), "{name}: {}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(report_of(&output)["outcome"], "success", "{name}");
+        assert!(marker.exists(), "{name}: the control runs its shell");
+        assert_eq!(composed.exists(), name == "lifecycle.md", "{name}: the control runs `composed`");
     }
 }
 
@@ -266,7 +460,8 @@ fn the_report_holds_no_value_or_file_content() {
     let output = run_report(&fixture, &document);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{stdout}");
-    assert_eq!(codes(&report_of(&output)), ["dm.expression.incompatible_call"], "{stdout}");
+    // The parent's passive warning, then the child's rejection.
+    assert_eq!(codes(&report_of(&output)), ["dm.expression.uncertain_call", "dm.expression.incompatible_call"], "{stdout}");
     assert!(!stdout.contains(SECRET), "{stdout}");
 }
 

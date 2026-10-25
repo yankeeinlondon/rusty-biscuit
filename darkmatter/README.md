@@ -29,6 +29,11 @@ last_updated: 2026-10-22
 
   A value that converts to its declared type without changing its meaning is converted (`"4"` against `number` becomes `4`), and [expression functions](./docs/topics/darkmatter-expressions.md#functions) bind their arguments by the same [rules](./docs/topics/schemas/definition.md#type-coercion). Before composing, Darkmatter rejects a document whose calls its declared types prove can never work, such as `min(flag, 5)` with `flag: boolean(required)`; see [Call Check](./docs/inline/call-check.md).
 
+  Guards narrow what a region may hold: inside `::block when="is_number(count)"` or `count ? min(count, 5) : 0`, `count` is known to be a number, and the call check, shell pre-flight, and DMLS all read the same facts without evaluating anything; see [What a Guard Proves](./docs/topics/darkmatter-expressions.md#what-a-guard-proves). Hosts such as Claudine can add their own [expression functions](./docs/topics/host-functions.md), which get the same checks.
+
+- One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
+- `md compose --output report-json` prints one JSON object with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document; see [`report-json` output](./docs/cli/report-json.md)
+
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 

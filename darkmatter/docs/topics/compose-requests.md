@@ -144,6 +144,28 @@ class), and schema `file` values. `md` prints the class as a
 `failure: <class>` row, in kebab case, on every error block and warning for
 a failed reference.
 
+## Keeping the warnings of a failed composition
+
+`compose_with` returns only the error when composition fails, so warnings
+reported before the failure (an uncertain call, an undeclared property) are
+lost. `compose_with_warnings` takes the same request and, on failure, returns
+a boxed `ComposeFailure` holding both:
+
+```rust,ignore
+match markdown.compose_with_warnings(&request) {
+    Ok((composed, report)) => { /* report.warnings as with compose_with */ }
+    Err(failure) => {
+        // The outer document's warnings come first; a child that had
+        // already succeeded reported into its parent.
+        for warning in &failure.warnings { eprintln!("warning: {}", warning.message); }
+        return Err(failure.error);
+    }
+}
+```
+
+`md compose --output report-json` uses it to list every diagnostic of a
+failed run (see [`report-json` output](../cli/report-json.md)).
+
 ## When a request cannot be built
 
 The builder returns `ContextBuildError` instead of letting a bad context fail

@@ -6,7 +6,8 @@
 //! decides whether the command still succeeds. The `md` CLI builds one from
 //! its `--deny` and `--allow` selections; the library consults it where a
 //! diagnostic becomes known, so a finding of passive analysis stops the
-//! document before any expression, shell, or effect runs.
+//! document before any expression, shell, or effect runs, and a runtime
+//! warning stops it before its next stage, command, or child.
 //!
 //! See `darkmatter/docs/cli/policy.md` for the command-line verbs.
 

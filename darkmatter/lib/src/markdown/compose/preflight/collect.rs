@@ -451,7 +451,21 @@ fn collect_recursive(
     inline_options.defer_shell_pending_schema_problems = true;
     inline_options.defer_missing_runtime_context = true;
     inline_options.defer_expression_failures = true;
-    let (prepared, prepared_report) = markdown.compose_with_options(inline_options)?;
+    // The call check covers what the terminal pass composes, so a rejection
+    // here is the one that pass would raise, with the same earlier warnings.
+    inline_options.call_check_operations = Some(discovery.enabled_operations);
+    let mut prepared = markdown.clone();
+    let (outcome, failed_warnings) = prepared.run_root_pipeline_collecting(inline_options, None);
+    let mut prepared_report = outcome.inspect_err(|_| options.preflight_failure_warnings.record(failed_warnings))?;
+    // Any later failure in this walk, a child's included, is reported after
+    // this document's passive call-check warnings, as the compose pass
+    // reports it. The rest of this lenient pass's warnings stand in for
+    // failures the compose pass would raise, so they are not kept.
+    prepared_report.warnings.truncate(prepared_report.passive_warnings);
+    let warnings_on_failure = WarningsOnFailure {
+        sink: &options.preflight_failure_warnings,
+        warnings: Some(std::mem::take(&mut prepared_report.warnings)),
+    };
     // The bytes of the prepared body that interpolation inserted. Discovery
     // reads the body through the same data-aware scanners as the compose pass,
     // so the approval set is exactly what can execute.
@@ -1038,6 +1052,7 @@ fn collect_recursive(
         (ComposeSource::Url(u), _) => Some(PathBuf::from(u.to_string())),
     };
 
+    warnings_on_failure.succeeded();
     Ok(super::PreflightGraphNode {
         source,
         entries: local_entries,
@@ -1045,6 +1060,29 @@ fn collect_recursive(
         children,
         targets,
     })
+}
+
+/// A walked document's warnings, kept in the request's pre-flight failure
+/// sink when the walk fails after its inline pass: dropped without
+/// [`Self::succeeded`], it prepends them to whatever its failed descendants
+/// kept.
+struct WarningsOnFailure<'a> {
+    sink: &'a super::PreflightFailureWarnings,
+    warnings: Option<Vec<crate::markdown::compose::ComposeWarning>>,
+}
+
+impl WarningsOnFailure<'_> {
+    fn succeeded(mut self) {
+        self.warnings = None;
+    }
+}
+
+impl Drop for WarningsOnFailure<'_> {
+    fn drop(&mut self) {
+        if let Some(warnings) = self.warnings.take() {
+            self.sink.prepend(warnings);
+        }
+    }
 }
 
 /// Fetches a remote Markdown child for pre-flight collection.

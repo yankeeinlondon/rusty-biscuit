@@ -416,7 +416,12 @@ impl<'a> ComposeHost<'a> {
             let approvals = self
                 .md
                 .compose_preflight_approvals_with(&self.request, self.approval_handler.clone(), extra)
-                .map_err(|error| ("shell", preflight_approval_error(error)))?;
+                .map_err(|error| {
+                    if let Some(sink) = self.document.sink {
+                        sink.warnings(&self.request.options().take_preflight_failure_warnings());
+                    }
+                    ("shell", preflight_approval_error(error))
+                })?;
             if self.verbose > 0 {
                 eprintln!(
                     "pre-flight: {} discovered, {} whitelisted, {} approved",
@@ -443,7 +448,8 @@ impl<'a> ComposeHost<'a> {
             sink.warnings(&report.warnings);
         }
         report.warnings.splice(0..0, self.call_warnings.iter().cloned());
-        // A warning found while composing stops the run before `write`.
+        // Composition stops at a blocking warning before its next effect; one
+        // reported by its last stages stops the run here, before `write`.
         blocked_diagnostics(self.request.options().blocking_policy(), &report.warnings, &[])
             .map_err(|error| ("compose", error))?;
         self.frontmatter =

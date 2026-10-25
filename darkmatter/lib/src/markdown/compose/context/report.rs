@@ -105,6 +105,12 @@ pub struct ComposeReport {
     /// reconciles its own before its report is merged into a parent, so a
     /// merged child report carries none.
     pub(crate) unknown_root_candidates: UnknownRootCandidates,
+
+    /// How many leading [`Self::warnings`] this document's passive call
+    /// check reported. Read only by pre-flight discovery, whose lenient
+    /// pass reports other warnings the compose pass would not. Never merged
+    /// from a child report.
+    pub(crate) passive_warnings: usize,
 }
 
 /// First-read undeclared-property candidates in read order, one per root.
@@ -119,6 +125,11 @@ pub(crate) struct UnknownRootCandidates {
 impl UnknownRootCandidates {
     pub(crate) fn len(&self) -> usize {
         self.list.len()
+    }
+
+    /// Every candidate, in first-read order.
+    pub(crate) fn as_slice(&self) -> &[UnknownRootCandidate] {
+        &self.list
     }
 
     /// Removes every candidate, in first-read order.

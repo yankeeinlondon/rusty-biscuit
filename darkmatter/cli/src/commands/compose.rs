@@ -502,6 +502,9 @@ pub fn run_compose(
                 });
             }
             Err(e) => {
+                if let Some(sink) = sink {
+                    sink.warnings(&compose_request.options().take_preflight_failure_warnings());
+                }
                 return Err(preflight_approval_error(e));
             }
         }
@@ -518,8 +521,10 @@ pub fn run_compose(
     }
     // The lifecycle surfaces' call warnings lead: their check ran first.
     report.warnings.splice(0..0, lifecycle_warnings);
-    // A warning found while composing stops the command before the document
-    // is written; the effects that ran are not undone.
+    // Composition already stopped at a blocking warning reported before a
+    // later stage or command; one reported by the last stages (an
+    // undeclared read reconciled at the end, link normalization) stops the
+    // command here, before the document is written. Effects are not undone.
     blocked_diagnostics(&blocking, &report.warnings, &[])?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 

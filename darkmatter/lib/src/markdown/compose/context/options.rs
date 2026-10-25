@@ -489,6 +489,18 @@ pub struct ComposeOptions {
     /// `false`.
     pub(crate) defer_expression_failures: bool,
 
+    /// The operations whose surfaces the passive call check covers, when they
+    /// differ from [`Self::enabled_operations`]. Set only by the shell-command
+    /// discovery pass, which composes a narrowed surface but must reject (and
+    /// report the warnings before) the same call the terminal pass would.
+    /// Default: `None`, the enabled operations.
+    pub(crate) call_check_operations: Option<ComposeOperationSet>,
+
+    /// The warnings a failed discovery-pass document had reported before its
+    /// failure, shared by every clone of the request; see
+    /// [`Self::take_preflight_failure_warnings`].
+    pub(crate) preflight_failure_warnings: crate::markdown::compose::preflight::PreflightFailureWarnings,
+
     /// When `true`, `has_alias`, `has_builtin_function`, `has_user_function`,
     /// and the shell half of `can_execute` answer `false` without launching the
     /// login shell. Set only by the shell-command discovery pass, which R8
@@ -965,6 +977,8 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
+            call_check_operations: None,
+            preflight_failure_warnings: Default::default(),
             suppress_shell_probes: false,
             nested_compose: Default::default(),
             icmp: Default::default(),
@@ -1011,6 +1025,27 @@ impl ComposeOptions {
     /// Returns true if the given operation is enabled.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
         self.enabled_operations.contains(op)
+    }
+
+    /// Whether the passive call check covers `op`'s surface: an enabled
+    /// operation, unless the discovery pass widened the check to the
+    /// terminal pass's operations.
+    pub(crate) fn call_check_covers(&self, op: ComposeOperation) -> bool {
+        match &self.call_check_operations {
+            Some(operations) => operations.contains(op),
+            None => self.is_enabled(op),
+        }
+    }
+
+    /// Drains the warnings a failed
+    /// [`compose_preflight`](crate::markdown::Markdown::compose_preflight) or
+    /// [`compose_preflight_approvals`](crate::markdown::Markdown::compose_preflight_approvals)
+    /// run under these options (or any clone of them) had reported before
+    /// its failure, in report order: what
+    /// [`ComposeFailure::warnings`](crate::markdown::compose::ComposeFailure::warnings)
+    /// holds for a failed composition. Empty after a successful run.
+    pub fn take_preflight_failure_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        self.preflight_failure_warnings.take()
     }
 
     /// Restricts composition to the effective frontmatter surface: frontmatter
@@ -2812,6 +2847,9 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
+            call_check_operations,
+            // A warning sink: it changes the report, never a composed result.
+            preflight_failure_warnings: _,
             suppress_shell_probes,
             nested_compose,
             icmp,
@@ -3181,6 +3219,18 @@ impl ComposeOptions {
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
         enc.bool(*defer_expression_failures);
+        enc.field("call_check_operations");
+        match call_check_operations {
+            Some(operations) => {
+                enc.tag(1);
+                let indices: Vec<usize> = operations.iter().map(|op| op.index()).collect();
+                enc.count(indices.len());
+                for index in indices {
+                    enc.u64(index as u64);
+                }
+            }
+            None => enc.tag(0),
+        }
         enc.field("suppress_shell_probes");
         enc.bool(*suppress_shell_probes);
         // An installed `Active` handle is per-document pipeline state, never

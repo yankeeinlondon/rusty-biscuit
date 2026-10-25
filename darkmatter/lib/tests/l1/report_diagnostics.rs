@@ -148,7 +148,7 @@ fn a_policy_stop_reports_every_warning_with_its_own_severity() {
     let (_, result) = compose(dir.path(), "doc.md", content, |options| {
         options.with_blocking_policy(BlockingPolicy::default().deny_code(UNCERTAIN_CALL_CODE))
     });
-    let failure = result.err().expect("the uncertain call blocks");
+    let failure = result.expect_err("the uncertain call blocks");
     let diagnostics = error_diagnostics(&failure.error);
     let codes: Vec<(&str, Severity)> = diagnostics.iter().map(|diagnostic| (diagnostic.code.as_str(), diagnostic.severity)).collect();
     assert_eq!(
@@ -184,7 +184,7 @@ fn report_diagnostics_hold_no_value_and_read_nothing() {
     let mut context = ComposeContext::capture_for_content(dir.path(), "");
     context.env_mut().insert("SECRET_VALUE".to_string(), SECRET.to_string());
     let request = crate::request_support::request_at(dir.path(), ComposeOptions::new_with_context(context).with_source_file(path.clone()));
-    let failure = Markdown::try_from(path.as_path()).unwrap().compose_with_warnings(&request).err().expect("the division fails");
+    let failure = Markdown::try_from(path.as_path()).unwrap().compose_with_warnings(&request).expect_err("the division fails");
     let records = |failure: &ComposeFailure| -> Vec<Diagnostic> {
         failure.warnings.iter().map(warning_diagnostic).chain(error_diagnostics(&failure.error)).collect()
     };
@@ -197,4 +197,183 @@ fn report_diagnostics_hold_no_value_and_read_nothing() {
 
     dir.close().unwrap();
     assert_eq!(records(&failure), before, "nothing was read to produce them");
+}
+
+/// The ordered history of a composition's passive call findings: the
+/// warnings found before a rejected call survive its failure, in authored
+/// order, and a successful report lists them by authored position whichever
+/// surface (interpolation, block or transclusion condition) holds them.
+mod passive_history {
+    use super::*;
+    use darkmatter::markdown::compose::expression::{ALWAYS_FALSE_CALL_CODE, INCOMPATIBLE_CALL_CODE};
+
+    /// `(code, line)` of every record, warnings first.
+    fn rows(warnings: &[Warning], error: Option<&darkmatter::markdown::MarkdownError>) -> Vec<(String, Option<usize>)> {
+        warnings
+            .iter()
+            .map(warning_diagnostic)
+            .chain(error.map(|error| error_diagnostics(error)).unwrap_or_default())
+            .map(|diagnostic| (diagnostic.code, diagnostic.source.map(|source| source.line)))
+            .collect()
+    }
+
+    fn row(code: &str, line: usize) -> (String, Option<usize>) {
+        (code.to_string(), Some(line))
+    }
+
+    /// Composes `content` and returns its failure's records, warnings first.
+    #[track_caller]
+    fn failure_rows(content: &str) -> Vec<(String, Option<usize>)> {
+        let dir = TempDir::new().unwrap();
+        let (_, failure) = failure(dir.path(), "doc.md", content);
+        rows(&failure.warnings, Some(&failure.error))
+    }
+
+    /// Composes `content` and returns its warnings' records.
+    #[track_caller]
+    fn success_rows(content: &str) -> Vec<(String, Option<usize>)> {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("other.md"), "other\n").unwrap();
+        let (_, result) = compose(dir.path(), "doc.md", content, |options| options);
+        let (_, report) = result.unwrap_or_else(|failure| panic!("composes: {}", failure.error));
+        rows(&report.warnings, None)
+    }
+
+    macro_rules! failure_history {
+        ($($name:ident: $content:expr => [$(($code:expr, $line:expr)),* $(,)?];)*) => {$(
+            #[test]
+            fn $name() {
+                assert_eq!(failure_rows($content), vec![$(row($code, $line)),*]);
+            }
+        )*};
+    }
+
+    failure_history! {
+        // R1-F4.1
+        an_earlier_body_warning_survives_a_later_rejection:
+            "{{ file_exists(\"\") }}\n\n{{ min(true, 5) }}\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 1), (INCOMPATIBLE_CALL_CODE, 3)];
+        // R1-F4.2
+        an_earlier_frontmatter_leaf_warning_survives_a_later_leaf_rejection:
+            "---\na: '{{ file_exists(\"\") }}'\nb: '{{ min(true, 5) }}'\n---\nBody\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 2), (INCOMPATIBLE_CALL_CODE, 3)];
+        // R1-F4.3
+        an_earlier_call_in_the_rejected_expression_keeps_its_warning:
+            "{{ file_exists(\"\") + min(true, 5) }}\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 1), (INCOMPATIBLE_CALL_CODE, 1)];
+        // R1-F4.4
+        an_earlier_block_condition_warning_survives_a_later_body_rejection:
+            "::block when='file_exists(\"\")'\nx\n::end-block\n\n{{ min(true, 5) }}\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 1), (INCOMPATIBLE_CALL_CODE, 5)];
+        // R1-F4.8: the runtime failure follows the passive warning.
+        an_earlier_warning_survives_a_later_evaluation_failure:
+            "{{ file_exists(\"\") }}\n\n{{ 1 / 0 }}\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 1), ("dm.expression.evaluation_failure", 3)];
+        // Only the prefix is kept: a finding after the rejection, in its own
+        // expression or later in the document, is not reported.
+        a_finding_after_the_rejection_is_not_reported:
+            "{{ min(true, 5) + file_exists(\"\") }}\n\n{{ file_exists(\"\") }}\n"
+            => [(INCOMPATIBLE_CALL_CODE, 1)];
+        // The first rejection in authored order is the one reported, with
+        // the interpolation warning before it, though the block conditions
+        // are scanned first.
+        the_first_rejection_in_authored_order_is_reported:
+            "{{ file_exists(\"\") }}\n\n::block when='min(true, 5) > 1'\nx\n::end-block\n\n{{ min(false, 5) }}\n"
+            => [(ALWAYS_FALSE_CALL_CODE, 1), (INCOMPATIBLE_CALL_CODE, 3)];
+    }
+
+    // R1-F4.5: a lifecycle rejection reports the lifecycle warnings found
+    // before it, then its located record.
+    #[test]
+    fn an_earlier_lifecycle_warning_survives_a_later_lifecycle_rejection() {
+        use darkmatter::lifecycle::md_host;
+        let frontmatter = "composed:\n  - stdout: '{{ file_exists(\"\") }}'\n  - stdout: '{{ min(true, 5) }}'\n";
+        let authored = format!("---\n{frontmatter}---\nBody\n");
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(frontmatter).expect("YAML parses");
+        let value: serde_json::Value = serde_json::to_value(yaml).expect("JSON");
+        let source = Path::new("doc.md");
+        let config = md_host::parse_lifecycle(&value, source, None).expect("the lifecycle parses");
+        let error = darkmatter::lifecycle::reject_incompatible_calls(&value, &config, source, Some(&authored), md_host::registry(), None)
+            .expect_err("the second action is rejected");
+        assert_eq!(error.earlier_warnings().len(), 1, "{:#?}", error.earlier_warnings());
+        let records: Vec<(String, Option<usize>)> = error_diagnostics(&error)
+            .into_iter()
+            .map(|diagnostic| (diagnostic.code, diagnostic.source.map(|source| source.line)))
+            .collect();
+        assert_eq!(records, [row(ALWAYS_FALSE_CALL_CODE, 3), row(INCOMPATIBLE_CALL_CODE, 4)]);
+    }
+
+    const PARENT: &str = "{{ file_exists(\"\") }}\n\n::file ./child.md\n\n{{ file_exists(\"http://\") }}\n";
+    const CHILD: &str = "{{ file_exists(\"https://\") }}\n\n{{ min(true, 5) }}\n";
+
+    /// `(code, file name, line)` of every record, warnings first.
+    fn located_rows(warnings: &[Warning], error: Option<&darkmatter::markdown::MarkdownError>) -> Vec<(String, String, usize)> {
+        warnings
+            .iter()
+            .map(warning_diagnostic)
+            .chain(error.map(|error| error_diagnostics(error)).unwrap_or_default())
+            .map(|diagnostic| {
+                let source = diagnostic.source.expect("every record is located");
+                let file = source.file.expect("a named file");
+                (diagnostic.code, file.file_name().unwrap().to_string_lossy().into_owned(), source.line)
+            })
+            .collect()
+    }
+
+    /// The parent's warnings, every one found by its passive check before the
+    /// child composes, then the child's warnings and its rejection.
+    fn transcluded_rejection_rows() -> Vec<(String, String, usize)> {
+        [
+            (ALWAYS_FALSE_CALL_CODE, "parent.md", 1),
+            (ALWAYS_FALSE_CALL_CODE, "parent.md", 5),
+            (ALWAYS_FALSE_CALL_CODE, "child.md", 1),
+            (INCOMPATIBLE_CALL_CODE, "child.md", 3),
+        ]
+        .into_iter()
+        .map(|(code, file, line)| (code.to_string(), file.to_string(), line))
+        .collect()
+    }
+
+    // R1-F4.9: a rejected child's failure keeps its parent's warnings first.
+    #[test]
+    fn a_parent_warning_survives_a_transcluded_child_rejection() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("child.md"), CHILD).unwrap();
+        let (_, failure) = failure(dir.path(), "parent.md", PARENT);
+        assert_eq!(located_rows(&failure.warnings, Some(&failure.error)), transcluded_rejection_rows());
+    }
+
+    // R1-F4.9: the pre-flight walk leaves the same history as the compose pass.
+    #[test]
+    fn a_parent_warning_survives_a_transcluded_child_rejection_in_preflight() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("child.md"), CHILD).unwrap();
+        let path = dir.path().join("parent.md");
+        std::fs::write(&path, PARENT).unwrap();
+        let request = crate::request_support::request_at(dir.path(), options_in(dir.path(), &path));
+        let error = Markdown::try_from(path.as_path())
+            .unwrap()
+            .compose_preflight(&request)
+            .expect_err("the child is rejected");
+        let warnings = request.options().take_preflight_failure_warnings();
+        assert_eq!(located_rows(&warnings, Some(&error)), transcluded_rejection_rows());
+    }
+
+    // R1-F4.6
+    #[test]
+    fn a_body_interpolation_warning_precedes_a_later_block_condition_warning() {
+        assert_eq!(
+            success_rows("{{ file_exists(\"\") }}\n\n::block when='file_exists(\"\")'\nx\n::end-block\n"),
+            [row(ALWAYS_FALSE_CALL_CODE, 1), row(ALWAYS_FALSE_CALL_CODE, 3)]
+        );
+    }
+
+    // R1-F4.7
+    #[test]
+    fn a_body_interpolation_warning_precedes_a_later_transclusion_condition_warning() {
+        assert_eq!(
+            success_rows("{{ file_exists(\"\") }}\n\n::file ./other.md when='file_exists(\"\")'\n"),
+            [row(ALWAYS_FALSE_CALL_CODE, 1), row(ALWAYS_FALSE_CALL_CODE, 3)]
+        );
+    }
 }

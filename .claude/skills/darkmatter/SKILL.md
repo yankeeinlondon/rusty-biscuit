@@ -195,8 +195,18 @@ the one registry of identifiers, commands, and help; on `md compose`,
 usage errors (`main.rs::REMOVED_FLAGS`); see `docs/cli/policy.md`. The
 pipeline's call precheck consults the policy per document, before its
 expressions run (`MarkdownError::BlockedDiagnostics`; a child's is fatal,
-never a tolerated transclusion failure); every other warning is checked by
-the CLI after composing and before writing. A new coded warning adds its
+never a tolerated transclusion failure); a runtime warning is checked by
+`pipeline::stop_if_blocked` before each body stage, after transclusion
+`when=` preparation, between `::shell` commands, and before frontmatter
+shell expansion, and within a stage before each further expression
+(`pipeline::blocking_guard` through the rewriters' `BeforeEval`, for body
+and frontmatter interpolation and directive targets) or condition
+(`pipeline::ReportWatch`, for `::block` and `when=`), judging only what is
+new since the last check (undeclared reads only once state and schema are
+final, through `unknown_identifiers::pending_warnings`; never in discovery
+passes); a nested `as_markdown` child's stop is restored on the caller
+(`NestedComposeSlot::take_blocked`), even when `||` absorbed the call;
+the last stages' warnings are checked by the CLI before writing. A new coded warning adds its
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
 naming the codes it governs.
 
@@ -208,7 +218,11 @@ invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
 `lifecycle_failure_diagnostics`), and a CLI-worded shell failure keeps its
 typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
 returns a failure with the warnings reported before it (`PipelineRuntime`'s
-failed-document stash). Never print to stdout on a report-mode path; see
+failed-document stash); a failed pre-flight walk leaves its failed document's
+warnings for `ComposeOptions::take_preflight_failure_warnings`, and a
+lifecycle call rejection carries its earlier warnings (`earlier_warnings`).
+The call precheck orders findings by authored position and keeps the prefix
+before a rejection. Never print to stdout on a report-mode path; see
 `docs/cli/report-json.md`.
 
 Every source-file argument opens through `cli/src/io::open_argument`:

@@ -98,13 +98,32 @@ flowchart LR
 
 ## Which diagnostics, in which order
 
-- **Warnings** come in the order the run found them: passive checks (a
-  lifecycle stack's calls, then the document's calls) in source order, then
-  what composition reports while it runs. Transcluded documents report in the
-  order their directives appear.
+- **Warnings** come in the order the run found them: passive checks first,
+  then what composition reports while it runs. The passive checks report a
+  lifecycle stack's calls (event by event, each surface in authored order),
+  then the document's calls by authored position: frontmatter first, then
+  the body top to bottom, with `{{ … }}` expressions and `::block`/`::file`
+  conditions interleaved where they are written. Transcluded documents report
+  in the order their directives appear.
 - **A failure** comes after the warnings reported before it. Earlier warnings
   are kept: a category 3 call reported before a failing `{{ 1 / 0 }}` is in
-  the failure report too.
+  the failure report too. A rejected call keeps the passive warnings found
+  before it in that order, including an earlier call in its own expression;
+  a finding after the rejected call is not reported, since the check stops
+  there. A failure in a transcluded document comes after every warning of
+  the documents that transclude it, outermost first, then its own: a
+  parent's passive check covers the whole parent before any child composes,
+  so a parent warning written after the `::file` line is reported too.
+
+  ```text
+  parent.md                         child.md
+  1 {{ file_exists("") }}           1 {{ file_exists("https://") }}
+  3 ::file ./child.md               3 {{ min(true, 5) }}
+  5 {{ file_exists("http://") }}
+  ```
+
+  reports `always_false_call` at `parent.md` lines 1 and 5, then at
+  `child.md` line 1, then `incompatible_call` at `child.md` line 3.
 
   ```json
   { "outcome": "failure",
@@ -117,9 +136,33 @@ flowchart LR
 - **A policy stop** (`--deny`) lists each warning once, with its own severity:
   a denied `warning` is still `"warning"`. The policy decides the outcome, not
   the diagnostic.
-- A check that stops a run before composition starts (a transcluded child's
-  rejected call is found by the pre-flight walk) reports that check alone:
-  nothing had been reported yet.
+- A check that stops a run before composition starts reports what that
+  check found. A rejected call the pre-flight walk finds (the walk checks
+  each document before it runs a shell) reports the same warnings ahead of
+  it as the compose pass would: those of the document that holds it, after
+  those of every document that transcludes it.
+- **A rejected call** reports the call's own record wherever it is authored:
+  in the body, in frontmatter, in a `::block` or `::file` condition, or on a
+  lifecycle surface (an action's text, a `when:` condition, a `shell:`
+  command, a side-effect argument such as `ensure_file:`, a `set:` value, or
+  a control reason such as `error:`). The record is the one DMLS shows for
+  the same bytes, located in the file as written. A lifecycle rejection stops
+  the run before `initialize`, so no lifecycle effect runs; the lifecycle
+  warnings found before it come first.
+
+  ```yaml
+  ---
+  composed:
+    - stdout: "{{ min(true, 5) }}"
+  ---
+  ```
+
+  ```json
+  { "code": "dm.expression.incompatible_call", "severity": "error",
+    "message": "min: argument 1 (`a`) is literal true, expected number (…)",
+    "source": { "file": "doc.md", "line": 3, "column": 21 },
+    "expected_type": "number", "actual_type": "literal true" }
+  ```
 
 ## Codes
 
