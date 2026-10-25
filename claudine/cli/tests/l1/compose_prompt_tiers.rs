@@ -161,15 +161,23 @@ fn plain_launch_directory_under_home_wins_for_both_forms() {
     }
 }
 
-#[test]
-fn local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home() {
-    // Ruling 1: when the launch directory, or its repository, *is* `$HOME`,
-    // containment alone would make `~/.claudine/prompts` local; its explicit
-    // user tier keeps it behind the local root's own `~/probe.md`.
-    for (prefix, repository) in [
-        ("prompt-tiers-launch-is-home", false),
-        ("prompt-tiers-repo-is-home", true),
-    ] {
+/// Ruling 1: when the launch directory, or its repository, *is* `$HOME`,
+/// containment alone would make `~/.claudine/prompts` local; its explicit
+/// user tier keeps it behind the local root's own `~/probe.md`.
+mod local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home {
+    use super::*;
+
+    #[test]
+    fn launch_directory_is_home() {
+        assert_local_root_wins("prompt-tiers-launch-is-home", false);
+    }
+
+    #[test]
+    fn repository_is_home() {
+        assert_local_root_wins("prompt-tiers-repo-is-home", true);
+    }
+
+    fn assert_local_root_wins(prefix: &str, repository: bool) {
         let (fixture, launch) = stage_at(prefix, &[], repository);
         assert_eq!(launch, fixture.home());
         write(&launch.join("probe.md"), "Tier=[local-root]\n");
@@ -230,31 +238,54 @@ fn nested_magic_reference_in_a_user_prompt_resolves_from_the_launch_tree() {
     }
 }
 
-#[test]
-fn nested_magic_reference_in_another_repository_resolves_from_the_launch_tree() {
-    // Ruling 2 across repositories: `@` follows the launch tree; `&` and `^`
-    // keep the source document's repository; `./` and bare stay beside it.
-    let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
-    let other = fixture.cwd().join("other");
-    std::fs::create_dir_all(&other).unwrap();
-    assert!(init_git_repo(&other), "git init failed at {}", other.display());
-    let other_prompts = other.join("prompts");
-    write(&launch.join("snippet.md"), "Snippet=[launch]\n");
-    write(&other.join("snippet.md"), "Snippet=[source-repo]\n");
-    write(&other_prompts.join("snippet.md"), "Snippet=[source-dir]\n");
+/// Ruling 2 across repositories: `@` follows the launch tree; `&` and `^`
+/// keep the source document's repository; `./` and bare stay beside it.
+mod nested_magic_reference_in_another_repository_resolves_from_the_launch_tree {
+    use super::*;
 
-    let expected = [
+    /// Each reference form and the copy it must resolve to.
+    const ROWS: [(&str, &str); 5] = [
         ("@", "launch"),
         ("&", "source-repo"),
         ("^", "source-repo"),
         ("./", "source-dir"),
         ("", "source-dir"),
     ];
-    let forms: Vec<&str> = expected.iter().map(|(form, _)| *form).collect();
-    for ((reference, document), (_, winner)) in stage_transclusion_routers(&other_prompts, &forms)
-        .into_iter()
-        .zip(expected)
-    {
+
+    macro_rules! form_tests {
+        ($($test:ident => $form:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_form_resolves($form); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(form, _)| *form).collect();
+                assert_eq!(rows, [$($form),*]);
+            }
+        };
+    }
+
+    form_tests! {
+        magic => "@",
+        repository => "&",
+        repository_root => "^",
+        explicit_relative => "./",
+        bare => "",
+    }
+
+    fn assert_form_resolves(form: &str) {
+        let (_, winner) = ROWS.iter().find(|(row, _)| *row == form).expect("a listed row");
+        let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
+        let other = fixture.cwd().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(init_git_repo(&other), "git init failed at {}", other.display());
+        let other_prompts = other.join("prompts");
+        write(&launch.join("snippet.md"), "Snippet=[launch]\n");
+        write(&other.join("snippet.md"), "Snippet=[source-repo]\n");
+        write(&other_prompts.join("snippet.md"), "Snippet=[source-dir]\n");
+
+        let [(reference, document)]: [(String, PathBuf); 1] = stage_transclusion_routers(&other_prompts, &[form])
+            .try_into()
+            .expect("one router");
         let stdout = compose_dry_run(&fixture, &launch, document.to_str().unwrap());
         assert!(
             stdout.contains(&format!("Snippet=[{winner}]")),

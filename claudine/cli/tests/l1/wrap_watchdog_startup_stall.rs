@@ -49,8 +49,14 @@ use crate::common;
 use common::wrap::*;
 use common::{CliProcessFixture, strip_ansi};
 
-/// The silence budget every test below configures (`CLAUDINE_STEP_TIMEOUT`).
+/// The silence budget every test below configures (`CLAUDINE_STEP_TIMEOUT`),
+/// except [`watchdog_startup_bytes_move_the_deadline`].
 const STEP_TIMEOUT_MS: u64 = 2_000;
+/// The chatty test's budget. Its subject is that output moves the deadline,
+/// which holds at any budget the chatter outlasts with gaps well inside it, so
+/// on Unix (0.2s gaps) it need not pay for the stall tests' floor; the
+/// Windows stub's ~1s `ping` gaps keep the 2s budget.
+const CHATTY_STEP_TIMEOUT_MS: u64 = if cfg!(windows) { 2_000 } else { 1_000 };
 /// The watchdog cadence every test below configures
 /// (`CLAUDINE_WATCHDOG_INTERVAL`).
 const WATCHDOG_INTERVAL_MS: u64 = 200;
@@ -92,7 +98,9 @@ enum ProviderBehavior {
     /// real output, so they must not hold the silence budget open.
     WhitespaceForever,
     /// Emit non-whitespace lines on stderr for longer than the budget, then
-    /// exit cleanly. This is the OpenCode bootstrap-log shape.
+    /// exit cleanly. This is the OpenCode bootstrap-log shape. On Unix it
+    /// chatters every 0.2s for about 1.6s, against
+    /// [`CHATTY_STEP_TIMEOUT_MS`].
     ChattyThenExit,
     /// Emit one real stream event and then stall forever without ever
     /// reaching a `step_finish` boundary.
@@ -117,7 +125,7 @@ fn write_provider(fixture: &CliProcessFixture, behavior: ProviderBehavior) {
                 "while :; do printf '\\n'; /bin/sleep 0.4; done\n"
             }
             ProviderBehavior::ChattyThenExit => {
-                "i=0\nwhile [ $i -lt 10 ]; do\n  printf 'loading config\\n' >&2\n  /bin/sleep 0.4\n  i=$((i + 1))\ndone\nexit 0\n"
+                "i=0\nwhile [ $i -lt 8 ]; do\n  printf 'loading config\\n' >&2\n  /bin/sleep 0.2\n  i=$((i + 1))\ndone\nexit 0\n"
             }
             ProviderBehavior::OneEventThenSilent => {
                 "printf '%s\\n' '{\"type\":\"init\",\"session_id\":\"startup-stall\",\"model\":\"test-model\"}'\nwhile :; do /bin/sleep 1; done\n"
@@ -267,7 +275,7 @@ fn watchdog_startup_stall_terminates_without_a_wall_clock_timeout() {
 
 /// Acceptance criterion 2, positive half. Non-whitespace bytes arriving
 /// before any semantic event are real progress and must push the deadline
-/// out: the fixture chatters for ~4s against a 2s budget and is not killed.
+/// out: the fixture chatters for ~1.6s against a 1s budget and is not killed.
 #[test]
 fn watchdog_startup_bytes_move_the_deadline() {
     let (fixture, md_file) = stall_fixture("startup-chatty", ProviderBehavior::ChattyThenExit);
@@ -275,7 +283,7 @@ fn watchdog_startup_bytes_move_the_deadline() {
     let assert = fixture
         .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_STEP_TIMEOUT", format!("{}s", CHATTY_STEP_TIMEOUT_MS as f64 / 1000.0))
         .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
         .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
@@ -291,6 +299,13 @@ fn watchdog_startup_bytes_move_the_deadline() {
         last_exit_reason(&fixture).as_deref(),
         Some("step_timeout"),
         "a chattering child must not be recorded as a silence kill; stderr: {plain}"
+    );
+    // Without this the run could pass by ending before a deadline that never
+    // moved would have fired.
+    let lifetime = last_child_lifetime_ms(&fixture).expect("the run records the child's lifetime");
+    assert!(
+        lifetime > CHATTY_STEP_TIMEOUT_MS + WATCHDOG_INTERVAL_MS,
+        "the child must outlive the unmoved deadline; lived {lifetime}ms; stderr: {plain}"
     );
 }
 

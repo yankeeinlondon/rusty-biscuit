@@ -776,7 +776,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         context.loop_values = request.loop_values.clone();
         let (_, env) = self.document_target(document, &request.task_identity);
         let mut overrides = request.set_overrides.clone();
-        if request.body_only { super::container::mask_body_events(&mut overrides); }
+        if request.body_only { super::container::mask_body_events(&mut overrides, &source); }
         let options = super::jit::step_prepare_options(
             &source, &context, overrides, &env, false,
         );
@@ -935,7 +935,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         prompt_compose_context.loop_values = request.loop_values.clone();
         let (planned_target, document_env_overrides) = self.document_target(&document, &request.task_identity);
         let mut overrides = request.set_overrides.clone();
-        if request.body_only { super::container::mask_body_events(&mut overrides); }
+        if request.body_only { super::container::mask_body_events(&mut overrides, &source); }
         // The identity is selected from the document's effective frontmatter
         // before its body renders, so `env.AGENT`/`env.MODEL` in the prompt
         // name the provider and model that launch, not the prediction's.

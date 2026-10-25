@@ -526,6 +526,22 @@ Listing again reads no file contents. `.git/info/exclude` sits inside `.git`
 and is not watched, so a change to it takes effect on the next rescan,
 configuration change, or restart.
 
+A created Markdown file that the walk would not list changes the index only
+when a link or transclusion was waiting for it, that is, when one of them
+failed to resolve and would resolve to that path. Then the link resolves.
+Any other such file costs nothing, so a build that writes generated Markdown
+under an ignored folder does not keep DMLS busy:
+
+```text
+docs/a.md:      [plan](plan.md)       ← broken until docs/plan.md exists
+created:        target/doc/gen1.md    → ignored, nothing waits for it: no work
+created:        docs/plan.md          → listed: joins the list, the link resolves
+```
+
+All the changes one `workspace/didChangeWatchedFiles` notification reports
+are applied together, so the index is rebuilt at most once per notification
+however many files it names.
+
 ### Diagnostics that wait for the list
 
 Some diagnostics depend on which paths exist. Publishing them before the list

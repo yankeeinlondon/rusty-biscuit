@@ -31,6 +31,12 @@ Both forms are treated as a **maximum** — when the live terminal is smaller th
 
 When `--height` is omitted, the component runs fullscreen.
 
+An inline prompt is placed at the cursor's row, which it asks the terminal for (a cursor position report, `ESC[6n`). A terminal that does not answer within two seconds, for example one too busy to respond, does not stop the prompt: it is placed at the bottom of the screen instead, which is where a shell usually leaves the cursor. If the cursor was higher, the prompt draws below it, over empty rows. A reply that arrives late is read by the running prompt and never reaches the shell.
+
+```sh
+question choose-one --height 6 red green blue   # placed at the cursor, or at the bottom if the terminal is silent
+```
+
 ### `--show-input-on-exit`
 
 Controls what happens to the inline viewport once the prompt exits.

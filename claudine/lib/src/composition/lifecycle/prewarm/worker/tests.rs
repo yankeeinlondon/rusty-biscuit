@@ -299,7 +299,7 @@ async fn failures_warn_once_without_the_phrase_and_later_candidates_still_run() 
     });
 
     assert_eq!(submit(&worker.handle(), &frontmatter), 3);
-    fake.wait_for_calls(3).await;
+    fake.wait_for_completed(3).await;
     // A failed candidate is not retried in this invocation.
     assert_eq!(submit(&worker.handle(), &frontmatter), 0);
     drop(worker);
@@ -332,7 +332,7 @@ async fn a_successful_or_no_op_preparation_counts_as_done() {
     let frontmatter = json!({ "success": [{ "say": "done" }] });
 
     assert_eq!(submit(&worker.handle(), &frontmatter), 1);
-    fake.wait_for_calls(1).await;
+    fake.wait_for_completed(1).await;
     drop(worker);
 
     assert_eq!(fake.completed(), texts(&["done"]));

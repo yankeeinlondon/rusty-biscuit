@@ -304,6 +304,9 @@ struct DesignFixture {
     /// Set by [`Self::with_gitea_repository`]: the root holding `o/r.git`,
     /// which the pane's git reaches through the proxy.
     git_root: Option<PathBuf>,
+    /// Set by [`Self::on_teardown_wait`]: called each time `Drop` polls for
+    /// the fixture's workers, starting before the first poll.
+    teardown_nudge: std::sync::Mutex<Option<Box<dyn FnMut() + Send>>>,
 }
 
 impl DesignFixture {
@@ -431,6 +434,7 @@ impl DesignFixture {
             feature: sibling("wt-feature"),
             main,
             git_root: None,
+            teardown_nudge: std::sync::Mutex::new(None),
             _parent: parent,
         };
         fixture.seed_stores(pr_age, with_child);
@@ -632,6 +636,15 @@ impl DesignFixture {
     }
 }
 
+impl DesignFixture {
+    /// Calls `nudge` each time teardown polls for this fixture's workers,
+    /// first before it checks them, so a stand-in can hold a worker until
+    /// teardown is waiting for it.
+    fn on_teardown_wait(&self, nudge: impl FnMut() + Send + 'static) {
+        *self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(nudge));
+    }
+}
+
 impl Drop for DesignFixture {
     fn drop(&mut self) {
         let in_cache = |real: PathBuf| real.file_name().map(|name| self.cache_dir().join("worktree").join(name));
@@ -640,7 +653,12 @@ impl Drop for DesignFixture {
             pr_store: pr_store_path(&self.main).ok().and_then(in_cache),
             head_store: remote_head_store_path(&self.main).ok().and_then(in_cache),
         };
-        let finished = reap_workers(&paths, || {});
+        let mut nudge = self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        let finished = reap_workers(&paths, || {
+            if let Some(nudge) = nudge.as_mut() {
+                nudge();
+            }
+        });
         if !std::thread::panicking() {
             assert!(finished, "a refresh worker outlived the test or kept a lock");
         }
@@ -898,9 +916,17 @@ fn level2_a_failed_assertion_in_a_held_pr_scene_still_reaps_the_worker() {
         assert_eq!(gitea.waiting(), 1, "the PR request is still held");
         workers = perf_support::refresh_workers(&fixture.main).iter().map(|worker| worker.pid).collect();
         directory = Some(fixture.main.clone());
-        // Answered only after this stall: the worker outlives the release,
-        // so only a teardown that waits for it can pass.
-        gitea.before_reply(|| std::thread::sleep(Duration::from_secs(2)));
+        // Answered only once the fixture's teardown is polling for the
+        // worker: the worker outlives the release, so only a teardown that
+        // waits for it can pass.
+        let (teardown_waiting, waited) = std::sync::mpsc::channel::<()>();
+        fixture.on_teardown_wait(move || {
+            let _ = teardown_waiting.send(());
+        });
+        let waited = std::sync::Mutex::new(waited);
+        gitea.before_reply(move || {
+            let _ = waited.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).recv();
+        });
         panic!("{}", perf_support::MANUFACTURED_FAILURE);
     }));
 
