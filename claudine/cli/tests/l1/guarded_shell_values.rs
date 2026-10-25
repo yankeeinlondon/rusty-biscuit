@@ -104,9 +104,9 @@ macro_rules! guarded_shell_cases {
 const LIFECYCLE_COMMIT_CASES: &[bool] = &[false, true];
 
 
-/// The motivating lifecycle guard: `commit_message` absent passes pre-flight
-/// once the template is approved and the false branch launches nothing; set,
-/// the selected branch passes it as one argument.
+// The motivating lifecycle guard: `commit_message` absent passes pre-flight
+// once the template is approved and the false branch launches nothing; set,
+// the selected branch passes it as one argument.
 guarded_shell_cases! {
     LIFECYCLE_COMMIT_SCHEDULE, lifecycle_commit_case;
     a_lifecycle_guard_proves_its_commit_message_present: 0,

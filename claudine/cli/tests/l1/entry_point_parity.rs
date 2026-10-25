@@ -481,12 +481,11 @@ fn run_candidate_part(sweep: usize, part: usize, host_schema: &str) {
 /// Each ordinary row is independently scheduled; Nextest owns parallelism.
 fn run_matrix_row(index: usize, host_schema: &str) {
     let fixtures = fixtures(host_schema);
-    let rows: Vec<Row> = rows_for(Owner::ClaudineCli)
+    let rows = [rows_for(Owner::ClaudineCli)
         .into_iter()
         .filter(|row| !is_candidate_sweep(row))
         .nth(index)
-        .into_iter()
-        .collect();
+        .expect("a scheduled ordinary row")];
 
     for row in &rows {
         let (_, fixture) = fixtures.for_entry(row.entry());

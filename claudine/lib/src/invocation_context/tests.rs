@@ -1264,6 +1264,7 @@ fn observed(refresh: CurrentRefresh) -> serde_json::Value {
 fn current_branch_observes_a_branch_switched_after_launch() {
     let fixture = TempDir::new().unwrap();
     init_repo(fixture.path());
+    commit_all(fixture.path(), "fixture");
 
     let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
     let provider = invocation.current_provider();

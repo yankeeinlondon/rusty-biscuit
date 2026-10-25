@@ -272,9 +272,9 @@ fn every_table_row_generates_its_tests() {
 // An authored `$schema` merges with the payload; phase rules are unchanged
 // ---------------------------------------------------------------------------
 
-/// `compose` reports an omitted authored required property as missing, and
-/// once the caller supplies it the payload still judges the Claudine controls
-/// beside it.
+// `compose` reports an omitted authored required property as missing, and
+// once the caller supplies it the payload still judges the Claudine controls
+// beside it.
 launch_verdict_cases! {
     AUTHORED_PROPERTY_SCHEDULE, authored_property_case;
     compose_reports_an_omitted_authored_property_and_still_applies_the_payload: false,
@@ -559,10 +559,10 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
     assert!(goose_prompt(&argv[0]).contains("GOOD-STEP"), "{argv:?}");
 }
 
-/// A sequence document whose only control is `sequence` is judged by the
-/// embedded `sequence.yaml` payload, imports included, with no schema on
-/// disk: a malformed task field fails the run before any step launches. The
-/// unedited sequence launches its one step.
+// A sequence document whose only control is `sequence` is judged by the
+// embedded `sequence.yaml` payload, imports included, with no schema on
+// disk: a malformed task field fails the run before any step launches. The
+// unedited sequence launches its one step.
 launch_verdict_cases! {
     SEQUENCE_TRIGGER_SCHEDULE, sequence_trigger_case;
     #[cfg(unix)]
@@ -640,8 +640,8 @@ fn assert_completion_names(stderr: &str, property: &str) {
     assert!(!stderr.contains("its `$schema`"), "{stderr}");
 }
 
-/// The agent's valid `model` passes completion and an invalid one fails it,
-/// so the payload frozen at launch judges what the agent wrote.
+// The agent's valid `model` passes completion and an invalid one fails it,
+// so the payload frozen at launch judges what the agent wrote.
 launch_verdict_cases! {
     INLINE_COMPLETION_SCHEDULE, inline_completion_case;
     #[cfg(unix)]
@@ -754,8 +754,8 @@ fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
 // Pending values are judged after composition
 // ---------------------------------------------------------------------------
 
-/// `mode: "{{ m }}"` is not judged as authored: a supplied member launches,
-/// and a frontmatter non-member fails on the composed value.
+// `mode: "{{ m }}"` is not judged as authored: a supplied member launches,
+// and a frontmatter non-member fails on the composed value.
 launch_verdict_cases! {
     TEMPLATED_CONTROL_SCHEDULE, templated_control_case;
     a_templated_control_is_judged_after_composition: true,

@@ -115,8 +115,7 @@ exit 0
 }
 
 #[cfg(unix)]
-#[test]
-fn sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored() {
+fn assert_sequence_reference_launch_scope(magic: bool, metadata_schema: &str) {
     // Ruling 2 of 2026-09-23-local-before-home: a nested `@` reference keeps
     // the invocation's launch tree as its local root, while explicit-relative
     // references stay anchored on the source document. Launching from
@@ -129,6 +128,7 @@ fn sequence_magic_reference_follows_launch_scope_and_relative_stays_source_ancho
     // source doc lives) and `unrelated/` (the process CWD), each carrying
     // its own fixtures with a distinguishable step count.
     let fixture = CliProcessFixture::named("sequence-magic-reference");
+    fixture.seed_inline_metadata_schema(metadata_schema);
 
     // --- Primary repo: source doc + source-relative fixtures (1 step) ---
     let repo_root = fixture.cwd().join("repo");
@@ -183,40 +183,47 @@ exit 0
 "#,
     );
 
-    // `@` resolves from the launch tree: the launch repository's fixtures
-    // are the intended winner, not a decoy.
-    let magic_count = fixture.cwd().join("magic-count.txt");
+    let count_path = fixture.cwd().join("call-count.txt");
+    let (document, expected_count) = if magic { (&magic_md, "3") } else { (&relative_md, "1") };
     fixture
         .command_builder()
         .ambient_context(&unrelated)
         .build()
-        .env("CLAUDINE_COUNT_FILE", &magic_count)
-        .args(["sequence", "--goose", magic_md.to_str().unwrap()])
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .args(["sequence", "--goose", document.to_str().unwrap()])
         .assert()
         .success();
     assert_eq!(
-        fs::read_to_string(&magic_count).unwrap().trim(),
-        "3",
-        "nested `@` must resolve from the launch tree \
-         (unrelated/fixtures/steps.yaml — 3 steps)."
+        fs::read_to_string(&count_path).unwrap().trim(),
+        expected_count,
+        "magic references must use the launch tree and explicit-relative references must use the source directory"
     );
+}
 
-    // Explicit-relative resolves beside the source document, not the CWD.
-    let relative_count = fixture.cwd().join("relative-count.txt");
-    fixture
-        .command_builder()
-        .ambient_context(&unrelated)
-        .build()
-        .env("CLAUDINE_COUNT_FILE", &relative_count)
-        .args(["sequence", "--goose", relative_md.to_str().unwrap()])
-        .assert()
-        .success();
-    assert_eq!(
-        fs::read_to_string(&relative_count).unwrap().trim(),
-        "1",
-        "explicit-relative must resolve from the source document's directory \
-         (repo_root/prompts/fixtures/steps.yaml — 1 step), not the process CWD."
-    );
+#[cfg(unix)]
+macro_rules! sequence_reference_launch_tests {
+    ($($test:ident => $magic:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_sequence_reference_launch_scope(
+                    $magic,
+                    include_str!("../../../schemas/inline-compose.yaml"),
+                );
+            }
+        )*
+
+        #[test]
+        fn sequence_reference_cases_cover_magic_and_source_relative() {
+            assert_eq!([$($magic),*], [true, false]);
+        }
+    };
+}
+
+#[cfg(unix)]
+sequence_reference_launch_tests! {
+    sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored => true,
+    sequence_relative_reference_stays_source_anchored_outside_the_launch_repository => false,
 }
 
 #[cfg(unix)]
