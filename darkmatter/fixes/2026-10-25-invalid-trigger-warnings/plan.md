@@ -46,14 +46,47 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/dmls.md
-source_files_during_phase_2: []
+source_files_during_phase_2:
+    - darkmatter/cli/src/commands/trigger_findings.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
-skills_files_updated_during_phase_2: []
-source_files_during_phase_3: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
-skills_files_updated_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
 source_files_during_phase_4: []
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
@@ -535,7 +568,7 @@ Phases 3–4; they form Wave 6 together with the first tasks of Phases 3 and 4.
 
 ### Wave 6 — CLI tasks (concurrent with Phase 3 Wave 6 and Phase 4 Wave 6)
 
-- [ ] **Compose delivery**
+- [x] **Compose delivery**
     - Verify through the normal invocation path: ordinary compose of a
       `$schema`-less document beside the invalid trigger succeeds, stdout
       carries the composed document, stderr carries exactly one warning row
@@ -550,7 +583,7 @@ Phases 3–4; they form Wave 6 together with the first tasks of Phases 3 and 4.
       error.
     - Add/adjust CLI L1 tests (isolated repository fixtures) for each bullet;
       reuse `CliProcessFixture` conventions from the testing skill.
-- [ ] **Schema validate**
+- [x] **Schema validate**
     - `validate_one` (`cli/src/commands/schema/validate.rs:236-243`) no longer
       maps per-trigger failures to `FileOutcome::SchemaError`; findings ride
       the outcome: `--format json` adds warning rows to the existing
@@ -569,12 +602,12 @@ Phases 3–4; they form Wave 6 together with the first tasks of Phases 3 and 4.
       against the recovered registry, including re-resolution after
       assignments; add a test with an invalid trigger beside a valid matching
       one (both filename orders per spec acceptance 2).
-- [ ] **Schema triggers**
+- [x] **Schema triggers**
     - `run_triggers` (`cli/src/commands/schema/triggers.rs:33`) no longer
       aborts on invalid triggers; the stdout trace gains a skipped-triggers
       section listing each finding's source and reason inline (inspection
       output), with existing sections unchanged; add a test.
-- [ ] **md clean**
+- [x] **md clean**
     - Ordinary mode: the discovery warning is written to stderr via the
       existing `report_section` helpers (`cli/src/commands/clean.rs:312-348`);
       cleaning succeeds beside an invalid trigger; findings never affect the
@@ -603,7 +636,7 @@ builds on it and is concurrent with Phase 4's Wave 7.
 
 ### Wave 6 — Registry install
 
-- [ ] **Valid-subset install**
+- [x] **Valid-subset install**
     - `Preparation::run`/`TriggerRegistries::install`
       (`dmls/src/overlay/registry.rs:424-469`, `581-638`): a scan that
       succeeds with findings installs the valid subset (registry +
@@ -628,7 +661,7 @@ builds on it and is concurrent with Phase 4's Wave 7.
 
 ### Wave 7 — Diagnostics, editor behavior, tests (concurrent with Phase 4 Wave 7)
 
-- [ ] **Warning diagnostics**
+- [x] **Warning diagnostics**
     - Publish each finding as a warning diagnostic on the disk trigger file
       (severity Warning, code `dm.schema.invalid_trigger`, source
       `darkmatter.schema`): file-level range with the established fallback
@@ -647,7 +680,7 @@ builds on it and is concurrent with Phase 4's Wave 7.
       link, or watch; publish for prepared scopes with no open document
       (workspace probes) and for trigger files outside the workspace; protocol
       stdout stays clean (LSP notifications only).
-- [ ] **Editor features and formatting**
+- [x] **Editor features and formatting**
     - Verify validation, completion, and hover reflect the installed valid
       subset and change with valid neighbors while an invalid trigger is
       skipped (mostly inherited from install; add explicit coverage).
@@ -656,7 +689,7 @@ builds on it and is concurrent with Phase 4's Wave 7.
       own (the registry publishes the warning on the trigger file); direct
       authoring checks of an open trigger stay strict and never fail document
       preparation.
-- [ ] **DMLS test suite**
+- [x] **DMLS test suite**
     - Update the last-good/transactional registry tests
       (`registry.rs:902-1681`; e.g.
       `a_malformed_nearer_candidate_keeps_last_good_and_its_watch_until_repaired`,

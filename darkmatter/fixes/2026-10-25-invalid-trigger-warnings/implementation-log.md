@@ -46,14 +46,53 @@ packages:
     - claudine
 human_review: false
 message_to_agent: |-
-    Phase 1 landed the library recovery core. Facts the next phases need:
-    (1) Findings: `TriggerRegistry::findings()`, `DarkmatterSchemas::discovery_findings()`, `ValidationReport::trigger_findings`, `CleanSchemaContext::discovery_findings()`, `SchemaCleanAnalysis::trigger_findings()`. Each `InvalidTriggerFinding` has `source()`, `identity()` (normalized path or bundle/name; dedup by this), `cause()`, `cause_path()`, `position()`, `code()`, `message()`.
-    (2) `md compose` already shows the warning on stderr through `warning_rows` and in report-json through `warning_diagnostic` (unlocated), because `prepare_document` adds `ComposeWarning::from_invalid_trigger` before any effect. `md schema validate`, `md schema triggers`, and `md clean` show nothing yet (Phase 2).
-    (3) Phase 2: two CLI tests were weakened because their surfaces print nothing yet; restore warning assertions on them. `cli/tests/l1/schema_triggers.rs::schema_validate_skips_a_trigger_with_a_forbidden_path_prefix` should also assert stderr names `bad.trigger.yaml` and the pattern `@prompts/**`. `an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location` previously also covered `md schema triggers`; add that command back once the trace lists skipped triggers. The old YAML hint text ("must be quoted") is not in the finding message.
-    (4) Phase 3: `dmls/src/overlay/registry.rs::fail_closed_on_findings` is a TEMPORARY bridge that turns a scan's first finding back into `SchemaError::TriggerLoad`, so DMLS still fails the scope closed with last-good. Delete it when DMLS installs valid subsets; the skill note in `.claude/skills/darkmatter/dmls.md` goes with it.
-    (5) Phase 4: `effective_schema_for` (compose) still returns only `Option<EffectiveSchema>`. Claudine's two schema matrices classify "discovery reported a finding" as their `Error` outcome (`claudine_schemas_matrix.rs::discover_from`).
-    (6) Two DMLS tests fail under full-package load on the unchanged base as well: `registry_preparation::a_held_preparation_leaves_edits_cancellation_and_other_requests_running` and `startup_preparation::a_request_overtakes_the_remaining_startup_probes_after_an_unchanged_configuration`. They cross the 500 ms slow-request log threshold. Do not chase them as regressions.
-    (7) User docs under `darkmatter/docs/` are untouched (Phase 5).
+    Phase 3 landed DMLS. Facts the next phases need:
+    (1) The temporary bridge `fail_closed_on_findings` is gone. A scan with findings is `Outcome::Ready` and installs its valid subset (even empty); `failed_scopes` never counts a skipped trigger, `failed_triggers` does, so the startup line stays `schema registry ready`. `TriggerRegistries::reconcile_warnings` publishes one warning per skipped disk trigger across all scopes (`TriggerDiagnosticTransition { path, finding }`), clears it when no scope reports it, and logs WARN `ignoring invalid schema trigger …` (fields `trigger=`, `code=`) / INFO `invalid schema trigger no longer reported`. Embedded findings are logged only.
+    (2) Diagnostic: severity Warning, code `dm.schema.invalid_trigger`, source `darkmatter.schema`, message = `InvalidTriggerFinding::message()`, `relatedInformation` = `cause_path()` when present (an unresolved import inside a payload carries no path in its error, so it has none). Open trigger files: buffer envelope parses → the warning (`SuggestionState::TriggerWarning`); malformed buffer → the strict `dm.schema.prepare` ERROR wins. `didClose` republishes the warning.
+    (3) Phase 5 docs to update in `darkmatter/docs/lsp/indexing.md` (log table still lists the old trigger-failure rows and says `initialized with failures` covers failed triggers) and any DMLS schema-support page describing last-good retention for trigger load errors: last-good now applies only to whole-scan failures (case-fold collision); root I/O fails closed; skipped triggers install the valid subset and warn on the trigger file.
+    (4) DMLS only reports triggered schemas' document diagnostics under `[schema] strict = true`; session tests of trigger properties must set it.
+    (5) The load-sensitive DMLS test from Phases 1-2 (`registry_preparation::a_held_preparation_…`) did not fail this phase.
+source_files_during_phase_2:
+    - darkmatter/cli/src/commands/trigger_findings.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
 ---
 
 # Implementation Log for 2026-10-25-invalid-trigger-warnings (6 phases)
@@ -153,3 +192,195 @@ Boundary and fidelity: discovery and compose are covered in-process at the crate
 
 - `just cross-check darkmatter --os windows`, attempt 1: 9,612 of 9,613 passed. `trigger_discovery_recovery::an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous` failed because the test expected the message to contain `root.join("schemas/memory.yaml").display()`, which keeps the authored `/` on Windows. `Path` equality is component-wise, so the source assertion passed. The test now checks that the message names `finding.source()`.
 - Attempt 2: 9,613 of 9,613 passed. `os_failing` is not set.
+
+## Phase 2
+
+### Progress
+
+- started Phase 2 (`md` CLI warning delivery): compose, schema validate, schema triggers, clean
+- all four Wave 6 tasks implemented and checked off in the plan; the work was done inline (no subagents), since the four tasks share one new delivery module
+
+### Design Decisions
+
+1. **Decision: one shared CLI delivery module for the non-compose commands**
+    - **decision:** `cli/src/commands/trigger_findings.rs` holds `emit_warnings` (stderr `Status` warning rows, the same presentation `md compose` already gives the warning), `FindingRow` (`{source, code, path, message}`; `path` is the trigger file, `null` for an embedded trigger), and `DeliveredFindings` (per-invocation dedup by `InvalidTriggerFinding::identity()`).
+    - **alternatives considered:** a renderer per command; route validate/clean through compose's `warning_rows`/`ComposeWarning`.
+    - **why:** the plan asks for one row shape for validate and clean and one dedup rule; compose's types are composition-specific.
+    - **downsides:** compose keeps its own `warning_rows`; both render through `Status` with warning state, so the two must stay visually aligned by hand.
+2. **Decision: `md schema validate` reports a finding on any outcome of the file that first discovers it**
+    - **decision:** `validate_one` returns a `CheckedFile { outcome, timings, findings }`; findings are kept even when the later effective-schema or validation step fails. Pretty mode prints them on stderr before the file's outcome (also under `--quiet`, which hides successes, not warnings). JSON mode puts the rows first in the record's `warnings` (discovery runs before validation), followed by schema advisories, on `Validated` and `SchemaError` records alike. Exit statuses are untouched.
+    - **alternatives considered:** only attach to `Validated` records (loses the warning on exit 2); suppress under `--quiet`.
+    - **why:** spec: "extend failure outcomes to retain earlier discovery warnings without changing existing outcome fields or exit statuses", and the warning "must be visible during ordinary CLI use".
+    - **downsides:** a `SchemaError` record can now carry `warnings`, a key consumers previously saw only on validated records.
+3. **Decision: the trigger trace gains a "Skipped invalid triggers" section between "Shadowed envelopes" and "Triggers"**
+    - **decision:** always printed (with `none` when empty, as the neighbouring sections do), each row the finding's message plus its code; nothing on stderr.
+    - **alternatives considered:** append at the end; print only when non-empty.
+    - **why:** it describes envelope status, like shadowing, and the existing sections' content is unchanged.
+    - **downsides:** none found; existing trace tests match by substring.
+4. **Decision: `md clean` gets findings from the library result, and a schema failure carries them on its error**
+    - **decision:** `FrontmatterRepair` and `CleanResult` gain `trigger_findings` (any outcome); `FrontmatterRepairError::Schema` becomes `Schema { error: Box<SchemaError>, trigger_findings }`, filled from `CleanSchemaContext::discovery_findings()` when `analyze` fails after discovery. The CLI writes them to stderr in ordinary mode and into a new always-present top-level `warnings` array in `--json` (version stays 1). On a schema failure there is no envelope, so the CLI writes them to stderr ahead of the error in both modes. `SchemaError` is boxed to satisfy `clippy::result_large_err`.
+    - **alternatives considered:** let the CLI rebuild a `CleanSchemaContext` to read findings (a second discovery); drop findings on the failure path.
+    - **why:** spec: retain warnings collected before a later authored-schema failure and deliver them with it; `md clean --json` "adds a top-level `warnings` array, separate from `diagnostics`".
+    - **downsides:** `FrontmatterRepairError::Schema` changed shape (tuple → struct); its only matchers were the CLI and one lib test.
+5. **Decision: ordinary `md compose` prints a failed run's trigger warnings before the error**
+    - **decision:** found while writing the tests: compose's ordinary mode dropped `ComposeFailure::warnings`, so a document that failed validation under a valid trigger, or whose authored `$schema` was missing, never showed the invalid-trigger warning. `report_failure_trigger_warnings` (in `commands/compose.rs`, used by the plain and lifecycle paths, for both the preflight and compose failures) now prints the `dm.schema.invalid_trigger` warnings a failure carries, skipping any the `BlockedDiagnostics` error already shows as blocking.
+    - **alternatives considered:** print every warning family on failure (changes output for warnings the spec does not cover); leave compose alone (violates "retain ... and deliver them with that failure").
+    - **why:** spec requirement for this warning; Rule 3 keeps other families unchanged.
+    - **downsides:** other compose warning families still disappear on failure in ordinary mode, as before.
+6. **Decision: embedded `path: null` is covered by construction, not a CLI test**
+    - **decision:** `FindingRow::path` is `finding.source().path()`, which is `None` for `TriggerSource::Embedded`; `md` has no embedded bundle to discover, so no `md` invocation can produce an embedded finding.
+    - **alternatives considered:** a unit test constructing an embedded finding (the constructor is `pub(crate)` in the library).
+    - **why:** the criterion cannot be exercised through `md`; Phase 4's Claudine delivery covers embedded sources.
+    - **downsides:** the null branch is proven by the type, not observed.
+
+### Work Completed
+
+- `cli/src/commands/trigger_findings.rs` (new): shared delivery (stderr rows, JSON row, per-invocation dedup).
+- `md schema validate` (`cli/src/commands/schema/validate.rs`): findings ride `CheckedFile`, dedup across files, stderr in pretty mode, `warnings` rows in JSON mode on any outcome.
+- `md schema triggers` (`cli/src/commands/schema/triggers.rs`): "Skipped invalid triggers" trace section.
+- `md clean` (`cli/src/commands/clean.rs`, `clean/json.rs`; lib `cleanup/frontmatter.rs`, `cleanup/document.rs`): `trigger_findings` on the results and the schema error; stderr warnings; `--json` top-level `warnings`.
+- `md compose` (`cli/src/commands/compose.rs`, `compose/lifecycle.rs`): trigger warnings printed on failure in ordinary mode.
+- Restored the two tests Phase 1 weakened: `schema_triggers::schema_validate_skips_a_trigger_with_a_forbidden_path_prefix` asserts stderr names `bad.trigger.yaml` and `@prompts/**`; `an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location` again covers `md schema triggers`.
+- `clean_json::test_json_envelope_has_exactly_the_documented_top_level_fields` pins the new `warnings` key.
+- Skill: `.claude/skills/darkmatter/schema.md` documents the CLI delivery. User docs (`darkmatter/docs/…`, including the clean `--json` and validate JSON references) remain Phase 5's.
+
+### Requirement-to-Test Mapping
+
+All CLI tests are spawned-`md` L1 tests (F3) in isolated temp repositories (`CliProcessFixture`, hand-written `.git`), no terminal or browser window. Library tests are in-process at the public API (F2, L1).
+
+| Requirement | Test(s) |
+| --- | --- |
+| Compose of a `$schema`-less prompt beside the incident trigger succeeds; stdout carries the document; exactly one stderr warning naming the trigger and reason (incl. a transcluded child) | `invalid_trigger_warnings::compose_beside_the_incident_trigger_succeeds_with_one_warning` |
+| `--output report-json` carries `dm.schema.invalid_trigger` (severity warning), no stderr row | `invalid_trigger_warnings::compose_report_json_carries_the_warning_as_a_diagnostic_and_not_on_stderr` |
+| Warnings retained on an independent validation / authored-schema failure | `compose_keeps_the_warning_when_a_valid_trigger_rejects_the_document`, `compose_keeps_the_warning_when_the_authored_schema_fails_to_load` |
+| `--deny dm.schema.invalid_trigger` / `--deny all` stop before the document is written, warning severity kept, no schema-load error | `compose_deny_of_the_code_or_all_stops_before_writing_the_document` (ordinary and report-json) |
+| `--disable schema-triggers` emits nothing | `compose_with_schema_triggers_disabled_reports_nothing`, `schema_validate_with_schema_triggers_disabled_reports_nothing`, `clean_with_schema_triggers_disabled_reports_nothing`, lib `trigger_discovery_recovery::clean_with_trigger_schemas_disabled_has_no_findings` |
+| Authored `$schema` naming the ignored trigger file still fails | `compose_of_a_document_referencing_the_ignored_trigger_still_fails` |
+| Validate pretty: stderr warning once per invocation for several files, exit 0 | `schema_validate_warns_once_on_stderr_for_several_files` |
+| Validate JSON: row shape, first-file attachment, none on the second | `schema_validate_json_attaches_a_shared_warning_to_the_first_file` |
+| Validate JSON failure outcomes retain the warning; exit 1 and exit 2 unchanged | `schema_validate_json_failure_keeps_the_discovery_warning`, `schema_validate_json_schema_error_keeps_the_discovery_warning` |
+| Assignments against the recovered registry, invalid trigger before/after the valid one | `schema_validate_assignments_use_the_valid_trigger_beside_an_invalid_one` (both filename orders, with and without the required assignment) |
+| Forbidden path prefix names trigger and pattern | `schema_triggers::schema_validate_skips_a_trigger_with_a_forbidden_path_prefix` |
+| Trigger trace lists skipped triggers inline, valid neighbor still matched; `none` when clean; YAML-located claimed file | `schema_triggers_lists_the_skipped_trigger_and_still_matches_the_valid_one`, `schema_triggers_reports_none_skipped_for_a_valid_root`, `schema_triggers::an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location` |
+| Clean ordinary: succeeds, stdout unchanged document, one stderr warning | `clean_beside_the_incident_trigger_succeeds_with_one_stderr_warning` |
+| Clean `--json`: version 1, `diagnostics`/`applied`/`changed` unchanged, top-level `warnings` row, clean stderr | `clean_json_carries_the_warning_in_the_top_level_warnings_array`, `clean_json::test_json_envelope_has_exactly_the_documented_top_level_fields` |
+| Clean schema failure still delivers the warning (both modes) | `clean_keeps_the_warning_when_the_authored_schema_fails_to_load`; lib `a_clean_schema_failure_carries_the_findings_discovered_before_it` |
+| `CleanResult::trigger_findings` is outside `diagnostics` and a valid neighbor still constrains | lib `clean_carries_the_skipped_trigger_outside_its_diagnostics` |
+
+The Input Robustness Matrix does not apply: Phase 2 adds no reader of a file format (it delivers findings the Phase 1 loaders already classify; the envelope matrix is Phase 1's `trigger_input_matrix`).
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages: [darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`, so both gates ran.
+- `just lint` (darkmatter): pass. Fixes it forced: `SchemaError` boxed inside `FrontmatterRepairError::Schema` (`clippy::result_large_err`), `expect_err` in the new lib test.
+- `just test` (darkmatter): 12,264 of 12,265 passed; the one failure was `dmls::l1 registry_preparation::a_held_preparation_leaves_edits_cancellation_and_other_requests_running` (the load-sensitive test from Phase 1). It passes alone. Fail-fast skipped 196 tests, so `cargo nextest run -p dmls --features effects-instrumentation --no-fail-fast` ran next: 1,431 of 1,431 passed.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependents: no package outside `darkmatter/` uses `CleanResult`, `FrontmatterRepair`, or `FrontmatterRepairError` (the ripgrep matches are unrelated names). `cargo check -p claudine -p claudine-cli -p messenger --tests` is clean.
+
+### Load-Sensitive and Pre-Existing Failures
+
+- `dmls::l1 registry_preparation::a_held_preparation_leaves_edits_cancellation_and_other_requests_running`: load-sensitive, as Phase 1 recorded (fails only under full-package load, passes alone and in the whole DMLS package run).
+
+### Cross-OS Check
+
+- `just cross-check darkmatter --os windows`, attempt 1: 9,616 of 9,616 passed (65 skipped). `os_failing` is not set.
+
+## Phase 3
+
+### Progress
+
+- started Phase 3 (DMLS valid-subset install, warning diagnostics, refresh)
+- removed the Phase 1 bridge `fail_closed_on_findings`; installed the valid subset; added per-source warning reconciliation, publication, and authoring-surface handling
+- converted 28 L1 tests and 13 unit tests (9 registry, 3 overlay, 1 router logging) that encoded the last-good/error contract (two parallel subagents took the L1 files: `workspace_schema_scopes.rs`; and `lsp_session.rs`, `startup_log_lines.rs`, `searched_candidates.rs`, `registry_observability.rs`, `strict_mode_recovery_spike.rs`)
+- added `dmls/tests/l1/invalid_trigger_warnings.rs`, a formatting passthrough test, and five registry unit tests
+- gates green; Windows cross-check green on attempt 2
+
+### Design Decisions
+
+1. **Decision: a scope's findings are its served registry's findings**
+    - **decision:** `Scope::findings()` returns `installed.registry.findings()` unless the scope is `RootFailed`; there is no separate per-scope findings field.
+    - **alternatives considered:** a dedicated `findings` field set only by the latest scan; dropping findings while a whole-scan failure (`TriggerFailed`) serves last-good.
+    - **why:** what DMLS reports must match what it serves: a `TriggerFailed` scope serves its last-good registry, so its warnings are that registry's; a `RootFailed` scope serves nothing, so it reports none. One source of truth, no extra state.
+    - **downsides:** while a case-fold collision holds, a warning reflects the last completed scan, not the current disk.
+2. **Decision: one published warning per trigger identity, reconciled after every install**
+    - **decision:** `TriggerRegistries::reconcile_warnings` folds every scope's findings (stale scopes included) in sorted scope-path order, keyed by `InvalidTriggerFinding::identity()`, and diffs the result with the published map. A new or changed finding publishes and logs at `warn`; a vanished one clears and logs at `info`; an unchanged one does nothing.
+    - **alternatives considered:** keep the per-failure-scope `FailureRecord` transition model (one record per scope, which republishes a source shared by scopes and lets a healthy scope clear another's warning); exclude stale scopes (a warning would flicker off at invalidation and republish after rescan).
+    - **why:** spec: "publish each source warning once; one healthy scope must not clear a warning still reported by another"; "repeated unchanged refreshes must not repeat warning logs or diagnostic publications". Identity is computed when the finding is built, so reconciliation does no I/O under the lock.
+    - **downsides:** when two contexts report different causes for one file, the message shown is the first scope path's; a stale scope keeps a repaired file's warning until it re-prepares (workspace passes re-prepare stale scopes).
+3. **Decision: the old trigger-load error diagnostic path is removed, not kept beside the warning**
+    - **decision:** `FailureRecord::owns_diagnostic`, `load_error_for`, and `trigger_load_diagnostic` are deleted; `TriggerDiagnosticTransition` now carries `finding: Option<InvalidTriggerFinding>`. Whole-scan failures still log through `record_failure` but publish no trigger-file diagnostic.
+    - **alternatives considered:** keep the error path for whole-scan failures.
+    - **why:** since Phase 1, discovery never returns `SchemaError::TriggerLoad`, so that path was reachable only through the bridge. Keeping dead code is debt.
+    - **downsides:** a case-fold collision gets no file diagnostic (as before: it never owned one).
+4. **Decision: on an open trigger file, the strict authoring error takes precedence over the warning**
+    - **decision:** a buffer whose envelope does not parse shows only `SuggestionState::TriggerError` (ERROR `dm.schema.prepare`). A buffer whose envelope parses, but that discovery skipped on disk, shows `SuggestionState::TriggerWarning` (the registry's warning, ranged at the YAML error span or the whole file).
+    - **alternatives considered:** show both (two diagnostics with near-identical text on the same file); show only the warning (loses the spec's strict authoring check).
+    - **why:** spec: "Direct authoring checks of an open trigger remain strict … Those errors do not turn its recoverable discovery warning into a document preparation failure." The error already describes the defect the warning would repeat.
+    - **downsides:** while a malformed buffer is open, the disk-state warning is hidden; it comes back on close.
+5. **Decision: `didClose` republishes a closed trigger's warning**
+    - **decision:** `didClose` publishes `closed_file_diagnostics(uri)` (the warning, or empty) instead of always clearing.
+    - **alternatives considered:** clear on close as before (the warning would vanish until the next transition, even though the trigger is still skipped).
+    - **why:** spec: publish findings on disk trigger files, including ones no document has open.
+    - **downsides:** none found.
+6. **Decision: related information only where the cause names a file**
+    - **decision:** `relatedInformation` is `InvalidTriggerFinding::cause_path()` when present. An unresolved import inside a payload (`NoMatch`/`Unresolved` causes) names no file, so its warning has none.
+    - **alternatives considered:** derive the payload path from the finding's read observations.
+    - **why:** spec: "Preserve **available** cause locations as related information." Guessing a location from observations could point at the wrong file.
+    - **downsides:** for that cause, the message names the import but not which payload holds it.
+7. **Decision: the startup registry line keeps its rule**
+    - **decision:** `schema registry initialized with failures` still means `failed_scopes > 0`. A skipped trigger leaves the line `schema registry ready` with `failed_triggers` counting it.
+    - **alternatives considered:** switch the line whenever `failed_triggers > 0`.
+    - **why:** a skipped trigger is a warning, not a failed preparation; the count already surfaces it, and the per-trigger WARN log names it.
+    - **downsides:** a reader scanning only the message misses skipped triggers; `docs/lsp/indexing.md` must say so (Phase 5).
+
+### Work Completed
+
+- `dmls/src/overlay/registry.rs`: bridge removed; `Outcome::TriggerFailed` is now a unit variant for whole-scan failures; `Scope::findings`, `reconcile_warnings`, and `finding_for` added; summary counts skipped triggers through findings; failure records lost their diagnostic role. Module and item docs rewritten for the new contract.
+- `dmls/src/overlay/mod.rs`: `TriggerDiagnosticTransition { path, finding }`; `SuggestionState::TriggerWarning`; the open-trigger path reads `finding_for`; `OverlayState::trigger_finding`.
+- `dmls/src/diagnostics/frontmatter.rs`: `invalid_trigger_diagnostic` (closed files) and `invalid_trigger_diagnostic_at` (open buffers), Warning + related information; `trigger_load_diagnostic` removed.
+- `dmls/src/router.rs`: `publish_trigger_transitions` publishes findings; `closed_file_diagnostics` used on `didClose`.
+- Skills: `.claude/skills/darkmatter/dmls.md` (the bridge paragraph replaced by the skipped-trigger contract, failure-logging scope, the strict-mode testing fact), `.claude/skills/darkmatter/schema.md` (where last-good still applies).
+- Docs: none this phase; Phase 5 owns `docs/lsp/indexing.md` and the DMLS schema-support pages (see `message_to_agent`).
+
+### Requirement-to-Test Mapping
+
+Boundary: the DMLS registry cache (in-process unit, F1) and the LSP protocol over an in-memory connection (L1, F2: real server, real files in a temp workspace, no window or focus).
+
+| Requirement (spec acceptance 8 / plan Phase 3) | Test |
+| --- | --- |
+| Valid-subset install; a formerly valid trigger saved invalid loses its properties while a valid neighbor changes | `overlay::registry::tests::a_trigger_saved_invalid_is_dropped_while_a_valid_neighbor_changes`; L1 `invalid_trigger_warnings::a_trigger_saved_invalid_loses_its_properties_while_a_valid_neighbor_changes` (diagnostics, completion, hover) |
+| First-load all-invalid installs an empty ready registry with findings | `registry::tests::a_first_load_with_only_invalid_triggers_installs_an_empty_ready_registry`; L1 `invalid_trigger_warnings::a_first_load_with_only_invalid_triggers_warns_on_each_and_an_unchanged_refresh_publishes_nothing` |
+| Multiple simultaneous warnings | the two first-load tests above (3 and 2 triggers) |
+| One source shared by scopes is published once and cleared only when no scope reports it | `registry::tests::a_shared_source_is_published_once_and_cleared_only_when_no_scope_reports_it` |
+| Prepared scopes with no open document | L1 `workspace_schema_scopes::*` (14 converted), `invalid_trigger_warnings::a_first_load_…` |
+| Repair and deletion clear the warning | `registry::tests::deleting_a_trigger_removes_it_and_creating_a_missing_payload_recovers`, `external_home_and_environment_roots_recover`; L1 `lsp_session::closed_trigger_envelope_diagnostic_round_trip` (both watch modes), `repairing_trigger_payload_clears_open_envelope_immediately`, `invalid_trigger_warnings::a_trigger_saved_invalid_…` (deletion) |
+| Unchanged refresh repeats neither logs nor publications | `registry::tests::repeated_identical_failures_warn_once_and_recovery_logs_info`; `router::logging_tests::a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once`; L1 `invalid_trigger_warnings::a_first_load_…` (no buffered publish after an unchanged event) |
+| Creation of a missing payload or its folder refreshes | `registry::tests::deleting_a_trigger_…` (absent `payloads/` folder); L1 `searched_candidates::a_candidate_created_during_an_in_flight_preparation_…`; `strict_mode_recovery_spike::…directory_recreation` |
+| Watches survive a failed resolution | `registry::tests::a_malformed_nearer_candidate_skips_its_trigger_and_keeps_its_watch_until_repaired` |
+| Related information = cause location | L1 `invalid_trigger_warnings::a_first_load_…` (unparseable payload), `searched_candidates::…` (nearer import) |
+| Strict authoring diagnostics while editing; closed file keeps the warning | L1 `invalid_trigger_warnings::an_open_trigger_stays_strict_while_edited_and_keeps_its_warning_once_closed` |
+| Skipped trigger never fails the document | L1 `invalid_trigger_warnings::a_trigger_saved_invalid_…` (no `dm.schema.prepare` on the doc), `overlay::tests::trigger_payload_edit_skips_the_trigger_without_failing_the_document` |
+| Formatting passes through with no added message | L1 `formatting_transaction::an_invalid_schema_trigger_beside_the_document_neither_blocks_formatting_nor_adds_a_message` (incident-shaped `memory.yaml`) |
+| Whole-scan failure keeps last-good and warns once; root failure fails closed | `registry::tests::a_whole_scan_failure_keeps_last_good_and_warns_once`, `a_cold_failure_logs_unavailable_once`, `a_root_io_error_fails_closed_and_recovers`; L1 `startup_log_lines::a_failed_scope_switches_the_registry_line_to_its_failure_variant` |
+| Startup counts | L1 `startup_log_lines::*` (6), `registry_observability::*` |
+
+The regression shape: every converted test asserted the old contract (last-good retention / `dm.schema.prepare` ERROR / `failed_scopes=1`), failed after the bridge was removed (28 L1, 13 unit), and passes against the new one. The new L1 tests' neighbor-change and closed-file assertions cannot pass under last-good retention.
+
+Input robustness: no parser or field validation was added or changed (the plan's Decisions → Input robustness), so no matrix applies. Smell grep over the changed DMLS source: no new `#[serde(default)]`, `unwrap_or_default()`, or `.ok()` on a load-bearing parse; `finding_for` uses `canonicalize_simplified(..).unwrap_or_else` only to fall back to the raw path for lookup.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages: [darkmatter, darkmatter-cli, dmls, test-toolkit]`, `change_class: package` (the tree still holds the uncommitted Phase 2 changes too), so both gates ran.
+- `just lint` (darkmatter): pass, also re-run after the final test edit.
+- `just test` (darkmatter): 12,471 of 12,471 passed (10 skipped).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependents: no package depends on `dmls`, and the `darkmatter` library is unchanged this phase, so no dependent tests apply.
+
+### Load-Sensitive and Pre-Existing Failures
+
+- None this phase. `registry_preparation::a_held_preparation_…` passed in the full run.
+
+### Cross-OS Check
+
+- `just cross-check dmls --os windows`, attempt 1: 1,437 of 1,438. `router::logging_tests::a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once` failed because my widened log filter (`"trigger"`) also matched Windows's `slow schema validation … matched_triggers=` WARN line. Fixed by filtering on `trigger registry` / `invalid schema trigger`.
+- Attempt 2: 1,438 of 1,438 passed. `os_failing` is not set.
