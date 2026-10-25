@@ -119,7 +119,9 @@ fn an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous() {
     assert_eq!(finding.code(), "dm.schema.invalid_trigger");
     let message = finding.message();
     assert!(message.contains("ignoring invalid schema trigger"), "{message}");
-    assert!(message.contains(&repo.path(trigger).display().to_string()), "{message}");
+    // The source as discovery found it; a `join`ed fixture path keeps its
+    // authored `/` on Windows, so it is compared above, not as text.
+    assert!(message.contains(&finding.source().to_string()), "{message}");
     assert!(message.contains("unknown keys: name, description"), "the unknown keys are named: {message}");
 
     let document = repo.document("prompt.md", "title: hello\n");

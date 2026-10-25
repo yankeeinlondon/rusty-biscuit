@@ -867,18 +867,27 @@ fn authored_schema_override_applies_last_and_takes_ownership() {
     assert!(is_claudine_owned(&effective, "start"), "Claudine still owns `start`");
 }
 
-/// A malformed disk `claudine.yaml` fails every launch verdict; it never
-/// falls back to the embedded copy.
+/// The disk `claudine.yaml` discovery skipped, with no Claudine payload
+/// applied: the skipped file still shadows the embedded copy.
+fn assert_skipped_without_embedded_fallback(locations: &Locations, name: &str) {
+    let schemas = locations.schemas();
+    let skipped: Vec<_> = schemas
+        .discovery_findings()
+        .iter()
+        .filter(|finding| finding.source().path().is_some_and(|path| path.ends_with("claudine.yaml")))
+        .collect();
+    assert_eq!(skipped.len(), 1, "{:?}", schemas.discovery_findings());
+    assert_accepts(locations.verdict(name, "start: [{ inf0: hi }]"), "no Claudine payload applies");
+    assert_accepts(locations.verdict(name, "title: x"), "an unrelated document launches");
+}
+
+/// A malformed disk `claudine.yaml` is skipped for every launch verdict; it
+/// never falls back to the embedded copy.
 #[test]
-fn malformed_disk_trigger_fails_without_embedded_fallback() {
+fn malformed_disk_trigger_is_skipped_without_embedded_fallback() {
     let locations = Locations::new();
     locations.write_schema(Root::Tree, "claudine.yaml", "kind: schema-trigger\nmatch: 42\n$schema: {}\n");
-    for frontmatter in ["start: [stop]", "title: x"] {
-        match locations.verdict("malformed", frontmatter) {
-            Err(CompositionError::SchemaLoad { .. }) => {}
-            other => panic!("`{frontmatter}`: expected SchemaLoad, got {other:?}"),
-        }
-    }
+    assert_skipped_without_embedded_fallback(&locations, "malformed");
 }
 
 /// A disk trigger's import never resolves to the embedded file of the same
@@ -891,13 +900,13 @@ fn disk_import_never_falls_back_to_an_embedded_file() {
         "claudine.yaml",
         "kind: schema-trigger\nmatch:\n    start: \"unknown[](required)\"\n$schema:\n    start: stack@./lifecycle.yaml\n",
     );
-    let error = locations.verdict("import", "start: [stop]").expect_err("the disk import is missing");
-    assert!(is_load_failure(&error), "{error:?}");
+    // The missing disk import skips the trigger.
+    assert_skipped_without_embedded_fallback(&locations, "import");
 }
 
 /// A disk `lifecycle.yaml` whose recursive family names a type it does not
-/// declare is a load failure: the embedded file of the same basename, which
-/// declares `item`, never supplies it.
+/// declare skips the trigger importing it: the embedded file of the same
+/// basename, which declares `item`, never supplies it.
 #[test]
 fn broken_disk_recursive_family_never_falls_back_to_an_embedded_file() {
     let locations = Locations::new();
@@ -911,8 +920,8 @@ fn broken_disk_recursive_family_never_falls_back_to_an_embedded_file() {
         "lifecycle.yaml",
         "kind: schema\ntypes:\n    stack:\n        - item[]\n    conditional:\n        when: expression(required)\n        then: stack(required)\n",
     );
-    let error = locations.verdict("broken", "start: [stop]").expect_err("the disk family is broken");
-    assert!(is_load_failure(&error), "{error:?}");
+    // The broken disk family skips the trigger.
+    assert_skipped_without_embedded_fallback(&locations, "broken");
 }
 
 /// A disk `claudine.yaml` that matches nothing still shadows the embedded

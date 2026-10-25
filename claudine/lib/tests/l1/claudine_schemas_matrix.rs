@@ -17,7 +17,7 @@
 
 use biscuit_file::Yaml;
 use claudine::composition::schema::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES};
-use darkmatter::markdown::schemas::SchemaError;
+use darkmatter::markdown::schemas::TriggerSource;
 use serde_json::{Map, Value, json};
 
 use crate::claudine_schemas::{BundleFile, Discovered, SchemaRepo, embedded_bundle, shipped_bundle};
@@ -28,11 +28,10 @@ pub(crate) enum Origin {
     /// The repository's `schemas/` folder.
     Disk,
     /// An embedded bundle named like Claudine's, with no disk schema files.
-    /// A load failure must be `SchemaError::EmbeddedTriggerLoad` (never the
-    /// disk origin's `TriggerLoad`) naming a trigger file, whose payload
-    /// imports the libraries, or the edited file itself: every bundle
-    /// document is parsed to classify it, so a library that is not YAML is
-    /// named directly.
+    /// A skipped trigger must be an embedded finding (never a disk file)
+    /// naming a trigger file, whose payload imports the libraries, or the
+    /// edited file itself: every bundle document is parsed to classify it,
+    /// so a library that is not YAML is named directly.
     Embedded,
 }
 
@@ -72,7 +71,8 @@ const SHAPES: [Shape; 8] = [
 /// What a cell must observe.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Outcome {
-    /// Discovery or payload resolution fails visibly; nothing is validated.
+    /// Discovery skips the edited bundle's trigger with a finding, or
+    /// payload resolution fails visibly; nothing is validated.
     Error,
     /// The bundle loads; the positive and violating probes are valid (`true`)
     /// or invalid (`false`).
@@ -486,31 +486,37 @@ fn as_json(text: &str) -> Value {
     Yaml::from_str(text).expect("shipped YAML").as_json().expect("JSON-compatible")
 }
 
-/// The bundle's discovery from `origin`, or `None` when it fails visibly.
+/// The bundle's discovery from `origin`, or `None` when it reports a
+/// skipped trigger. Discovery itself never fails for an invalid trigger.
 fn discover_from(bundle: &[BundleFile], edited: &str, origin: Origin) -> (SchemaRepo, Option<Discovered>) {
-    match origin {
+    let (repo, discovered) = match origin {
         Origin::Disk => {
             let repo = SchemaRepo::new(bundle);
-            let discovered = repo.discover().ok();
+            let discovered = repo.discover().expect("an invalid trigger never fails discovery");
             (repo, discovered)
         }
         Origin::Embedded => {
             let repo = SchemaRepo::new(&[]);
-            let discovered = match repo.discover_embedded(embedded_bundle(bundle)) {
-                Ok(discovered) => Some(discovered),
-                Err(SchemaError::EmbeddedTriggerLoad { bundle, name, .. }) => {
-                    assert_eq!(bundle, CLAUDINE_SCHEMA_BUNDLE_NAME);
-                    assert!(
-                        CLAUDINE_TRIGGER_FILES.contains(&name.as_str()) || name == edited,
-                        "the failure names a trigger or the edited {edited}: {name}"
-                    );
-                    None
-                }
-                Err(other) => panic!("an embedded bundle fails as EmbeddedTriggerLoad, not: {other}"),
-            };
+            let discovered =
+                repo.discover_embedded(embedded_bundle(bundle)).expect("an invalid trigger never fails discovery");
             (repo, discovered)
         }
+    };
+    let Some(finding) = discovered.schemas.discovery_findings().first() else {
+        return (repo, Some(discovered));
+    };
+    match (origin, finding.source()) {
+        (Origin::Disk, TriggerSource::File(_)) => {}
+        (Origin::Embedded, TriggerSource::Embedded { bundle, name }) => {
+            assert_eq!(bundle, CLAUDINE_SCHEMA_BUNDLE_NAME);
+            assert!(
+                CLAUDINE_TRIGGER_FILES.contains(&name.as_str()) || name == edited,
+                "the finding names a trigger or the edited {edited}: {name}"
+            );
+        }
+        (origin, source) => panic!("a {origin:?} bundle reports {source}"),
     }
+    (repo, None)
 }
 
 /// The outcome of one bundle, through public discovery and validation.
