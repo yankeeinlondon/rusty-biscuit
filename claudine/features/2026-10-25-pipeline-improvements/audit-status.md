@@ -4,6 +4,11 @@ kind: implementation-log
 
 # Pipeline audit status
 
+All 21 audits are complete. Final totals: **267 net test identities added**,
+**80 distinct slow tests modified**, **45 review findings**, and **59 existing
+documentation files updated**. Two updated files were empty placeholders and
+now contain canonical guides; no new documentation paths were needed.
+
 The coordinator processes pipeline steps 1–21 serially. Each step runs three
 concurrent agents for tests, review, and canonical documentation. Test counts
 count test identities, not rows exercised inside a test. Documentation totals
@@ -166,6 +171,49 @@ repaired (including one real-resource test). Review: 45 findings, 13 medium and
 canonical documents updated, zero new paths; two formerly empty guides filled.
 All 21 specs reference canonical documents; all 59 referenced paths exist and
 have the required kind. All spec bodies remain unchanged.
+
+## Final speed repairs and verification
+
+The broader final-area runs exposed additional over-budget cases. The table
+separates added behavioral coverage/guards from scheduling identities that
+preserve existing matrix cases.
+
+| Slice | Net identities added | Coverage/guards | Scheduling | Distinct slow tests modified | Existing tests strengthened |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Serial per-spec audits | 91 | 53 | 38 | 15 | 6 |
+| Final clean/CLI/generator/watchdog repairs | 45 | 6 | 39 | 16 | 1 |
+| Final context/reference repairs | 20 | 6 | 14 | 18 | 1 |
+| Final DMLS/approval/parity repairs | 96 | 9 | 87 | 22 | 1 |
+| Final helper deadlines/research/source/provider repairs | 15 | 1 | 14 | 9 | 4 |
+| **Total** | **267** | **75** | **192** | **80** | **13** |
+
+The context slice reworked one slow embedded-export identity already counted
+in step 11; the aggregate counts that identity once. Two over-budget
+interaction cases were intentionally left structurally intact and fell below
+five seconds after unrelated work and nested test-thread oversubscription
+were removed. They are verified but not counted as modified slow tests.
+
+All four broad canonical L1 runs passed, totaling 25,246 observations before
+the final repairs. The final combined parallel run passed all **1,269** selected
+tests with maximum **4.751 seconds** and **zero over five seconds**. Relevant L2
+and muted real-resource evidence is recorded in the numbered reports and
+`verification.md`. No test was ignored, moved to a slower tier, or given a
+larger timeout to satisfy the limit.
+
+Review totals remain **45 findings: 13 medium, 32 low, zero high**. Six findings
+were addressed during the audit. The rest primarily concern allocation,
+repeated parsing/validation, cache lifetime, and API/diagnostic ergonomics.
+Previously recorded feature departures and pending human approval are stated
+in `verification.md` and the corresponding numbered reports.
+
+Documentation counts are by distinct path: **59 existing files updated,
+zero new paths**, including **two empty guides filled**. All 21 specs carry
+valid `canonical_docs` lists, all 59 referenced documents declare
+`kind: canonical-documentation`, and every specification body remains
+unchanged. All four final canonical lint recipes passed: Messenger, Darkmatter
+(including the Zed WASM check), Claudine (including transport and lifecycle
+documentation guards), and Biscuit Speaks. `git diff --check` and the final
+cross-spec reference/kind/body checks passed.
 
 Detailed test evidence is in the numbered `audit-*-tests.md` files. Mini-review
 findings are in `spec.md`; only the current review agent writes that file.

@@ -63,10 +63,51 @@ new coverage guards** and **39 extra scheduling identities**.
 
 ## Verification
 
-The coordinator owns the combined parallel L1 run, preventing concurrent
-builds or tests from competing with these timing measurements. Final results
-and per-module maximum durations are pending that run. This agent ran no
-build, test, or lint during the coordinator's full-area gate or while the
-other final-speed edits were pending. `git diff --check` passed.
+The coordinator's combined parallel L1 run passed **1,269 / 1,269 tests**,
+with zero tests over five seconds. This agent's nine modules account for
+**161 passing tests**, including the 15 Darkmatter clean-parity tests covered
+by the separate report. The maximum in this slice is **3.608 seconds**.
+
+| Module | Tests passed | Maximum duration |
+| --- | ---: | ---: |
+| `agent_text_is_data` | 33 | 2.963 s |
+| `authored_text_rendering` | 13 | 0.917 s |
+| `inline_completion_lifecycle` | 23 | 2.735 s |
+| `provider_tail_launch` | 27 | 2.195 s |
+| `provider_tail_notice` | 19 | 1.995 s |
+| `contamination_probes` | 11 | 2.483 s |
+| `generate_ux` | 15 | 1.438 s |
+| `wrap_watchdog_startup_stall` | 5 | 3.608 s |
+| `clean_parity` (separate report) | 15 | 0.969 s |
+
+The original inline persistence identities now take **1.071 / 1.162 s**;
+the malformed-input replacements take at most **0.555 s**; the header matrix
+replacements at most **0.917 s**. The conditional required-property identity
+takes **1.131 s**. The proxy positive/control pair takes **1.540 / 2.054 s**;
+the sequence positive/control pair takes **1.944 / 2.055 s**. Credential
+surface replacements take at most **2.195 s**, other-failure replacements
+**1.854 s**, and unknown-switch replacements **1.248 s**. The three baseline
+contamination observations take at most **1.313 s**. The original roster,
+steering-grant, and all-drift generator identities take **0.948 / 1.250 /
+1.438 s**, respectively. The watchdog identity takes **3.608 s**, including
+its retained real two-second budget and completion-marker assertion.
+
+These are host timings from the final scoped parallel invocation; the
+original timings came from the full-area gate, which ran more tests. No
+cross-OS timing result is claimed. This agent ran no independent build,
+test, or lint while the coordinator owned the final gates.
+`git diff --check` passed after the edits.
 
 Original timing evidence: `/tmp/pipeline-final-claudine-l1.log`.
+Final evidence: `/tmp/pipeline-final-speed-verified.log`, Nextest run
+`67830caf-931f-47fc-80d7-cc8c45165925`. The combined execution took **81.071
+seconds**, separate from compilation.
+
+To reproduce this agent's slice from the repository root:
+
+```sh
+BISCUIT_TEST_FILTER='test(clean_parity::) | test(agent_text_is_data::) | test(authored_text_rendering::) | test(inline_completion_lifecycle::) | test(provider_tail_launch::) | test(provider_tail_notice::) | test(contamination_probes::) | test(generate_ux::) | test(wrap_watchdog_startup_stall::)' just test darkmatter-cli claudine-cli claudine-gen
+```
+
+This reproduction command was not an additional run; the passing evidence
+comes from the coordinator's broader combined invocation.

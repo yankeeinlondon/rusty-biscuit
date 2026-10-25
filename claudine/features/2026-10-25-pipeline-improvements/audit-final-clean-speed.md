@@ -23,8 +23,25 @@ No production, fixture-case, L2, runner, or CI configuration changed.
 
 ## Verification
 
-Scoped parallel L1 verification is pending the coordinator's full-area gate
-finishing. No build or test runs overlap that gate.
+The coordinator's combined parallel L1 run passed **1,269 / 1,269 tests**,
+with zero tests over five seconds. All **15 clean-parity tests passed**;
+the maximum was **0.969 seconds** (`bom_before_frontmatter`), compared with
+the original matrix's 5.036 seconds. The new roster guard took 0.017 seconds.
+All printed-output, JSON, and saved-byte assertions remain exercised across
+the same 14 shared cases.
 
 `git diff --check` passed after the edit. Original full-gate evidence is
-`/tmp/pipeline-final-darkmatter-l1.log`.
+`/tmp/pipeline-final-darkmatter-l1.log`; final evidence is
+`/tmp/pipeline-final-speed-verified.log` (Nextest run
+`67830caf-931f-47fc-80d7-cc8c45165925`). The combined execution took 81.071
+seconds; compilation is separate from per-test durations. No independent
+build, test, or lint execution overlapped the coordinator's run.
+
+To reproduce just this slice from the repository root:
+
+```sh
+BISCUIT_TEST_FILTER='test(clean_parity::)' just test darkmatter-cli
+```
+
+This reproduction command was not an additional run. The passing evidence
+comes from the coordinator's broader combined invocation.
