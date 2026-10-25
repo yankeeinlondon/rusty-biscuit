@@ -344,7 +344,7 @@ follow, not a request for confirmation.
 
 ### Wave 1 — Typed finding record and code (foundation)
 
-- [ ] **Finding record**
+- [x] **Finding record**
     - Add `InvalidTriggerFinding` (fields per the decision above) in the
       schemas module tree with `code()` → `dm.schema.invalid_trigger`,
       `source_family()` → `darkmatter.schema`, a `message()` that names the
@@ -361,7 +361,7 @@ follow, not a request for confirmation.
 
 ### Wave 2 — Discovery recovery (envelopes, disk and embedded)
 
-- [ ] **Envelope recovery**
+- [x] **Envelope recovery**
     - In `scan_with_source` (`triggers/discovery.rs:574-657`): an envelope
       classification error for an unshadowed file records a finding
       (`TriggerSource::File`, typed cause, envelope position when the cause is
@@ -389,7 +389,7 @@ follow, not a request for confirmation.
 
 ### Wave 3 — Payload gate and failure observations
 
-- [ ] **Payload validator gate**
+- [x] **Payload validator gate**
     - In `resolve_file_payload` / `resolve_embedded_payload`
       (`triggers/assemble.rs:297-339`, `725-787`), after
       `enforce_merge_compatible`, run validator construction through the
@@ -402,7 +402,7 @@ follow, not a request for confirmation.
       compilation; gate regardless of matching or later overrides.
     - Keep cycle detection (`check_payload_cycles`) and merge-compatibility
       errors flowing to findings with the same envelope attribution.
-- [ ] **Failure observations**
+- [x] **Failure observations**
     - Extend payload resolution so a failing resolution still reports probed
       lookup locations (`searched`) and successfully read dependencies; wire
       them into `TriggerRegistry` next to the findings: skipped envelopes and
@@ -419,7 +419,7 @@ follow, not a request for confirmation.
 
 ### Wave 4 — Registry exposure and clean context (concurrent)
 
-- [ ] **Schema-surface exposure**
+- [x] **Schema-surface exposure**
     - `TriggerRegistry` gains `findings` (ordered) and exposes them;
       `DarkmatterSchemas::with_trigger_discovery` (`schemas/mod.rs:523-527`)
       returns `Err` only for infrastructure errors and installs the registry
@@ -430,7 +430,7 @@ follow, not a request for confirmation.
       reports, and `PreparedSchemas::effective_for`
       (`compose/schema_validation.rs:203-210`) no longer flatten them away;
       `ValidationReport` carries `trigger_findings` alongside `advisories`.
-- [ ] **Clean schema context**
+- [x] **Clean schema context**
     - `CleanSchemaConfig::resolve` (`schemas/clean.rs:153-171`) stops aborting
       on per-trigger failures; `CleanSchemaContext`/`SchemaCleanAnalysis`
       expose the findings (including the `Ok(None)` effective-schema branch at
@@ -440,7 +440,7 @@ follow, not a request for confirmation.
 
 ### Wave 5 — Compose integration and library tests (concurrent)
 
-- [ ] **Compose integration**
+- [x] **Compose integration**
     - `prepare_schemas` (`compose/schema_validation.rs:252-316`) no longer
       fails for per-trigger findings; project each finding into the compose
       report as a coded `ComposeWarning` (stage `schema_validation`, code
@@ -461,7 +461,7 @@ follow, not a request for confirmation.
       authored-schema resolution, validation, or composition later fails;
       `WarningIdentity` dedup keeps one row per source across repeated schema
       passes and transclusion children.
-- [ ] **Library recovery tests**
+- [x] **Library recovery tests**
     - Update the transactional tests in `triggers/discovery.rs:995-1053,
       1191-1263` (`malformed_trigger_is_hard_error`,
       `malformed_trigger_atomic_no_registry`, `vacuous_trigger_is_hard_error`,
