@@ -351,6 +351,26 @@ fn host_catalog_diagnostics(
     }
 }
 
+/// One `dm.lifecycle.incomplete_analysis` warning per host catalog whose
+/// lifecycle artifact could not be used, at the top of a document with
+/// frontmatter, when no other catalog's could: the document's lifecycle
+/// stacks are then analyzed as the `md` host's, so a host-only event, verb,
+/// or rename is not seen. The message is the artifact's reason.
+fn lifecycle_host_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
+    if ctx.overlay.is_none() {
+        return;
+    }
+    for reason in crate::overlay::event_views::LifecycleHost::for_document(ctx).incomplete() {
+        out.push(diagnostic(
+            Range::default(),
+            DiagnosticSeverity::WARNING,
+            code::LIFECYCLE_INCOMPLETE_ANALYSIS,
+            source::SCHEMA,
+            format!("{reason}; lifecycle stacks are analyzed as the `md` host's"),
+        ));
+    }
+}
+
 fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
     candidates
         .into_iter()
@@ -741,6 +761,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     let (catalogs, failed_catalogs) = host_catalog_results(ctx);
     host_catalog_diagnostics(&failed_catalogs, &mut out);
     host_function_catalog_diagnostics(&failed_functions, &mut out);
+    lifecycle_host_diagnostics(ctx, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);
@@ -1115,7 +1136,7 @@ impl<'a> KnownRoots<'a> {
     /// [`validation_view`](crate::overlay::event_views::validation_view).
     pub(crate) fn view(
         &self,
-        event: Option<darkmatter::lifecycle::registry::EventId>,
+        event: Option<&crate::overlay::event_views::StackEvent>,
     ) -> darkmatter::markdown::compose::expression::BindingView {
         crate::overlay::event_views::validation_view(event, &self.catalogs)
     }

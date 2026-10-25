@@ -189,18 +189,16 @@ impl FunctionRegistration {
     /// Whether a call with `count` arguments handles a missing value at
     /// argument `index`: every overload taking `count` arguments (and at
     /// least one does) binds it to a parameter that explicitly declares
-    /// `null` and returns a type that does not. A plain `unknown` parameter,
-    /// an optional non-null one, or overloads that disagree at `index` do
-    /// not; neither does a pass-through function whose result may itself be
-    /// `null` (`trim(text: string | null): string | null`), which hands the
-    /// absence on to its caller instead of handling it.
+    /// `null`. The return type plays no part, so `trim(text: string | null):
+    /// string | null` handles its argument as `is_null` does. A plain
+    /// `unknown` parameter, an optional non-null one, or overloads that
+    /// disagree at `index` do not. Whether the call's position lets it handle
+    /// anything (`is_empty(trim(x))` does not) is the caller's call-site
+    /// rule, not this registration's.
     pub fn handles_absence_at(&self, index: usize, count: usize) -> bool {
         let mut candidates = self.overloads.iter().filter(|signature| signature.accepts_count(count)).peekable();
         candidates.peek().is_some()
-            && candidates.all(|signature| {
-                !signature.returns().admits_null_explicitly()
-                    && signature.parameter_for(index).is_some_and(CompiledParameter::admits_null)
-            })
+            && candidates.all(|signature| signature.parameter_for(index).is_some_and(CompiledParameter::admits_null))
     }
 
     /// The fact a call with `count` arguments proves: present when an

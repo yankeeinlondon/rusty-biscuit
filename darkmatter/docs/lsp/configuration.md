@@ -454,7 +454,19 @@ untyped_var: 1    # not in $schema: its type is unknown
 Both calls are silent by default and warn in strict mode: `maybe` may be
 `null`, and `untyped_var` has no declared type.
 
-It is the only call-diagnostic setting; no function has one of its own. The
+Two call warnings ignore `strict` and appear either way:
+
+- `dm.expression.always_false_call`: a `file_exists` call on literal text
+  that can never be a file reference (`file_exists("https://")`).
+- `dm.expression.incomplete_analysis`: a call to a host function (one a host
+  such as Claudine registers) whose facts artifact, `<catalog>.facts.json`
+  beside the host's function catalog, is missing, invalid, or out of date.
+  The call gets no type check and its guard narrows nothing until the host
+  regenerates the artifact. See
+  [Host Expression Functions](../topics/host-functions.md).
+
+It is the only call-diagnostic setting; no function has one of its own (there
+is no `file_exists` setting). The
 editor key is `expressions.strict` under `dmls`, and it overrides the file
 both ways. See [DMLS Diagnostics](../../dmls/docs/diagnostics.md#expressionsstrict)
 for the categories, the fix for each warning, and what an invalid value does.

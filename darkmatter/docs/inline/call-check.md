@@ -52,6 +52,23 @@ flowchart LR
 The check is passive: it reads the authored text and the schema's declared
 types, never a frontmatter value, and it evaluates nothing.
 
+The check reads the document in authored order: frontmatter first, then the
+body top to bottom, with `{{ … }}` expressions and `::block`/`::file`
+conditions interleaved where they are written. When several calls cannot
+bind, the first in that order rejects the document, and the warnings found
+before it (an earlier call in the same expression included) are reported
+with the rejection:
+
+```markdown
+{{ file_exists("") }}   ← dm.expression.always_false_call, reported first
+
+{{ min(true, 5) }}      ← dm.expression.incompatible_call rejects the document
+```
+
+The pre-flight walk that `md compose` runs before approving shell commands
+checks the same surfaces, so it rejects the same call with the same earlier
+warnings ([Report output](../cli/report-json.md#which-diagnostics-in-which-order)).
+
 ## The five argument categories
 
 For every argument of every call, the check compares the argument's declared

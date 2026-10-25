@@ -69,6 +69,21 @@ impl NestedComposeSlot {
         matches!(self, Self::Discover(_))
     }
 
+    /// Takes the blocking stop a nested child of this document reported, so
+    /// the document stops before its next effect instead of when its stages
+    /// finish.
+    pub(crate) fn take_blocked(&self) -> Option<MarkdownError> {
+        let Self::Active(nested) = self else {
+            return None;
+        };
+        let mut outcome = lock(&nested.scope.outcome);
+        if matches!(outcome.restored, Some(MarkdownError::BlockedDiagnostics { .. })) {
+            outcome.restored.take()
+        } else {
+            None
+        }
+    }
+
     /// Evaluates `as_markdown(content)` on this surface.
     pub(crate) fn evaluate(&self, content: &str) -> Result<String, ExpressionError> {
         match self {
@@ -172,7 +187,36 @@ impl NestedCompose {
         Ok(report)
     }
 
+    /// A blocking warning the child's last stages reported stops the calling
+    /// document as one the child stopped on does.
+    ///
+    /// Out of line and in place: a report moved through a closure here would
+    /// add its copies to a frame that recurs once per nested composition.
+    #[inline(never)]
+    fn stop_if_child_blocked(&self, result: &mut MarkdownResult<ComposeReport>) {
+        if let Ok(report) = result
+            && let Err(stop) = super::pipeline::stop_if_blocked(report, &lock(&self.scope.options), None)
+        {
+            *result = Err(stop);
+        }
+    }
+
     fn compose(&self, content: &str) -> Result<String, ExpressionError> {
+        // The setup and the fold run out of line, and the child travels
+        // boxed: this frame recurs once per nested composition, so only what
+        // the recursive call needs is live in it.
+        let mut child = self.prepare_child(content)?;
+        let NestedChild { markdown, runtime, options, node, .. } = &mut *child;
+        let options = options.take().expect("a prepared child holds its request");
+        let mut result = markdown.run_compose_pipeline_node(options, runtime, node.take(), None);
+        self.stop_if_child_blocked(&mut result);
+        self.fold_child(child, result)
+    }
+
+    /// Parses `content` and derives the request and runtime its nested
+    /// pipeline runs with.
+    #[inline(never)]
+    fn prepare_child(&self, content: &str) -> Result<Box<NestedChild>, ExpressionError> {
         let source_context = biscuit_terminal::errors::SourceContext::new(
             PathBuf::from("as_markdown()"),
             PathBuf::from("as_markdown()"),
@@ -183,7 +227,7 @@ impl NestedCompose {
         let authored_keys: Option<HashSet<String>> = (frontmatter.raw_source().is_some()
             || !frontmatter.is_empty())
         .then(|| frontmatter.as_map().keys().cloned().collect());
-        let mut child = Markdown::with_frontmatter(frontmatter, body);
+        let child = Markdown::with_frontmatter(frontmatter, body);
 
         let mut runtime = lock(&self.scope.runtime).clone_for_child();
         let mut options = lock(&self.scope.options).clone();
@@ -217,8 +261,24 @@ impl NestedCompose {
         let options = options.derive(|options| options.with_request_context(context));
 
         let node = format!("as_markdown#{}", NEXT_NODE.fetch_add(1, Ordering::Relaxed));
-        let result = child.run_compose_pipeline_node(options, &mut runtime, Some((node, PathBuf::from("as_markdown()"))), None);
+        Ok(Box::new(NestedChild {
+            markdown: child,
+            runtime,
+            options: Some(options),
+            node: Some((node, PathBuf::from("as_markdown()"))),
+            authored_keys,
+        }))
+    }
 
+    /// Folds a finished child into this document's outcome and serializes
+    /// the composed content.
+    #[inline(never)]
+    fn fold_child(
+        &self,
+        child: Box<NestedChild>,
+        result: MarkdownResult<ComposeReport>,
+    ) -> Result<String, ExpressionError> {
+        let NestedChild { markdown: mut child, runtime, authored_keys, .. } = *child;
         let mut outcome = lock(&self.scope.outcome);
         outcome.deepest_seen = outcome.deepest_seen.max(runtime.transclusion.deepest_seen);
         outcome.context_groups = Some(match outcome.context_groups.take() {
@@ -251,6 +311,17 @@ impl NestedCompose {
     }
 }
 
+/// A nested child between [`NestedCompose::prepare_child`] and
+/// [`NestedCompose::fold_child`].
+struct NestedChild {
+    markdown: Markdown,
+    runtime: PipelineRuntime,
+    /// Taken by the recursive call.
+    options: Option<crate::markdown::compose::ComposeRequest>,
+    node: Option<(String, PathBuf)>,
+    authored_keys: Option<HashSet<String>>,
+}
+
 fn is_structural(error: &MarkdownError) -> bool {
     let transclusion_limit = matches!(
         error,
@@ -261,7 +332,10 @@ fn is_structural(error: &MarkdownError) -> bool {
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
             )
     );
-    transclusion_limit || error.pre_approval_violation().is_some() || error.shell_input_violation().is_some()
+    transclusion_limit
+        || error.pre_approval_violation().is_some()
+        || error.shell_input_violation().is_some()
+        || matches!(error, MarkdownError::BlockedDiagnostics { .. })
 }
 
 fn violation(message: String) -> ExpressionError {

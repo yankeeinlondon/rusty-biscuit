@@ -24,6 +24,7 @@
 //! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
 //! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
 //! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
+//! | `dm.lifecycle.incomplete_analysis` | `WARNING` | No host catalog's lifecycle artifact could be used (missing, stale, or invalid), so lifecycle stacks are analyzed as the `md` host's, which may not be the document's host. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -117,6 +118,10 @@ pub mod code {
     /// A host global catalog in the document's schema roots failed to load,
     /// so the globals it declares are not known to this document's analysis.
     pub const SCHEMA_HOST_CATALOG: &str = "dm.schema.host_catalog";
+    /// No host catalog in the document's schema roots has a usable lifecycle
+    /// artifact, so its lifecycle stacks are analyzed under the `md` host.
+    /// Reported once per catalog, at the top of the document.
+    pub const LIFECYCLE_INCOMPLETE_ANALYSIS: &str = "dm.lifecycle.incomplete_analysis";
     /// A recognized standalone SimplifiedSchema envelope is malformed (missing
     /// or non-mapping `types`, unsupported tagged-envelope keys, or an invalid
     /// payload).

@@ -230,16 +230,19 @@ inside its block without checking any file or URL.
 Not applied yet (**planned**):
 
 - A lifecycle `when` (with its `then` / `else` actions) and a sequence task
-  `when` in frontmatter do not narrow the actions they select. DMLS analyzes
-  each frontmatter expression on its own and has no model of the host's
-  action structure, so a value under `then:` hovers with its declared type.
+  `when` in frontmatter do not narrow the hover of the actions they select: a
+  value under `then:` hovers with its declared type. Call diagnostics in
+  lifecycle stacks are narrowed (see
+  [Diagnostics](./diagnostics.md)); sequence task bodies are not.
 - Host globals (`err`, `timing`, `group`) and nested union members are not
   projected: a guard on `x.kind` narrows only `x.kind`, never `x`.
 
 ## Formatting rule: globals inside a lifecycle stack
 
-Inside the value of one of md's lifecycle events (`initialize`, `composed`,
-`failed`, `cancelled`, `finalize`), an expression is hovered with that
+Inside the value of one of the document's host's lifecycle events (md's
+`initialize`, `composed`, `failed`, `cancelled`, `finalize`, or a host's from
+its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), such as
+Claudine's `start` and `success`), an expression is hovered with that
 event's binding view, at any depth of the stack: a `{{ … }}` span, a `when`
 condition, or an expression-typed value. A cursor on a global the event
 declares, such as `err`, shows its declaration and whether the event can read

@@ -831,24 +831,38 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
             .collect::<Result<_, _>>()?
     };
     // Prefer the borrowed context (Finding 12) so a read-side function
-    // dispatched here does not deep-clone the lookup's context; only fall back
-    // to the owned clone for lookups that expose only the owned accessor.
-    let mut ctx = lookup
-        .resolution_context_ref()
-        .map(std::borrow::Cow::Borrowed)
-        .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
-    if let Some(context) = ctx.as_ref()
-        && let Some(occurrence) = caller_occurrence
-        && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
-    {
-        let mut selected = context.as_ref().clone();
-        selected.active_caller_file_provenance = Some(provenance);
-        ctx = Some(std::borrow::Cow::Owned(selected));
-    }
-    match functions::call_function(&name, &evaluated, ctx.as_deref()) {
+    // dispatched here does not deep-clone the lookup's context.
+    let owned_ctx = owned_call_context(lookup, caller_occurrence);
+    let ctx = owned_ctx.as_deref().or_else(|| lookup.resolution_context_ref());
+    match functions::call_function(&name, &evaluated, ctx) {
         Some(result) => result,
         None => Err(unknown_function_error(&name)),
     }
+}
+
+/// The context a call needs owned: the lookup's own clone when it exposes no
+/// borrowed context, or one selecting the caller file `caller_occurrence`
+/// names. `None` means the borrowed context serves the call as it is.
+///
+/// Out of line and boxed: a context held by value in
+/// [`evaluate_function`] would sit in a frame that recurs once per nested
+/// composition.
+#[inline(never)]
+fn owned_call_context<L: EvaluationLookup>(
+    lookup: &L,
+    caller_occurrence: Option<String>,
+) -> Option<Box<ResolutionContext>> {
+    let borrowed = lookup.resolution_context_ref();
+    let owned = if borrowed.is_none() { lookup.resolution_context().map(Box::new) } else { None };
+    let context = borrowed.or(owned.as_deref())?;
+    if let Some(occurrence) = caller_occurrence
+        && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
+    {
+        let mut selected = Box::new(context.clone());
+        selected.active_caller_file_provenance = Some(provenance);
+        return Some(selected);
+    }
+    owned
 }
 
 /// Evaluates a lazy function's operands one at a time, binding each as it is

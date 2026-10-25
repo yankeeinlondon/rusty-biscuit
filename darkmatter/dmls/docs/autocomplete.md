@@ -115,6 +115,10 @@ composed:
 Inside a `{{ … }}` span or a `when` condition in such a stack, the
 interpolation candidates (described below) also include the globals that
 event may read: `err` and its members in `failed`, but not in `composed`.
+Under a host with a
+[lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), the
+host's events are stacks for this purpose too: under Claudine, `err` is
+offered in `blocked` and `failure` and not in `start` or `success`.
 
 ### Schema definitions
 
@@ -169,8 +173,11 @@ Inside an interpolation, the DSL provider offers these candidate families:
    `as_json5`).
 5. **Host globals** — every global a host catalog in the document's schema
    roots declares, such as Claudine's `seq`, `loop`, and `group`.
-6. **Event globals** — inside an md lifecycle stack only, the globals that
-   event may read (see [Lifecycle stacks](#lifecycle-stacks)).
+6. **Event globals** — inside a lifecycle stack only, the globals that
+   event may read under the document's host: md's events, or a host's from
+   its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md),
+   such as Claudine's `start` or `failure` (see
+   [Lifecycle stacks](#lifecycle-stacks)).
 
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.

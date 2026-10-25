@@ -170,23 +170,28 @@ absence:
 | `{{ x.a ? x.b : c }}` | yes — a guard on `x.a` says nothing about its sibling `x.b` |
 | `{{ a ? x : b }}` | yes, when the `x` branch is evaluated |
 | `{{ is_null(x) }}`, `{{ is_empty(x) }}`, `{{ file_exists(x) }}` | no — a direct argument to a parameter that declares `\| null` |
+| `{{ lower(x) }}`, `{{ trim(x) \|\| "d" }}`, `{{ is_null(x) && y }}` | no for `x` — the same rule, whatever the function returns; `&&`/`\|\|` are operators, not calls that consume `x` |
 | `{{ min(x, 5) }}` | yes — `min`'s `a: number` does not declare `null` (and `min(null, 5)` is a binding error) |
-| `{{ lower(x) }}`, `{{ is_empty(trim(x)) }}` | yes — `lower`/`trim` return `null` for `null`, so they pass the absence on; `is_empty` no longer guards the lookup directly |
+| `{{ is_empty(trim(x)) }}`, `{{ upper(lower(x)) }}` | yes — the inner call is itself another call's argument, so it hands its result on; `is_empty` receives `trim(x)`, not `x` |
 | `::block when="x"` | yes — a misspelled gate would silently hide content |
 
 A function argument is silent when the call handles a missing value **by its
 declared types**: the argument is a bare variable (or a path on one) passed
-straight to a parameter whose type explicitly includes `| null`, and the
-function's own return type does not. The rule is the same for every function,
-including a host application's:
+straight to a parameter whose type explicitly includes `| null`, and the call
+is not itself an argument of another call. The function's return type plays
+no part. The rule is the same for every function, including a host
+application's:
 
 - `unknown | null` or `string | null` handles it; a plain `unknown`
   parameter does not, and neither does an optional parameter whose type has
   no `null` (`b?: number`).
 - A function with several signatures handles it only when every signature
   that takes that many arguments declares `null` at that position.
-- A function that returns `null` for `null` (`lower`, `trim`) passes the
-  absence on rather than handling it.
+- A call nested directly in another call's argument (`is_empty(trim(x))`)
+  handles nothing: the outer call receives the inner call's result, not `x`.
+  An operator or fallback in between ends the nesting
+  (`is_empty(trim(x) || "d")` handles `x`), and the logical `&&`/`||` are
+  operators, so `is_null(x) && is_empty(y)` handles both.
 
 The suppression only silences the advisory. A call that cannot bind, an
 unknown function, or an unavailable global is still reported.

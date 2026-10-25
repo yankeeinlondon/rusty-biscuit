@@ -467,6 +467,7 @@ impl<'a> TransclusionEngine<'a> {
         resolved_cache: Option<
             &HashMap<String, crate::markdown::compose::preflight::PreflightResolvedTarget>,
         >,
+        mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
@@ -564,6 +565,12 @@ impl<'a> TransclusionEngine<'a> {
                     )
                 {
                     report.add_warning(warning.at_line(directive.line));
+                }
+                // A blocking finding of an earlier directive, or of this
+                // condition's context check, stops before this condition
+                // runs: it may compose nested content.
+                if let Some(watch) = watch.as_deref_mut() {
+                    watch.check(report)?;
                 }
                 let mut missing = Vec::new();
                 let should_include =

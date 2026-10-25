@@ -500,40 +500,120 @@ enum ArtifactKey {
     Text(String),
 }
 
+impl ArtifactKey {
+    /// The companion file at `path` as a reader receives it.
+    fn read(path: &Path) -> Self {
+        match std::fs::read(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::Absent,
+            Err(error) => Self::Unreadable(error.to_string()),
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => Self::Text(text),
+                Err(_) => Self::Unreadable("the file is not UTF-8 text".to_string()),
+            },
+        }
+    }
+
+    fn artifact(&self) -> crate::markdown::compose::expression::host::FactsArtifact<'_> {
+        use crate::markdown::compose::expression::host::FactsArtifact;
+        match self {
+            Self::Absent => FactsArtifact::Absent,
+            Self::Unreadable(error) => FactsArtifact::Unreadable(error),
+            Self::Text(text) => FactsArtifact::Text(text),
+        }
+    }
+}
+
 type HostFunctionCacheKey = (std::path::PathBuf, String, ArtifactKey);
 type HostFunctionCacheValue = Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>;
 
 fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
-    use crate::markdown::compose::expression::host::{FactsArtifact, facts_artifact_path};
+    use crate::markdown::compose::expression::host::facts_artifact_path;
     use crate::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
     static CACHE: std::sync::LazyLock<
         std::sync::Mutex<std::collections::HashMap<HostFunctionCacheKey, HostFunctionCacheValue>>,
     > = std::sync::LazyLock::new(Default::default);
 
-    let artifact = match std::fs::read(facts_artifact_path(path)) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ArtifactKey::Absent,
-        Err(error) => ArtifactKey::Unreadable(error.to_string()),
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(text) => ArtifactKey::Text(text),
-            Err(_) => ArtifactKey::Unreadable("the file is not UTF-8 text".to_string()),
-        },
-    };
-    let key = (path.to_path_buf(), biscuit_hash::blake3_hash(text), artifact);
+    let key = (path.to_path_buf(), biscuit_hash::blake3_hash(text), ArtifactKey::read(&facts_artifact_path(path)));
     let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(found) = cache.get(&key) {
         return found.clone();
     }
     let fail = |message: String| HostFunctionCatalogError { path: path.to_path_buf(), message };
     let built = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
-        let artifact = match &key.2 {
-            ArtifactKey::Absent => FactsArtifact::Absent,
-            ArtifactKey::Unreadable(error) => FactsArtifact::Unreadable(error),
-            ArtifactKey::Text(text) => FactsArtifact::Text(text),
-        };
-        HostFunctions::analysis_only(catalog, artifact).map_err(|error| fail(error.to_string()))
+        HostFunctions::analysis_only(catalog, key.2.artifact()).map_err(|error| fail(error.to_string()))
     });
     cache.insert(key, built.clone());
     built
+}
+
+/// The host lifecycle profile recorded beside one host catalog in a
+/// document's schema roots.
+#[derive(Debug, Clone)]
+pub struct HostLifecycleDiscovery {
+    /// The host catalog the artifact belongs to.
+    pub catalog: std::path::PathBuf,
+    /// The rebuilt profile, or why the artifact
+    /// (`<stem>.lifecycle.json`) could not be trusted: absent, unreadable,
+    /// stale against the catalog, or invalid.
+    pub profile: Result<std::sync::Arc<crate::lifecycle::host_profile::HostLifecycleProfile>, String>,
+}
+
+/// The host lifecycle profiles of a document's schema roots: for each host
+/// catalog [`host_catalogs`] loads, in the same order and with the same
+/// shadowing, the profile its `<stem>.lifecycle.json` records
+/// ([`crate::lifecycle::host_profile`]). A catalog that does not load is
+/// skipped here; [`host_catalogs`] reports it. Passive: files are read,
+/// nothing runs.
+///
+/// Results are cached per catalog path, catalog bytes, and artifact bytes:
+/// a profile's registry holds its catalog for the rest of the process, so
+/// the catalog is leaked once per distinct key.
+pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) -> Vec<HostLifecycleDiscovery> {
+    use crate::lifecycle::host_profile::{HostLifecycleProfile, lifecycle_artifact_path};
+    type Key = (std::path::PathBuf, String, ArtifactKey);
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<Key, HostLifecycleDiscovery>>> =
+        std::sync::LazyLock::new(Default::default);
+
+    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut found = Vec::new();
+    for root in roots.search_paths() {
+        let Ok(entries) = std::fs::read_dir(root) else { continue };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
+            .collect();
+        files.sort();
+        for path in files {
+            let Some(name) = path.file_name().map(|name| name.to_os_string()) else { continue };
+            if !seen.insert(name) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            if !is_global_catalog(&text) || declares_fm(&text) {
+                continue;
+            }
+            let key = (path.clone(), biscuit_hash::blake3_hash(&text), ArtifactKey::read(&lifecycle_artifact_path(&path)));
+            let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(discovery) = cache.get(&key) {
+                found.push(discovery.clone());
+                continue;
+            }
+            let Ok(catalog) = GlobalCatalog::from_host_file(&path, context) else { continue };
+            let catalog: &'static GlobalCatalog = Box::leak(Box::new(catalog));
+            let discovery = HostLifecycleDiscovery {
+                catalog: path.clone(),
+                profile: HostLifecycleProfile::from_artifact(catalog, &path, &text, key.2.artifact())
+                    .map(std::sync::Arc::new),
+            };
+            cache.insert(key, discovery.clone());
+            found.push(discovery);
+        }
+    }
+    found
 }
 
 /// Whether `text` claims the function-catalog envelope: `kind: schema` with

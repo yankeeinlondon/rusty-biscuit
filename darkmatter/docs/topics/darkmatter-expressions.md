@@ -278,6 +278,23 @@ three layers, which stay separate:
 | Refinement | every guard enclosing the site | under `when="tag"`, `tag` is `string` |
 | Approval fallback | shell templates only | a placeholder of unknown or non-string type approves as `{{ string }}` |
 
+This is how a site's type scope is built and used, without evaluating
+anything:
+
+```mermaid
+flowchart TD
+    S["schema layers<br/>(baseline, triggers, document, host globals)"] --> DT["declared type of each value<br/>tag: string | null"]
+    DT --> G{"enclosing guards,<br/>outermost first"}
+    G -- "true side / then: / ternary yes" --> T["apply the guard's true-side facts"]
+    G -- "false side / else: / ternary no" --> FS["apply the guard's false-side facts"]
+    T --> W{"a lifecycle set<br/>wrote the subject since?"}
+    FS --> W
+    W -- yes --> DT2["back to the declared type"]
+    W -- no --> SC["the site's type scope"]
+    DT2 --> SC
+    SC --> C["call check, shell pre-flight,<br/>absence warnings, DMLS hover"]
+```
+
 The fallback is only the shape a shell command is approved by. It is not a
 declaration: an undeclared name stays unknown to functions, warnings, and
 DMLS. An undeclared value is unknown, which proves nothing about presence
@@ -387,8 +404,10 @@ the table above says:
 
 - **planned:** narrowing an object from a guard on one of its members
   (`x.kind == 'a'` narrowing `x`), and nested unions;
-- **planned:** DMLS narrowing of Claudine lifecycle `then:`/`else:` actions and
-  sequence task bodies (DMLS narrows `md`'s lifecycle stacks today).
+- **planned:** DMLS narrowing of sequence task bodies, and of hover inside
+  lifecycle `then:`/`else:` actions. DMLS's call diagnostics already narrow
+  every lifecycle stack, under the `md` host or under a host's
+  [lifecycle artifact](lifecycle/host-artifact.md) (Claudine's included).
 
 ## Literals and Grouping
 

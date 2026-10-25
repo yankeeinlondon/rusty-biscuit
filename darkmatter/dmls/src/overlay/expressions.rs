@@ -27,9 +27,8 @@ use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
 
-use darkmatter::lifecycle::registry::EventId;
 
-use crate::overlay::event_views::{event_globals, event_name};
+use crate::overlay::event_views::StackEvent;
 use crate::overlay::{FmEntry, FmScalarStyle, FmValueKind, FrontmatterAst};
 
 /// One `{{{ … }}}` interpolation literal with a document-relative span.
@@ -950,20 +949,20 @@ pub fn host_global_candidates(partial: &str, catalogs: &[GlobalCatalog]) -> Vec<
     items
 }
 
-/// The hover block for a global the `md` registry declares for `event` (`err`,
-/// `timing`) or one of its members: the declaration's description, its
+/// The hover block for a global the host's registry declares for `event`
+/// (`err`, `timing`) or one of its members: the declaration's description, its
 /// availability in that event, and the member's shape from Darkmatter's
 /// global catalog. `None` when the event's view does not declare the root.
-pub fn event_global_hover(name: &str, event: EventId) -> Option<String> {
+pub fn event_global_hover(name: &str, event: &StackEvent) -> Option<String> {
     let (root, member) = match name.split_once('.') {
         Some((root, member)) => (root, Some(member)),
         None => (name, None),
     };
-    let global = event_globals(event).global(root)?;
+    let global = event.globals().global(root)?;
     let mut block = format!(
         "**`{root}`** — {}\n\nIn `{}`: {}",
         global.description(),
-        event_name(event),
+        event.name(),
         global.availability()
     );
     if let Some(member) = member
@@ -979,9 +978,9 @@ pub fn event_global_hover(name: &str, event: EventId) -> Option<String> {
 /// Completion candidates for the globals `event` may read: each root its view
 /// declares and does not make unavailable, and, once `partial` names one and
 /// a `.`, its members from Darkmatter's global catalog.
-pub fn event_global_candidates(partial: &str, event: EventId) -> Vec<ExprCompletion> {
+pub fn event_global_candidates(partial: &str, event: &StackEvent) -> Vec<ExprCompletion> {
     let mut items = Vec::new();
-    for global in event_globals(event).globals() {
+    for global in event.globals().globals() {
         if matches!(global.availability(), Availability::Unavailable(_)) {
             continue;
         }
@@ -1079,7 +1078,7 @@ pub fn hover_markdown_in_event(
     site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
-    event: EventId,
+    event: &StackEvent,
 ) -> String {
     hover_markdown_from(
         parser(expression),
@@ -1113,7 +1112,7 @@ fn hover_markdown_from(
     site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
-    event: Option<EventId>,
+    event: Option<&StackEvent>,
 ) -> String {
     let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
@@ -1608,7 +1607,8 @@ mod tests {
             generic("known ? then_b : else_b", &keys),
             [pair("then_b", "then_b"), pair("else_b", "else_b")]
         );
-        assert_eq!(generic("lower(arg)", &keys), [pair("arg", "arg")]);
+        assert_eq!(generic("abs(arg)", &keys), [pair("arg", "arg")]);
+        assert_eq!(generic("is_empty(lower(arg))", &keys), [pair("arg", "arg")]);
         assert_eq!(generic("known || rhs", &keys), [pair("rhs", "rhs")]);
         assert_eq!(generic("user.name + 1", &keys), [pair("user", "user.name")]);
     }
@@ -1620,6 +1620,7 @@ mod tests {
             "maybe ? maybe : \"none\"",
             "is_null(maybe)",
             "isEmpty(maybe)",
+            "lower(maybe)",
             "ok ? known : null",
             "current.cwd",
             "fm.anything-at-all",

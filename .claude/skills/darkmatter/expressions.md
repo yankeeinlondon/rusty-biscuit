@@ -77,15 +77,18 @@ and DMLS both read it.
   `number | string`, never authored order).
 - Lifecycle surfaces are call-checked at their guarded sites by
   `darkmatter::lifecycle::lifecycle_call_checks` (every surface, with its
-  authored `location`; DMLS ranges md stacks from it) over
+  authored `location`; DMLS ranges every stack from it, under the document's
+  host from its lifecycle artifact, else md) over
   `walk_stack_scoped`, which shares `branch_scopes`/`scope_after_action` with
   `walk_scoped`. `reject_incompatible_calls` is its first category 5 (md: CLI
   before the run; Claudine: `prepare.rs` after the launch schema); on success
   it returns the surfaces' located warnings (pass the loaded text,
   `Markdown::loaded_text()`), which md and Claudine report first among the
   composition's warnings; error
-  `LifecycleError::LifecycleCallRejected` (`rejected_call()`), Claudine twin
-  `CompositionError::LifecycleCallRejected`.
+  `LifecycleError::LifecycleCallRejected` (`rejected_call()`; its located
+  shared record is `call_diagnostic()`, which `error_diagnostics` reports),
+  Claudine twin `CompositionError::LifecycleCallRejected`
+  (`lifecycle_call_diagnostic()`).
 - An all-literal call is classified by the real `bind_call`, which runs no
   handler.
 - An `as_sent` source (`numberlike`, `boolish`) is two representations, the

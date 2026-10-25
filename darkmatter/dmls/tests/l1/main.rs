@@ -40,6 +40,7 @@ mod index_store_sweep;
 mod level1_graph_index;
 mod level1_wiki;
 mod lifecycle_event_views;
+mod lifecycle_host_profile;
 mod lsp_session;
 mod mapping_only_corpus;
 mod named_type_references;

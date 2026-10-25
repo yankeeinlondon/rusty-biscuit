@@ -15,6 +15,10 @@
 //! | `::block when="…"` | page blocks are enabled | |
 //! | `::file`/`::code` `when=…` | a transclusion stage is enabled | |
 //!
+//! The shell-command discovery pass composes a narrowed surface, but its
+//! check covers the surfaces of the composition it prepares, so it rejects
+//! the same call with the same earlier warnings.
+//!
 //! The same walk collects every warning the shared call diagnostics show
 //! without `expressions.strict` ([`CallCheck::diagnostics`]): an argument of
 //! category 3 ([`UNCERTAIN_CALL_CODE`]), a call that is always `false`
@@ -50,13 +54,22 @@ use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use serde_json::Value;
 
-/// A category 5 call the precheck found.
+/// A category 5 call the precheck found, or a policy stop.
+///
+/// A rejection carries `earlier`: the warnings the walk found before the
+/// rejected call in authored order, which a failure report shows before it.
 pub(crate) enum PrecheckFailure {
     /// In a frontmatter value; the pipeline attributes it like an
     /// interpolation failure (override supplier or authored span).
-    Frontmatter(LocatedFrontmatterError),
+    Frontmatter {
+        failure: LocatedFrontmatterError,
+        earlier: Vec<ComposeWarning>,
+    },
     /// In the body, already located.
-    Body(MarkdownError),
+    Body {
+        error: Box<MarkdownError>,
+        earlier: Vec<ComposeWarning>,
+    },
     /// Warnings the request's blocking policy selects
     /// ([`ComposeOptions::with_blocking_policy`](super::ComposeOptions::with_blocking_policy)),
     /// with the precheck's other warnings.
@@ -66,8 +79,23 @@ pub(crate) enum PrecheckFailure {
     },
 }
 
+/// A rejected call before its warnings are attributed.
+enum Rejection {
+    Frontmatter(LocatedFrontmatterError),
+    Body(MarkdownError),
+}
+
+/// Authored order of a finding: the frontmatter string leaf it is in, in
+/// walk order ([`BODY_RANK`] for the body), then its byte offset in that
+/// leaf or in the body.
+type Order = (usize, usize);
+
+/// The rank of every body finding: after every frontmatter leaf.
+const BODY_RANK: usize = usize::MAX;
+
 /// A shown warning of one call, where its scanned text holds it.
 struct Advisory {
+    order: Order,
     function: String,
     finding: ExpressionDiagnostic,
     /// The frontmatter key path whose string leaf holds it, and that string;
@@ -79,28 +107,43 @@ struct Advisory {
     origin: std::ops::Range<usize>,
 }
 
-/// Warnings found so far, in document order.
+/// Warnings found so far, in scan order; [`advisory_warnings`] puts them in
+/// authored order. The surfaces are scanned one after another, so a block
+/// condition's warning is found before an earlier interpolation's.
 #[derive(Default)]
-struct Advisories(Vec<Advisory>);
+struct Advisories {
+    found: Vec<Advisory>,
+    /// Frontmatter string leaves ranked so far.
+    leaves: usize,
+}
 
 impl Advisories {
+    /// The rank of the next frontmatter string leaf scanned.
+    fn next_leaf(&mut self) -> usize {
+        self.leaves += 1;
+        self.leaves - 1
+    }
+
     /// Records every warning of `checks` and of `incomplete` calls, for an
-    /// expression starting at byte `offset` of the scanned text.
+    /// expression starting at byte `offset` of the scanned text ranked
+    /// `rank`.
+    #[allow(clippy::too_many_arguments)]
     fn record(
         &mut self,
         checks: &[CallCheck],
         incomplete: &[IncompleteHostCall],
+        rank: usize,
         offset: usize,
         leaf: Option<(&[Segment], &str)>,
         key: Option<&str>,
     ) {
         for check in checks {
             for finding in check.diagnostics(false) {
-                self.push(&check.function, finding, offset, leaf, key);
+                self.push(&check.function, finding, rank, offset, leaf, key);
             }
         }
         for call in incomplete {
-            self.push(&call.function, call.diagnostic(), offset, leaf, key);
+            self.push(&call.function, call.diagnostic(), rank, offset, leaf, key);
         }
     }
 
@@ -108,11 +151,13 @@ impl Advisories {
         &mut self,
         function: &str,
         finding: ExpressionDiagnostic,
+        rank: usize,
         offset: usize,
         leaf: Option<(&[Segment], &str)>,
         key: Option<&str>,
     ) {
-        self.0.push(Advisory {
+        self.found.push(Advisory {
+            order: (rank, offset + finding.span.start),
             function: function.to_string(),
             origin: offset + finding.span.start..offset + finding.span.end,
             finding,
@@ -138,17 +183,23 @@ fn expression_start(text: &str, location: &ExpressionLocation) -> usize {
 /// `options` composes, against the declared types of every layer of
 /// `schema` ([`DeclaredTypes::for_schema`]).
 ///
+/// Authored order is frontmatter first, leaf by leaf in key order, then the
+/// body by offset, with interpolations and block and transclusion
+/// conditions interleaved.
+///
 /// ## Returns
 ///
 /// One warning per finding [`CallCheck::diagnostics`] shows without
-/// `expressions.strict`, plus one per incomplete host call, in document
+/// `expressions.strict`, plus one per incomplete host call, in authored
 /// order.
 ///
 /// ## Errors
 ///
-/// The first rejected call (frontmatter first, then the body in document
-/// order), carrying [`ExpressionError::CallCheck`]; or, when no call is
-/// rejected, the warnings the request's blocking policy selects.
+/// The first rejected call in authored order, carrying
+/// [`ExpressionError::CallCheck`] and the warnings found before it in
+/// authored order (including those earlier in its own expression; none
+/// after it); or, when no call is rejected, the warnings the request's
+/// blocking policy selects.
 pub(crate) fn check_document(
     markdown: &Markdown,
     provenance: &FrontmatterProvenance,
@@ -158,11 +209,23 @@ pub(crate) fn check_document(
     let declared = DeclaredTypes::for_schema(schema);
     let site = TypeScope::unguarded(&declared);
     let mut advisories = Advisories::default();
-    if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        check_frontmatter(markdown, provenance, &options.exclude_keys, &site, &mut advisories)
-            .map_err(PrecheckFailure::Frontmatter)?;
+    let mut rejected = None;
+    if options.call_check_covers(ComposeOperation::FrontmatterInterpolation) {
+        rejected = check_frontmatter(markdown, provenance, &options.exclude_keys, &site, &mut advisories)
+            .map(|(order, failure)| (order, Rejection::Frontmatter(failure)));
     }
-    check_body(markdown, options, &site, &mut advisories).map_err(PrecheckFailure::Body)?;
+    if rejected.is_none() {
+        rejected = check_body(markdown, options, &site, &mut advisories)
+            .map(|(offset, error)| ((BODY_RANK, offset), Rejection::Body(error)));
+    }
+    if let Some((order, rejection)) = rejected {
+        advisories.found.retain(|advisory| advisory.order < order);
+        let earlier = advisory_warnings(markdown, options, advisories);
+        return Err(match rejection {
+            Rejection::Frontmatter(failure) => PrecheckFailure::Frontmatter { failure, earlier },
+            Rejection::Body(error) => PrecheckFailure::Body { error: Box::new(error), earlier },
+        });
+    }
     let warnings = advisory_warnings(markdown, options, advisories);
     let policy = options.blocking_policy();
     if policy.blocking(&warnings).is_empty() {
@@ -174,9 +237,11 @@ pub(crate) fn check_document(
 
 fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advisories: Advisories) -> Vec<ComposeWarning> {
     use biscuit_terminal::components::prose::Prose;
-    if advisories.0.is_empty() {
+    if advisories.found.is_empty() {
         return Vec::new();
     }
+    let mut found = advisories.found;
+    found.sort_by_key(|advisory| advisory.order);
     let document = match markdown.source().as_ref().unwrap_or(&options.source) {
         ComposeSource::File(path) => Some(path.clone()),
         ComposeSource::Url(url) => Some(std::path::PathBuf::from(url.to_string())),
@@ -188,8 +253,7 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
     let loaded = markdown.loaded_source_context_for_errors();
     let body_origin = BodyOrigin::capture(markdown);
     let body = markdown.content();
-    advisories
-        .0
+    found
         .into_iter()
         .map(|advisory| {
             // The authored position of the finding, projected through the
@@ -249,15 +313,11 @@ fn check_frontmatter(
     exclude_keys: &std::collections::HashSet<String>,
     site: &TypeScope<'_>,
     advisories: &mut Advisories,
-) -> Result<(), LocatedFrontmatterError> {
-    for (key, value) in markdown.frontmatter().as_map() {
-        if exclude_keys.contains(key) {
-            continue;
-        }
+) -> Option<(Order, LocatedFrontmatterError)> {
+    markdown.frontmatter().as_map().iter().filter(|(key, _)| !exclude_keys.contains(*key)).find_map(|(key, value)| {
         let mut path = vec![ValuePathSegment::Key(key.clone())];
-        check_frontmatter_value(key, value, &mut path, provenance, site, advisories)?;
-    }
-    Ok(())
+        check_frontmatter_value(key, value, &mut path, provenance, site, advisories)
+    })
 }
 
 fn check_frontmatter_value(
@@ -267,47 +327,44 @@ fn check_frontmatter_value(
     provenance: &FrontmatterProvenance,
     site: &TypeScope<'_>,
     advisories: &mut Advisories,
-) -> Result<(), LocatedFrontmatterError> {
+) -> Option<(Order, LocatedFrontmatterError)> {
     if provenance.data().is_data(path) {
-        return Ok(());
+        return None;
     }
     match value {
         Value::String(text) if text.contains("{{") => {
+            let rank = advisories.next_leaf();
             let leaf = Some((path.as_slice(), text.as_str()));
             let mut record = |checks: &[CallCheck], incomplete: &[IncompleteHostCall], offset: usize| {
-                advisories.record(checks, incomplete, offset, leaf, Some(key));
+                advisories.record(checks, incomplete, rank, offset, leaf, Some(key));
             };
-            match first_rejected(text, ExpressionFinder::scan_plain(text).expressions, |_| site.clone(), &mut record) {
-                Some((location, check)) => Err(LocatedFrontmatterError {
+            let (location, check, at) =
+                first_rejected(text, ExpressionFinder::scan_plain(text).expressions, |_| site.clone(), &mut record)?;
+            Some((
+                (rank, at),
+                LocatedFrontmatterError {
                     error: Box::new(rejection(Some(key), &location.expression, check)),
                     location: Some(FrontmatterExpressionLocation {
                         path: path.clone(),
                         scanned: text.clone(),
                         span: location.start..location.end,
                     }),
-                }),
-                None => Ok(()),
-            }
+                },
+            ))
         }
-        Value::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                path.push(ValuePathSegment::Index(index));
-                let outcome = check_frontmatter_value(key, item, path, provenance, site, advisories);
-                path.pop();
-                outcome?;
-            }
-            Ok(())
-        }
-        Value::Object(map) => {
-            for (child, item) in map {
-                path.push(ValuePathSegment::Key(child.clone()));
-                let outcome = check_frontmatter_value(key, item, path, provenance, site, advisories);
-                path.pop();
-                outcome?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
+        Value::Array(items) => items.iter().enumerate().find_map(|(index, item)| {
+            path.push(ValuePathSegment::Index(index));
+            let outcome = check_frontmatter_value(key, item, path, provenance, site, advisories);
+            path.pop();
+            outcome
+        }),
+        Value::Object(map) => map.iter().find_map(|(child, item)| {
+            path.push(ValuePathSegment::Key(child.clone()));
+            let outcome = check_frontmatter_value(key, item, path, provenance, site, advisories);
+            path.pop();
+            outcome
+        }),
+        _ => None,
     }
 }
 
@@ -321,128 +378,135 @@ fn path_label(path: &[ValuePathSegment]) -> String {
         .collect()
 }
 
+/// The body's first rejected call in authored order and its body offset.
+/// Each surface is scanned up to its own first rejection; the earliest of
+/// those is the body's.
 fn check_body(
     markdown: &Markdown,
     options: &super::ComposeRequest,
     site: &TypeScope<'_>,
     advisories: &mut Advisories,
-) -> Result<(), MarkdownError> {
+) -> Option<(usize, MarkdownError)> {
     let body = markdown.content();
-    let page_blocks = options.is_enabled(ComposeOperation::PageBlocks);
+    let page_blocks = options.call_check_covers(ComposeOperation::PageBlocks);
     let guards = if page_blocks { BodyGuards::scan(body) } else { BodyGuards::default() };
+    let mut rejections = Vec::new();
 
     if page_blocks
         && body.contains("::block")
         && let Ok(regions) = super::page_blocks::parser::parse_page_blocks(body, markdown.source_context_for_errors())
     {
-        check_block_conditions(markdown, &regions, &guards, site, advisories)?;
+        rejections.extend(check_block_conditions(markdown, &regions, &guards, site, advisories));
     }
 
-    if (options.is_enabled(ComposeOperation::BlockTransclusion)
-        || options.is_enabled(ComposeOperation::CodeTransclusion))
+    if (options.call_check_covers(ComposeOperation::BlockTransclusion)
+        || options.call_check_covers(ComposeOperation::CodeTransclusion))
         && body.contains("when=")
         && let Ok(directives) = transclusion::parse_directives(body, markdown.source_context_for_errors())
     {
-        for directive in &directives {
-            let Some(when) = &directive.options.when_expr else {
-                continue;
-            };
+        rejections.extend(directives.iter().find_map(|directive| {
+            let when = directive.options.when_expr.as_ref()?;
             let scope = guards.scope_at(site.clone(), directive.span.start);
             let offset = condition_start(body, directive.span.start, when);
-            if let Some(check) = rejected_condition(when, &scope, &mut |checks, incomplete| {
-                advisories.record(checks, incomplete, offset, None, None)
-            }) {
-                let error = condition_rejection(markdown, when, directive.line, check);
-                return Err(transclusion::TransclusionError::from(error).into());
-            }
-        }
+            let (check, at) = rejected_condition(when, &scope, &mut |checks, incomplete| {
+                advisories.record(checks, incomplete, BODY_RANK, offset, None, None)
+            })?;
+            let error = condition_rejection(markdown, when, directive.line, check);
+            Some((offset + at, transclusion::TransclusionError::from(error).into()))
+        }));
     }
 
-    if options.is_enabled(ComposeOperation::Interpolation) && body.contains("{{") {
+    if options.call_check_covers(ComposeOperation::Interpolation) && body.contains("{{") {
         let scan = if super::inline::interpolation::resolve_interpolate_code_blocks(markdown, options) {
             ExpressionFinder::scan_plain(body)
         } else {
             ExpressionFinder::new(body).scan()
         };
         let mut record = |checks: &[CallCheck], incomplete: &[IncompleteHostCall], offset: usize| {
-            advisories.record(checks, incomplete, offset, None, None);
+            advisories.record(checks, incomplete, BODY_RANK, offset, None, None);
         };
-        if let Some((location, check)) =
+        if let Some((location, check, at)) =
             first_rejected(body, scan.expressions, |location| guards.scope_at(site.clone(), location.start), &mut record)
         {
             let error = rejection(None, &location.expression, check);
-            return Err(anchor_body(markdown, error, location.start..location.end));
+            rejections.push((at, anchor_body(markdown, error, location.start..location.end)));
         }
     }
-    Ok(())
+    rejections.into_iter().min_by_key(|(at, _)| *at)
 }
 
 /// Each region's condition is checked under the guards of the blocks that
-/// enclose it, which must hold for it to be evaluated.
+/// enclose it, which must hold for it to be evaluated; the first rejected
+/// one, in authored order, with its body offset.
 fn check_block_conditions(
     markdown: &Markdown,
     regions: &[PageBlockRegion],
     guards: &BodyGuards,
     site: &TypeScope<'_>,
     advisories: &mut Advisories,
-) -> Result<(), MarkdownError> {
+) -> Option<(usize, MarkdownError)> {
     let body = markdown.content();
-    for region in regions {
-        if let Some(when) = &region.options.when_expr
-            && let Some(check) =
+    regions.iter().find_map(|region| {
+        if let Some(when) = &region.options.when_expr {
+            let offset = condition_start(body, region.span.start, when);
+            if let Some((check, at)) =
                 rejected_condition(when, &guards.scope_at(site.clone(), region.span.start), &mut |checks, incomplete| {
-                    advisories.record(checks, incomplete, condition_start(body, region.span.start, when), None, None)
+                    advisories.record(checks, incomplete, BODY_RANK, offset, None, None)
                 })
-        {
-            let error = condition_rejection(markdown, when, region.start_line, check);
-            return Err(PageBlockError::from(error).into());
+            {
+                let error = condition_rejection(markdown, when, region.start_line, check);
+                return Some((offset + at, PageBlockError::from(error).into()));
+            }
         }
-        check_block_conditions(markdown, &region.children, guards, site, advisories)?;
-    }
-    Ok(())
+        check_block_conditions(markdown, &region.children, guards, site, advisories)
+    })
 }
 
 /// The first `{{ … }}` of `expressions` in `text` holding a rejected call,
-/// each checked under the scope `scope_at` gives it; the checks and
-/// incomplete host calls of every expression before it are passed to
-/// `record` with the expression's offset in `text`. An expression that does
-/// not parse is left to its evaluating stage, which reports it.
+/// each checked under the scope `scope_at` gives it, with the rejection's
+/// byte offset in `text`. The checks and incomplete host calls of that
+/// expression and every one before it are passed to `record` with the
+/// expression's offset in `text`; the caller keeps only the warnings before
+/// the rejection. An expression that does not parse is left to its
+/// evaluating stage, which reports it.
 fn first_rejected<'d>(
     text: &str,
     expressions: Vec<ExpressionLocation>,
     scope_at: impl Fn(&ExpressionLocation) -> TypeScope<'d>,
     record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall], usize),
-) -> Option<(ExpressionLocation, CallCheck)> {
+) -> Option<(ExpressionLocation, CallCheck, usize)> {
     expressions.into_iter().find_map(|location| {
         let expr = parse_spanned(&location.expression).ok()?;
         let (checks, rejected) = checked(&expr, &scope_at(&location));
-        if let Some(check) = rejected {
-            return Some((location, check));
-        }
-        record(&checks, &incomplete_host_calls(&expr), expression_start(text, &location));
-        None
+        let offset = expression_start(text, &location);
+        record(&checks, &incomplete_host_calls(&expr), offset);
+        rejected.map(|(check, at)| (location, check, offset + at))
     })
 }
 
-/// The condition's first rejected call; otherwise its checks and incomplete
-/// host calls are passed to `record`.
+/// The condition's first rejected call and its offset in `when`; its checks
+/// and incomplete host calls are passed to `record` either way.
 fn rejected_condition(
     when: &str,
     scope: &TypeScope<'_>,
     record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall]),
-) -> Option<CallCheck> {
+) -> Option<(CallCheck, usize)> {
     let expr = parse_condition_spanned(when).ok()?;
     let (checks, rejected) = checked(&expr, scope);
-    if rejected.is_none() {
-        record(&checks, &incomplete_host_calls(&expr));
-    }
+    record(&checks, &incomplete_host_calls(&expr));
     rejected
 }
 
-/// Every call check of `expr` under `scope`, and the first rejected one.
-fn checked(expr: &SpannedExpr, scope: &TypeScope<'_>) -> (Vec<CallCheck>, Option<CallCheck>) {
+/// Every call check of `expr` under `scope`, and the rejected one whose
+/// category 5 finding starts first, with that finding's offset.
+fn checked(expr: &SpannedExpr, scope: &TypeScope<'_>) -> (Vec<CallCheck>, Option<(CallCheck, usize)>) {
     let checks = check_expression_calls(expr, scope);
-    let rejected = checks.iter().find(|check| check.is_rejected()).cloned();
+    let rejected = checks
+        .iter()
+        .filter(|check| check.is_rejected())
+        .map(|check| (check, check.rejection_diagnostic().map_or(check.span.start, |finding| finding.span.start)))
+        .min_by_key(|(_, at)| *at)
+        .map(|(check, at)| (check.clone(), at));
     (checks, rejected)
 }
 

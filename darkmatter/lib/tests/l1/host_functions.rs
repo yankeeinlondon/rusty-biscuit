@@ -538,6 +538,65 @@ fn a_function_catalog_in_a_schema_root_is_never_a_document_schema() {
     assert!(!effective.declares_top_level_property("is_project_file"));
 }
 
+/// Criterion 36 on a host function whose result may itself be null:
+/// `project_trim(value: string | null): string | null` handles a missing
+/// direct argument statically and at runtime, while the same call nested in
+/// another call's argument does not.
+#[test]
+fn a_host_parameter_declaring_null_handles_a_missing_argument_whatever_it_returns() {
+    use darkmatter::markdown::compose::ComposeWarning;
+    use darkmatter::markdown::compose::expression::static_variable_reads;
+
+    let catalog = concat!(
+        "kind: schema\n",
+        "categories:\n",
+        "    - Project -> Ask about the test host's project.\n",
+        "types:\n",
+        "    project_trim: |-\n",
+        "        function(\n",
+        "            parameters(value: string | null);\n",
+        "            returns(string | null);\n",
+        "            category(Project);\n",
+        "        ) -> Trims text; null passes through.\n",
+    );
+    let host = HostFunctions::builder(load(catalog))
+        .function(
+            "project_trim",
+            &[],
+            |registration| registration,
+            Arc::new(|call| Ok(call.args().text(0).map_or(Value::Null, |text| json!(text.trim())))),
+        )
+        .build()
+        .expect("the pass-through host registers");
+    install_host_functions(host).expect("installs");
+
+    for (source, handled) in [("project_trim(missing)", true), ("is_empty(project_trim(missing))", false)] {
+        let expr = parse_spanned(source).unwrap();
+        assert_eq!(static_variable_reads(&expr)[0].handles_absence, handled, "{source}");
+    }
+
+    let dir = TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    let path = root.join("doc.md");
+    std::fs::write(&path, "---\ntitle: t\n---\n[{{ project_trim(missing) }}] {{ is_empty(project_trim(nested)) }}\n")
+        .unwrap();
+    let options =
+        ComposeOptions::new_with_context(ComposeContext::capture_for_content(&root, "")).with_source_file(path.clone());
+    let (composed, report) = Markdown::try_from(path.as_path())
+        .unwrap()
+        .compose_with(&crate::request_support::request_at(&root, options))
+        .unwrap_or_else(|error| panic!("composes: {error}"));
+    assert_eq!(composed.content().trim_end(), "[] true");
+    let undeclared: Vec<&str> = report
+        .warnings
+        .iter()
+        .filter(|warning| warning.code.as_deref() == Some(ComposeWarning::UNDECLARED_PROPERTY_CODE))
+        .map(|warning| warning.message.as_str())
+        .collect();
+    assert_eq!(undeclared.len(), 1, "{undeclared:#?}");
+    assert!(undeclared[0].starts_with("`nested`"), "{undeclared:#?}");
+}
+
 /// Criterion 36 on a host function: `is_project_file(value: unknown | null)`
 /// handles a missing direct argument exactly as a built-in with that
 /// parameter does, statically and at runtime, while a missing argument to

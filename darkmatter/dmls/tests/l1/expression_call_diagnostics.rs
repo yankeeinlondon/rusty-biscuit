@@ -753,6 +753,114 @@ mod shared_fields {
         }
     }
 
+    /// Clean controls: a page-block or transclusion condition's rejection
+    /// already reports the editor's record.
+    #[test]
+    fn a_rejected_condition_reports_the_editor_fields() {
+        for (label, document) in [
+            ("page block", "---\ntitle: t\n---\n::block when=\"min(true, 5) > 1\"\nshown\n::end-block\n"),
+            ("transclusion", "---\ntitle: t\n---\n::file ./other.md when=\"min(true, 5) > 1\"\n"),
+        ] {
+            let workspace = LspWorkspace::new();
+            std::fs::write(workspace.path().join("other.md"), "other\n").unwrap();
+            let mut session = Session::open(&workspace, document);
+            let path = workspace.path().join("doc.md");
+            let editor = editor_calls(&mut session, &path);
+            session.shutdown();
+
+            let error = Markdown::try_from(path.as_path())
+                .unwrap()
+                .compose_with(&request(workspace.path(), &path))
+                .expect_err("a category 5 condition rejects the document");
+            assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
+            let [record] = editor.as_slice() else { panic!("{label}: one record: {editor:#?}") };
+            assert_eq!(record.code, INCOMPATIBLE, "{label}");
+            assert_eq!(record.source.as_ref().map(|source| source.line), Some(4), "{label}");
+            assert_eq!(record.expected_type.as_deref(), Some("number"), "{label}");
+            assert_eq!(record.actual_type.as_deref(), Some("literal true"), "{label}");
+        }
+    }
+
+    /// The lifecycle rejection of `document`, written to `doc.md` in a
+    /// fresh workspace, beside the editor's call records for the same bytes:
+    /// `(report records, editor records, workspace)`.
+    fn lifecycle_rejection(document: &str) -> (Vec<Diagnostic>, Vec<Diagnostic>, LspWorkspace) {
+        use darkmatter::lifecycle::md_host;
+
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, document);
+        let path = workspace.path().join("doc.md");
+        let editor = editor_calls(&mut session, &path);
+        session.shutdown();
+
+        let markdown = Markdown::try_from(path.as_path()).unwrap();
+        let frontmatter: Value =
+            markdown.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+        let config = md_host::parse_lifecycle(&frontmatter, &path, None).expect("the lifecycle parses");
+        let error = darkmatter::lifecycle::reject_incompatible_calls(
+            &frontmatter,
+            &config,
+            &path,
+            markdown.loaded_text(),
+            md_host::registry(),
+            None,
+        )
+        .expect_err("a category 5 lifecycle call rejects the document");
+        (error_diagnostics(&error), editor, workspace)
+    }
+
+    /// One test per lifecycle surface: the rejection's report records equal
+    /// the editor's for the same bytes, all six fields, at `(line, column)`.
+    macro_rules! lifecycle_rejection_parity {
+        ($($name:ident: $item:expr, ($line:expr, $column:expr);)+) => {$(
+            #[test]
+            fn $name() {
+                let (reported, editor, workspace) = lifecycle_rejection(&$item);
+                assert_eq!(reported, editor, "the report's records are the editor's");
+                let [record] = reported.as_slice() else { panic!("one record: {reported:#?}") };
+                assert_eq!(record.code, INCOMPATIBLE);
+                assert_eq!(record.severity, Severity::Error);
+                assert_eq!(
+                    record.source,
+                    Some(DiagnosticSource { file: Some(workspace.path().join("doc.md")), line: $line, column: $column })
+                );
+                assert_eq!(record.expected_type.as_deref(), Some("number"));
+                assert_eq!(record.actual_type.as_deref(), Some("literal true"));
+                // Rejection is passive: no lifecycle effect ran.
+                assert!(!workspace.path().join("marker").exists());
+            }
+        )+};
+    }
+
+    fn action(event: &str) -> String {
+        format!("---\n{event}:\n  - stdout: \"{{{{ min(true, 5) }}}}\"\n---\nBody\n")
+    }
+
+    fn condition(event: &str) -> String {
+        format!("---\n{event}:\n  - when: min(true, 5)\n    then:\n      - stdout: hi\n---\nBody\n")
+    }
+
+    fn composed(item: &str) -> String {
+        format!("---\ncomposed:\n  - {item}\n---\nBody\n")
+    }
+
+    lifecycle_rejection_parity! {
+        initialize_action_rejection_reports_the_editor_fields: action("initialize"), (3, 21);
+        composed_action_rejection_reports_the_editor_fields: action("composed"), (3, 21);
+        failed_action_rejection_reports_the_editor_fields: action("failed"), (3, 21);
+        cancelled_action_rejection_reports_the_editor_fields: action("cancelled"), (3, 21);
+        finalize_action_rejection_reports_the_editor_fields: action("finalize"), (3, 21);
+        initialize_condition_rejection_reports_the_editor_fields: condition("initialize"), (3, 15);
+        composed_condition_rejection_reports_the_editor_fields: condition("composed"), (3, 15);
+        failed_condition_rejection_reports_the_editor_fields: condition("failed"), (3, 15);
+        cancelled_condition_rejection_reports_the_editor_fields: condition("cancelled"), (3, 15);
+        finalize_condition_rejection_reports_the_editor_fields: condition("finalize"), (3, 15);
+        shell_rejection_reports_the_editor_fields: composed("shell: \"{{ min(true,5) }}\""), (3, 20);
+        ensure_file_rejection_reports_the_editor_fields: composed("ensure_file: [\"marker\", \"{{ min(true,5) }}\"]"), (3, 37);
+        set_rejection_reports_the_editor_fields: composed("set: {count: \"{{ min(true,5) }}\"}"), (3, 26);
+        error_reason_rejection_reports_the_editor_fields: composed("error: \"{{ min(true,5) }}\""), (3, 20);
+    }
+
     #[test]
     fn a_category_3_warning_reports_the_editor_fields() {
         let document = "---\n$schema:\n  label: string\nlabel: \"7\"\ntitle: \"{{ min(label, 9) }}\"\n---\n\nBody {{ min(label, 5) }}\n";

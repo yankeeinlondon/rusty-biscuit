@@ -164,6 +164,8 @@ pub(crate) fn run_stage(
         replacements.push((span, output));
         report.warnings.extend(execution.warnings);
         report.shell_expansions_applied += 1;
+        // A blocking warning this command reported stops the next one.
+        super::super::pipeline::stop_if_blocked(report, options, None)?;
     }
 
     let before = markdown.content().to_string();

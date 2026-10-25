@@ -6968,7 +6968,7 @@ const OPERAND_DOC: &str = concat!(
     "iteration-1: 3\n",
     "f1: known - fm_bin\n",
     "f2: \"known ? fm_then : known\"\n",
-    "f3: lower(fm_arg)\n",
+    "f3: abs(fm_arg)\n",
     "f4: known || fm_rhs\n",
     "f5: \"fm_quiet ? fm_quiet : is_null(fm_other)\"\n",
     "f6: 'foo--bar'\n",
@@ -6977,7 +6977,7 @@ const OPERAND_DOC: &str = concat!(
     "\n",
     "B1: {{ known - bin_op }}\n",
     "B2: {{ known ? then_b : else_b }}\n",
-    "B3: {{ lower(fn_arg) }}\n",
+    "B3: {{ abs(fn_arg) }}\n",
     "B4: {{ known || rhs_var }}\n",
     "B5: {{ is_empty(lower(nested)) }}\n",
     "S1: {{ quiet1 || \"d\" }} {{ quiet2 ? quiet2 : \"none\" }} {{ is_null(quiet3) }} {{ isEmpty(quiet4) }}\n",
@@ -7037,8 +7037,8 @@ fn undeclared_property_fires_in_every_operand_position_at_warning_severity() {
         (span_on(OPERAND_DOC, "f2:", "fm_then"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f3:", "fm_arg"), "darkmatter.frontmatter"),
         // `f4`'s `known || fm_rhs` is the condition grammar's `or`, whose
-        // `unknown | null` operands return `boolean`, so `fm_rhs` is handled;
-        // `B4`'s body fallback may return `rhs_var`'s `null`, so it is not.
+        // operands bind `unknown | null`, so `fm_rhs` is handled; `B4`'s body
+        // `||` is a fallback, whose right-hand side is not.
         (span_on(OPERAND_DOC, "f6:", "foo--bar"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f7:", "a- b"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "B1:", "bin_op"), "darkmatter.compose"),

@@ -3,14 +3,18 @@
 use super::super::super::Markdown;
 use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
-use super::super::body_origin::{BodyOrigin, BodyProvenance};
-use super::super::directive_targets::rewrite_directive_targets;
+use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges};
+use super::super::directive_targets::{DirectiveTargetRewrite, rewrite_directive_targets};
 use super::super::interpolation;
 use super::super::shell_expansion;
 use super::super::expression::{
     BindingView, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding,
 };
 use super::super::context::report::CandidateLocus;
+use super::super::expression::absence::MissingRoot;
+use super::super::pipeline::{FinalVerdict, blocking_guard};
+use super::super::schema_validation::PreparedSchemas;
+use super::super::ComposeWarning;
 use super::super::{ComposeReport, EffectiveState};
 use serde_json::Value;
 use tracing::debug;
@@ -31,6 +35,12 @@ use tracing::debug;
 /// is anchored to its authored span when `body.origin` (the map from the
 /// current body back to the loaded text) proves one.
 ///
+/// Under a blocking policy, a warning or undeclared read an evaluated
+/// expression reported stops the stage before the next expression is
+/// evaluated ([`MarkdownError::BlockedDiagnostics`]): a later one may compose
+/// nested content that runs a shell. Spans are evaluated end to start, so
+/// "next" is the previous span in the document.
+///
 /// ## Returns
 ///
 /// The number of interpolations applied.
@@ -41,8 +51,9 @@ pub(crate) fn run_stage(
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     body: &mut BodyProvenance,
+    schemas: &PreparedSchemas,
 ) -> MarkdownResult<usize> {
-    use interpolation::{Evaluator, ScanMode, interpolate_text_in};
+    use interpolation::{Evaluator, ScanMode, interpolate_text_guarded};
 
     let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
         ScanMode::Plain
@@ -66,45 +77,16 @@ pub(crate) fn run_stage(
         .observing_missing_roots();
     body.data.ensure_describes(markdown.content())?;
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
-    let targets = rewrite_directive_targets(
-        markdown.content(),
-        Some(&body.data),
-        &evaluator,
-        markdown.frontmatter_line_count(),
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, failure))?;
+    let verdict = FinalVerdict { markdown, state, schemas };
+    let targets = rewrite_targets_guarded(markdown, &body.data, &evaluator, origin, report, options, verdict)?;
     report.add_warnings(targets.warnings);
     // An absent property in a whole-value directive target already warns as a
     // skipped nullable target; a second warning would report one issue twice.
     drop(evaluator.take_missing_roots());
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));
     let data = body.data.after_edits(&targets.edits, &targets.output);
-    let result = interpolate_text_in(
-        &targets.output,
-        Some(&data),
-        &evaluator,
-        scan_mode,
-        options.expression_failure_policy(),
-        "interpolation",
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
-
-    let data = data.after_edits(&result.edits, &result.output);
-    body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
-    body.authored = body.authored.take().and_then(|authored| {
-        authored
-            .advanced(markdown.content(), &targets.edits, &targets.output)?
-            .advanced(&targets.output, &result.edits, &result.output)
-    });
-    body.data = data;
-    *markdown.content_mut() = result.output;
-    report.add_warnings(result.warnings);
     let authored = markdown.loaded_source_context_for_errors();
-    // The scanner evaluates spans end to start; restore document order so the
-    // first authored read of a root is the one kept.
-    let mut roots = evaluator.take_missing_roots();
-    roots.sort_by_key(|root| root.span.as_ref().map_or(usize::MAX, |span| span.start));
-    report.add_unknown_root_candidates("interpolation", roots, |root| {
+    let locate = |root: &MissingRoot| {
         root.span
             .as_ref()
             .zip(authored.as_ref())
@@ -122,13 +104,74 @@ pub(crate) fn run_stage(
                     })
             })
             .map_or(CandidateLocus::Document, CandidateLocus::Line)
+    };
+    let missing_roots = |mark| {
+        let roots = evaluator.missing_roots_since(mark);
+        roots.iter().map(|root| (root.root.clone(), locate(root))).collect()
+    };
+    let mut guard =
+        blocking_guard(report, options, Some(verdict), Some((evaluator.missing_root_mark(), &missing_roots)));
+    let result = interpolate_text_guarded(
+        &targets.output,
+        Some(&data),
+        &evaluator,
+        scan_mode,
+        options.expression_failure_policy(),
+        "interpolation",
+        guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+    )
+    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
+    drop(guard);
+
+    let data = data.after_edits(&result.edits, &result.output);
+    body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
+    body.authored = body.authored.take().and_then(|authored| {
+        authored
+            .advanced(markdown.content(), &targets.edits, &targets.output)?
+            .advanced(&targets.output, &result.edits, &result.output)
     });
+    body.data = data;
+    *markdown.content_mut() = result.output;
+    report.add_warnings(result.warnings);
+    // The scanner evaluates spans end to start; restore document order so the
+    // first authored read of a root is the one kept.
+    let mut roots = evaluator.take_missing_roots();
+    roots.sort_by_key(|root| root.span.as_ref().map_or(usize::MAX, |span| span.start));
+    report.add_unknown_root_candidates("interpolation", roots, locate);
     let replacements = targets.replacements + result.replacements;
     debug!(
         count = replacements,
         "compose: interpolations applied"
     );
     Ok(replacements)
+}
+
+/// The directive-target pass of [`run_stage`], checking the blocking policy
+/// before each target.
+///
+/// Out of line so its guard and failure temporaries stay out of
+/// `run_stage`'s frame, which recurs once per nested composition.
+#[inline(never)]
+fn rewrite_targets_guarded<L: EvaluationLookup>(
+    markdown: &Markdown,
+    data: &DataRanges,
+    evaluator: &interpolation::Evaluator<'_, L>,
+    origin: Option<&BodyOrigin>,
+    report: &ComposeReport,
+    options: &crate::markdown::compose::ComposeRequest,
+    verdict: FinalVerdict<'_>,
+) -> MarkdownResult<DirectiveTargetRewrite> {
+    // A target's absent root is reported as a skipped target, never as an
+    // undeclared read, so this pass judges warnings alone.
+    let mut guard = blocking_guard(report, options, Some(verdict), None);
+    rewrite_directive_targets(
+        markdown.content(),
+        Some(data),
+        evaluator,
+        markdown.frontmatter_line_count(),
+        guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+    )
+    .map_err(|failure| anchor_authored_failure(markdown, origin, failure))
 }
 
 /// Anchors a body failure to its authored span when `origin` proves one.

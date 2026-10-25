@@ -110,6 +110,7 @@ mod compose_call_precheck;
 mod shared_diagnostics;
 #[cfg(feature = "effects-instrumentation")]
 mod report_diagnostics;
+mod runtime_blocking;
 mod frontmatter_coercion_engine;
 mod frontmatter_surface_projection;
 mod fs_capability;

@@ -442,12 +442,25 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   inside expressions: `providers/dsl.rs::with_site_scope` builds
   `BodyGuards::scope_at` over `DeclaredTypes`, and `overlay/expressions.rs`
   `hover_markdown*` take a `site: &TypeScope` and refine it with
-  `branch_scope`. Lifecycle/task `when` guards do not narrow frontmatter
-  actions in DMLS (no host action model); see `dmls/docs/hover.md`.
-- Lifecycle stacks: `overlay/event_views.rs` maps a root key to an md event
-  through `md_host::registry().resolve_key` (never a hand list) and gives
-  every `{{ … }}` span, `when` condition, and expression-typed value inside
-  that stack the event's registry `BindingView`. Completion offers only the
+  `branch_scope`. Lifecycle/task `when` guards do not narrow the hover of
+  frontmatter actions (call diagnostics in lifecycle stacks are narrowed;
+  task bodies are not); see `dmls/docs/hover.md`.
+- Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
+  selects the document's host: the first host catalog whose
+  `<stem>.lifecycle.json` loads
+  (`schemas::catalog::host_lifecycle_profiles` →
+  `lifecycle::host_profile::HostLifecycleProfile`; Claudine's
+  `claudine/schemas/globals.lifecycle.json`), else `md_host`. Its registry's
+  `resolve_key` (never a hand list) maps a root key to a `StackEvent`
+  (event plus registry) and gives every `{{ … }}` span, `when` condition, and
+  expression-typed value inside that stack the event's registry
+  `BindingView`; `diagnostics/frontmatter.rs::GuardedStackCalls` parses with
+  the host's parse options and calls the library's one walk,
+  `lifecycle_call_checks`, with the host's registry, for stack spans and
+  expression-typed stack values alike. Without a usable artifact the stacks
+  are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
+  reason. DMLS never depends on a host crate; `md_host::` appears only in
+  `event_views.rs` (the fallback and its tests). Completion offers only the
   globals the event may read; `err` where the event has none is
   `dm.expression.unavailable_global` (the view's reason, never `fm.err`).
   Host-catalog globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
@@ -546,7 +559,7 @@ branch, even without frontmatter. It comes from the library's passive
   `expression::static_variable_reads`. It yields every `Variable` with its own
   span, classified by the same `AbsenceScope` rules the runtime uses (fallback
   primary, ternary condition plus its guarded root, direct argument to a
-  `| null` parameter of a function whose result is not nullable). Never re-derive those rules in DMLS. The only deliberate
+  `| null` parameter of a call that is not another call's argument). Never re-derive those rules in DMLS. The only deliberate
   difference is that the static walk visits both ternary branches.
 - **`root_identifier` keeps its one-root contract.** Hover, definition, and
   graph indexing depend on it. Only the two diagnostic providers use the walk.

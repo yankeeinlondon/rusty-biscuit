@@ -143,6 +143,12 @@ mod rejection {
         let probes = ["b", "n", "s", "'pear'", "true", "null", "[1]"];
 
         let dir = TempDir::new().unwrap();
+        // One request for every call: the document path never changes, and
+        // preparing a request per function costs seconds on Windows.
+        let path = dir.path().join("doc.md");
+        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), ""))
+            .with_source_file(path.clone());
+        let request = crate::request_support::request_at(dir.path(), options);
         let mut unproven = Vec::new();
         let mut failures = Vec::new();
         let names = functions::dispatchable_canonical_names();
@@ -164,7 +170,8 @@ mod rejection {
             };
             hooks::reset_handler_entries();
             let content = format!("---\n$schema:\n  b: boolean(required)\n  n: number(required)\n  s: string(required)\nb: true\nn: 1\ns: x\n---\n{{{{ {call} }}}}\n");
-            match compose_in(dir.path(), &content, false) {
+            std::fs::write(&path, &content).unwrap();
+            match Markdown::try_from(path.as_path()).unwrap().compose_with(&request) {
                 Ok(_) => failures.push(format!("{call}: composed")),
                 Err(error) if call_check(&error).is_none() => failures.push(format!("{call}: {error}")),
                 Err(_) => {}

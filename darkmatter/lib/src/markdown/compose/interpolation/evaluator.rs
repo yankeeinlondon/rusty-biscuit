@@ -246,6 +246,13 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         }
     }
 
+    /// The roots recorded since `mark`, leaving them in place.
+    pub(crate) fn missing_roots_since(&self, mark: usize) -> Vec<MissingRoot> {
+        self.missing_roots
+            .as_ref()
+            .map_or_else(Vec::new, |roots| roots.borrow().iter().skip(mark).cloned().collect())
+    }
+
     /// Takes the recorded missing roots, leaving none.
     pub(crate) fn take_missing_roots(&self) -> Vec<MissingRoot> {
         self.missing_roots.as_ref().map(RefCell::take).unwrap_or_default()

@@ -36,9 +36,10 @@ use super::expression::{
     ResolvedBinding, fm_namespace, parse,
 };
 use super::interpolation::{
-    Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
-    interpolate_value_located, ScanMode,
+    BeforeEval, Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
+    interpolate_value_guarded, ScanMode,
 };
+use super::interpolation::rewrite::reborrow;
 use super::expression::absence::MissingRoot;
 use super::{ComposeContext, ComposeWarning};
 use super::value_origin::{DataPaths, FrontmatterProvenance};
@@ -268,7 +269,7 @@ fn get_nested(value: &Value, path: &str) -> Option<Value> {
 }
 
 /// Where one frontmatter value sits, and which of its leaves are data.
-struct LeafScope<'a> {
+struct LeafScope<'a, 'g> {
     /// Segments from the frontmatter root to the value.
     segments: Vec<ValuePathSegment>,
     /// Display path (`key`, `key.child`, `key[0]`) for warning scopes.
@@ -276,6 +277,17 @@ struct LeafScope<'a> {
     data: &'a DataPaths,
     /// Authored strings this rewrite scanned. Their results are data.
     scanned: Vec<Vec<ValuePathSegment>>,
+    /// Checked before each expression, given its warnings as the pass
+    /// reports them (scoped to their leaf and key).
+    before_eval: BeforeEval<'g>,
+}
+
+/// The top-level key a leaf's `segments` start with.
+fn scope_key(segments: &[ValuePathSegment]) -> &str {
+    match segments.first() {
+        Some(ValuePathSegment::Key(key)) => key,
+        _ => "",
+    }
 }
 
 /// Recursively rewrites interpolation expressions in a JSON value tree.
@@ -290,7 +302,7 @@ fn rewrite_value<L: EvaluationLookup>(
     value: &Value,
     evaluator: &Evaluator<L>,
     policy: ExpressionFailurePolicy,
-    scope: &mut LeafScope<'_>,
+    scope: &mut LeafScope<'_, '_>,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedFrontmatterError> {
     if scope.data.is_data(&scope.segments) {
         return Ok((value.clone(), 0, vec![]));
@@ -304,9 +316,24 @@ fn rewrite_value<L: EvaluationLookup>(
             // parsed and evaluated directly (preserving its typed result), and
             // a parse/eval failure is always fatal. Mixed text rewrites as a
             // string under `policy`. See [`interpolate_value_located`].
-            let (value, count, warnings) =
-                interpolate_value_located(s, evaluator, policy, "frontmatter-interpolation")
-                    .map_err(|failure| LocatedFrontmatterError::in_string(s, failure))?;
+            let display = scope.display.clone();
+            let key = scope_key(&scope.segments);
+            let present = |warning: ComposeWarning| {
+                let mut warning = warning.in_scope(&display);
+                warning.message = format!("key '{key}': {}", warning.message);
+                warning
+            };
+            let mut scoped = reborrow(&mut scope.before_eval).map(|check| {
+                move |new: &[ComposeWarning]| check(&new.iter().cloned().map(present).collect::<Vec<_>>())
+            });
+            let (value, count, warnings) = interpolate_value_guarded(
+                s,
+                evaluator,
+                policy,
+                "frontmatter-interpolation",
+                scoped.as_mut().map(|check| check as &mut dyn FnMut(&[ComposeWarning]) -> Result<(), MarkdownError>),
+            )
+            .map_err(|failure| LocatedFrontmatterError::in_string(s, failure))?;
             let warnings =
                 warnings.into_iter().map(|warning| warning.in_scope(&scope.display)).collect();
             scope.scanned.push(scope.segments.clone());
@@ -732,6 +759,7 @@ pub(crate) fn interpolate_frontmatter_located(
     resolution_context: Option<ResolutionContext>,
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
+    before_eval: BeforeEval<'_>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     interpolate_frontmatter_impl(
         frontmatter,
@@ -743,6 +771,7 @@ pub(crate) fn interpolate_frontmatter_located(
         false,
         exclude_keys,
         name_coercion_keys,
+        before_eval,
     )
 }
 
@@ -769,6 +798,7 @@ pub(crate) fn interpolate_frontmatter(
         resolution_context,
         exclude_keys,
         name_coercion_keys,
+        None,
     )
     .map_err(|failure| *failure.error)
 }
@@ -814,6 +844,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
         true,
         exclude_keys,
         name_coercion_keys,
+        None,
     )
     .map_err(|failure| *failure.error)
 }
@@ -840,6 +871,7 @@ fn interpolate_frontmatter_impl(
     best_effort: bool,
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
+    mut before_eval: BeforeEval<'_>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     // Pass 1 first decodes every authored whole-leaf literal token, so no scan
     // below ever sees one. Excluded (event-time) keys keep their raw text for
@@ -1038,12 +1070,14 @@ fn interpolate_frontmatter_impl(
     let rewrite_key = |key: &str,
                        original: &Value,
                        evaluator: &Evaluator<'_, FrontmatterSeedState>,
-                       scanned_leaves: &mut Vec<Vec<ValuePathSegment>>| {
+                       scanned_leaves: &mut Vec<Vec<ValuePathSegment>>,
+                       before_eval: BeforeEval<'_>| {
         let mut scope = LeafScope {
             segments: vec![ValuePathSegment::Key(key.to_string())],
             display: key.to_string(),
             data: &data,
             scanned: Vec::new(),
+            before_eval,
         };
         let outcome = rewrite_value(original, evaluator, policy, &mut scope)
             .map_err(|e| key_scoped_failure(key, e));
@@ -1122,7 +1156,7 @@ fn interpolate_frontmatter_impl(
             // `state.data` below.
             let outcome = {
                 let evaluator = evaluator_for(&state, best_effort);
-                let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves);
+                let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
                 missing_roots.extend(
                     evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
                 );
@@ -1205,7 +1239,7 @@ fn interpolate_frontmatter_impl(
 
         let outcome = {
             let evaluator = evaluator_for(&state, best_effort);
-            let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves);
+            let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
             missing_roots.extend(
                 evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
             );

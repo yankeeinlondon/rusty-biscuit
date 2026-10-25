@@ -340,33 +340,33 @@ fn nullable_target_is_suppressed_by_registry_predicate_guards() {
 
 /// `dm.expression.undeclared_property` reports exactly the reads the
 /// library's static walk leaves unhandled: a direct `&&` operand is handled
-/// (`and` declares `unknown | null` and returns `boolean`), a later operand
+/// (`and` declares `unknown | null`), a later operand
 /// is covered by the earlier one's facts, a false ternary branch is not
 /// covered by its condition, a fact about `bar.a` does not cover its sibling
 /// `bar.b`, and under strict equality `baz != null` covers `baz.name` while
 /// `qux != ''` does not cover `qux.name` (a missing `qux` is `null`, and
-/// `null != ''`). `lower` passes `null` through, so only facts cover its
-/// argument.
+/// `null != ''`). Each read sits in a comparison, an ordinary operand, so
+/// only facts cover it.
 #[test]
 fn undeclared_property_findings_match_the_library_branch_facts() {
     let text = concat!(
         "---\ntitle: T\n---\n\n",
-        "A {{ foo && lower(foo) }}\n",
+        "A {{ foo && foo == 'n' }}\n",
         "B {{ foo ? 'x' : foo }}\n",
-        "C {{ bar.a && lower(bar.b) }}\n",
-        "D {{ baz != null && lower(baz.name) }}\n",
-        "E {{ qux != '' && lower(qux.name) }}\n",
+        "C {{ bar.a && bar.b == 'n' }}\n",
+        "D {{ baz != null && baz.name == 'n' }}\n",
+        "E {{ qux != '' && qux.name == 'n' }}\n",
     );
     let workspace = LspWorkspace::new();
     let session = Session::open(&workspace, text);
 
     let mut library: Vec<(u64, u64)> = Vec::new();
     for (prefix, inner) in [
-        ("A {{ ", "foo && lower(foo)"),
+        ("A {{ ", "foo && foo == 'n'"),
         ("B {{ ", "foo ? 'x' : foo"),
-        ("C {{ ", "bar.a && lower(bar.b)"),
-        ("D {{ ", "baz != null && lower(baz.name)"),
-        ("E {{ ", "qux != '' && lower(qux.name)"),
+        ("C {{ ", "bar.a && bar.b == 'n'"),
+        ("D {{ ", "baz != null && baz.name == 'n'"),
+        ("E {{ ", "qux != '' && qux.name == 'n'"),
     ] {
         let base = text.find(prefix).unwrap() + prefix.len();
         let expr = parse_spanned(inner).unwrap();
@@ -467,15 +467,16 @@ dmls_sites! {
     ExpressionBranchHover,
     FrontmatterExpressionHover,
     TransclusionTargetDiagnostic,
-    LifecycleBranch,
+    LifecycleBranchDiagnostic,
+    LifecycleBranchHover,
     TaskBody,
 }
 
 /// `Ok(test)` for a site DMLS supports, with the test proving it agrees with
 /// the library; `Err(reason)` for one it does not support yet.
 fn dmls_state(site: DmlsSite) -> Result<&'static str, &'static str> {
-    const NO_HOST_MODEL: &str = "planned: DMLS checks each frontmatter expression on its own and has no model of host \
-         actions, so a lifecycle or task `when` does not narrow the actions it selects (docs/hover.md)";
+    const UNGUARDED_HOVER: &str = "planned: hover inside a lifecycle `then`/`else` body, and every site of a sequence \
+         task body, shows the declared type, not the type a `when` narrows (docs/hover.md)";
     match site {
         DmlsSite::BodyBlockHover | DmlsSite::TransclusionTargetDiagnostic => {
             Ok("body_guard_rows_agree_with_the_library_in_hover_and_nullable_targets")
@@ -483,13 +484,14 @@ fn dmls_state(site: DmlsSite) -> Result<&'static str, &'static str> {
         DmlsSite::ExpressionBranchHover | DmlsSite::FrontmatterExpressionHover => {
             Ok("expression_branch_rows_agree_with_the_library")
         }
-        DmlsSite::LifecycleBranch | DmlsSite::TaskBody => Err(NO_HOST_MODEL),
+        DmlsSite::LifecycleBranchDiagnostic => Ok("lifecycle_host_profile::claudine_events_narrow_until_a_write_with_stdout"),
+        DmlsSite::LifecycleBranchHover | DmlsSite::TaskBody => Err(UNGUARDED_HOVER),
     }
 }
 
 /// Every editor surface has an explicit state: supported ones name their
-/// agreement test, and lifecycle `then`/`else` and task bodies are planned,
-/// not claimed.
+/// agreement test, and lifecycle `then`/`else` hover and task bodies are
+/// planned, not claimed.
 #[test]
 fn every_dmls_site_has_an_explicit_state() {
     for &site in DmlsSite::ALL {
@@ -497,7 +499,7 @@ fn every_dmls_site_has_an_explicit_state() {
             Ok(test) => assert!(!test.is_empty(), "{site:?}"),
             Err(reason) => {
                 assert!(reason.starts_with("planned:"), "{site:?}: {reason}");
-                assert!(matches!(site, DmlsSite::LifecycleBranch | DmlsSite::TaskBody), "{site:?}");
+                assert!(matches!(site, DmlsSite::LifecycleBranchHover | DmlsSite::TaskBody), "{site:?}");
             }
         }
     }
@@ -619,16 +621,18 @@ fn expression_branch_rows_agree_with_the_library() {
 }
 
 /// Criterion 21, editor side: `dm.expression.undeclared_property` follows the
-/// library's type rule. A direct argument to `is_null`, `is_empty`, or
-/// `file_exists` (each `unknown | null`, returning `boolean`) is handled;
-/// `min(x, 5)`'s `number` parameter and `is_empty(trim(x))`'s indirect read
-/// are not, so they warn as composition does.
+/// library's type rule. A direct argument to `is_null`, `is_empty`,
+/// `file_exists` (each `unknown | null`), `trim`, or `lower` (each
+/// `string | null`, whatever they return) is handled; `min(x, 5)`'s `number`
+/// parameter and `is_empty(trim(x))`'s nested read are not, so they warn as
+/// composition does.
 #[test]
 fn undeclared_property_findings_follow_the_parameter_types() {
     let text = concat!(
         "---\ntitle: T\n---\n\n",
         "A {{ is_null(a) }} {{ is_empty(b) }} {{ file_exists(c) }}\n",
         "B {{ min(d, 5) }} {{ is_empty(trim(e)) }}\n",
+        "C {{ trim(f) }} {{ lower(g) }}\n",
     );
     let workspace = LspWorkspace::new();
     let session = Session::open(&workspace, text);
@@ -640,5 +644,27 @@ fn undeclared_property_findings_follow_the_parameter_types() {
         })
         .collect();
     assert_eq!(session.ranges("dm.expression.undeclared_property"), expected, "{:#?}", session.diagnostics);
+    session.shutdown();
+}
+
+/// The same rule with a document schema declaring another property: only
+/// `dm.expression.undeclared_property` is compared, since strict call
+/// warnings on the same reads are a separate diagnostic.
+#[test]
+fn a_direct_nullable_argument_is_handled_under_a_document_schema() {
+    let text = concat!(
+        "---\n$schema:\n  other: string\nother: o\n---\n\n",
+        "A {{ trim(x) }} {{ lower(y) }} {{ is_null(z) }}\n",
+        "B {{ is_empty(trim(w)) }}\n",
+    );
+    let workspace = LspWorkspace::new();
+    let session = Session::open(&workspace, text);
+    let (line, character) = position(text, offset_of(text, "B {{", "trim(w", 0) + "trim(".len());
+    assert_eq!(
+        session.ranges("dm.expression.undeclared_property"),
+        [(u64::from(line), u64::from(character))],
+        "{:#?}",
+        session.diagnostics
+    );
     session.shutdown();
 }

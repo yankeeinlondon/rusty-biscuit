@@ -13,7 +13,7 @@ use crate::markdown::compose::expression::{
 use crate::markdown::compose::page_blocks::BodyGuards;
 use crate::markdown::compose::expression::absence;
 use crate::markdown::compose::expression::lint::whole_value_span;
-use crate::markdown::compose::interpolation::rewrite::interpolate_value;
+use crate::markdown::compose::interpolation::rewrite::{BeforeEval, interpolate_value_guarded, reborrow, show_new_warnings};
 use crate::markdown::compose::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError,
 };
@@ -273,15 +273,20 @@ pub(crate) struct DirectiveTargetRewrite {
 ///
 /// Only authored directives are considered, and only a target that lies wholly
 /// in authored text is evaluated; its value is data.
+///
+/// `before_eval` is checked before each target is evaluated and after the
+/// last (see [`BeforeEval`]).
 pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     source: &str,
     data: Option<&DataRanges>,
     evaluator: &Evaluator<L>,
     line_offset: usize,
+    mut before_eval: BeforeEval<'_>,
 ) -> Result<DirectiveTargetRewrite, LocatedInterpolationError> {
     let mut output = source.to_string();
     let mut replacements = 0usize;
     let mut warnings = Vec::new();
+    let mut shown = 0;
     let mut edits = Vec::new();
 
     for directive in scan_darkmatter_directives_in(source, data).into_iter().rev() {
@@ -300,19 +305,24 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
             continue;
         };
 
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
         let expression = parse(&location.expression).ok();
-        let (value, count, target_warnings) = interpolate_value(
+        let (value, count, target_warnings) = interpolate_value_guarded(
             raw,
             evaluator,
             ExpressionFailurePolicy::Strict,
             "interpolation",
+            reborrow(&mut before_eval),
         )
-        .map_err(|error| LocatedInterpolationError {
-            error: Box::new(error),
-            span: Some(target.span.clone()),
+        .map_err(|failure| LocatedInterpolationError {
+            // A policy stop is about no one target.
+            span: (!matches!(*failure.error, crate::markdown::types::MarkdownError::BlockedDiagnostics { .. }))
+                .then(|| target.span.clone()),
+            error: failure.error,
         })?;
         replacements += count;
         warnings.extend(target_warnings);
+        shown = warnings.len();
 
         let evaluated_target = match value {
             serde_json::Value::Null => EvaluatedDirectiveTarget::Absent {
@@ -357,6 +367,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
             }
         }
     }
+    show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
     // Directives were rewritten end to start.
     edits.reverse();
 

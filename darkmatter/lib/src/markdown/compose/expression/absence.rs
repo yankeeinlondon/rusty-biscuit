@@ -10,12 +10,11 @@
 //!   itself a primary (`a || b || "d"`); the condition of a ternary
 //!   (`x ? a : b`); and a direct argument bound to a parameter whose
 //!   declared type explicitly includes `null` (`is_null(x)`, `is_empty(x)`,
-//!   `file_exists(x)`, a host function's `string | null` parameter), unless
-//!   the function's result may itself be `null` (`trim(x)` passes the
-//!   absence on). A plain `unknown` parameter or an optional non-null one
-//!   does not handle it, and an overloaded function handles it only when
-//!   every overload taking that many arguments does. `is_empty(trim(x))` is
-//!   not direct. Handling a read never proves its value present.
+//!   `file_exists(x)`, `trim(x)`, a host function's `string | null`
+//!   parameter), whatever the function returns. A plain `unknown` parameter
+//!   or an optional non-null one does not handle it, and an overloaded
+//!   function handles it only when every overload taking that many
+//!   arguments does. Handling a read never proves its value present.
 //! - **Shared branch facts**: a read the enclosing branch facts prove present
 //!   ([`TypeScope::assume`], the one fact producer). A ternary branch gets
 //!   its own side of the condition, so `x ? x : "none"` handles the second
@@ -29,6 +28,13 @@
 //! other node — arithmetic, comparison, negation, a call whose parameter
 //! does not declare `null` —
 //! makes its operands ordinary again, so `{{ x == "a" ? … }}` still warns.
+//! A call that is itself a direct argument of another call handles none of
+//! its own arguments: its result, not the variable, is what the outer call
+//! receives, so `is_empty(trim(x))` still warns for `x` while `trim(x)`,
+//! `trim(x) || "d"`, and `trim(x) == "a"` do not. The logical `and`/`or`
+//! (`&&`/`||` between conditions) are operators here, neither consuming
+//! their operands nor consumed: `is_null(x) && y` handles `x`, and so does
+//! `is_empty(x && y)`.
 //!
 //! The runtime evaluator applies these rules while it evaluates, so a warning
 //! also requires evaluation reachability: an unchosen branch or a
@@ -61,6 +67,10 @@ static UNTYPED: DeclaredTypes<'static> = DeclaredTypes::new(None);
 pub(crate) struct AbsenceScope<'a> {
     /// A bare variable directly in this position is an explicit absence check.
     handles_absence: bool,
+    /// This position is a direct argument of a call other than `and`/`or`,
+    /// so a call here (other than `and`/`or`) hands its result on instead of
+    /// handling its own arguments' absence.
+    consumed_by_call: bool,
     /// The enclosing branch facts; `None` when no branch encloses the read.
     facts: Option<&'a TypeScope<'static>>,
 }
@@ -81,6 +91,7 @@ impl<'a> AbsenceScope<'a> {
     pub(crate) fn operand(self) -> Self {
         Self {
             handles_absence: false,
+            consumed_by_call: false,
             ..self
         }
     }
@@ -89,6 +100,7 @@ impl<'a> AbsenceScope<'a> {
     pub(crate) fn absence_check(self) -> Self {
         Self {
             handles_absence: true,
+            consumed_by_call: false,
             ..self
         }
     }
@@ -96,15 +108,19 @@ impl<'a> AbsenceScope<'a> {
     /// The argument at `index` of a call to `function` with `count`
     /// arguments, handled as
     /// [`FunctionRegistration::handles_absence_at`](super::call_binding::FunctionRegistration::handles_absence_at)
-    /// decides.
+    /// decides, unless this call is itself a direct argument of another call
+    /// (see the module docs).
     /// An unknown function, or a host function whose analysis is incomplete,
     /// handles nothing.
     pub(crate) fn call_argument(self, function: &str, index: usize, count: usize) -> Self {
+        let logical = short_circuit_polarity(function).is_some();
         Self {
-            handles_absence: super::functions::inspect_registration(function, |registration| {
-                registration.handles_absence_at(index, count)
-            })
-            .unwrap_or(false),
+            handles_absence: (logical || !self.consumed_by_call)
+                && super::functions::inspect_registration(function, |registration| {
+                    registration.handles_absence_at(index, count)
+                })
+                .unwrap_or(false),
+            consumed_by_call: !logical,
             ..self
         }
     }
@@ -121,6 +137,7 @@ impl<'a> AbsenceScope<'a> {
     {
         AbsenceScope {
             handles_absence: self.handles_absence,
+            consumed_by_call: self.consumed_by_call,
             facts: Some(facts),
         }
     }
@@ -147,7 +164,7 @@ pub struct StaticVariableRead<'e> {
     pub span: SourceSpan,
     /// Whether the author handled this read's absence (fallback primary,
     /// ternary condition, or direct argument to a parameter declaring
-    /// `null`), or the
+    /// `null` of a call that is not itself another call's argument), or the
     /// branch facts around it prove it present.
     pub handles_absence: bool,
 }
@@ -530,14 +547,29 @@ mod tests {
         assert!(scope.call_argument("is_null", 0, 1).handles("x"));
         assert!(scope.call_argument("isEmpty", 0, 1).handles("x"));
         assert!(scope.call_argument("file_exists", 0, 1).handles("x"));
-        // `a: number`; `text: string | null` passing null through.
+        // `text: string | null`, whatever the function returns.
+        assert!(scope.call_argument("trim", 0, 1).handles("x"));
+        // `a: number`.
         assert!(!scope.call_argument("min", 0, 2).handles("x"));
-        assert!(!scope.call_argument("trim", 0, 1).handles("x"));
         // No overload takes that many arguments; no such function.
         assert!(!scope.call_argument("is_null", 0, 3).handles("x"));
         assert!(!scope.call_argument("no_such_function", 0, 1).handles("x"));
         // A handled scope does not leak into another call's arguments.
-        assert!(!scope.absence_check().call_argument("trim", 0, 1).handles("x"));
+        assert!(!scope.absence_check().call_argument("min", 0, 2).handles("x"));
+    }
+
+    #[test]
+    fn a_call_that_is_another_calls_argument_handles_none_of_its_own() {
+        let scope = AbsenceScope::default();
+        let consumed = scope.call_argument("is_empty", 0, 1);
+        assert!(!consumed.call_argument("trim", 0, 1).handles("x"));
+        assert!(!consumed.call_argument("is_null", 0, 1).handles("x"));
+        // An operator or fallback between the calls ends the consumption.
+        assert!(consumed.operand().call_argument("trim", 0, 1).handles("x"));
+        assert!(consumed.absence_check().call_argument("trim", 0, 1).handles("x"));
+        // `and`/`or` neither consume their operands nor are consumed.
+        assert!(scope.call_argument("and", 0, 2).call_argument("is_null", 0, 1).handles("x"));
+        assert!(consumed.call_argument("and", 0, 2).handles("x"));
     }
 
     #[test]
@@ -593,8 +625,8 @@ mod tests {
         // Comparisons, predicates, and `&&` give their branch facts too.
         ("x != null ? x : \"n\"", &["x", "null"]),
         ("is_string(x) ? x : \"n\"", &[]),
-        // `and`/`or` operands bind `unknown | null` and return `boolean`, so
-        // a direct variable operand is handled like any such argument.
+        // `and`/`or` operands bind `unknown | null`, so a direct variable
+        // operand is handled like any such argument.
         ("x && x.name", &[]),
         ("and(x, y) ? y : z", &["z"]),
         ("x || y ? y : z", &["y", "z"]),
@@ -605,16 +637,24 @@ mod tests {
         ("isEmpty(x)", &[]),
         ("is_empty(lower(x))", &["x"]),
         ("is_empty(trim(x))", &["x"]),
+        ("is_empty((trim(x)))", &["x"]),
         ("file_exists(x)", &[]),
         ("min(x, 5)", &["x"]),
-        ("lower(x)", &["x"]),
+        ("lower(x)", &[]),
+        ("trim(x)", &[]),
+        ("trim(x) || \"d\"", &[]),
+        ("trim(x) == \"a\" ? y : z", &["y", "z"]),
+        ("is_empty(trim(x) || \"d\")", &[]),
+        ("is_null(x) && is_empty(trim(y))", &["y"]),
+        ("is_empty(x && y)", &[]),
         ("x == 1 ? y : z", &["x", "y", "z"]),
         ("!x ? y : z", &["x", "y", "z"]),
         ("x.deep || \"d\"", &[]),
         ("x[i] || \"d\"", &["i"]),
         ("a - b", &["a", "b"]),
         ("foo--bar", &["foo", "bar"]),
-        ("lower(a) + upper(b)", &["a", "b"]),
+        ("lower(a) + upper(b)", &[]),
+        ("upper(lower(a))", &["a"]),
         ("[a, b]", &["a", "b"]),
         ("spec-name", &["spec-name"]),
     ];

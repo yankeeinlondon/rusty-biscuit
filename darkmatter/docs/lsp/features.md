@@ -194,12 +194,13 @@ Expression diagnostics follow one severity policy:
 |------|----------|-----|
 | `dm.expression.malformed`, schema-typed frontmatter value with exact projection | Error | The schema declares the value is an expression, so a parse failure never evaluates. |
 | `dm.expression.malformed`, document-body span | Warning | A body `{{ … }}` is only *inferred* to be an expression; it may be foreign template syntax. Authors can opt out with `\{{`. |
-| `dm.expression.undeclared_property` | Warning | Advisory: the undeclared document property is valid and `null` unless supplied at runtime. Inside an md lifecycle stack the event's binding view declares `err` and `timing`; a global a host catalog declares (Claudine's `seq`, `loop`, `group`) is never reported. |
+| `dm.expression.undeclared_property` | Warning | Advisory: the undeclared document property is valid and `null` unless supplied at runtime. Inside a lifecycle stack of the document's host (md's, or a host's from its lifecycle artifact) the event's binding view declares `err` and `timing`; a global a host catalog declares (Claudine's `seq`, `loop`, `group`) is never reported. |
 | `dm.expression.unknown_function` | Error | The function catalog is closed, so compose fails on the call. |
-| `dm.expression.unavailable_global` | Error | Inside an md lifecycle stack, the event declares the global unavailable (`err` in `composed`), so the read fails when the stack runs. |
+| `dm.expression.unavailable_global` | Error | Inside a lifecycle stack of the document's host, the event declares the global unavailable (`err` in md's `composed` or Claudine's `start`), so the read fails when the stack runs. |
 | `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
 | `dm.expression.incompatible_call` | Error | Darkmatter's design-time call check proves no value of the argument's type can bind (or the argument count is wrong), so `md compose` rejects the document. |
 | `dm.expression.uncertain_call` | Warning | The argument may not convert to the parameter's type for some values; with `expressions.strict`, also an argument that may be `null` or whose type is unknown. |
+| `dm.lifecycle.incomplete_analysis` | Warning | No host catalog's lifecycle artifact is usable, so lifecycle stacks are analyzed as the `md` host's; the document may still be right for its host. |
 
 The authoritative per-code list is [DMLS diagnostics — Severity](../../dmls/docs/diagnostics.md#severity). A new diagnostic takes its severity from this policy rather than from a neighboring code.
 

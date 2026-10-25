@@ -109,7 +109,16 @@ Darkmatter's **SimplifiedSchema**:
   hovered, and completed with that event's globals: reading `err` where the
   event has no failure is `dm.expression.unavailable_global`. Host-catalog
   globals (Claudine's `seq`, `loop`, `group`) are always accepted, and a host
-  catalog that fails to load is the warning `dm.schema.host_catalog`. See
+  catalog that fails to load is the warning `dm.schema.host_catalog`. A host
+  that ships a [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)
+  beside its catalog (Claudine does) has its stacks analyzed with its own
+  events, renames, globals, and verbs: Claudine's `start`, `success`,
+  `blocked`, `failure`, and `loop` gate are stacks, and `say`, `retry`, or
+  `proxy` operands are checked. Each call is typed at its site, narrowed by
+  the `when:` items around it until a `set` writes the property, exactly as
+  the host's launch types it. Without a usable artifact the stacks are
+  analyzed as md's and the document carries
+  `dm.lifecycle.incomplete_analysis`. See
   [Diagnostics](./diagnostics.md), [Hover](./hover.md), and
   [Autocomplete](./autocomplete.md#lifecycle-stacks).
 
