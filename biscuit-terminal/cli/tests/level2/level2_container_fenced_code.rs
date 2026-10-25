@@ -5,7 +5,7 @@
 //! in a quote or list container projected to an invalid render tree
 //! (`Paragraph([…, Code, …])`), which validation rejected — the terminal
 //! renderer then emitted empty output. These tests prove the container paths
-//! render the styled text and the dim code block in a real terminal.
+//! render the styled text and code block in a real terminal.
 //!
 //! The same containers are also checked for inline code, a link around an
 //! explicit code block, and hard breaks in list items, as displayed.
@@ -41,7 +41,7 @@ static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 const FENCED_PROSE: &str = "<red>before <code-block lang=rust>code</code-block> after</red>";
 
 /// Drives `bt <subcommand> "<FENCED_PROSE>"` with `FORCE_COLOR=1` and asserts
-/// the container rendered the styled text and the dim code block — proving the
+/// the container rendered the styled text and code block — proving the
 /// embedded-Prose-with-code projection no longer collapses to empty output.
 fn assert_container_renders_fenced_code<H: TerminalHarness>(harness: &mut H, subcommand: &str) {
     let frame = common::run_bt_output(harness, &format!("{subcommand} \"{FENCED_PROSE}\""), FORCED);
@@ -212,7 +212,7 @@ fn assert_container_inline_code<H: TerminalHarness>(harness: &mut H, subcommand:
 }
 
 /// A link around an explicit code block inside a `bt <subcommand>` container
-/// displays as linked paragraphs around the dim, unlinked code.
+/// displays as linked paragraphs around the highlighted, unlinked code.
 fn assert_container_link_around_code_block<H: TerminalHarness>(harness: &mut H, subcommand: &str) {
     let (frame, rows) = common::run_bt_rows(
         harness,
@@ -231,7 +231,6 @@ fn assert_container_link_around_code_block<H: TerminalHarness>(harness: &mut H, 
         assert_eq!(common::osc8_destinations(&row.raw), ["https://e.io"], "{row:?}");
     }
     let code = shown.iter().find(|row| content(row) == "x").expect("code row");
-    assert_eq!(dim_runs(code), ["x"], "{code:?}");
     assert!(link_runs(code).is_empty(), "{code:?}");
 }
 

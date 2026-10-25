@@ -375,7 +375,7 @@ mod tests {
     fn a_failed_filesystem_query_is_a_reading_error_naming_both_paths() {
         let mut source = disk().filesystem(
             "/volumes/fast",
-            Err(io::Error::new(io::ErrorKind::Other, "device not ready")),
+            Err(io::Error::other("device not ready")),
         );
         let error = read(Path::new("/volumes/fast/store/new"), &mut source).unwrap_err();
         let SpaceError::Reading { path, measured, source: cause } = &error else {

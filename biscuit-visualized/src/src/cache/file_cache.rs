@@ -31,14 +31,14 @@ pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv6";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
 pub const RASTERIZER: &str = "resvg@0.47";
 
-#[cfg(test)]
+#[cfg(all(test, feature = "image"))]
 thread_local! {
     static STORED_FILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// How many files (artifacts and their sidecars) this thread stored in any
 /// cache since the last call, and resets the count.
-#[cfg(test)]
+#[cfg(all(test, feature = "image"))]
 pub(crate) fn take_stored_files() -> usize {
     STORED_FILES.with(|stored| stored.replace(0))
 }
@@ -209,7 +209,7 @@ impl FileCache {
         file_name: &str,
         data: &[u8],
     ) -> io::Result<PathBuf> {
-        #[cfg(test)]
+        #[cfg(all(test, feature = "image"))]
         STORED_FILES.with(|stored| stored.set(stored.get() + 1));
         let cache_dir = self.cache_dir(kind, format);
         fs::create_dir_all(&cache_dir)?;

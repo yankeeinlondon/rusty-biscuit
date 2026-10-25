@@ -2057,7 +2057,7 @@ fn the_callers_own_shell_inside_is_not_listed_and_the_wrapper_run_hands_off() {
     let output = Command::new("sh")
         .arg("-c")
         .arg("\"$0\" remove feat-x; status=$?; exit $status")
-        .arg(env!("CARGO_BIN_EXE_wt"))
+        .arg(biscuit_test_harness::bin_exe!("wt"))
         .current_dir(&wt)
         .env("WT_SHELL_WRAPPER", "1")
         .env("GIT_TERMINAL_PROMPT", "0")

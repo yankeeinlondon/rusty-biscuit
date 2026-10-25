@@ -637,6 +637,11 @@ impl GraphRun {
     /// The table and legend survive the image, in a real terminal: every
     /// worktree row, with its column borders where the header has them.
     fn assert_table_intact(&self) {
+        assert!(
+            self.screen.iter().any(|row| row.contains("Worktree") && row.contains("Branch") && row.contains('│')),
+            "the whole listing must fit on screen:\n{}",
+            self.screen.join("\n")
+        );
         let rows = &self.all;
         let all = self.all.join("\n");
         let header = rows
@@ -846,7 +851,7 @@ fn level2_graph_fits_a_narrow_kitty_window() {
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 56, 60);
 
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     graph_drawn_or_skip!(run);
 }
@@ -868,7 +873,7 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
     for (columns, lines) in [(100, 32), (56, 60)] {
         let mut run = GraphRun::new(&fixture, columns, lines);
         run.keep_evidence("merged");
-        assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+        assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
         let all = run.all.join("\n");
         assert!(!names_an_omission(&all), "a merged branch is complete history:\n{all}");
         run.assert_table_intact();
@@ -891,7 +896,7 @@ fn level2_graph_restores_lane_density_in_kitty() {
     let fixture = Fixture::sparse_lanes();
     let mut run = GraphRun::new(&fixture, 200, 60);
     run.keep_evidence("sparse");
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
     assert!(!names_an_omission(&all), "every fork and merge is drawn:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
@@ -913,7 +918,7 @@ fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
     let fixture = Fixture::continued_after_merge();
     let mut run = GraphRun::new(&fixture, 200, 60);
     run.keep_evidence("continued");
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
     assert!(!names_an_omission(&all), "the continued branch is connected:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");

@@ -249,7 +249,7 @@ Other L1 facts:
 - `wt list` runs under `script` so the transmitted APC (`c=` only) and the
   `CSI <rows> B` reservation are recorded; a window screenshot must show the
   PNG's drawn pixels exactly where the reservation starts.
-- A short window (100×32) proves the half-height lane cap and its notice; a
+- A short window (100×32) proves the remaining-screen-space lane cap and its notice; a
   narrow one (56×60) the width clamp.
 - Cases and kept artifacts (in the temp directory, for inspection):
   - `level2_graph_draws_a_merged_branch_in_kitty` (`Fixture::merged`): both
