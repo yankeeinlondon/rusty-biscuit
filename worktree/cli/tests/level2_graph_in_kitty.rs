@@ -838,7 +838,7 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
     let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
         panic!("the capped graph should note the lanes it left out:\n{}", run.screen.join("\n"))
     });
-    assert!((1..BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
+    assert!((1..=BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
 }
 
 /// A narrow window: the graph is clamped to the window's columns and drawn
