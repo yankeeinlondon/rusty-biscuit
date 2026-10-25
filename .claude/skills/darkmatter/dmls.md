@@ -351,16 +351,34 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   covered by the folder rule (its parent holds the payload), so a test of the
   folder-above-a-candidate rule needs a nested absent folder
   (`schemas/shared/deep/` under an existing `schemas/shared/`). Protocol tests:
-  `tests/l1/searched_candidates.rs`. Failure logging and trigger-file
-  diagnostics share one transition record per (workspace boundary,
-  document folder): `warn` when new, `debug` on a repeat, `info` on
-  recovery; a cold failure logs `trigger registry unavailable`. Root I/O
-  errors (including a non-UTF-8 root file) never serve last-good data.
-  Discovery itself now returns skipped triggers as findings rather than an
-  error; `overlay/registry.rs::fail_closed_on_findings` turns a scan's first
-  finding back into `SchemaError::TriggerLoad`, so DMLS still fails the scope
-  closed with its last-good registry. That bridge is temporary: it goes when
-  DMLS installs a scan's valid subset and publishes findings as warnings.
+  `tests/l1/searched_candidates.rs`.
+- Skipped (invalid) triggers: a scan with findings is `Outcome::Ready` and
+  installs its valid subset, even an empty one; there is no last-good
+  retention for them, and `failed_scopes` never counts them (only
+  `failed_triggers`). `TriggerRegistries::reconcile_warnings` runs after
+  every install: it folds every scope's served findings (stale scopes
+  included, by sorted scope path, keyed by `InvalidTriggerFinding::identity`)
+  and diffs them with the published set, pushing a
+  `TriggerDiagnosticTransition { path, finding }` and one `warn` log
+  (`ignoring invalid schema trigger …`, `trigger=`, `code=`) only for a new
+  or changed finding, and a clear plus `info` (`invalid schema trigger no
+  longer reported`) when no scope reports it. Embedded findings are logged,
+  never published. Closed files get `diagnostics::frontmatter::invalid_trigger_diagnostic`
+  (warning, line of a YAML error, related information = `cause_path`); an
+  open trigger whose buffer envelope parses gets
+  `SuggestionState::TriggerWarning` from `finding_for`, while a malformed
+  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins;
+  `didClose` republishes the warning (`closed_file_diagnostics`). Triggered
+  schemas only produce document diagnostics in `[schema] strict = true`, so
+  a session test of trigger properties sets it. Tests:
+  `tests/l1/invalid_trigger_warnings.rs`, the registry unit tests.
+- Whole-scope failures (root I/O, a non-UTF-8 root file → `RootFailed`, never
+  last-good; a case-fold collision → `TriggerFailed`, last-good) log through
+  one record per (workspace boundary, document folder): `warn` when new,
+  `debug` on a repeat, `info` on recovery; a cold failure logs `trigger
+  registry unavailable`. They publish no trigger-file diagnostic. A
+  `TriggerFailed` case can't be built on a case-insensitive file system; the
+  unit test substitutes `Prepared::result`.
 - Request timing (`request_timing`): the router starts a `RequestTimings` on
   `ServerState` at each dequeue and emits exactly one `CompletionEvent` per
   request or notification (`slow request`/`slow notification` at `warn` from

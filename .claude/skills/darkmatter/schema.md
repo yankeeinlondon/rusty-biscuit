@@ -752,7 +752,8 @@ For grammar or schema changes, cover:
   naming the folder, so `scan` never installs a registry missing that root
   and bare-name lookup never falls through to a less local root. DMLS turns
   that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
-  last-good registry (last-good is only for trigger-file load errors).
+  last-good registry (last-good is only for whole-scan failures such as a
+  case-fold collision; a skipped trigger installs the valid subset).
 - `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
   embedded bundles, DMLS authoring, payload-cycle checks); never add a
   caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
@@ -790,6 +791,20 @@ For grammar or schema changes, cover:
   trigger still fails with `TriggerSchemaReferenced`. Tests:
   `tests/l1/trigger_discovery_recovery.rs`,
   `compose/tests/invalid_triggers.rs`.
+- The `md` commands other than compose deliver findings through
+  `cli/src/commands/trigger_findings.rs`: `emit_warnings` (stderr `Status`
+  warning rows, as compose prints them), `FindingRow` (`{source, code, path,
+  message}`, `path` null for embedded), and `DeliveredFindings` (one warning
+  per `identity()` per invocation; `schema validate` attaches a shared
+  trigger to the first file). `schema validate --format json` puts rows
+  first in a record's `warnings` on any outcome; `schema triggers` lists them
+  in a stdout "Skipped invalid triggers" section; `md clean` reads
+  `CleanResult::trigger_findings` (stderr, or `--json`'s top-level
+  `warnings`), and a schema failure carries them on
+  `FrontmatterRepairError::Schema { trigger_findings, .. }`. Ordinary
+  `md compose` prints a failed run's trigger warnings before its error
+  (`report_failure_trigger_warnings`), except the ones a `--deny` block
+  already shows. Tests: `cli/tests/l1/invalid_trigger_warnings.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and
