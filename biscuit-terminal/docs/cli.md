@@ -77,9 +77,22 @@ What decides between the two:
 - A drawing wider than the available columns shows the source instead. The
   columns are the terminal width, narrowed by `--width` and the margin flags,
   less two columns for the code block's padding.
-- A diagram that does not parse shows its source and exits 0. With images
-  available, the same diagram is an error (exit 1), as described in the
-  [CLI README](../cli/README.md#flowchart-rendering).
+- A diagram that does not parse is an error (exit 1, the error and the
+  source on stderr), as it is with images, and also when `--feature` forbids
+  text: the source is then parsed without being drawn. A diagram that parses
+  but is not drawn as text, or does not fit, is not an error unless the
+  image route would refuse it too: a math label (`$$…$$`, Merman's math
+  support is not built in) is the same error whenever the source is shown,
+  whether `--feature`, `MERMAID_FALLBACK=code-block`, or a narrow `--width`
+  chose it. A drawing that fits shows the formula literally and exits 0.
+
+  ```bash
+  bt flowchart --feature no-mermaid-fallbacks 'A["$$x^2$$"] --> B'  # exit 1, lacks capability `math`
+  bt flowchart 'A["$$x^2$$"] --> B'                                 # text drawing, exit 0
+  ```
+- `--title` is shown once on every route: drawn in the image, as a bold line
+  above a text drawing (which never draws the title itself), and inside the
+  source, which already gives it, with no line added.
 - `--meta` and `--debug` describe a rendered image, so they print nothing for
   a text or source fallback. `--json` prints the generated Mermaid code and
   renders nothing, with or without images.

@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::discovery::detection::{ColorDepth, ImageSupport};
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_node,
 };
@@ -34,11 +34,16 @@ fn promoting(term: &Terminal, strictness: RenderStrictness) -> TerminalRenderOpt
     opts
 }
 
+/// No images, no color, and Unicode glyphs, whatever the host's `NO_COLOR`,
+/// `COLORTERM`, `TERM`, or locale say: the drawings asserted below are
+/// box-drawing text.
 fn no_image_terminal() -> Terminal {
     Terminal::builder()
         .width(80)
         .image_support(ImageSupport::None)
         .is_tty(false)
+        .color_depth(ColorDepth::None)
+        .supports_unicode(true)
         .build()
 }
 
@@ -288,6 +293,109 @@ fn a_parse_error_follows_the_render_strictness() {
     let rendered = render_terminal_node(&mermaid_fence(BROKEN_FLOWCHART), &lossy).expect("Lossy falls back");
     assert_eq!(rendered.output, as_code(BROKEN_FLOWCHART, &lossy));
     assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+/// A valid flowchart under frontmatter Merman cannot preprocess.
+const MALFORMED_FRONTMATTER: &str = "---\ntitle: [broken\n---\nflowchart LR\n A --> B";
+
+/// A source that does not preprocess is a failure, not an ineligible family:
+/// rejected under strict, one diagnostic under warn, silent under lossy, and
+/// the code block wherever it renders. A policy that forbids text does not
+/// hide it.
+#[test]
+fn malformed_frontmatter_follows_the_render_strictness() {
+    let term = no_image_terminal();
+    let never = || {
+        TerminalDiagramRenderer::default()
+            .with_fallback_policy(MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Never))
+    };
+    for hook in [text_allowed(), never()] {
+        let strict = automatic_with(&term, RenderStrictness::Strict, GraphicsMode::Vector, hook);
+        let result = render_terminal_node(&mermaid_fence(MALFORMED_FRONTMATTER), &strict);
+        assert!(matches!(result, Err(RenderError::LossyRejected { .. })), "{result:?}");
+    }
+
+    let warn = automatic_with(&term, RenderStrictness::Warn, GraphicsMode::Vector, text_allowed());
+    let rendered = render_terminal_node(&mermaid_fence(MALFORMED_FRONTMATTER), &warn).expect("Warn falls back");
+    assert_eq!(rendered.output, as_code(MALFORMED_FRONTMATTER, &warn));
+    assert_eq!(rendered.diagnostics.len(), 1, "{:?}", rendered.diagnostics);
+    assert_eq!(rendered.diagnostics[0].kind, DiagnosticKind::Lossy);
+
+    let lossy = automatic_with(&term, RenderStrictness::Lossy, GraphicsMode::Vector, text_allowed());
+    let rendered = render_terminal_node(&mermaid_fence(MALFORMED_FRONTMATTER), &lossy).expect("Lossy falls back");
+    assert_eq!(rendered.output, as_code(MALFORMED_FRONTMATTER, &lossy));
+    assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+/// A header Merman detects no diagram type in (a typo of `flowchart`).
+const UNDETECTABLE: &str = "flowchar LR\n A --> B";
+
+/// An undetectable diagram type is a failure, not an ineligible family:
+/// rejected under strict, one diagnostic under warn, silent under lossy, and
+/// the code block wherever it renders. A policy that forbids text does not
+/// hide it.
+#[test]
+fn an_undetectable_diagram_type_follows_the_render_strictness() {
+    let term = no_image_terminal();
+    let never = || {
+        TerminalDiagramRenderer::default()
+            .with_fallback_policy(MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Never))
+    };
+    for hook in [text_allowed(), never()] {
+        let strict = automatic_with(&term, RenderStrictness::Strict, GraphicsMode::Vector, hook);
+        let result = render_terminal_node(&mermaid_fence(UNDETECTABLE), &strict);
+        assert!(matches!(result, Err(RenderError::LossyRejected { .. })), "{result:?}");
+    }
+
+    let warn = automatic_with(&term, RenderStrictness::Warn, GraphicsMode::Vector, text_allowed());
+    let rendered = render_terminal_node(&mermaid_fence(UNDETECTABLE), &warn).expect("Warn falls back");
+    assert_eq!(rendered.output, as_code(UNDETECTABLE, &warn));
+    assert_eq!(rendered.diagnostics.len(), 1, "{:?}", rendered.diagnostics);
+    assert_eq!(rendered.diagnostics[0].kind, DiagnosticKind::Lossy);
+
+    let lossy = automatic_with(&term, RenderStrictness::Lossy, GraphicsMode::Vector, text_allowed());
+    let rendered = render_terminal_node(&mermaid_fence(UNDETECTABLE), &lossy).expect("Lossy falls back");
+    assert_eq!(rendered.output, as_code(UNDETECTABLE, &lossy));
+    assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+/// ZenUML, which Merman does not draw, is an ordinary family with no text
+/// output: declined, so the code block with no diagnostic under every
+/// strictness.
+#[test]
+fn a_zenuml_fence_renders_as_code_without_a_diagnostic() {
+    let zenuml = "zenuml\n    A.b()";
+    for strictness in [RenderStrictness::Strict, RenderStrictness::Warn, RenderStrictness::Lossy] {
+        for (term, graphics_mode) in
+            [(no_image_terminal(), GraphicsMode::Rich), (Terminal::new_optimistic(80), GraphicsMode::Vector)]
+        {
+            let opts = automatic_with(&term, strictness, graphics_mode, text_allowed());
+
+            let rendered = render_terminal_node(&mermaid_fence(zenuml), &opts).expect("declined is not an error");
+
+            assert_eq!(rendered.output, as_code(zenuml, &opts), "{strictness:?} {graphics_mode:?}");
+            assert!(rendered.diagnostics.is_empty(), "{strictness:?} {graphics_mode:?}: {:?}", rendered.diagnostics);
+        }
+    }
+}
+
+/// The controls for the malformed frontmatter: the unedited flowchart, and
+/// the same flowchart under well-formed frontmatter, are drawn as text with
+/// no diagnostic under every strictness.
+#[test]
+fn a_flowchart_with_or_without_frontmatter_is_text_under_every_strictness() {
+    let term = no_image_terminal();
+    for source in ["flowchart LR\n A --> B", "---\ntitle: fixed\n---\nflowchart LR\n A --> B"] {
+        for strictness in [RenderStrictness::Strict, RenderStrictness::Warn, RenderStrictness::Lossy] {
+            let opts = automatic_with(&term, strictness, GraphicsMode::Vector, text_allowed());
+
+            let rendered = render_terminal_node(&mermaid_fence(source), &opts).expect("text");
+
+            let plain = strip_escape_codes(rendered.output.as_str());
+            assert!(plain.starts_with("```txt\n┌"), "{strictness:?} {source:?}: {plain}");
+            assert!(rendered.diagnostics.is_empty(), "{strictness:?} {source:?}: {:?}", rendered.diagnostics);
+        }
+    }
 }
 
 #[test]

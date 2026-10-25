@@ -37,7 +37,7 @@ use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node}
 use super::display::{display_background, display_image, display_pixels};
 use super::fallback_policy::{MermaidFallbackPolicy, ResolvedFallbackPolicy};
 use crate::artifact::{Background, OutputFormat, RenderRequest};
-use crate::mermaid::{MermaidError, TextCharset, TextCoverage, TextOptions, TextRender};
+use crate::mermaid::{MermaidError, TextCharset, TextCoverage, TextOptions, TextRender, TextSource};
 
 use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 
@@ -448,6 +448,11 @@ pub const PARTIAL_NOTE_ID: &str = "mermaid-partial-warning";
 /// Columns kept free beside a text drawing for its `txt` code block's own
 /// padding: a highlighting code renderer (darkmatter's pads one column on
 /// the left) may pad either side, while the plain code block pads none.
+///
+/// It does not cover a line-number gutter, whose width grows with the row
+/// count. On the render-tree hook path biscuit-terminal measures the
+/// finished rows and shows the fence as code when one is wider than the
+/// fence, so a numbering code renderer never overflows there.
 pub const TEXT_BLOCK_CHROME_COLUMNS: u32 = 2;
 
 /// What [`MermaidDiagram::present`] chose to show.
@@ -608,7 +613,9 @@ impl MermaidDiagram {
         self
     }
 
-    /// Sets the diagram title.
+    /// Sets the diagram title: the image's alt text (it is not drawn into
+    /// the image), and a bold line leading a text or source presentation
+    /// that does not already show it (see [`present`](Self::present)).
     pub fn with_title<S: Into<String>>(mut self, title: S) -> Self {
         self.renderer = self.renderer.with_title(title);
         self
@@ -828,8 +835,11 @@ impl MermaidDiagram {
     /// [`TEXT_BLOCK_CHROME_COLUMNS`]; anything Merman does not draw as a
     /// diagram, a drawing that does not fit, a policy that forbids it, or a
     /// text failure shows the source. A title set with
-    /// [`with_title`](Self::with_title) leads the text and source nodes,
-    /// unless the source already gives that title.
+    /// [`with_title`](Self::with_title) leads the text and source nodes
+    /// once: it is left out only where the nodes shown already show the
+    /// same title (a source that gives it, or a sequence or XY chart drawing
+    /// that draws its `title` statement). A drawing never shows a
+    /// frontmatter title, so text keeps the title the source gives there.
     pub fn present(&self, term: &biscuit_terminal::terminal::Terminal) -> MermaidPresentation {
         self.present_with(term, self.fallback.resolve())
     }
@@ -843,12 +853,53 @@ impl MermaidDiagram {
         if TerminalImage::route_has_pixels(term) {
             return match self.try_render(term) {
                 Ok(result) => MermaidPresentation::Image(result),
-                Err(_) => MermaidPresentation::Source(self.titled(self.source_nodes())),
+                Err(_) => MermaidPresentation::Source(self.titled_source()),
             };
         }
-        match self.text_nodes(self.text_columns(term.width()), text_charset(term), policy) {
-            Ok(Some(nodes)) => MermaidPresentation::Text(self.titled(nodes)),
-            Ok(None) | Err(_) => MermaidPresentation::Source(self.titled(self.source_nodes())),
+        match self.text_attempt(self.text_columns(term.width()), text_charset(term), policy) {
+            Ok(TextAttempt::Drawn { nodes, shows_title }) => MermaidPresentation::Text(self.titled(nodes, shows_title)),
+            Ok(TextAttempt::Refused | TextAttempt::Unrequested) | Err(_) => MermaidPresentation::Source(self.titled_source()),
+        }
+    }
+
+    /// The fallible counterpart of [`present`](Self::present), for a caller
+    /// that reports a diagram it cannot draw (a CLI that exits unsuccessfully).
+    ///
+    /// The choice is `present`'s, and a source shown because the family is
+    /// not drawn as text, the drawing does not fit, or the policy forbids
+    /// text is still `Ok`. What `present` hides behind the source is an
+    /// error here.
+    ///
+    /// Whenever the source is shown in place of a drawing (the policy forbids
+    /// text, the family is not drawn as text, or the drawing does not fit),
+    /// one more Merman request parses the source and checks it needs no
+    /// render capability that is not built in, so that a source the image
+    /// route would refuse (a parse error, a `$$…$$` math label) is still
+    /// reported. That request lays nothing out, loads no fonts, and writes no
+    /// artifact; the text request limit of one is unchanged. A text drawing
+    /// is shown as drawn: a math label Merman draws as its literal text is
+    /// not an error.
+    ///
+    /// ## Errors
+    ///
+    /// On the image route, [`try_render`](Self::try_render)'s error. Otherwise
+    /// a source that does not preprocess (malformed frontmatter or
+    /// directive) or has no detectable diagram type, a parse error, a render
+    /// capability that is not built in (math) when the source is shown,
+    /// Merman failure, time budget, or resource limit.
+    pub fn try_present(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> Result<MermaidPresentation, MermaidRenderError> {
+        if TerminalImage::route_has_pixels(term) {
+            return self.try_render(term).map(MermaidPresentation::Image);
+        }
+        match self.text_attempt(self.text_columns(term.width()), text_charset(term), self.fallback.resolve())? {
+            TextAttempt::Drawn { nodes, shows_title } => Ok(MermaidPresentation::Text(self.titled(nodes, shows_title))),
+            TextAttempt::Unrequested | TextAttempt::Refused => {
+                self.renderer.diagram.validate_renderable()?;
+                Ok(MermaidPresentation::Source(self.titled_source()))
+            }
         }
     }
 
@@ -860,33 +911,56 @@ impl MermaidDiagram {
     ///
     /// ## Errors
     ///
-    /// A parse error, Merman failure, time budget, or resource limit.
+    /// A source that does not preprocess (malformed frontmatter or
+    /// directive) or has no detectable diagram type, whatever the policy; a
+    /// parse error, Merman failure, time
+    /// budget, or resource limit.
     pub(crate) fn text_nodes(
         &self,
         columns: u32,
         charset: TextCharset,
         policy: ResolvedFallbackPolicy,
     ) -> Result<Option<Vec<RenderNode>>, MermaidError> {
+        Ok(match self.text_attempt(columns, charset, policy)? {
+            TextAttempt::Drawn { nodes, .. } => Some(nodes),
+            TextAttempt::Refused | TextAttempt::Unrequested => None,
+        })
+    }
+
+    /// [`text_nodes`](Self::text_nodes), also telling whether a declined
+    /// drawing was requested from Merman.
+    fn text_attempt(
+        &self,
+        columns: u32,
+        charset: TextCharset,
+        policy: ResolvedFallbackPolicy,
+    ) -> Result<TextAttempt, MermaidError> {
         let diagram = &self.renderer.diagram;
-        // A policy that refuses this family's coverage needs no request.
+        // A policy that refuses this family's coverage needs no request. A
+        // source that does not preprocess or has no detectable type is an
+        // error even then: it is known not to draw, so it is never read as a
+        // family not drawn as text.
         let admitted = diagram
-            .text_eligibility()
+            .try_text_eligibility()?
             .is_some_and(|eligibility| policy.text_fallback.admits(eligibility.coverage()));
         if !admitted {
-            return Ok(None);
+            return Ok(TextAttempt::Unrequested);
         }
         let options = TextOptions::new(columns.saturating_sub(TEXT_BLOCK_CHROME_COLUMNS)).with_charset(charset);
-        let TextRender::Drawing(drawing) = diagram.render_text(options)? else {
-            return Ok(None);
+        let drawing = match diagram.render_text(options)? {
+            TextRender::Drawing(drawing) => drawing,
+            TextRender::Source(TextSource::Ineligible | TextSource::NoColumns) => return Ok(TextAttempt::Unrequested),
+            TextRender::Source(_) => return Ok(TextAttempt::Refused),
         };
         let partial = drawing.coverage() == TextCoverage::Partial;
+        let shows_title = diagram.title().is_some_and(|title| drawing.shows_title(title));
         // Rows may end in significant spaces; only trailing newlines go.
         let text = drawing.into_text();
         let mut nodes = vec![RenderNode::code(Some("txt".to_string()), None, text.trim_end_matches('\n'))];
         if partial && policy.show_partial_note {
             nodes.push(partial_note());
         }
-        Ok(Some(nodes))
+        Ok(TextAttempt::Drawn { nodes, shows_title })
     }
 
     /// The source as a `mermaid` code node.
@@ -894,15 +968,24 @@ impl MermaidDiagram {
         vec![RenderNode::code(Some("mermaid".to_string()), None, self.instructions())]
     }
 
-    /// `nodes` led by the component's title, unless the source already
-    /// gives the same title.
-    fn titled(&self, mut nodes: Vec<RenderNode>) -> Vec<RenderNode> {
-        let Some(title) = self.renderer.diagram.title() else {
+    /// The source nodes, led by the component's title unless the source
+    /// gives that title itself.
+    fn titled_source(&self) -> Vec<RenderNode> {
+        let shows_title = self
+            .renderer
+            .diagram
+            .title()
+            .is_some_and(|title| source_gives_title(self.instructions(), title));
+        self.titled(self.source_nodes(), shows_title)
+    }
+
+    /// `nodes` led by the component's title, unless `shows_title`: the
+    /// nodes themselves already show that title. The caller decides from
+    /// the output it emits, never from a source it does not show.
+    fn titled(&self, mut nodes: Vec<RenderNode>, shows_title: bool) -> Vec<RenderNode> {
+        let Some(title) = self.renderer.diagram.title().filter(|_| !shows_title) else {
             return nodes;
         };
-        if source_gives_title(self.instructions(), title) {
-            return nodes;
-        }
         nodes.insert(0, RenderNode::paragraph(vec![RenderNode::strong(vec![RenderNode::text(title)])]));
         nodes
     }
@@ -969,6 +1052,18 @@ impl MermaidDiagram {
     }
 }
 
+/// What a text attempt produced.
+enum TextAttempt {
+    /// The drawing's nodes, and whether the drawing itself draws the
+    /// component's title.
+    Drawn { nodes: Vec<RenderNode>, shows_title: bool },
+    /// Merman drew the diagram, but the drawing is not shown (it does not
+    /// fit, is empty, or is not diagrammatic): the source parsed.
+    Refused,
+    /// No text request was made, so whether the source parses is unknown.
+    Unrequested,
+}
+
 /// Successful render result from [`MermaidDiagram::try_render()`].
 #[derive(Debug, Clone)]
 pub struct MermaidRenderResult {
@@ -986,14 +1081,20 @@ pub struct MermaidRenderResult {
 
 /// Whether a line of `source` gives `title` with a `title` statement: on a
 /// line of its own (`title X`, or `title: X` in frontmatter) or after the
-/// header (`pie title X`), optionally quoted.
+/// header (`pie title X`), optionally quoted. A double-quoted value is read
+/// with its escapes (`"a \"b\""` gives `a "b"`), as YAML reads a
+/// JSON-compatible double-quoted scalar.
 fn source_gives_title(source: &str, title: &str) -> bool {
     source.lines().any(|line| {
         let line = line.trim();
         line.strip_prefix("title")
             .or_else(|| line.split_once(" title ").map(|(_, rest)| rest))
-            .map(|rest| rest.trim_start().trim_start_matches(':').trim().trim_matches('"'))
-            .is_some_and(|named| named == title.trim())
+            .map(|rest| rest.trim_start().trim_start_matches(':').trim())
+            .is_some_and(|named| {
+                let unquoted = serde_json::from_str::<String>(named)
+                    .unwrap_or_else(|_| named.trim_matches('"').to_string());
+                unquoted.trim() == title.trim()
+            })
     })
 }
 

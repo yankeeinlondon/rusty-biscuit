@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use crate::artifact::{Background, OutputFormat, RenderRequest};
+use crate::cache::file_cache::take_stored_files;
+use crate::fonts::chain::take_default_chain_requests;
 use crate::mermaid::render::take_merman_calls;
 use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidError, MermaidTheme, Palette, QuadrantTheme};
 use crate::tests::{capture_warnings, isolated_cache_dir};
@@ -208,6 +210,35 @@ fn an_unknown_diagram_type_is_a_render_failure() {
     assert!(reason.contains("No Mermaid diagram type detected"), "{reason}");
 }
 
+/// A frontmatter title written as a JSON string literal, which is a YAML
+/// double-quoted scalar (how `bt --title` writes it), is read back as
+/// exactly the text it encodes: YAML indicators, quotes, a backslash, and
+/// non-ASCII included.
+#[test]
+#[serial]
+fn a_json_string_frontmatter_title_is_read_back_verbatim() {
+    let _cache_dir = isolated_cache_dir();
+    let title = r#"Q: [draft] a "quoted" #hash, back\slash 'single' {brace} Café: ünï ✓"#;
+    let scalar = serde_json::to_string(title).unwrap();
+    let diagram = MermaidDiagram::new(format!("---\ntitle: {scalar}\n---\nflowchart LR\n    A --> B"));
+
+    let artifact = diagram.render_in(super::golden_tests::golden_chain(), &svg_request(Background::Theme)).unwrap();
+
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+    let shown = svg
+        .split("flowchartTitleText\">")
+        .nth(1)
+        .and_then(|rest| rest.split("</text>").next())
+        .unwrap_or_else(|| panic!("no title text in {svg}"));
+    let unescaped = shown
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    assert_eq!(unescaped, title);
+}
+
 /// Merman renders ZenUML outside its primary matrix; D20 keeps today's
 /// fallback, so no Merman call is made for it.
 #[test]
@@ -237,6 +268,29 @@ fn a_math_label_shows_as_its_source_text() {
 
     assert!(reason.to_lowercase().contains("math"), "{reason}");
     assert!(diagram.fallback_code_block().contains("$$x^2$$"));
+}
+
+/// `validate` checks the parse only, so a math label passes it;
+/// `validate_renderable` finds the missing capability from Merman's plan for
+/// the parsed model and reports the error the image render gives, with no
+/// fonts and no artifact.
+#[test]
+#[serial]
+fn a_math_label_parses_but_is_not_renderable() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("flowchart LR\n    A[\"$$x^2$$\"] --> B");
+    let rendered = render_failure(diagram.render(&RenderRequest::default()));
+    take_default_chain_requests();
+    take_stored_files();
+
+    let validated = diagram.validate();
+    let planned = render_failure(diagram.validate_renderable());
+
+    assert!(validated.is_ok(), "{validated:?}");
+    assert_eq!(planned, rendered);
+    assert_eq!(take_default_chain_requests(), 0, "no font chain");
+    assert_eq!(take_stored_files(), 0, "no artifact");
+    assert_eq!(MermaidDiagram::new("flowchart LR\n    A --> B").validate_renderable().ok(), Some(()));
 }
 
 // ---------------------------------------------------------------------------

@@ -16,8 +16,15 @@ use std::time::Instant;
 ///
 /// Handles inverse mode, width parsing, layout application, and the
 /// fallback policy selected by `--feature`.
+///
+/// `title` is the command's `--title`, which `instructions` already gives
+/// (in frontmatter or a `title` statement), so the image draws it. It is
+/// also the component's own title, because a text drawing does not draw a
+/// frontmatter title: the component then leads the text with it, and leaves
+/// it out of a source or drawing that already shows it.
 pub fn build_mermaid_diagram(
     instructions: &str,
+    title: Option<&str>,
     inverse: bool,
     width: Option<&str>,
     layout: &LayoutArgs,
@@ -29,6 +36,9 @@ pub fn build_mermaid_diagram(
         MermaidDiagram::new(instructions)
     };
     diagram = diagram.with_fallback_policy(features.fallback_policy());
+    if let Some(title) = title {
+        diagram = diagram.with_title(title);
+    }
 
     // Apply width
     if let Some(w) = width {
@@ -43,9 +53,18 @@ pub fn build_mermaid_diagram(
     Ok(diagram)
 }
 
+/// `body` under Mermaid frontmatter giving `title`, when there is one.
+///
+/// The title is written as a YAML double-quoted scalar (a JSON string
+/// literal is one), so any text, including `:`, `[`, `#`, quotes,
+/// backslashes, and newlines, is read back as exactly that title rather than
+/// breaking the frontmatter.
 pub fn with_mermaid_frontmatter_title(body: &str, title: Option<&str>) -> String {
     match title {
-        Some(title) => format!("---\ntitle: {title}\n---\n{body}"),
+        Some(title) => {
+            let scalar = serde_json::to_string(title).expect("a string always serializes");
+            format!("---\ntitle: {scalar}\n---\n{body}")
+        }
         None => body.to_string(),
     }
 }
@@ -55,8 +74,10 @@ pub fn with_mermaid_frontmatter_title(body: &str, title: Option<&str>) -> String
 /// When `terminal` can show images, uses the fallible
 /// [`MermaidDiagram::try_render()`], so a failed image export is an error.
 /// Otherwise prints the text drawing or the source that
-/// [`MermaidDiagram::present`] chooses, highlighted (see
-/// [`render_mermaid_fallback`]); `meta` and `debug` describe images only.
+/// [`MermaidDiagram::try_present`] chooses, highlighted (see
+/// [`render_mermaid_fallback`]); a source that does not parse, or that the
+/// image route would refuse (a math label) when the source is shown, is an
+/// error there too. `meta` and `debug` describe images only.
 ///
 /// When `debug` is true, emits a `--- mermaid debug ---` block to
 /// stderr containing the resolved `image width: <N> cells` line.
@@ -72,12 +93,13 @@ pub fn display_mermaid(
 ) -> color_eyre::Result<()> {
     let start_time = Instant::now();
 
-    let rendered = if TerminalImage::route_has_pixels(terminal) {
-        diagram.try_render(terminal)
-    } else {
-        Err(MermaidRenderError::NoImageSupport)
-    };
-    let result = match rendered {
+    if !TerminalImage::route_has_pixels(terminal) {
+        return match render_mermaid_fallback(diagram, terminal) {
+            Ok(output) => print_fallback(&output, layout, terminal),
+            Err(e) => handle_mermaid_error(e, diagram, instructions, diagram_type, layout, terminal),
+        };
+    }
+    let result = match diagram.try_render(terminal) {
         Ok(result) => result,
         Err(e) => {
             return handle_mermaid_error(e, diagram, instructions, diagram_type, layout, terminal);
@@ -125,15 +147,37 @@ fn mermaid_source_block(instructions: &str) -> Prose {
     Prose::new(format!("```mermaid\n{instructions}\n```"))
 }
 
-/// `diagram` as [`MermaidDiagram::present`] shows it on `term`, with code
-/// blocks highlighted by darkmatter: the text drawing (a `txt` block, plus
-/// the partial note) or the `mermaid` source.
+/// `diagram` as [`MermaidDiagram::try_present`] shows it on `term`, with
+/// code blocks highlighted by darkmatter: the text drawing (a `txt` block,
+/// plus the partial note) or the `mermaid` source.
 ///
 /// This is the component's own layout (its text columns, then its margins
 /// and alignment) with a code renderer installed; without color the code
 /// renderer declines and the blocks are plain fences.
-pub fn render_mermaid_fallback(diagram: &MermaidDiagram, term: &Terminal) -> String {
-    let nodes = match diagram.present(term) {
+///
+/// ## Errors
+///
+/// A source that does not parse, or any other failure `try_present`
+/// reports; a family that is not drawn as text, a drawing that does not
+/// fit, or a policy that forbids text shows the source instead, unless the
+/// source needs a render capability that is not built in (a math label).
+pub fn render_mermaid_fallback(diagram: &MermaidDiagram, term: &Terminal) -> Result<String, MermaidRenderError> {
+    Ok(lay_out_presentation(diagram, diagram.try_present(term)?, term))
+}
+
+/// Prints a fallback with `layout`'s vertical margins, then the route hint.
+fn print_fallback(output: &str, layout: &LayoutArgs, term: &Terminal) -> color_eyre::Result<()> {
+    emit_vertical_margins(layout, || {
+        println!("{output}");
+        Ok(())
+    })?;
+    crate::hints::emit_terminal_route_hint(term);
+    Ok(())
+}
+
+/// `presentation` laid out as [`render_mermaid_fallback`] describes.
+fn lay_out_presentation(diagram: &MermaidDiagram, presentation: MermaidPresentation, term: &Terminal) -> String {
+    let nodes = match presentation {
         MermaidPresentation::Image(result) => return result.output,
         presentation => presentation.nodes().unwrap_or_default().to_vec(),
     };
@@ -148,9 +192,10 @@ pub fn render_mermaid_fallback(diagram: &MermaidDiagram, term: &Terminal) -> Str
 
 /// Handle Mermaid rendering errors with user-friendly output.
 ///
-/// No image support is not a failure: the fallback is printed (see
-/// [`render_mermaid_fallback`]) with the route hint. A failed image export
-/// is reported and returned as an error.
+/// An image route that turns out to have no pixels is not a failure: the
+/// component's infallible presentation is printed with the route hint. A
+/// source that does not parse and a failed image export are reported and
+/// returned as errors.
 pub fn handle_mermaid_error(
     error: MermaidRenderError,
     diagram: &MermaidDiagram,
@@ -161,13 +206,8 @@ pub fn handle_mermaid_error(
 ) -> color_eyre::Result<()> {
     match error {
         MermaidRenderError::NoImageSupport => {
-            let output = render_mermaid_fallback(diagram, term);
-            emit_vertical_margins(layout, || {
-                println!("{output}");
-                Ok(())
-            })?;
-            crate::hints::emit_terminal_route_hint(term);
-            Ok(())
+            let output = lay_out_presentation(diagram, diagram.present(term), term);
+            print_fallback(&output, layout, term)
         }
         MermaidRenderError::Visualization(ref viz_err) => {
             let mut section = Section::new(HeadingLevel::h3, "Error");
@@ -215,6 +255,26 @@ mod tests {
         assert!(!rendered.contains('\\'), "stray escape backslash: {rendered:?}");
     }
 
+    /// That Merman reads such a scalar back verbatim is pinned in
+    /// biscuit-visualized (`a_json_string_frontmatter_title_is_read_back_verbatim`).
+    #[test]
+    fn frontmatter_title_is_a_yaml_double_quoted_scalar() {
+        let cases = [
+            ("Plain", r#""Plain""#),
+            ("Q: [draft]", r#""Q: [draft]""#),
+            (r#"a "quoted" #hash"#, r#""a \"quoted\" #hash""#),
+            (r"back\slash", r#""back\\slash""#),
+        ];
+        for (title, scalar) in cases {
+            assert_eq!(
+                with_mermaid_frontmatter_title("flowchart LR\n    A --> B", Some(title)),
+                format!("---\ntitle: {scalar}\n---\nflowchart LR\n    A --> B"),
+                "{title}"
+            );
+        }
+        assert_eq!(with_mermaid_frontmatter_title("pie", None), "pie");
+    }
+
     use biscuit_terminal::discovery::detection::ImageSupport;
     use biscuit_visualized::components::{MermaidFallbackPolicy, PARTIAL_NOTE_ID, TextFallback};
 
@@ -238,7 +298,7 @@ mod tests {
     /// `source` as `bt` builds it, with text allowed explicitly so the
     /// host's `MERMAID_FALLBACK` cannot change the route.
     fn diagram(source: &str) -> MermaidDiagram {
-        build_mermaid_diagram(source, false, None, &LayoutArgs::default(), &MermaidFeatureArgs::default())
+        build_mermaid_diagram(source, None, false, None, &LayoutArgs::default(), &MermaidFeatureArgs::default())
             .expect("diagram")
             .with_fallback_policy(MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Allowed))
     }
@@ -250,7 +310,7 @@ mod tests {
         let pie = diagram(PIE);
         assert!(matches!(pie.present(&term), MermaidPresentation::Source(_)));
 
-        let output = render_mermaid_fallback(&pie, &term);
+        let output = render_mermaid_fallback(&pie, &term).expect("pie fallback");
 
         assert!(output.contains(TRUECOLOR_FOREGROUND), "no highlighting: {output:?}");
         assert!(output.contains("Dogs"), "source missing: {output:?}");
@@ -263,7 +323,7 @@ mod tests {
         let flowchart = diagram(FLOWCHART);
         assert!(matches!(flowchart.present(&term), MermaidPresentation::Text(_)));
 
-        let output = render_mermaid_fallback(&flowchart, &term);
+        let output = render_mermaid_fallback(&flowchart, &term).expect("flowchart fallback");
 
         assert!(output.contains(TRUECOLOR_FOREGROUND), "no highlighting: {output:?}");
         assert!(output.contains('┌') && output.contains(" A "), "drawing missing: {output:?}");
@@ -279,7 +339,7 @@ mod tests {
     fn a_source_fallback_matches_darkmatters_code_block() {
         let term = no_image_terminal(ColorDepth::TrueColor);
 
-        let output = render_mermaid_fallback(&diagram(PIE), &term);
+        let output = render_mermaid_fallback(&diagram(PIE), &term).expect("pie fallback");
         let code_block = darkmatter::markdown::CodeBlock::new(PIE)
             .with_fence_language("mermaid")
             .render(&term);
@@ -294,12 +354,66 @@ mod tests {
     fn without_color_fallbacks_are_plain_fences() {
         let term = no_image_terminal(ColorDepth::None);
 
-        let source = render_mermaid_fallback(&diagram(PIE), &term);
-        let text = render_mermaid_fallback(&diagram(FLOWCHART), &term);
+        let source = render_mermaid_fallback(&diagram(PIE), &term).expect("pie fallback");
+        let text = render_mermaid_fallback(&diagram(FLOWCHART), &term).expect("flowchart fallback");
 
         assert!(source.starts_with("```mermaid\n"), "{source:?}");
         assert!(text.starts_with("```txt\n"), "{text:?}");
         assert!(!source.contains('\x1b') && !text.contains('\x1b'), "escapes without color");
+    }
+
+    /// Without images, a source that does not parse is an error whether text
+    /// is allowed (the text request fails) or forbidden (the source is
+    /// parsed); valid sources and a family never drawn as text succeed.
+    #[test]
+    fn without_images_a_source_that_does_not_parse_is_an_error() {
+        let term = no_image_terminal(ColorDepth::None);
+        let broken = "flowchart LR\n    A[unclosed --> B";
+        let never = MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Never);
+        let display = |diagram: &MermaidDiagram| {
+            display_mermaid(diagram, diagram.instructions(), "diagram", &LayoutArgs::default(), false, false, &term)
+        };
+
+        assert!(display(&diagram(broken)).is_err(), "text allowed");
+        assert!(display(&diagram(broken).with_fallback_policy(never)).is_err(), "text forbidden");
+        assert!(display(&diagram(FLOWCHART)).is_ok(), "valid, drawn as text");
+        assert!(display(&diagram(FLOWCHART).with_fallback_policy(never)).is_ok(), "valid, text forbidden");
+        assert!(display(&diagram(PIE)).is_ok(), "valid, never drawn as text");
+    }
+
+    /// Without images, a math label (Merman's math support is not built in)
+    /// is the image route's error wherever the source is shown instead of a
+    /// drawing: either restrictive `--feature`, or a `--width` too narrow
+    /// for the drawing. With room and text allowed, the drawing shows the
+    /// formula literally and succeeds.
+    #[test]
+    fn without_images_a_math_label_shown_as_source_is_an_error() {
+        use biscuit_visualized::components::MermaidFallbackFeature;
+
+        let term = no_image_terminal(ColorDepth::None);
+        let formula = "flowchart LR\n    A[\"$$x^2$$\"] --> B";
+        let build = |width: Option<&str>, features: Vec<MermaidFallbackFeature>| {
+            build_mermaid_diagram(formula, None, false, width, &LayoutArgs::default(), &MermaidFeatureArgs { features })
+                .expect("diagram")
+        };
+        let allowed = MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Allowed);
+        let display = |diagram: &MermaidDiagram| {
+            display_mermaid(diagram, diagram.instructions(), "flowchart", &LayoutArgs::default(), false, false, &term)
+        };
+        let cases = [
+            ("--feature no-mermaid-fallbacks", build(None, vec![MermaidFallbackFeature::NoMermaidFallbacks])),
+            (
+                "--feature no-mermaid-partial-fallbacks",
+                build(None, vec![MermaidFallbackFeature::NoMermaidPartialFallbacks]),
+            ),
+            ("--width 8", build(Some("8"), Vec::new()).with_fallback_policy(allowed)),
+        ];
+
+        for (case, diagram) in cases {
+            let error = display(&diagram).expect_err(case).to_string();
+            assert!(error.contains("lacks capability `math`"), "{case}: {error}");
+        }
+        assert!(display(&build(None, Vec::new()).with_fallback_policy(allowed)).is_ok(), "drawn as text");
     }
 
     /// A failed image export stays an error; only missing image support

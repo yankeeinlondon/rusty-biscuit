@@ -334,13 +334,12 @@ bt flowchart --json "A --> B"                      # Output as JSON
 
 **Without images:**
 - A terminal that cannot show images gets the diagram drawn as text when Merman can draw it and it fits, otherwise the diagram's source, both as highlighted code blocks on stdout (plain fences without color), and the exit code is 0. `--feature` changes that choice; see [the `bt` CLI reference](../docs/cli.md#mermaid-text-fallback)
-- Without images, a diagram that does not parse also shows its source and exits 0
 
 **Error handling:**
-- When the terminal can show images, a diagram that cannot be drawn (it does not parse, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero
+- A diagram that cannot be drawn (it does not parse, has a math label, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero, with or without images, and whatever `--feature` says
 
 ```bash
-bt flowchart "A -->"    # in a terminal with images: the error and the source go to stderr, exit code 1
+bt flowchart "A[unclosed --> B"    # the error and the source go to stderr, exit code 1
 ```
 
 ### Quadrant Chart Rendering

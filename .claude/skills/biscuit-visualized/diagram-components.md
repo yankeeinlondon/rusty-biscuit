@@ -66,7 +66,14 @@ selection; `render` lays the nodes out with the plain code block
 margins and alignment once. A caller with its own code renderer (`bt`
 installs darkmatter's highlighter) calls `present`, lays the nodes out at the
 public `text_columns(term_width)` with `with_code_renderer`, and applies the
-layout itself. Rules:
+layout itself. `try_present` is the fallible twin for a caller that must
+report failures (`bt`): same choice, but an image or text failure is `Err`,
+and whenever it shows the source (ineligible family, policy forbids text,
+drawing too wide) it calls the crate-private
+`mermaid::MermaidDiagram::validate_renderable`: one Merman `svg_plan` request
+(parse + capability plan; no layout, fonts, or artifact; not a text request)
+that errs on a parse failure or a missing capability (math labels), with the
+image render's message. Public `validate` stays parse-only. Rules:
 
 - image route iff `TerminalImage::route_has_pixels(term)` (biscuit-terminal,
   the encoder's own test), decided before any SVG/font/artifact work; an image
@@ -74,7 +81,11 @@ layout itself. Rules:
 - text columns = `resolve_scaled_dimensions_for(width, layout, term_width,
   None, None).image_width` (so `Scale` takes the available columns and
   measures no SVG), less `TEXT_BLOCK_CHROME_COLUMNS` (2) for a highlighting
-  code renderer's padding; charset Unicode iff `term.supports_unicode`
+  code renderer's padding; charset Unicode iff `term.supports_unicode`. The
+  reserve does not cover a line-number gutter: on the hook path
+  biscuit-terminal measures the finished fragment and declines an over-wide
+  one; `bt` never numbers lines. Darkmatter tests:
+  `darkmatter/lib/tests/l1/mermaid_text_line_numbers.rs`
 - policy (`components/fallback_policy.rs`): `MermaidFallbackPolicy`
   (`with_text_fallback(TextFallback::{Allowed, NoPartial, Never})`,
   `with_show_partial_note(bool)`), resolved per render by `resolve()` /
@@ -88,8 +99,11 @@ layout itself. Rules:
   `partial_note()` (block quote: strong `Note:`, `dim` span with emphasized
   `PARTIAL_NOTE_ID`) for partial coverage when shown; source = one `mermaid`
   code node; an explicit `with_title` leads text and source as a strong
-  paragraph unless a source line gives that title (`title X`, `title: X`,
-  `pie title X`)
+  paragraph unless the output shown already shows it: for source, a source
+  line gives it (`title X`, `title: X`, `pie title X`; double-quoted values
+  unescaped); for text, `TextDrawing::shows_title` (sequence first row,
+  XY `titleDisplay: chart(bytes=N)="X"` row; no family draws frontmatter
+  titles). Never dedupe text against the source it does not show
 - tests: `src/src/tests/component_fallback_tests.rs` (counters, env seam
   via `present_with`) and `tests/l1/render_tree_diagram_hook.rs` (hook)
 
@@ -112,7 +126,13 @@ columns: a list item's or quote's inner width). It is taken for
 Otherwise `Automatic` answers `DiagramOutcome::Nodes` with the component's
 text nodes (`MermaidDiagram::text_nodes`: `txt` code node, then the partial
 note block quote), or `Declined` when the source should show (policy, family,
-fit), or `Err` for a parse/Merman/budget/limit failure. `Image` mode below
+fit), or `Err` for a parse/Merman/budget/limit failure. Eligibility for that
+choice is `mermaid::MermaidDiagram::try_text_eligibility` (crate-private):
+frontmatter or a directive Merman cannot preprocess, or a header whose type
+Merman cannot detect (`SourceTheme::detect_error`), is `Err`, never an
+ineligible family, whatever the policy; a detected family with no text
+capability (pie; ZenUML, which Merman detects) stays `Ok(None)` → `Declined`. The public
+`text_eligibility()` is the infallible convenience (`None` for all of them). `Image` mode below
 `Rich` declines. A fragment it returns (`DiagramOutcome::Nodes`)
 is rendered by biscuit-terminal with promotion off, so it cannot re-promote its
 own fence. When and how

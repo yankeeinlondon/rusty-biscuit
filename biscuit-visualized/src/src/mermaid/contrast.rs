@@ -474,9 +474,12 @@ pub(crate) fn author_text_colors(source: &str) -> Vec<Rgb> {
     let mut colors = Vec::new();
     for (at, _) in source.match_indices([':', '=']) {
         let key_end = source[..at].trim_end_matches([' ', '\t', '"', '\'']).len();
+        // The key starts after the last character that cannot be in one,
+        // which may be wider than a byte (`Café:`).
         let key_start = source[..key_end]
-            .rfind(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '-')))
-            .map_or(0, |index| index + 1);
+            .char_indices()
+            .rfind(|&(_, c)| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '-')))
+            .map_or(0, |(index, c)| index + c.len_utf8());
         if !is_text_key(&source[key_start..key_end]) {
             continue;
         }
@@ -689,5 +692,12 @@ mod tests {
             author_text_colors(source),
             [Rgb::from_hex("#123456").unwrap(), Rgb::new(1, 2, 3), Rgb::new(0, 0, 255), Rgb::new(255, 0, 0)]
         );
+    }
+
+    /// A non-ASCII character just before a `:` or `=` ends no key mid-byte.
+    #[test]
+    fn author_text_colors_reads_past_a_multibyte_character_before_a_separator() {
+        let source = "---\ntitle: \"Café: ünï=1 ✓\"\n---\nflowchart LR\n  A[Æ: x] --> B\n  style A ücolor:blue";
+        assert_eq!(author_text_colors(source), [Rgb::new(0, 0, 255)]);
     }
 }

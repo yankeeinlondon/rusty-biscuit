@@ -68,14 +68,10 @@ impl Run for FlowchartArgs {
         let direction = if self.vertical { "TD" } else { "LR" };
         let body = content.join("\n    ");
 
-        let instructions = if let Some(title) = &self.title {
-            format!(
-                "---\ntitle: {}\n---\nflowchart {}\n    {}",
-                title, direction, body
-            )
-        } else {
-            format!("flowchart {}\n    {}", direction, body)
-        };
+        let instructions = crate::commands::mermaid::with_mermaid_frontmatter_title(
+            &format!("flowchart {}\n    {}", direction, body),
+            self.title.as_deref(),
+        );
 
         if ctx.json {
             let output = serde_json::json!({
@@ -93,6 +89,7 @@ impl Run for FlowchartArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            self.title.as_deref(),
             self.inverse,
             width_str.as_deref(),
             &self.layout,

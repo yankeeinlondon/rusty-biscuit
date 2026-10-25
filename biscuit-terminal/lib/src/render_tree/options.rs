@@ -394,7 +394,9 @@ impl TerminalRenderOptions {
 /// the render's [`RenderStrictness`]: `Strict` rejects the render, `Warn`
 /// records a lossy diagnostic, and both `Warn` and `Lossy` fall back to code
 /// rendering. [`DiagramOutcome::Declined`] renders the code block with no
-/// diagnostic under every strictness.
+/// diagnostic under every strictness, and so does a
+/// [`DiagramOutcome::Nodes`] fragment whose finished rows do not fit the
+/// fence's columns. A [`DiagramOutcome::Rendered`] answer is never measured.
 pub trait DiagramRenderer {
     /// Renders `request.source` for the terminal.
     ///
@@ -419,7 +421,11 @@ pub enum DiagramOutcome {
     /// A render-tree fragment laid out in place of the fence, at the fence's
     /// indent and available width. Code nodes in it go through the installed
     /// [`CodeRenderer`]; a `mermaid` code node in it is never offered to the
-    /// diagram hook again.
+    /// diagram hook again. If any finished row (measured in display cells,
+    /// escape sequences excluded) is wider than
+    /// [`DiagramRenderRequest::available_width`], for instance because the
+    /// code renderer added a line-number gutter, the fragment is discarded
+    /// and the outcome is treated as [`Declined`](Self::Declined).
     Nodes(Vec<RenderNode>),
     /// The hook chose not to draw this fence. It renders as the ordinary code
     /// block, with no diagnostic, exactly as if the hook had not been called.

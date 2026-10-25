@@ -1756,7 +1756,11 @@ impl Writer<'_> {
                 };
                 match diagrams.render_terminal_diagram(&request) {
                     Ok(DiagramOutcome::Rendered(output)) => return Ok(output),
-                    Ok(DiagramOutcome::Nodes(nodes)) => return self.render_diagram_fragment(&nodes),
+                    Ok(DiagramOutcome::Nodes(nodes)) => {
+                        if let Some(output) = self.render_diagram_fragment(&nodes)? {
+                            return Ok(output);
+                        }
+                    }
                     Ok(DiagramOutcome::Declined) => {}
                     Err(e) => match self.opts.strictness {
                         RenderStrictness::Strict => {
@@ -1800,12 +1804,18 @@ impl Writer<'_> {
         Ok(self.render_code(lang, value))
     }
 
-    /// Lays out a [`DiagramOutcome::Nodes`] fragment where the fence stood.
+    /// Lays out a [`DiagramOutcome::Nodes`] fragment where the fence stood,
+    /// or `None` when a finished row is wider than the fence's columns.
     ///
     /// The fragment renders with promotion off, so a `mermaid` code node in it
     /// (a source fallback) is printed as code instead of reaching the hook
-    /// again.
-    fn render_diagram_fragment(&mut self, nodes: &[RenderNode]) -> Result<String, RenderError> {
+    /// again. The hook judged its fit before the installed code renderer
+    /// decorated the fragment's code nodes, and that decoration can be wider
+    /// than any fixed allowance (a line-number gutter grows with the row
+    /// count), so the width is checked on the finished output. `None` is the
+    /// hook's decline: the fence renders as its ordinary code block and the
+    /// fragment's diagnostics are dropped with it.
+    fn render_diagram_fragment(&mut self, nodes: &[RenderNode]) -> Result<Option<String>, RenderError> {
         let mut unpromoted = self.opts.clone();
         unpromoted.context.mermaid_mode = TerminalMermaidMode::Code;
         let mut sub = Writer {
@@ -1813,9 +1823,14 @@ impl Writer<'_> {
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
         };
-        let result = sub.render_blocks(nodes);
+        let output = sub.render_blocks(nodes)?;
+        let limit = self.opts.context.available_width;
+        if output.split('\n').any(|row| visible_width(row) > limit) {
+            tracing::debug!(limit, "diagram fragment is wider than its fence; rendering the fence as code");
+            return Ok(None);
+        }
         self.diagnostics.append(&mut sub.diagnostics);
-        result
+        Ok(Some(output))
     }
 
     /// Returns the terminal capability snapshot the graphics paths consult,

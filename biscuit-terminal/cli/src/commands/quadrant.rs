@@ -218,6 +218,7 @@ impl Run for QuadrantArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            title,
             self.inverse,
             width_str.as_deref(),
             &self.layout,

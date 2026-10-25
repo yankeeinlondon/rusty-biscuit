@@ -23,7 +23,12 @@ use super::mermaid::{MermaidDiagram, text_charset};
 ///   Merman does not draw as a diagram, a drawing that does not fit, or a
 ///   [fallback policy](Self::with_fallback_policy) that forbids text is
 ///   [declined](DiagramOutcome::Declined), so it renders as its code block
-///   with no diagnostic. A parse error, Merman failure, time budget or
+///   with no diagnostic; ZenUML is such a fence. The hook's fit allows for
+///   the code block's padding only; biscuit-terminal declines the drawing
+///   the same way when the installed code renderer's decoration (a
+///   line-number gutter) makes a finished row wider than the fence. A source that does not
+///   preprocess (malformed frontmatter or directive) or has no detectable
+///   diagram type (a header typo), a parse error, Merman failure, time budget or
 ///   resource limit, or an image failure is an error, which the render's
 ///   strictness handles.
 ///

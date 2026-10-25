@@ -27,7 +27,13 @@ DiagramRenderRequest, DiagramOutcome, DiagramRenderError}`) on
 - `Ok(DiagramOutcome::Nodes(fragment))`: laid out in place at the fence's
   width (`render_diagram_fragment`), code nodes through the `CodeRenderer`;
   rendered with `mermaid_mode = Code` so a `mermaid` source node in the
-  fragment cannot re-enter the hook (that would recurse forever)
+  fragment cannot re-enter the hook (that would recurse forever). Every
+  finished row is then measured (`visible_width`); one wider than
+  `available_width` makes the answer a `Declined` (fragment and its
+  diagnostics dropped). This is the only place a code renderer's
+  line-number gutter (`context.line_numbers`; digits + 3 cells in
+  darkmatter) is accounted for, since the hook judges fit before it. Never
+  applied to `Rendered`
 - `Ok(DiagramOutcome::Declined)`: the ordinary code block, **no diagnostic**
   under Strict, Warn and Lossy
 - no hook installed: the fence renders exactly as `TerminalMermaidMode::Code`
@@ -80,11 +86,17 @@ in the opposite fixed theme (`MermaidDiagram::inverted`) on a solid
 background.
 
 Without images (`TerminalImage::route_has_pixels(term)` false), `bt` takes
-the component's `MermaidDiagram::present` and lays the text drawing (`txt`
-node + partial note) or the source (`mermaid` node) out with darkmatter's code
-renderer at `text_columns`, then applies margins once
-(`commands/mermaid.rs::render_mermaid_fallback`); this exits 0, even for a
-source that does not parse. With images, the image route is unchanged: an
+the component's fallible `MermaidDiagram::try_present` and lays the text
+drawing (`txt` node + partial note) or the source (`mermaid` node) out with
+darkmatter's code renderer at `text_columns`, then applies margins once
+(`commands/mermaid.rs::render_mermaid_fallback`). Ineligible families, a
+drawing too wide, and a policy that forbids text exit 0 with the source; a
+source that does not parse, or that has a math label (`$$…$$`; Merman's
+`math` capability is not built in), is an error and exits non-zero whenever
+the source is shown (restrictive `--feature`, `MERMAID_FALLBACK=code-block`,
+or a drawing too wide), via the component's parse-and-capability-plan check;
+a text drawing that fits shows the formula literally and exits 0. Never use the infallible `present` in a
+CLI: it hides the error. With images, the image route is unchanged: an
 image-export failure reports the error and exits non-zero, and
 `--meta`/`--debug` describe images only. Every Mermaid subcommand takes
 `--feature` (`no-mermaid-fallbacks`, `no-mermaid-partial-fallbacks`,

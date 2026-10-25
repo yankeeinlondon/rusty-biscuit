@@ -4,10 +4,10 @@ Renders Mermaid diagrams inline in the terminal as raster images. [`MermaidDiagr
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`.
 
-Supports every diagram family Merman renders, among them flowcharts, sequence, class, state, ER, Gantt, pie, quadrant, XY (bar and line) charts, git graphs, timelines, journeys, mindmaps, requirement, C4, block, kanban, architecture, packet, radar, sankey, and treemap diagrams, and the families only Merman draws: agentflow, cynefin, event modeling (`eventmodeling`), info, ishikawa, railroad (with its `railroadAbnf`, `railroadEbnf`, and `railroadPeg` dialects), swimlane, tree view (`treeView`), use case (`usecase`), venn, and wardley maps (see [Diagram types](../merman.md#diagram-types)). ZenUML and diagrams with math labels (`$$…$$`) are not rendered and show their source (see [When a diagram falls back to its source](../merman.md#when-a-diagram-falls-back-to-its-source)):
+Supports every diagram family Merman renders, among them flowcharts, sequence, class, state, ER, Gantt, pie, quadrant, XY (bar and line) charts, git graphs, timelines, journeys, mindmaps, requirement, C4, block, kanban, architecture, packet, radar, sankey, and treemap diagrams, and the families only Merman draws: agentflow, cynefin, event modeling (`eventmodeling`), info, ishikawa, railroad (with its `railroadAbnf`, `railroadEbnf`, and `railroadPeg` dialects), swimlane, tree view (`treeView`), use case (`usecase`), venn, and wardley maps (see [Diagram types](../merman.md#diagram-types)). ZenUML and diagrams with math labels (`$$…$$`) are not rendered as images and show their source (see [When a diagram falls back to its source](../merman.md#when-a-diagram-falls-back-to-its-source)); on a terminal without images, a math label that Merman draws as text appears as its literal `$$…$$` in the text drawing:
 
 ```rust
-// Merman's math support is not compiled in, so this shows as a fenced code block.
+// Merman's math support is not compiled in, so with images this shows as a fenced code block.
 let diagram = MermaidDiagram::new("flowchart LR\n    A[\"$$x^2$$\"] --> B");
 ```
 
@@ -48,7 +48,7 @@ let diagram = MermaidDiagram::new("pie title Distribution\n    \"A\" : 40\n    \
 | `MermaidDiagram::new(source)` | Create from Mermaid source text, styled with the terminal's palette (see [Themes and palettes](#themes-and-palettes)) |
 | `.with_theme(MermaidTheme)` | Use one of the four fixed palettes ([`MermaidTheme`](../../src/src/mermaid/config.rs): `Dark`, `Default`, `Forest`, `Neutral`) instead of the terminal's |
 | `.with_palette(Palette)` | Use any [`Palette`](../../src/src/mermaid/palette.rs) instead of the terminal's |
-| `.with_title(str)` | The rendered file's alt text. It is not drawn; put a title in the Mermaid source (`pie title …`, `---\ntitle: …\n---`) to draw one |
+| `.with_title(str)` | The rendered file's alt text, and the title shown above a [text drawing or source](#title) that does not already show it. It is not drawn into the image; put a title in the Mermaid source (`pie title …`, `---\ntitle: …\n---`) to draw one there |
 | `.with_config(MermaidConfig)` | Quadrant chart settings ([`MermaidConfig`](../../src/src/mermaid/config.rs), see [below](#quadrant-chart-configuration)) |
 | `.with_width(ImageWidth)` | Display width ([`ImageWidth`](../../../biscuit-terminal/docs/components/terminal_image.md#width-specifications)); the default is `ImageWidth::Scale(1.0)` |
 | `.with_background(Background)` | What paints behind the diagram ([`Background`](../../src/src/artifact.rs)); the default is `Background::Transparent` |
@@ -293,6 +293,7 @@ let inverse_theme = theme.inverse();  // For solid background rendering
 
 - Use `MermaidDiagram::try_render(&Terminal)` when you need the image plus metadata (`png_path`, `cache_hit`). It is image-only: on a terminal without images it returns `NoImageSupport`, never text.
 - Use the `TerminalRenderable` implementation (`render`) when you want graceful fallback (see [Without images: the text fallback](#without-images-the-text-fallback)).
+- Use `try_present(&Terminal)` when you show the fallback but must still report a diagram that cannot be drawn (see [Errors on the text route](#errors-on-the-text-route)).
 - Half-block character art is never used for diagrams.
 
 ## Without images: the text fallback
@@ -418,6 +419,8 @@ MERMAID_FALLBACK=code-block bt flowchart "A --> B"   # shows the source
 
 The drawing must fit the columns available to the component: the terminal width less the margins (in a Markdown render, the [hook](#mermaid-fences-in-a-render-tree) uses the width at the fence's position), limited by an explicit `ImageWidth::Characters`, `Percent`, or `Fill`, less two columns for a highlighting code renderer's padding ([`TEXT_BLOCK_CHROME_COLUMNS`](../../src/src/components/mermaid.rs)). The default `ImageWidth::Scale` uses every available column; text cells do not scale. Width is measured in terminal display cells, so a wide CJK label counts twice.
 
+A line-number gutter is not part of those two columns. In a Markdown render with line numbers on (`md --line-numbers --mermaid`), Darkmatter's code renderer puts the line count's digits plus three cells before every row, so biscuit-terminal measures the finished drawing and shows the source when a row is wider than the fence. The flowchart `A[Alpha] --> B[Beta] --> C[Gamma] --> D[Delta] --> E[Epsilon]` draws 58 cells wide compactly: in 60 columns it is drawn without line numbers and shown as source with them, and in 62 columns it is drawn either way. A drawing of ten rows or more has a two-digit gutter, five cells.
+
 Flowchart, sequence, and swimlane diagrams (the families whose metadata admits Merman's `auto` layout) are drawn in their ordinary layout first and, if that is too wide, once more in a compact layout, all within one request. Other families get their ordinary layout only. A drawing that is still too wide shows the source; it is never clipped, wrapped, or turned to a different direction:
 
 ```sh
@@ -438,13 +441,49 @@ The drawing uses Unicode box-drawing characters when the terminal supports Unico
 
 Control characters inside labels are neutralized before the drawing reaches the terminal, so a label cannot move the cursor or change colors.
 
+### Title
+
+A title set with `with_title` is shown once, as a bold line above the drawing or the source, unless what is shown already shows the same title:
+
+- **source**: the source gives it (`title X`, a frontmatter `title:`, or `pie title X`; a double-quoted value is read with its escapes);
+- **text**: the drawing draws it. A text drawing never draws a frontmatter `title:`, so with frontmatter alone the bold line is always shown. Only two families draw a `title` statement: a sequence diagram on its first row, and an XY chart as its `titleDisplay: chart(…)="X"` row. A node, lane, participant, edge label, or axis title that happens to equal the title does not count, so the bold line is shown beside it.
+
+```rust
+// No image: the drawing omits the frontmatter title, so "Release" leads it once.
+MermaidDiagram::new("---\ntitle: Release\n---\nflowchart LR\n A --> B").with_title("Release");
+// The drawing's first row is "Release": no second copy.
+MermaidDiagram::new("sequenceDiagram\n title Release\n Alice->>Bob: Hi").with_title("Release");
+```
+
 ### Errors on the text route
 
-`render` never fails. A source that does not parse, a Merman failure, an exceeded [time budget](#error-handling) (the same `with_time_budget` applies to text requests), a resource limit, or an empty drawing all show the source code block; the text route never falls back to the image, and the image route never falls back to text. A title set with `with_title` is shown once, as a bold line above the drawing or the source, unless the source already gives the same title (`title X`, a frontmatter `title:`, or `pie title X`).
+`render` never fails. A source that does not parse (unreadable frontmatter or `%%{init}%%` directive included), a Merman failure, an exceeded [time budget](#error-handling) (the same `with_time_budget` applies to text requests), a resource limit, or an empty drawing all show the source code block; the text route never falls back to the image, and the image route never falls back to text.
+
+`try_present` makes the same choice as `present` but returns those failures as a `MermaidRenderError`, which is how `bt` exits non-zero for a source that does not parse. A source shown because its family is not drawn as text, its drawing does not fit, or the policy forbids text is `Ok` only when the image route could draw it: whenever the source is shown in place of a drawing, `try_present` makes one more Merman request that parses the source and asks Merman whether it needs a render capability that is not built in. A source that does not parse, or that has a math label (`$$…$$`), is then the same error the image route gives. That request lays nothing out, loads no font, writes no file, and is not a text request:
+
+```rust
+use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::{MermaidDiagram, MermaidFallbackPolicy, TextFallback};
+
+let term = Terminal::builder().width(80).image_support(ImageSupport::None).build();
+let never = MermaidFallbackPolicy::default().with_text_fallback(TextFallback::Never);
+
+assert!(MermaidDiagram::new("flowchart LR\n    A[unclosed --> B").try_present(&term).is_err());
+assert!(MermaidDiagram::new("flowchart LR\n    A[unclosed --> B").with_fallback_policy(never).try_present(&term).is_err());
+assert!(MermaidDiagram::new("pie\n    \"A\" : 1").try_present(&term).is_ok()); // shown as source
+
+// A math label: an error wherever the source is shown, text when it is drawn.
+let formula = "flowchart LR\n    A[\"$$x^2$$\"] --> B";
+assert!(MermaidDiagram::new(formula).with_fallback_policy(never).try_present(&term).is_err());
+assert!(MermaidDiagram::new(formula).try_present(&term).is_ok()); // drawn as text, `$$x^2$$` literal
+```
+
+A text drawing that fits is shown as drawn: Merman draws a math label as its literal text and the drawing is partial, so it is not an error. The public `mermaid::MermaidDiagram::validate` stays parse-only: a math label passes it.
 
 ### Laying the nodes out yourself
 
-The text and source presentations are render-tree nodes (a `txt` or `mermaid` code node, then the note's block quote), so the program displaying them decides how code is highlighted. `render` lays them out with biscuit-terminal's plain code block. To highlight them, as `bt` does with darkmatter's highlighter, take [`present`](../../src/src/components/mermaid.rs) and render the nodes yourself at `text_columns`, then apply the component's layout:
+The text and source presentations are render-tree nodes (a `txt` or `mermaid` code node, then the note's block quote), so the program displaying them decides how code is highlighted. `render` lays them out with biscuit-terminal's plain code block. To highlight them, as `bt` does with darkmatter's highlighter, take [`present`](../../src/src/components/mermaid.rs) (`bt` takes `try_present`) and render the nodes yourself at `text_columns`, then apply the component's layout:
 
 ```rust
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
@@ -480,9 +519,16 @@ consulted before any code-block hook.
   then the partial note, exactly as the component does at the same width.
   When the source should show instead (the family is not drawn as a diagram,
   the drawing does not fit, or the fallback policy forbids text), it
-  *declines*, and the fence renders as an ordinary code block with no
+  *declines*; biscuit-terminal treats a drawing the code renderer's
+  line-number gutter makes too wide the same way ([Width](#width)), and the fence renders as an ordinary code block with no
   diagnostic under every strictness. A parse error, a Merman failure, or an
-  exceeded time budget is an error, which the strictness below handles.
+  exceeded time budget is an error, which the strictness below handles. So
+  is frontmatter or an `%%{init}%%` directive that Merman cannot read, even
+  above a valid flowchart and even when the policy forbids text: a fence
+  that begins `---`, `title: [broken`, `---` is never declined as if its
+  family had no text drawing. A header Merman detects no diagram type in
+  (a typo such as `flowchar LR`) is an error in the same way. ZenUML is not:
+  it is a family with no text drawing, so its fence is declined.
 
 Set the policy on the hook as on the component:
 `TerminalDiagramRenderer::default().with_fallback_policy(policy)`.

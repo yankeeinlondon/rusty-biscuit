@@ -309,7 +309,7 @@ pub fn render_xy_chart(
         return Ok(());
     }
 
-    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout, features)?;
+    let diagram = build_mermaid_diagram(&instructions, eff_title, inverse, width, layout, features)?;
     let chart_name = match chart_type {
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",

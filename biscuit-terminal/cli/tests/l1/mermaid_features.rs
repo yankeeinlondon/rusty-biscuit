@@ -131,6 +131,127 @@ fn feature_names_match_case_insensitively() {
     assert!(is_source(&out), "{out}");
 }
 
+/// A flowchart with one missing closing bracket: Merman cannot parse it.
+const BROKEN_FLOWCHART: &str = "A[unclosed --> B";
+
+/// `bt --plain <args…>`, which must fail with a Mermaid parse error on
+/// stderr and print nothing on stdout.
+fn assert_render_failure(args: &[&str]) {
+    let output = bt().arg("--plain").args(args).output().expect("run bt");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{args:?} succeeded: {output:?}");
+    assert!(stderr.contains("Error"), "{args:?} reported no error: {stderr}");
+    assert!(stderr.contains(BROKEN_FLOWCHART), "{args:?} omits the source: {stderr}");
+    assert!(output.stdout.is_empty(), "{args:?} printed a fallback: {output:?}");
+}
+
+#[test]
+fn without_images_a_source_that_does_not_parse_is_an_error() {
+    assert_render_failure(&["flowchart", BROKEN_FLOWCHART]);
+}
+
+/// The policy forbids text, so no text request reports the error; the
+/// source is still parsed.
+#[test]
+fn without_images_or_text_a_source_that_does_not_parse_is_an_error() {
+    assert_render_failure(&["flowchart", "--feature", "no-mermaid-fallbacks", BROKEN_FLOWCHART]);
+}
+
+/// A math label parses, but the image route refuses it (Merman's math
+/// support is not built in). With text forbidden by the variable, the
+/// source shown in its place still reports that error and exits
+/// unsuccessfully. In-process tests cover the flags and `--width`.
+#[test]
+fn without_images_or_text_a_math_label_is_an_error() {
+    let output = bt()
+        .args(["--plain", "flowchart", "A[\"$$x^2$$\"] --> B"])
+        .env("MERMAID_FALLBACK", "code-block")
+        .output()
+        .expect("run bt");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "succeeded: {output:?}");
+    assert!(stderr.contains("lacks capability `math`"), "{stderr}");
+    assert!(output.stdout.is_empty(), "printed a fallback: {output:?}");
+}
+
+/// `--title` is written into the frontmatter as a quoted scalar, so a title
+/// that is not valid as bare YAML (`[broken`) still leaves the frontmatter
+/// readable and the flowchart is drawn as text, led by that title. No bt command takes raw
+/// Mermaid with its own frontmatter, so malformed frontmatter is reached
+/// only in-process (biscuit-visualized's text, component, and hook tests).
+#[test]
+fn without_images_a_title_yaml_would_misread_is_drawn_as_text() {
+    let output = bt()
+        .args(["--plain", "flowchart", "--title", "[broken", "A --> B"])
+        .output()
+        .expect("run bt flowchart");
+
+    let out = stdout(&output);
+    let drawing = out.strip_prefix("[broken\n\n").unwrap_or_else(|| panic!("the title leads: {out}"));
+    assert!(is_text(drawing), "{out}");
+}
+
+/// `bt --plain <command> --title Release <args…> <features…>`'s stdout.
+fn titled(command: &str, args: &[&str], features: &[&str]) -> String {
+    let output = bt()
+        .args(["--plain", command, "--title", "Release"])
+        .args(features)
+        .args(args)
+        .output()
+        .expect("run bt");
+    stdout(&output)
+}
+
+/// `--title` is shown exactly once on every route without images: leading
+/// the text drawing (which never draws a frontmatter title), and inside the
+/// source (frontmatter or a `title` statement), with no second copy.
+#[test]
+fn without_images_a_title_is_shown_once_on_the_text_and_source_routes() {
+    let drawn: [(&str, &[&str]); 3] = [
+        ("flowchart", &["A --> B"]),
+        ("state-diagram", &["[*] --> Idle"]),
+        ("erd", &["A ||--o{ B : has"]),
+    ];
+    for (command, args) in drawn {
+        let out = titled(command, args, &[]);
+        assert!(out.starts_with("Release\n\n```txt\n"), "{command}: {out}");
+        assert_eq!(out.matches("Release").count(), 1, "{command}: {out}");
+
+        let out = titled(command, args, &["--feature", "no-mermaid-fallbacks"]);
+        assert!(is_source(&out), "{command}: {out}");
+        assert_eq!(out.matches("Release").count(), 1, "{command}: {out}");
+    }
+
+    let source_only: [(&str, &[&str]); 6] = [
+        ("pie-chart", &["Dogs:386"]),
+        ("quadrant", &["A: [0.3, 0.7]"]),
+        ("timeline", &["2002: LinkedIn"]),
+        ("bar-chart", &["1", "2", "3"]),
+        ("line-chart", &["1", "2", "3"]),
+        ("git-graph", &["commit"]),
+    ];
+    for (command, args) in source_only {
+        let out = titled(command, args, &[]);
+        assert!(is_source(&out), "{command}: {out}");
+        assert_eq!(out.matches("Release").count(), 1, "{command}: {out}");
+    }
+}
+
+/// A pie chart is never drawn as text: its source is shown, successfully.
+#[test]
+fn without_images_a_family_not_drawn_as_text_shows_its_source() {
+    let output = bt()
+        .args(["--plain", "pie-chart", "Dogs:386", "Cats:85"])
+        .output()
+        .expect("run bt pie-chart");
+
+    let out = stdout(&output);
+    assert!(is_source(&out), "{out}");
+    assert!(out.contains("Dogs"), "{out}");
+}
+
 #[test]
 fn an_unknown_or_empty_name_is_a_usage_error_listing_the_names() {
     for value in [

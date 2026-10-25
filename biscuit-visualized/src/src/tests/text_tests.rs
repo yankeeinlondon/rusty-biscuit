@@ -70,6 +70,12 @@ fn too_wide(result: TextRender) -> TextReport {
     }
 }
 
+/// A valid flowchart whose frontmatter is not YAML Merman can read.
+const MALFORMED_FRONTMATTER: &str = "---\ntitle: [broken\n---\nflowchart LR\n A --> B";
+
+/// Sources whose diagram type Merman cannot detect.
+const UNDETECTABLE: [&str; 2] = ["flowchar LR\n A --> B", "notADiagram"];
+
 fn failure(result: Result<TextRender, MermaidError>) -> String {
     match result {
         Err(MermaidError::RenderFailed(reason)) => reason,
@@ -348,6 +354,11 @@ fn flowchart_too_wide_canonically_draws_compactly() {
     assert!(compact.text().contains("│ Alpha ├──►│ Beta ├──►│"), "{}", compact.text());
     assert_eq!(take_text_requests(), 1, "auto is one request");
 
+    let TextRender::Drawing(exact) = render(CHAIN_FLOWCHART, TextOptions::new(58)) else {
+        panic!("a 58-cell drawing fits 58 columns");
+    };
+    assert_eq!(exact.report().width, 58);
+
     let TextRender::Drawing(canonical) = render(CHAIN_FLOWCHART, TextOptions::new(66)) else {
         panic!("the canonical layout fits 66 columns");
     };
@@ -456,6 +467,45 @@ fn invalid_source_is_an_error_after_one_request() {
     let reason = failure(MermaidDiagram::new("flowchart LR\n    A[unclosed --> B").render_text(TextOptions::new(80)));
     assert!(reason.contains("parse error"), "{reason}");
     assert_eq!(take_text_requests(), 1);
+}
+
+/// A valid flowchart under frontmatter Merman cannot preprocess is a
+/// failure, never an ineligible family; nothing is requested. The control
+/// (the same flowchart under well-formed frontmatter) is drawn.
+#[test]
+fn malformed_frontmatter_is_an_error_without_a_request() {
+    take_text_requests();
+    let reason = failure(MermaidDiagram::new(MALFORMED_FRONTMATTER).render_text(TextOptions::new(80)));
+    assert!(!reason.is_empty());
+    assert_eq!(take_text_requests(), 0);
+
+    let control = "---\ntitle: fixed\n---\nflowchart LR\n A --> B";
+    assert!(matches!(render(control, TextOptions::new(80)), TextRender::Drawing(_)));
+    assert_eq!(take_text_requests(), 1);
+}
+
+/// A header Merman detects no diagram type in (a typo, or no header at all)
+/// is a failure carrying Merman's detection error, never an ineligible
+/// family; nothing is requested.
+#[test]
+fn an_undetectable_diagram_type_is_an_error_without_a_request() {
+    take_text_requests();
+    for source in UNDETECTABLE {
+        let reason = failure(MermaidDiagram::new(source).render_text(TextOptions::new(80)));
+        assert!(reason.contains("No diagram type detected"), "{source}: {reason}");
+        assert!(MermaidDiagram::new(source).text_eligibility().is_none(), "{source}");
+    }
+    assert_eq!(take_text_requests(), 0);
+}
+
+/// ZenUML, which Merman does not draw, stays an ordinary family with no text
+/// output: the source, no error, no request.
+#[test]
+fn zenuml_is_ineligible_not_an_error() {
+    take_text_requests();
+    let result = MermaidDiagram::new("zenuml\n    A.b()").render_text(TextOptions::new(80));
+    assert!(matches!(result, Ok(TextRender::Source(TextSource::Ineligible))), "{result:?}");
+    assert_eq!(take_text_requests(), 0);
 }
 
 /// A zero budget is past its deadline at Merman's first checkpoint, so the

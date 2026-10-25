@@ -64,11 +64,10 @@ impl Run for GitGraphArgs {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let instructions = if let Some(title) = &self.title {
-            format!("---\ntitle: {}\n---\ngitGraph\n{}", title, body)
-        } else {
-            format!("gitGraph\n{}", body)
-        };
+        let instructions = crate::commands::mermaid::with_mermaid_frontmatter_title(
+            &format!("gitGraph\n{}", body),
+            self.title.as_deref(),
+        );
 
         if ctx.json {
             let output = serde_json::json!({
@@ -85,6 +84,7 @@ impl Run for GitGraphArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            self.title.as_deref(),
             self.inverse,
             width_str.as_deref(),
             &self.layout,

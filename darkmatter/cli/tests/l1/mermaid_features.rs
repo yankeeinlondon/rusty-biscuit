@@ -14,6 +14,7 @@ use biscuit_visualized::components::{MERMAID_FALLBACK_ENV, MermaidFallbackPolicy
 use clap::Parser;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::MermaidMode;
+use darkmatter::markdown::output::terminal::ColorDepth;
 use darkmatter_cli::args::{Command, Feature};
 use darkmatter_cli::render::terminal_page;
 use darkmatter_cli::Cli;
@@ -52,7 +53,12 @@ fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Ma
     let cli = parse(args);
     let md = Markdown::try_from_content(doc).unwrap();
     let term = Terminal::new_optimistic(80);
-    let page = terminal_page(&md, None, &cli, &term, &dispatched_features(&cli)).expect("terminal page");
+    // A default-layout page detects color from the process, not from `term`,
+    // unless its depth is set: pin it so `NO_COLOR` or `TERM=dumb` cannot
+    // strip the highlighting these tests assert.
+    let page = terminal_page(&md, None, &cli, &term, &dispatched_features(&cli))
+        .expect("terminal page")
+        .with_color_depth(ColorDepth::TrueColor);
     (page, md)
 }
 

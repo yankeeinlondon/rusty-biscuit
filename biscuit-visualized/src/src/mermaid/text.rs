@@ -224,6 +224,7 @@ pub struct TextReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextDrawing {
     text: String,
+    family: &'static str,
     coverage: TextCoverage,
     report: TextReport,
 }
@@ -248,6 +249,31 @@ impl TextDrawing {
 
     pub fn report(&self) -> &TextReport {
         &self.report
+    }
+
+    /// Whether the drawing draws `title` as the diagram's title.
+    ///
+    /// Of the families drawn as text, only two draw a title, and only from a
+    /// `title` statement (no family draws a frontmatter `title:`): a
+    /// sequence diagram on its first row, alone, and an XY chart as its
+    /// `titleDisplay: chart(bytes=N)="…"` disclosure row. Each is matched
+    /// exactly where it is drawn, so a node, lane, participant, edge label,
+    /// or axis title that equals `title` does not count. A title Merman
+    /// draws escaped (a control character) does not match, so it is shown
+    /// twice rather than not at all.
+    pub(crate) fn shows_title(&self, title: &str) -> bool {
+        let title = title.trim();
+        if title.is_empty() {
+            return false;
+        }
+        match self.family {
+            "sequence" => self.text.lines().next().is_some_and(|row| row.trim() == title),
+            "xychart" => {
+                let disclosure = format!("titleDisplay: chart(bytes={})=\"{title}\"", title.len());
+                self.text.lines().any(|row| row.trim_end() == disclosure)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -303,7 +329,7 @@ pub(crate) fn judge(output: &merman::ascii::AsciiOutput, eligibility: TextEligib
     } else if report.overflowed || report.width > options.max_columns {
         TextRender::Source(TextSource::TooWide(report))
     } else {
-        TextRender::Drawing(TextDrawing { text, coverage: eligibility.coverage, report })
+        TextRender::Drawing(TextDrawing { text, family: eligibility.family, coverage: eligibility.coverage, report })
     }
 }
 

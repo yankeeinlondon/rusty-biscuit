@@ -186,12 +186,20 @@ source as a code block instead (on a terminal without images the component
 first tries a text drawing, and shows the source when the family has none or
 it does not fit; see [the text fallback](./components/mermaid_diagram.md#without-images-the-text-fallback)):
 
-- the source does not parse, or its diagram type is unknown;
+- the source does not parse, or its diagram type is unknown. Frontmatter or
+  an `%%{init}%%` directive that Merman cannot read counts as not parsing,
+  even above a valid diagram (`title: [broken` is unclosed YAML). On a
+  terminal without images both are failures of the text drawing too, never
+  a family without one;
 - a ZenUML diagram, recognized by its `zenuml` header. Merman could draw it,
   but Mermaid.js supports ZenUML only through an external plugin, so a
   diagram that renders here would not render elsewhere;
 - a label that uses math (`$$…$$`). Merman's math support is not compiled in,
-  so it refuses the whole diagram, not just the label;
+  so it refuses the whole diagram, not just the label. On a terminal without
+  images Merman's text drawing shows the label literally, so a drawing that
+  fits is shown; where the source is shown instead, the fallible
+  `try_present` still reports this failure (from Merman's capability plan for
+  the parsed source, without drawing an SVG);
 - Merman exceeds the [time budget](#time-budget).
 
 ## Themes

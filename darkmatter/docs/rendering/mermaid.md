@@ -129,7 +129,15 @@ both hold:
   CLI sets it from `TERMINAL_IMAGES`; `TERMINAL_IMAGES=0` turns images off).
 
 `Automatic` draws the image only where the terminal can show pixels; anywhere
-else it tries a text drawing, described below.
+else it tries a text drawing, described below. Whether the terminal shows
+pixels comes from the detected graphics route: `BISCUIT_GRAPHICS=none`, or
+output that is not a terminal, means no pixels. Page geometry (a maximum
+width, margins, padding, a background, or line numbers) and
+`TerminalOptions::max_width` never change that answer:
+
+```sh
+BISCUIT_GRAPHICS=none md --mermaid README.md --line-numbers   # text drawings, never images
+```
 
 The hook sizes the diagram to the columns the fence occupies (a list item's
 or a quote's inner width, not the whole terminal) and draws it with the

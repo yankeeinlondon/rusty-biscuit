@@ -582,7 +582,7 @@ impl MermaidDiagram {
             ));
         }
         let source = rewrite_label_newlines(&self.instructions).into_owned();
-        let source_theme = source_theme(&source);
+        let source_theme = source_theme(&source)?;
         let palette = self.palette();
         let design = match (&source_theme.family, source_theme.author_theme) {
             (Some(family), AuthorTheme::None) => Some(design::design_json(&palette, family)),
@@ -912,7 +912,9 @@ impl MermaidDiagram {
     /// may replace the source ([`text_eligibility`]), from Merman's own
     /// preprocessing and type detection of the source, so a comment or
     /// directive is never taken for the header. `None` also for a source
-    /// Merman cannot detect a diagram in.
+    /// Merman cannot preprocess or detect a diagram type in; a caller that
+    /// must report a source that cannot be drawn renders it instead
+    /// ([`render_text`](Self::render_text) fails for such a source).
     ///
     /// ## Examples
     ///
@@ -924,14 +926,105 @@ impl MermaidDiagram {
     /// assert!(MermaidDiagram::new("pie\n    \"A\" : 1").text_eligibility().is_none());
     /// ```
     pub fn text_eligibility(&self) -> Option<TextEligibility> {
+        self.try_text_eligibility().ok().flatten()
+    }
+
+    /// [`text_eligibility`](Self::text_eligibility) for a fallible caller: a
+    /// source Merman cannot preprocess (malformed frontmatter or directive)
+    /// or detect a diagram type in (a header typo) is that error, never a
+    /// family that is not drawn as text. A detected family with no text
+    /// capability (pie, ZenUML) is `Ok(None)`.
+    pub(crate) fn try_text_eligibility(&self) -> Result<Option<TextEligibility>, MermaidError> {
         let source = rewrite_label_newlines(&self.instructions);
-        source_theme(&source).diagram_type.and_then(text_eligibility)
+        Ok(source_theme(&source)?.text_diagram_type()?.and_then(text_eligibility))
+    }
+
+    /// Checks that the source parses, as [`render`](Self::render) would read
+    /// it, without drawing it: one Merman parse bounded by the
+    /// [time budget](Self::with_time_budget), with no layout, no fonts, and
+    /// no artifact. For a caller that shows the source and still has to
+    /// report a source that cannot be drawn.
+    ///
+    /// Only the parse is checked: a source that parses but needs a render
+    /// capability that is not built in (a math label) passes here and still
+    /// fails [`render`](Self::render).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::MermaidDiagram;
+    ///
+    /// assert!(MermaidDiagram::new("pie\n    \"A\" : 1").validate().is_ok());
+    /// assert!(MermaidDiagram::new("flowchart LR\n    A[unclosed --> B").validate().is_err());
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// `MermaidError::RenderFailed` when the source does not preprocess or
+    /// parse, has no known diagram type or is ZenUML, or the parse exceeds
+    /// the time budget.
+    pub fn validate(&self) -> Result<(), MermaidError> {
+        let (source, engine) = self.validation_input()?;
+        let control = self.control();
+        self.call_merman(|| {
+            engine
+                .parse_diagram_for_render_model_controlled_sync(&source, merman::ParseOptions::strict(), &control)??
+                .ok_or(RenderError::NoDiagram)
+                .map(drop)
+        })
+    }
+
+    /// [`validate`](Self::validate) for a fallible caller that shows the
+    /// source in place of a drawing: the source must also need no render
+    /// capability that is not built in (math for a `$$…$$` label, a layout
+    /// engine), which [`render`](Self::render) would refuse with the same
+    /// error. One Merman request bounded by the
+    /// [time budget](Self::with_time_budget), stopping at Merman's capability
+    /// plan for the parsed model: no layout, no fonts, and no artifact.
+    ///
+    /// ## Errors
+    ///
+    /// [`validate`](Self::validate)'s, and `MermaidError::RenderFailed` naming
+    /// the first missing capability.
+    pub(crate) fn validate_renderable(&self) -> Result<(), MermaidError> {
+        let (source, engine) = self.validation_input()?;
+        let renderer = Renderer::new().with_engine(engine);
+        let control = self.control();
+        self.call_merman(|| {
+            let output = renderer.render(merman::RenderRequest::svg_plan(&source, control.clone(), SvgRequest::default()))?;
+            let RenderOutput::SvgPlan(Some(plan)) = output else {
+                return Err(RenderError::NoDiagram);
+            };
+            match plan.missing_capabilities().first() {
+                None => Ok(()),
+                Some(&capability) => Err(RenderError::from(merman::svg::RenderError::MissingCapability {
+                    capability,
+                    diagram_type: plan.diagram_type().to_string(),
+                })),
+            }
+        })
+    }
+
+    /// The rewritten source and the engine [`render`](Self::render) would
+    /// parse it with; ZenUML, which is never handed to Merman, is an error.
+    fn validation_input(&self) -> Result<(String, Engine), MermaidError> {
+        if is_zenuml(&self.instructions) {
+            return Err(MermaidError::RenderFailed(
+                "ZenUML diagrams are not rendered; showing the source".to_string(),
+            ));
+        }
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let author_variables = source_theme(&source)?.author_variables;
+        let site_config = self.site_config(&self.palette(), false, author_variables.as_ref());
+        let engine = Engine::new().with_site_config(merman::MermaidConfig::from_value(site_config));
+        Ok((source, engine))
     }
 
     /// Draws the diagram as text for a terminal that cannot show images.
     ///
     /// At most one Merman request, bounded by the
-    /// [time budget](Self::with_time_budget), and none when the family is not
+    /// [time budget](Self::with_time_budget), and none when the source does
+    /// not preprocess, has no detectable type, or the family is not
     /// eligible ([`text_eligibility`](Self::text_eligibility)) or `options`
     /// has no columns. A family that admits Merman's `auto` layout is
     /// requested with it (canonical, then compact once when canonical is too
@@ -948,9 +1041,11 @@ impl MermaidDiagram {
     ///
     /// ## Errors
     ///
-    /// `MermaidError::RenderFailed` when the source does not parse, Merman
-    /// fails, exceeds the time budget (logged as a warning), or reaches a
-    /// resource limit. Nothing is retried.
+    /// `MermaidError::RenderFailed` when the source does not preprocess
+    /// (malformed frontmatter or directive) or has no detectable diagram type
+    /// (no request is made for either), does not parse,
+    /// Merman fails, exceeds the time budget (logged as a warning), or
+    /// reaches a resource limit. Nothing is retried.
     ///
     /// ## Examples
     ///
@@ -978,8 +1073,8 @@ impl MermaidDiagram {
         resources: merman::ascii::AsciiResourcePolicy,
     ) -> Result<TextRender, MermaidError> {
         let source = rewrite_label_newlines(&self.instructions).into_owned();
-        let source_theme = source_theme(&source);
-        let Some(eligibility) = source_theme.diagram_type.and_then(text_eligibility) else {
+        let source_theme = source_theme(&source)?;
+        let Some(eligibility) = source_theme.text_diagram_type()?.and_then(text_eligibility) else {
             return Ok(TextRender::Source(TextSource::Ineligible));
         };
         if options.max_columns() == 0 {
@@ -1165,23 +1260,40 @@ struct SourceTheme {
     author_variables: Option<serde_json::Value>,
     /// The source's whole `%%{init}%%`/frontmatter config.
     author_config: serde_json::Value,
+    /// Merman's error when it detected no diagram type. The image route
+    /// ignores it (its render fails with Merman's own error); the text route
+    /// reports it ([`SourceTheme::text_diagram_type`]).
+    detect_error: Option<String>,
+}
+
+impl SourceTheme {
+    /// The detected type for the text route: a source whose type Merman
+    /// cannot detect is that error, never a family that is not drawn as
+    /// text. A detected type with no metadata id or text capability is
+    /// `Ok`; ZenUML is one (Merman detects it and has no text output for it).
+    fn text_diagram_type(&self) -> Result<Option<&'static str>, MermaidError> {
+        match &self.detect_error {
+            Some(error) => Err(MermaidError::RenderFailed(error.clone())),
+            None => Ok(self.diagram_type),
+        }
+    }
 }
 
 /// The source's diagram family and author theme keys, from Merman's own
-/// preprocessing (directives and frontmatter) and type detection. A source
-/// Merman cannot preprocess or detect has no family; its render fails later
-/// with Merman's own error.
-fn source_theme(source: &str) -> SourceTheme {
+/// preprocessing (directives and frontmatter) and type detection.
+///
+/// ## Errors
+///
+/// `MermaidError::RenderFailed` when Merman cannot preprocess the source
+/// (malformed frontmatter or directive), the same strict preprocessing every
+/// Merman request makes. A source with no detectable type is not an error
+/// here: it has no family and records the detection error
+/// ([`SourceTheme::text_diagram_type`]); an image render fails later with
+/// Merman's own error.
+fn source_theme(source: &str) -> Result<SourceTheme, MermaidError> {
     let engine = Engine::new();
-    let Ok(preprocessed) = merman::preprocess_diagram(source, engine.registry()) else {
-        return SourceTheme {
-            family: None,
-            diagram_type: None,
-            author_theme: AuthorTheme::None,
-            author_variables: None,
-            author_config: serde_json::Value::Null,
-        };
-    };
+    let preprocessed = merman::preprocess_diagram(source, engine.registry())
+        .map_err(|error| MermaidError::RenderFailed(error.to_string()))?;
     let author = preprocessed.config.as_value();
     let author_theme = if author.get("theme").is_some() {
         AuthorTheme::Named
@@ -1191,14 +1303,17 @@ fn source_theme(source: &str) -> SourceTheme {
         AuthorTheme::None
     };
     let mut config = preprocessed.config.clone();
-    let detected = engine.registry().detect_type(preprocessed.source.text(), &mut config).ok();
+    let (detected, detect_error) = match engine.registry().detect_type(preprocessed.source.text(), &mut config) {
+        Ok(detected) => (Some(detected), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
     let family = detected
         .and_then(merman::diagram_type_family_id)
         .map(|family| family.as_str().to_string());
     let diagram_type = detected.and_then(merman::diagram_type_metadata_id);
     let author_variables = (author_theme == AuthorTheme::Variables).then(|| author["themeVariables"].clone());
     let author_config = author.clone();
-    SourceTheme { family, diagram_type, author_theme, author_variables, author_config }
+    Ok(SourceTheme { family, diagram_type, author_theme, author_variables, author_config, detect_error })
 }
 
 /// Whether an author's `themeVariables` set a color anywhere (a string, or a

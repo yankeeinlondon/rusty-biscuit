@@ -46,9 +46,19 @@ The hook answers:
 | Answer | What the renderer prints |
 | --- | --- |
 | `Ok(DiagramOutcome::Rendered(s))` | `s`, verbatim |
-| `Ok(DiagramOutcome::Nodes(fragment))` | the fragment, laid out where the fence stood at its indent and width; its code nodes go through the code renderer, and a `mermaid` node in it is never offered to the diagram hook again |
+| `Ok(DiagramOutcome::Nodes(fragment))` | the fragment, laid out where the fence stood at its indent and width; its code nodes go through the code renderer, and a `mermaid` node in it is never offered to the diagram hook again. If any finished row is wider than `available_width` (display cells, escapes excluded), the answer counts as `Declined` and the fragment's diagnostics are dropped |
 | `Ok(DiagramOutcome::Declined)` | the ordinary code block, with no diagnostic under any strictness |
 | `Err(e)` | `Strict`: the render fails with `LossyRejected`. `Warn`: a lossy diagnostic, then the code block. `Lossy`: the code block |
+
+The width check exists because the hook decides fit before the code renderer
+decorates the fragment. With `context.line_numbers` on, a code renderer may
+put a gutter before each row (Darkmatter's is the line count's digits plus
+three cells), so a fragment row the hook sized to the fence can end up wider
+than it. A hook therefore only needs to allow for the code block's padding;
+anything wider is caught here. For example, a `txt` node with one 77-cell row
+in an 80-column fence, behind a one-digit gutter, gives an 81-cell row and the
+fence renders as code; a 76-cell row gives exactly 80 and is kept. `Rendered`
+output is never measured, since image escapes are not text cells.
 
 A minimal hook that leaves the fence a code block when images are allowed, and
 answers a lower ceiling with a placeholder `txt` node:

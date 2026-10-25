@@ -97,8 +97,10 @@ impl Run for TimelineArgs {
             }
         }
 
-        use crate::commands::mermaid::with_mermaid_frontmatter_title;
-        let instructions = with_mermaid_frontmatter_title(&lines.join("\n"), eff_title);
+        // The `title` statement is the timeline's only title: Mermaid's
+        // timeline draws no frontmatter title, and a second copy there
+        // showed twice in the source fallback.
+        let instructions = lines.join("\n");
 
         if ctx.json {
             let output = serde_json::json!({
@@ -116,6 +118,7 @@ impl Run for TimelineArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            eff_title,
             self.inverse,
             width_str.as_deref(),
             &self.layout,

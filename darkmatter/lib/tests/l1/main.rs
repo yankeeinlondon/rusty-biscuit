@@ -102,6 +102,7 @@ mod mermaid_automatic_mode;
 mod mermaid_embedded_font;
 mod mermaid_static_svg;
 mod mermaid_syntax_highlighting;
+mod mermaid_text_line_numbers;
 mod meta_schema_repo_schemas;
 mod missing_ctx_capture;
 mod more_is_more_literals_and_indexes;

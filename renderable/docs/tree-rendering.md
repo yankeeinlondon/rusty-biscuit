@@ -212,7 +212,9 @@ flowchart TD
     H -- no --> C
     H -- yes --> R[DiagramRenderer]
     R -- "Rendered(String)" --> O[printed verbatim]
-    R -- "Nodes(fragment)" --> N[fragment laid out in place]
+    R -- "Nodes(fragment)" --> W{every finished row fits the fence?}
+    W -- yes --> N[fragment laid out in place]
+    W -- no --> C
     R -- Declined --> C
     R -- Err --> S{strictness}
     S -- Strict --> X[render rejected]
@@ -220,11 +222,18 @@ flowchart TD
 ```
 
 - **`Rendered`** is output the hook already formatted, such as an image escape
-  sequence.
+  sequence. It is never measured.
 - **`Nodes`** is a render-tree fragment, laid out where the fence stood, at its
   indent and width. A text drawing arrives as a `txt` code node and a source
   fallback as a `mermaid` code node. The fragment is rendered with promotion
   off, so its `mermaid` node prints as code instead of reaching the hook again.
+  The renderer then measures every finished row in display cells (escape
+  sequences take none). If one is wider than the columns the hook was offered,
+  the fragment is dropped and the fence is treated as `Declined`. This catches
+  decoration the hook could not see when it judged its fit, such as the
+  line-number gutter a code renderer adds (`context.line_numbers`), whose width
+  grows with the row count: a 58-cell drawing offered 60 columns becomes a
+  62-cell numbered row, so it shows as source instead.
 - **`Declined`** means "show the source". The fence renders as the ordinary
   code block with **no diagnostic** under every strictness, exactly as if the
   hook had not been called.

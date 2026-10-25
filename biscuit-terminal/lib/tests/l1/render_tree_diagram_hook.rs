@@ -16,6 +16,7 @@ use biscuit_terminal::render_tree::{
     TerminalRenderOptions, render_terminal_node,
 };
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::block_constraint::visible_width;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::TerminalCodeContext;
 use renderable::tree::{
@@ -508,4 +509,124 @@ fn as_code_opts(opts: &TerminalRenderOptions) -> TerminalRenderOptions {
     let mut as_code = opts.clone();
     as_code.context.mermaid_mode = TerminalMermaidMode::Code;
     as_code
+}
+
+/// A code hook that numbers rows as a line-numbering highlighter does: a
+/// dimmed, right-aligned number and ` │ ` before each row, so the gutter
+/// grows with the row count (one digit plus three cells for up to nine rows).
+struct GutterCode;
+
+impl CodeRenderer for GutterCode {
+    fn render_terminal_code(
+        &self,
+        _lang: Option<&str>,
+        value: &str,
+        _meta: Option<&str>,
+        _attrs: &NodeAttrs,
+        _context: TerminalCodeContext,
+    ) -> Option<String> {
+        let rows: Vec<&str> = value.lines().collect();
+        let digits = rows.len().to_string().len();
+        let numbered: Vec<String> = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| format!("\x1b[2m{:>digits$} │ \x1b[0m{row}", index + 1))
+            .collect();
+        Some(numbered.join("\n"))
+    }
+
+    fn render_browser_code(
+        &self,
+        _lang: Option<&str>,
+        _value: &str,
+        _meta: Option<&str>,
+        _attrs: &NodeAttrs,
+    ) -> Option<BrowserFragment<Ready>> {
+        None
+    }
+}
+
+/// A hook answering with one `txt` drawing whose single row is `cells` wide.
+fn drawing_of_width(cells: usize) -> Rc<RecordingDiagrams> {
+    RecordingDiagrams::outcome(Ok(DiagramOutcome::Nodes(vec![RenderNode::code(
+        Some("txt".to_string()),
+        None,
+        "x".repeat(cells),
+    )])))
+}
+
+fn widest_row(output: &str) -> u32 {
+    output.split('\n').map(visible_width).max().unwrap_or(0)
+}
+
+#[test]
+fn nodes_outcome_wider_than_the_fence_once_decorated_renders_the_code_block_silently() {
+    for strictness in [RenderStrictness::Strict, RenderStrictness::Warn, RenderStrictness::Lossy] {
+        // 77 cells fit the 80 the hook was offered; the gutter makes 81.
+        let diagrams = drawing_of_width(77);
+        let opts = automatic(strictness, GraphicsMode::Vector)
+            .with_code_renderer(Rc::new(GutterCode))
+            .with_diagram_renderer(diagrams.clone());
+
+        let rendered = render_terminal_node(&mermaid_fence(), &opts)
+            .unwrap_or_else(|e| panic!("{strictness:?}: an over-wide fragment is a decline, not an error: {e}"));
+
+        assert_eq!(diagrams.seen()[0].available_width, 80);
+        assert_eq!(rendered.output, as_code_block(&opts), "{strictness:?}");
+        assert!(rendered.output.contains("A --> B"), "{strictness:?}: {:?}", rendered.output);
+        assert!(rendered.diagnostics.is_empty(), "{strictness:?}: {:?}", rendered.diagnostics);
+    }
+}
+
+#[test]
+fn nodes_outcome_that_fits_once_decorated_is_laid_out() {
+    // 76 cells plus the four-cell gutter is exactly the fence's 80; the
+    // gutter's escape sequences take no cells.
+    let opts = automatic(RenderStrictness::Strict, GraphicsMode::Vector)
+        .with_code_renderer(Rc::new(GutterCode))
+        .with_diagram_renderer(drawing_of_width(76));
+
+    let rendered = render_terminal_node(&mermaid_fence(), &opts).expect("render");
+
+    assert!(rendered.output.contains(&"x".repeat(76)), "{:?}", rendered.output);
+    assert!(!rendered.output.contains("A --> B"), "{:?}", rendered.output);
+    assert_eq!(widest_row(&rendered.output), 80, "{:?}", rendered.output);
+    assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+#[test]
+fn nodes_outcome_in_a_list_item_is_measured_against_the_items_width() {
+    let list = |fence: RenderNode| {
+        RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text("item")]), fence])],
+        )
+    };
+    // Fits the top level (76 + 4 = 80), but not the item's narrower width.
+    let diagrams = drawing_of_width(76);
+    let opts = automatic(RenderStrictness::Strict, GraphicsMode::Vector)
+        .with_code_renderer(Rc::new(GutterCode))
+        .with_diagram_renderer(diagrams.clone());
+
+    let rendered = render_terminal_node(&list(mermaid_fence()), &opts).expect("render");
+
+    let fence_width = diagrams.seen()[0].available_width;
+    assert!(fence_width < 80, "the fence is offered its narrowed width, got {fence_width}");
+    let source = render_terminal_node(&list(mermaid_fence()), &as_code_opts(&opts)).expect("render as code");
+    assert_eq!(rendered.output, source.output, "the item shows the fence as code");
+    assert!(!rendered.output.contains(&"x".repeat(76)), "{:?}", rendered.output);
+    assert!(rendered.diagnostics.is_empty(), "{:?}", rendered.diagnostics);
+}
+
+#[test]
+fn rendered_outcome_is_never_measured() {
+    // Image output carries escape payloads whose length is not text cells.
+    let wide = "x".repeat(200);
+    let opts = automatic(RenderStrictness::Strict, GraphicsMode::Rich)
+        .with_diagram_renderer(RecordingDiagrams::outcome(Ok(DiagramOutcome::Rendered(wide.clone()))));
+
+    let rendered = render_terminal_node(&mermaid_fence(), &opts).expect("render");
+
+    assert_eq!(rendered.output, wide);
 }

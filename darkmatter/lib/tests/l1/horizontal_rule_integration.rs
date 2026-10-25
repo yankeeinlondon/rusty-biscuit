@@ -506,8 +506,13 @@ mod tests {
         );
     }
 
+    /// `TerminalImageMode::Force` lifts only a route that lacks support; it
+    /// never lifts disabled graphics, and a pinned width does not either. The
+    /// forced image tier on an unsupported snapshot is pinned in
+    /// biscuit-terminal's renderer tests, where the snapshot is injectable.
     #[test]
-    fn test_terminal_image_mode_force_enables_hr_image_tier() {
+    fn test_terminal_image_mode_force_with_width_keeps_disabled_graphics() {
+        let _graphics = test_toolkit::EnvGuard::set_safe("BISCUIT_GRAPHICS", "none");
         let markdown = "---\n\nSome content after";
         let md: Markdown = markdown.into();
         let mut options = TerminalOptions::default();
@@ -518,9 +523,10 @@ mod tests {
         let output = md.as_terminal(options).unwrap();
 
         assert!(
-            output.contains("\x1b_G"),
-            "TerminalImageMode::Force must emit Kitty image escapes for HR: {output:?}"
+            !output.contains("\x1b_G"),
+            "a width must not grant images that BISCUIT_GRAPHICS=none denies: {output:?}"
         );
+        assert!(output.contains("Some content after"), "{output:?}");
     }
 
     // ================================================================
