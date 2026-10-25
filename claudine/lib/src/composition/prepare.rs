@@ -62,7 +62,7 @@ pub use bootstrap::BootstrapPreparation;
 pub use entry::{DocumentEntryReason, LoopOwnership, PreparationStages, SourceBasis};
 pub use service::{
     BootstrapRequest, DocumentPreparation, PromptSource, SchemaStage, prepare_bootstrap,
-    prepare_document,
+    prepare_document, prepare_document_selecting,
 };
 
 /// Options for composition preparation.

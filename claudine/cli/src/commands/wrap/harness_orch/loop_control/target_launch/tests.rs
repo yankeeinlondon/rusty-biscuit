@@ -1547,7 +1547,7 @@ fn launch_model(
     document: &MaterializedHarnessPrompt,
 ) -> (Option<String>, ModelResolutionReason) {
     let _no_model = without_ambient_model();
-    super::resolve_launch_model(intent, provider, cli_model, None, document)
+    super::resolve_launch_model(intent, provider, cli_model, None, &document.selection_hints)
 }
 
 /// A document that names no model launches the planned model, with the
@@ -1630,9 +1630,8 @@ fn an_unchanged_run_with_a_planned_model_keeps_the_recorded_plan() {
     assert_ne!(dropped.args, vec![RECORDED_ARGV.to_string()]);
 }
 
-/// A sequence step carries its planned model whatever the reason; outside a
-/// sequence a model the launched document's frontmatter chose is left to
-/// each refreshed read.
+/// Document-owned models are read again; genuine enclosing/review/caller
+/// fallbacks remain available when the launched document names none.
 #[test]
 fn planned_fallback_model_carries_what_the_document_cannot_re_derive() {
     let target = |model: Option<&str>, model_reason: ModelResolutionReason| {
@@ -1647,21 +1646,26 @@ fn planned_fallback_model_carries_what_the_document_cannot_re_derive() {
     let from_frontmatter = target(Some("m"), ModelResolutionReason::FrontmatterSingle);
     let from_env = target(Some("m"), ModelResolutionReason::GenericEnv);
     let none = target(None, ModelResolutionReason::ProviderDefault);
+    let absent = EffectiveSelectionHints::default();
+    let own = EffectiveSelectionHints {
+        model: Some(ModelHint::Single("m".to_string())),
+        ..EffectiveSelectionHints::default()
+    };
 
     assert_eq!(
-        planned_fallback_model(&reviewed, true),
+        planned_fallback_model(&reviewed, &own),
         Some(("m".to_string(), ModelResolutionReason::SequenceReview))
     );
     assert_eq!(
-        planned_fallback_model(&from_frontmatter, true),
+        planned_fallback_model(&from_frontmatter, &absent),
         Some(("m".to_string(), ModelResolutionReason::FrontmatterSingle))
     );
-    assert_eq!(planned_fallback_model(&from_frontmatter, false), None);
+    assert_eq!(planned_fallback_model(&from_frontmatter, &own), None);
     assert_eq!(
-        planned_fallback_model(&from_env, false),
+        planned_fallback_model(&from_env, &own),
         Some(("m".to_string(), ModelResolutionReason::GenericEnv))
     );
-    assert_eq!(planned_fallback_model(&none, true), None);
+    assert_eq!(planned_fallback_model(&none, &absent), None);
 }
 
 #[test]

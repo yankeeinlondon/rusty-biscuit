@@ -214,6 +214,58 @@ fn a_disabled_handle_walks_nothing() {
     assert!(fake.calls().is_empty());
 }
 
+#[tokio::test]
+#[serial_test::serial]
+async fn container_events_are_collected_with_their_lexical_frontmatter() {
+    let _dry_run = test_toolkit::EnvGuard::set_safe("PLAYA_DRY_RUN", "0");
+    let dir = TempDir::new().unwrap();
+    write_source(dir.path(), "prompt.md", &json!({ "failure": [{ "say": "prompt" }] }), "Work.\n");
+    write_source(dir.path(), "nested.md", &json!({
+        "title": "Child",
+        "failure": [{ "say": "referenced {{ fm.title }}" }],
+        "sequence": [{ "name": "child", "prompt": "prompt.md" }],
+    }), "Child.\n");
+    let path = write_source(dir.path(), "seq.md", &json!({
+        "title": "Root",
+        "initialize": [{ "say": "never prepare initialize" }],
+        "failure": [{ "say": "root {{ fm.title }}" }],
+        "sequence": [{
+            "name": "group",
+            "group": {
+                "failure": [
+                    { "say": "group {{ fm.title }}" },
+                    { "say": "late {{ group.failed }}" },
+                ],
+                "tasks": [
+                    { "name": "inline", "sequence": [{ "name": "prompt", "prompt": "prompt.md" }],
+                      "failure": [{ "say": "inline {{ fm.title }}" }] },
+                    { "name": "referenced", "sequence": "nested.md" },
+                ],
+            },
+        }],
+    }), "Root.\n");
+    let (source, graph) = graph_for(&path);
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+
+    assert_eq!(submit(&worker.handle(), &source, &graph), 5);
+    fake.wait_for_calls(5).await;
+    drop(worker);
+    assert_eq!(sorted(fake.texts()), strings(&[
+        "root Root", "group Root", "inline Root", "referenced Child", "prompt",
+    ]));
+
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+    assert_eq!(submit_sequence_preflight(
+        &worker.handle(), &GlobalSettings::default(), &graph, &source,
+        ["title".to_string()], &ComposeContext::capture_minimal(),
+    ), 1, "caller-supplied keys stay late in every lexical container");
+    fake.wait_for_calls(1).await;
+    drop(worker);
+    assert_eq!(fake.texts(), ["prompt"]);
+}
+
 /// Under an explicit provider and voice, task `setup:`/`teardown:` stacks (a
 /// top-level task, a serial member, a parallel member) are prepared with what
 /// task stacks play with, and prompt document lifecycles with the user's

@@ -120,6 +120,9 @@ impl TaskExecution<'_> {
                 live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(), loop_values,
                 ..self.stack.with_signal(signal)
             };
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                self.prewarm_container(runner.guard_mut().config(), &event_frontmatter);
+            }
             let event = if self.prompt.is_dry_run() {
                 let outcome = Default::default();
                 let decision = runner.record_outcome(signal, &outcome);

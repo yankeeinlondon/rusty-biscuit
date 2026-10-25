@@ -37,8 +37,10 @@ use tracing::info_span;
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
     bootstrap_harness_prompt, execute_harness_attempt, harness_prompt_mode_label,
-    materialize_harness_prompt, preflight_harness_document, session_compat_key, HarnessPromptMode,
+    preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
+#[cfg(test)]
+use super::materialize_harness_prompt;
 
 type HarnessLoopResult = (
     i32,
@@ -1684,18 +1686,23 @@ fn materialize_attempt_prompt_phase(
     //
     // For an unchanged document this reproduces the identity the invocation
     // already installed, so the key compares equal and the resume proceeds.
+    let installed = prompt_state.input_layers.env_overrides.clone();
+    let select = |hints: &claudine::composition::EffectiveSelectionHints| {
+        target_launch::refreshed_identity_env(launch_intent, hints, cli_model, repo_root, &source_path, &installed)
+    };
     info_span!(
         "harness_materialize_prompt",
         attempt,
         source_path = %prompt_state.source_path.display(),
     )
     .in_scope(|| {
-        materialize_harness_prompt(
+        super::prompt::materialize_harness_prompt_selecting(
             prompt_state,
             repo_root,
             child_cwd,
             resume_followup.as_deref(),
             schema,
+            Some(&select),
         )
     })
     .and_then(|mut materialized| {

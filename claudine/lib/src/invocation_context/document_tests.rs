@@ -67,6 +67,14 @@ impl Fixture {
         Self { _temp: temp, root, home, document, approval }
     }
 
+    fn with_inline_metadata_schema(schema: &str) -> Self {
+        let fixture = Self::new();
+        let schema_dir = fixture.home.join("schemas");
+        fs::create_dir_all(&schema_dir).unwrap();
+        fs::write(schema_dir.join("claudine.yaml"), schema).unwrap();
+        fixture
+    }
+
     /// The map a document named `dir` is entered under: every value differs
     /// from the other document's and from anything ambient.
     fn map(&self, dir: &str) -> DocumentEnvironment {
@@ -193,7 +201,7 @@ fn assert_document_reads(fixture: &Fixture, prepared: &Prepared, dir: &str) {
 
 #[test]
 fn every_consumer_of_the_launch_document_reads_its_captured_map() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let launch = fixture.launch();
 
     let prepared = prepare_under(&fixture, &launch);
@@ -203,7 +211,7 @@ fn every_consumer_of_the_launch_document_reads_its_captured_map() {
 
 #[test]
 fn a_second_document_reads_its_own_map_and_the_first_keeps_its_own() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let first = fixture.launch();
     let first_prepared = prepare_under(&fixture, &first);
 
@@ -234,7 +242,7 @@ fn a_second_document_reads_its_own_map_and_the_first_keeps_its_own() {
 
 #[test]
 fn re_preparing_a_document_captures_no_new_environment() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let launch = fixture.launch();
     assert_eq!(launch.work_snapshot().document_environment_captures, 1);
 
@@ -309,7 +317,7 @@ fn a_child_process_starts_from_the_document_map_with_the_launch_home() {
 /// outrank it.
 #[test]
 fn a_preparation_without_a_snapshot_reads_its_resolution_context_map() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     assert!(std::env::var_os("PATH").is_some(), "the process carries a PATH to outrank");
     let document = fixture.document.with_file_name("plain.md");
     fs::write(&document, "---\ntitle: plain\n---\npath=[{{ env.PATH }}] agent=[{{ ctx.agent }}]\n").unwrap();

@@ -27,6 +27,7 @@ pub(super) struct RootRun<'a> {
     /// The runtime state the current pass entered `start` with; `None`
     /// until a pass enters. A retry of the pass returns to it.
     pub(super) checkpoint: Option<PassCheckpoint>,
+    prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
 }
 
 impl<'a> RootRun<'a> {
@@ -36,10 +37,11 @@ impl<'a> RootRun<'a> {
         stack: StackExecutionContext<'a>,
         runtime: Arc<RuntimeState>,
         frame: Option<LoopFrame>,
+        prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)).with_subject(SubjectKind::RootSequence),
             stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
-            frame, checkpoint: None }
+            frame, checkpoint: None, prewarm }
     }
 
     /// The `loop` values of the pass being run, when the root loops.
@@ -125,6 +127,16 @@ impl<'a> RootRun<'a> {
             let ambient = self.loop_values();
             let stack = StackExecutionContext { signal, err: error.as_ref(), shell_runner: if self.started { self.stack.shell_runner } else { &disabled },
                 loop_values: ambient.as_ref().or(self.stack.loop_values), ..self.stack.with_signal(signal) };
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                claudine::composition::lifecycle::prewarm::collect_and_submit(
+                    &self.prewarm, stack.settings, self.runner.guard_mut().config(), || {
+                        claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                            &serde_json::Value::Object(stack.live_frontmatter_snapshot().unwrap_or_else(|| stack.frontmatter.clone())),
+                            stack.prepared_context.expect("root sequence has a captured context").clone(),
+                        )
+                    },
+                );
+            }
             let result = self.runner.execute_event(signal, &stack);
             if let Some(claudine::composition::lifecycle::executor::StackControl::Proxy { location, .. }) = &result.outcome.control {
                 self.proxy_location = Some(location.clone());

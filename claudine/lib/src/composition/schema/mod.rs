@@ -4,10 +4,10 @@
 //! matching trigger schemas of its five schema locations, with Claudine's
 //! embedded bundle ([`bundle`]) as the last-resort location, under its
 //! authored `$schema` (see [`load_effective_schema`]). Darkmatter's compose
-//! pipeline also runs schema validation as an always-on stage between
-//! override application and shell expansion (see
-//! `darkmatter::markdown::compose::schema_validation`), against the authored
-//! `$schema` alone. When the (post-override) frontmatter does not satisfy it,
+//! pipeline also runs effective-schema validation between frontmatter
+//! interpolation and shell expansion (see
+//! `darkmatter::markdown::compose::schema_validation`). When the
+//! post-override frontmatter does not satisfy that schema,
 //! compose aborts with `MarkdownError::SchemaValidationFailed`, which the
 //! prepare layer surfaces as `CompositionError::ComposeFailed`.
 //!
@@ -34,10 +34,8 @@
 //! user-visible warning to stderr; `tracing::warn!` events still fire for
 //! anyone running with structured tracing enabled.
 //!
-//! See [`claudine/features/2026-05-15-schemas/plan.md`][plan] for the
-//! Phase 2 contract.
-//!
-//! [plan]: ../../../../features/2026-05-15-schemas/plan.md
+//! The current launch contract is documented in
+//! [Composition](../../../../docs/topics/composition.md).
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
@@ -190,6 +188,15 @@ pub fn prepare_direct_with_schema_and_prompt(
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
     prepare_with_schema(source, options, PrepareMode::Direct(prompt_source, None))
+}
+
+pub(super) fn prepare_direct_with_schema_and_prompt_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source, select))
 }
 
 /// Wrap [`prepare_inline`] with schema-aware error categorization and

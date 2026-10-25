@@ -490,6 +490,22 @@ struct ValidatedTask {
 }
 
 impl TaskExecution<'_> {
+    pub(super) fn prewarm_container(&self, lifecycle: &crate::composition::LifecycleConfig, frontmatter: &Map<String, Value>) {
+        let Some(document) = self.document else { return };
+        let handle = document.prewarm().with_injected_keys(
+            reserved::ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string())
+                .chain(self.user_setters.and_then(Value::as_object).into_iter().flat_map(|map| map.keys().cloned())),
+        );
+        crate::composition::lifecycle::prewarm::collect_and_submit(&handle, self.stack.settings, lifecycle, || {
+            crate::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                &Value::Object(frontmatter.clone()),
+                self.stack.prepared_context.unwrap_or_else(|| self.state.context()).clone(),
+            )
+        });
+    }
+}
+
+impl TaskExecution<'_> {
     /// Run the task through setup, its primary action, and teardown.
     ///
     /// Never returns `Err`: every failure is part of the task's reported

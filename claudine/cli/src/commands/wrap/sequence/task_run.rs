@@ -648,8 +648,9 @@ impl<'a> WrapperPromptRunner<'a> {
     ///   from a list; otherwise the hint decides it by the canonical
     ///   non-interactive rule, so a document an earlier task rewrote launches
     ///   on its fresh `agent`;
-    /// - the model stays `planned`'s while the provider does and the hints
-    ///   name no `model`; otherwise it is re-resolved from the hints.
+    /// - an enclosing or reviewed model stays while the provider does and
+    ///   the hints name no `model`; a document-owned prediction is re-resolved
+    ///   so removing that document's model also removes its selected value.
     ///
     /// ## Errors
     ///
@@ -680,7 +681,16 @@ impl<'a> WrapperPromptRunner<'a> {
                     })
         };
         if let Some(planned) = planned.as_ref().filter(|planned| keeps_provider(planned)) {
-            if composed.model.is_none() {
+            let document_model = match &selection.site.own {
+                super::providers::OwnHints::Task(prediction) => matches!(
+                    &prediction.model,
+                    claudine::composition::sequence::preflight::providers::HintState::Static { source, .. }
+                        if source.layer == claudine::composition::sequence::preflight::providers::HintLayer::Document
+                ),
+                super::providers::OwnHints::Body(Some((_, hints))) => hints.model.is_some(),
+                _ => false,
+            };
+            if composed.model.is_none() && !document_model {
                 return Ok(Some(planned.clone()));
             }
             return Ok(Some(self.run.selection.for_document(

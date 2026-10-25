@@ -157,6 +157,9 @@ impl TaskExecution<'_> {
             stack.group = Some(&group_value);
             stack.err = error.as_ref();
             if !shell_enabled { stack.shell_runner = &DisabledShellRunner; }
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                execution.prewarm_container(runner.guard_mut().config(), &live.lock().expect(SLOT_POISONED));
+            }
             let event = if self.prompt.is_dry_run() {
                 let outcome = Default::default();
                 let decision = runner.record_outcome(signal, &outcome);

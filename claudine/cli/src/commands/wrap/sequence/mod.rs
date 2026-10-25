@@ -308,7 +308,11 @@ pub(crate) fn execute_sequence(
             log::message(&super::composition::dry_run::render_prep_target(&target, &term));
         }
     }
-    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime), frame);
+    let prewarm = invocation.prewarm().with_injected_keys(
+        composition::sequence::reserved::ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string())
+            .chain(user_set_overrides.as_ref().and_then(serde_json::Value::as_object).into_iter().flat_map(|map| map.keys().cloned())),
+    );
+    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime), frame, prewarm);
     if !shared.dry_run {
         match root.event(LifecycleSignal::Initialize, None)? {
             ContainerEventDecision::Continue => {},

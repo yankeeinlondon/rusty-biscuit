@@ -202,9 +202,8 @@ impl SequenceSource {
         }
     }
 
-    /// `true` when a zero-step result is a legitimate runtime outcome rather
-    /// than an authoring mistake. A clean repository makes
-    /// `{{ ctx.dirty_files }}` empty; `sequence: []` is still a typo.
+    /// Whether the entries came from runtime data rather than an authored
+    /// sequence list. Either source can produce an empty sequence.
     pub fn is_dynamic(&self) -> bool {
         matches!(self, Self::DataFile { .. } | Self::Expression | Self::Shell)
     }

@@ -807,6 +807,31 @@ fn the_stack_key_is_removed_grammar_in_every_stack() {
 }
 
 #[test]
+fn removed_grammar_in_unselected_nested_bodies_keeps_its_authored_path() {
+    for (frontmatter, expected_path, expected_removed) in [
+        (
+            json!({ "start": [{ "when": "true", "then": [{ "info": "selected" }],
+                "else": [{ "when": "false", "then": [{ "info": "unused" }],
+                    "else": { "stack": [] } }] }] }),
+            "start[0].else[0].else.stack",
+            "stack",
+        ),
+        (
+            json!({ "loop": { "while": "true", "gate": [{ "when": "true",
+                "then": [{ "info": "selected" }],
+                "else": [{ "say": { "text": "unused", "route": "ops" } }] }] } }),
+            "loop.gate[0].else[0].say.route",
+            "say.route",
+        ),
+    ] {
+        let (path, key, replacement) = removed(parse_err(frontmatter));
+        assert_eq!(path, expected_path);
+        assert_eq!(key, expected_removed);
+        assert!(!replacement.is_empty());
+    }
+}
+
+#[test]
 fn the_action_aggregator_and_discriminator_are_removed_grammar() {
     let (path, key, replacement) = removed(parse_err(json!({ "start": [{ "action": [{ "info": "x" }] }] })));
     assert_eq!((path.as_str(), key.as_str()), ("start[0].action", "action"));

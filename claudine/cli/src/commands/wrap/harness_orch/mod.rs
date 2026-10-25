@@ -12,10 +12,11 @@ pub(crate) use session_key::session_compat_key;
 pub(crate) use loop_control::{LaunchRebuildIntent, planned_fallback_model, run_harness_loop};
 pub(crate) use prompt::{
     bootstrap_harness_prompt, find_wrapper_harness_source, load_overlaid_document,
-    materialize_harness_prompt,
     materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, preflight_harness_document,
 };
+#[cfg(test)]
+pub(crate) use prompt::materialize_harness_prompt;
 pub(crate) use shell_options::{
     CachedHarnessLoopContext, apply_composition_shell_overrides, build_harness_shell_options,
     build_harness_shell_options_for_source, build_harness_shell_options_for_source_with_cache,

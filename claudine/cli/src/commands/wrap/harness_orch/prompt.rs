@@ -284,6 +284,7 @@ pub(crate) fn preflight_harness_document(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn materialize_harness_prompt(
     state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
@@ -297,6 +298,17 @@ pub(crate) fn materialize_harness_prompt(
     // bootstrap read defers it to the stabilized reread taken after
     // `initialize` has had its chance to add or repair the property (R4).
     schema: claudine::composition::SchemaStage,
+) -> Result<MaterializedHarnessPrompt> {
+    materialize_harness_prompt_selecting(state, _repo_root, child_cwd, resume_followup, schema, None)
+}
+
+pub(super) fn materialize_harness_prompt_selecting(
+    state: &mut HarnessPromptState,
+    _repo_root: Option<&Path>,
+    child_cwd: &Path,
+    resume_followup: Option<&str>,
+    schema: claudine::composition::SchemaStage,
+    select: Option<&claudine::composition::ResolvedIdentitySelector<'_>>,
 ) -> Result<MaterializedHarnessPrompt> {
     let loaded = load_overlaid_source(state).map(|source| {
         let options = harness_prepare_options(state, &source, child_cwd);
@@ -333,14 +345,14 @@ pub(crate) fn materialize_harness_prompt(
         }
     };
 
-    let prepared = claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+    let prepared = claudine::composition::prepare_document_selecting(claudine::composition::DocumentPreparation {
         entry: state.entry,
         mode,
         source: &source,
         prompt_source,
         schema,
         options,
-    })?;
+    }, select)?;
 
     let inline_closure_plan = match prepared.closure {
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),

@@ -133,7 +133,7 @@ pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
     approve_document_shell, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
-    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_document_selecting, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
     read_selection_hints, replace_env_overrides, ResolvedIdentitySelector,
 };
 #[cfg(test)]

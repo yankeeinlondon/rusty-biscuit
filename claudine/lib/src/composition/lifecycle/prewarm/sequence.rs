@@ -1,7 +1,8 @@
 //! Collect a sequence's candidates from its static preflight graph.
 //!
-//! Before step one launches, every prompt document the graph reached and every
-//! retained internal task stack is walked from what preflight already parsed:
+//! Before step one launches, root and nested container lifecycles, reached
+//! prompt documents, and retained internal task stacks are walked from what
+//! preflight already parsed:
 //! nothing is composed, no reference is resolved, nothing is fetched, and no
 //! action runs. What preflight cannot know yet is left late:
 //!
@@ -67,11 +68,13 @@ pub fn submit_sequence_preflight(
         context,
     };
     let mut queued = 0;
-    if graph.steps.iter().any(|step| step.task.is_none()) {
+    if let Some(lifecycle) = &graph.root_lifecycle {
+        queued += walk.submit(settings, lifecycle_phrases(lifecycle), &walk.sequence, &walk.injected);
+    } else if graph.steps.iter().any(|step| step.task.is_none()) {
         queued += walk.document(&walk.sequence, &sequence.resolved_path, &walk.injected);
     }
     for task in graph.steps.iter().filter_map(|step| step.task.as_ref()) {
-        queued += walk.task(task);
+        queued += walk.task(task, &walk.sequence);
     }
     queued
 }
@@ -90,13 +93,13 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    fn task(&self, task: &PreflightTask) -> usize {
+    fn task(&self, task: &PreflightTask, frontmatter: &Map<String, Value>) -> usize {
         let mut queued = 0;
         for (scope, nodes) in parsed_task_stacks(task) {
             queued += self.submit(
                 &self.task_playback,
                 stack_phrases(scope, &nodes),
-                &self.sequence,
+                frontmatter,
                 &self.injected,
             );
         }
@@ -116,11 +119,14 @@ impl Walk<'_> {
                 }
             }
             PreflightAction::Group(group) => {
-                queued += group.tasks.iter().map(|member| self.task(member)).sum::<usize>();
+                queued += self.submit(self.user, lifecycle_phrases(&group.lifecycle), frontmatter, &self.injected);
+                queued += group.tasks.iter().map(|member| self.task(member, frontmatter)).sum::<usize>();
             }
             PreflightAction::Sequence(sequence) => {
+                let frontmatter = sequence.frontmatter.as_ref().unwrap_or(frontmatter);
+                queued += self.submit(self.user, lifecycle_phrases(&sequence.lifecycle), frontmatter, &self.injected);
                 queued += sequence.steps.iter().filter_map(|step| step.task.as_ref())
-                    .map(|child| self.task(child)).sum::<usize>();
+                    .map(|child| self.task(child, frontmatter)).sum::<usize>();
             }
             PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
         }
