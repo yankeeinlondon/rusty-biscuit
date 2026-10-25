@@ -545,8 +545,8 @@ branch, even without frontmatter. It comes from the library's passive
 - **Walk.** Diagnostics use the library's
   `expression::static_variable_reads`. It yields every `Variable` with its own
   span, classified by the same `AbsenceScope` rules the runtime uses (fallback
-  primary, ternary condition plus its guarded root, direct `is_null`/`is_empty`
-  argument). Never re-derive those rules in DMLS. The only deliberate
+  primary, ternary condition plus its guarded root, direct argument to a
+  `| null` parameter of a function whose result is not nullable). Never re-derive those rules in DMLS. The only deliberate
   difference is that the static walk visits both ternary branches.
 - **`root_identifier` keeps its one-root contract.** Hover, definition, and
   graph indexing depend on it. Only the two diagnostic providers use the walk.
@@ -577,11 +577,12 @@ branch, even without frontmatter. It comes from the library's passive
 
 `dm.expression.incompatible_call` (**Error**) and
 `dm.expression.uncertain_call` (**Warning**) show Darkmatter's design-time
-argument categories. Darkmatter's library owns every rule: DMLS calls
-`expression::check_expression_calls(expr, &TypeScope)` and maps each
-`CallFinding.category` to a severity in `diagnostics/call_check.rs::severity`
-(5 → error, 3 → warning, 2 and 4 → warning only under `expressions.strict`,
-1 never). Never add a conversion, union, or category rule in DMLS; fix the
+argument categories. Darkmatter's library owns every rule, code, severity,
+and message: DMLS calls `expression::expression_call_diagnostics(expr,
+&TypeScope, strict)` (or `CallCheck::diagnostics` for lifecycle surfaces) and
+only ranges each `ExpressionDiagnostic` (`diagnostics/call_check.rs::lsp_diagnostic`,
+expected/actual types in `data`). Never add a conversion, union, category, or
+severity rule in DMLS; fix the
 library's `call_check.rs` instead, so composition's precheck and the editor
 keep agreeing. User docs:
 [`dmls/docs/diagnostics.md#call-diagnostics`](../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).

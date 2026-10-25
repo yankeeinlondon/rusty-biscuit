@@ -567,20 +567,24 @@ message). The moving parts:
   short-circuited operand is never read, so it never warns. Handled
   (intentional-absence policy, never a presence proof): a fallback primary
   (and every operand of a primary `a || b || "d"` chain), a ternary
-  condition, and a direct argument of an absence predicate. Also handled: a
+  condition, and a direct argument bound to a parameter declaring `| null`
+  in a function whose result does not (`AbsenceScope::call_argument` →
+  `FunctionRegistration::handles_absence_at`, per argument, every overload
+  taking that many arguments). Also handled: a
   read the shared branch facts prove present — the scope carries a
   `TypeScope` (`TypeScope::assume`, computed only when observing): a ternary
   branch gets its own side of the condition, an `and`/`&&` operand the earlier
   operands' true side, an `or`/`||` operand their false side;
   `TypeScope::guards_path_or_ancestor` covers the proven path and below, never
   a sibling. "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all
-  warn, and `x ? "a" : x` warns for the false branch.
+  warn (`lower` returns `null` for `null`, so it passes the absence on), and
+  `x ? "a" : x` warns for the false branch.
   `when=` and `$()` ternary conditions are gates, not absence checks: a bare
   unknown `when="x"` warns.
-- **Absence predicates** are the `predicates::ABSENCE_PREDICATES` binding group
-  (`is_null`, `is_empty`, aliases), read through
-  `functions::is_absence_predicate`. Never spell the names in a walker. The
-  rule is interim (spec Resolved Decision 9).
+- **No function-name list.** Absence handling is decided by declared types
+  only, so a host function with a `| null` parameter is handled like a
+  built-in. `unknown_identifier_warning.rs::absence_handling_names_no_function`
+  fails if a named predicate group comes back.
 - **Observation is opt-in.** `evaluate`/`evaluate_condition`/`Evaluator::eval`
   are unchanged; surfaces call `evaluate_observed`,
   `conditions::evaluate_condition_observed`, or build the `Evaluator` with

@@ -506,7 +506,16 @@ Static presence decisions read Darkmatter's shared `TypeScope`.
 `lib/tests/l1/type_scope_ownership_guard.rs` fails when a
 `TypeScope::unguarded`, `DeclaredTypes::new`, `assume_at`, or presence lookup
 appears outside its reasoned allowlist entry, or when an entry is stale. It also
-fails when preflight refuses a `MissingValue` without asking `placeholder_guard`.
+fails when preflight refuses a `MissingValue` without asking `placeholder_guard`,
+and on an unreviewed `Expr::Variable(`/`SpannedExprKind::Variable(` match:
+which roots and paths an expression reads comes from Darkmatter's
+`static_access_reads`/`static_variable_reads`, filtered by Claudine's names.
+Claudine registers no host expression function. Adding one means a
+`function(...)` catalog in `claudine/schemas/`, a Rust registration through
+Darkmatter's `expression::host::HostFunctions` installed at startup, and its
+generated `<stem>.facts.json` with a freshness test. Until all of that is
+wired, `lib/tests/l1/host_catalog.rs::claudine_ships_no_host_function_catalog_and_no_facts_artifact`
+fails (see `darkmatter/docs/topics/host-functions.md`).
 A new host site adds an entry with its reason. Runtime `is_null` checks are not
 restricted. The guard/site conformance matrix is
 `composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
@@ -568,7 +577,9 @@ predicates and action operands get the same verdict, each typed at its site
 under the enclosing `when:` items (a `set` ends the fact; no fact crosses an
 event), from `darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
 right after the launch schema resolves (`lifecycle::reject_incompatible_calls`,
-error twin `CompositionError::LifecycleCallRejected`). Expressions are typed
+error twin `CompositionError::LifecycleCallRejected`); on success it returns
+the stacks' category 3 and always-false warnings, located in
+`source.original_text`, which lead `PreparedComposition.warnings`. Expressions are typed
 by every schema layer (`DeclaredTypes::for_schema`), and Claudine's globals
 by its host catalog, which `claudine_registry()` registers
 (`register_global_catalog`); sequence preflight sites add

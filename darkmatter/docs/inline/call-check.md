@@ -72,15 +72,51 @@ $schema:
 |---|---|---|---|---|
 | 1 | Always binds: the same type, or a conversion that is always safe | `min(size, 5)`, `upper(size)`, `min("4", 5)` | composes | silent |
 | 2 | Binds unless the value is missing (`null`) | `min(maybe, 5)` | composes; fails when it runs if `maybe` is unset | silent |
-| 3 | Might bind, might not | `min(count, 5)`: text converts only if it holds a number | composes; the value decides when it runs | warning |
+| 3 | Might bind, might not | `min(count, 5)`: text converts only if it holds a number | composes **with a warning**; the value decides when it runs | warning |
 | 4 | Type not known | `min(untyped, 5)` | composes; the value decides when it runs | silent |
 | 5 | Can never bind | `min(flag, 5)`, `min("pear", 5)`, `min(1)` | **rejected** | error |
 
-Only category 5 changes what `md compose` does. The others describe how sure
-the check can be, and the editor uses them to decide what to flag; its strict
-setting also warns for categories 2 and 4 (see
+Only category 5 stops `md compose`. Category 3 composes too, but each such
+argument is reported as a `dm.expression.uncertain_call` warning on stderr,
+exactly as the editor shows it. Categories 1, 2, and 4 are silent; the editor's
+strict setting also warns for 2 and 4 (see
 [DMLS Diagnostics](../../dmls/docs/diagnostics.md#severity)). The idea is that a
 document with no types gets no warnings, and adding types buys more checking.
+
+For `{{ min(count, 5) }}` on line 6 of `doc.md`, with `count: string` and
+`count: "4"`, the document composes to `4` and stderr shows:
+
+```text
+$ md compose doc.md
+⚠ `min(…)` at doc.md:6: argument 1 (`a`) is string | null, expected number (category 3: some values of that type convert and others do not)
+```
+
+The same check covers lifecycle stacks: a category 3 call in a `when:` or an
+action operand is a warning naming the stack path
+(``lifecycle `composed[0].when` ``), and a category 5 call rejects the document
+before any event runs.
+
+### One diagnostic, everywhere
+
+Composition, `md compose`, and the editor report each call finding with the
+same fields, decided once by the Darkmatter library:
+
+| Field | Example |
+|---|---|
+| code | `dm.expression.uncertain_call` |
+| severity | `warning` (`error` for category 5) |
+| message | ``min: argument 1 (`a`) is string \| null, expected number (category 3: …)`` |
+| source | the file, and the one-based line and column where the argument starts |
+| expected type | `number` (the parameter's declared type) |
+| actual type | `string \| null` (the argument's design-time type) |
+
+A blocking policy changes whether a command fails, never a diagnostic's code
+or severity. The position is always the authored one: an argument inside a
+frontmatter string, a `::block when=` condition, a lifecycle scalar, or a
+transcluded file is reported where you wrote it, not in the composed output. A
+diagnostic never contains an evaluated value, an environment value, or file
+contents, and producing one runs nothing: a call in a branch that never runs is
+still checked, and no function is called to check it.
 
 A few rules decide the category:
 

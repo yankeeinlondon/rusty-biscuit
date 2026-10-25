@@ -350,7 +350,9 @@ true-implies `file` lets `is_project_file(source) && frontmatter(source,
 `number`, `boolean`, `object`, `unknown[]`), because only those have a
 false side Darkmatter can describe. Registration rejects a fact on a
 function that does not return `boolean`, on a parameter it does not
-declare, or of a type its kind cannot prove.
+declare, or of a type its kind cannot prove. A host's facts reach the editor
+through a generated facts artifact; see
+[Host Expression Functions](./host-functions.md).
 
 ### How long a fact lasts
 
@@ -1909,6 +1911,9 @@ To add a function:
    `function_descriptors(name)`; runtime bindings do not repeat authored
    metadata.
 
+A program embedding Darkmatter adds its own functions without editing
+Darkmatter: see [Host Expression Functions](./host-functions.md).
+
 For a read-side function, obtain paths through the `ResolutionContext`
 (`cwd`, the document's directory; magic search paths; optional remote runtime)
 rather than the process CWD. Its `base_dir()` is the document's tree root, which
@@ -1922,6 +1927,8 @@ it never leaks an unresolved `{{ … }}` literal.
 
 ## See Also
 
+- [Host Expression Functions](./host-functions.md) — functions a host
+  registers, and the facts artifact the editor reads
 - [Parsing](./parsing/index.md) — scanning, lexing, and grammar in detail
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)

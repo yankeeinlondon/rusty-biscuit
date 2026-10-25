@@ -166,12 +166,30 @@ absence:
 | `{{ x ? x : b }}` | no — the true branch is reached only when `x` is present |
 | `{{ x ? b : x }}` | yes, when the false branch is evaluated — it learns nothing about `x` |
 | `{{ x != null ? x : b }}`, `{{ is_string(x) ? x : b }}` | the condition's `x` yes; the true branch's `x` no |
-| `{{ x && x.name }}` | the first `x` yes (an `&&` operand is not an absence check); `x.name` no — it is read only once `x` held, and a guard on `x` covers the paths below it |
+| `{{ x && x.name }}` | no — an `&&` operand binds `and`'s `unknown \| null` parameter (see below), and `x.name` is read only once `x` held |
 | `{{ x.a ? x.b : c }}` | yes — a guard on `x.a` says nothing about its sibling `x.b` |
 | `{{ a ? x : b }}` | yes, when the `x` branch is evaluated |
-| `{{ is_null(x) }}`, `{{ is_empty(x) }}` | no — direct argument of an absence predicate or one of its aliases |
-| `{{ is_empty(lower(x)) }}` | yes — the predicate no longer guards the lookup directly |
+| `{{ is_null(x) }}`, `{{ is_empty(x) }}`, `{{ file_exists(x) }}` | no — a direct argument to a parameter that declares `\| null` |
+| `{{ min(x, 5) }}` | yes — `min`'s `a: number` does not declare `null` (and `min(null, 5)` is a binding error) |
+| `{{ lower(x) }}`, `{{ is_empty(trim(x)) }}` | yes — `lower`/`trim` return `null` for `null`, so they pass the absence on; `is_empty` no longer guards the lookup directly |
 | `::block when="x"` | yes — a misspelled gate would silently hide content |
+
+A function argument is silent when the call handles a missing value **by its
+declared types**: the argument is a bare variable (or a path on one) passed
+straight to a parameter whose type explicitly includes `| null`, and the
+function's own return type does not. The rule is the same for every function,
+including a host application's:
+
+- `unknown | null` or `string | null` handles it; a plain `unknown`
+  parameter does not, and neither does an optional parameter whose type has
+  no `null` (`b?: number`).
+- A function with several signatures handles it only when every signature
+  that takes that many arguments declares `null` at that position.
+- A function that returns `null` for `null` (`lower`, `trim`) passes the
+  absence on rather than handling it.
+
+The suppression only silences the advisory. A call that cannot bind, an
+unknown function, or an unavailable global is still reported.
 
 A branch is silent for exactly what its side of the condition proves present,
 by the same guard rules that narrow shell placeholders (see

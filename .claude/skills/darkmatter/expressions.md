@@ -34,8 +34,21 @@ and DMLS both read it.
   holds a category 5 call before anything evaluates, dead branches included.
   The error is `ExpressionError::CallCheck`; find it with
   `MarkdownError::rejected_call()`.
-- DMLS maps categories to `dm.expression.incompatible_call` (5) and
-  `dm.expression.uncertain_call` (3; also 2 and 4 under `[expressions] strict`).
+- **Shared diagnostics** (`expression/diagnostics.rs`): the library owns the
+  codes (`INCOMPATIBLE_CALL_CODE`, `UNCERTAIN_CALL_CODE`, plus
+  `ALWAYS_FALSE_CALL_CODE`, `INCOMPLETE_ANALYSIS_CODE`), the severity ladder
+  (`call_severity`: 5 error, 3 warning, 2/4 warning only when strict), and
+  the record (`CallCheck::diagnostics(strict)` / `expression_call_diagnostics`
+  → `ExpressionDiagnostic` with expected/actual types; `.locate`/`.at` →
+  located `Diagnostic` with one-based line/column). DMLS only ranges records
+  (types in LSP `data`); composition is never strict, so the precheck turns
+  each category 3, always-false, and incomplete finding into a
+  `ComposeWarning` whose `diagnostic` (`Option<Box<_>>`: inline it overflowed
+  the 16-level `as_markdown` nesting test's stack) is the located record, and
+  `MarkdownError::call_diagnostic()` is a rejection's record. Never build a
+  call code, severity, or message outside this module. Parity tests:
+  `lib/tests/l1/shared_diagnostics.rs`, DMLS
+  `expression_call_diagnostics::shared_fields`.
 - `CallCheck::always_false` marks a call whose authored literal argument
   is not a well-formed file reference, at a parameter registered with
   `RegistrationBuilder::false_for_malformed_reference` (`file_exists` only;
@@ -67,7 +80,10 @@ and DMLS both read it.
   authored `location`; DMLS ranges md stacks from it) over
   `walk_stack_scoped`, which shares `branch_scopes`/`scope_after_action` with
   `walk_scoped`. `reject_incompatible_calls` is its first category 5 (md: CLI
-  before the run; Claudine: `prepare.rs` after the launch schema), error
+  before the run; Claudine: `prepare.rs` after the launch schema); on success
+  it returns the surfaces' located warnings (pass the loaded text,
+  `Markdown::loaded_text()`), which md and Claudine report first among the
+  composition's warnings; error
   `LifecycleError::LifecycleCallRejected` (`rejected_call()`), Claudine twin
   `CompositionError::LifecycleCallRejected`.
 - An all-literal call is classified by the real `bind_call`, which runs no
@@ -156,6 +172,17 @@ and an unknown function as the `ERROR` `dm.expression.unknown_function` through
 `expression::validate_expression` (see
 [dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
 
+**Static read inventory for hosts.** `expression::static_access_reads(&Expr)`
+lists every variable read (all branches, operands, call arguments, index
+expressions; source order) as a `StaticAccessRead`: the authored `variable`
+plus the `AccessStep`s applied to it through parentheses (`Member`, string
+`Key`, or `Index` with its `access` node); `static_path()` is the dotted
+prefix up to the first `Index`. A host that rejects or collects names
+(Claudine's retired `_loop_*`/sequence names, loop control variables,
+target-identity roots) filters these reads; it never walks `Expr` itself.
+Claudine's `type_scope_ownership_guard.rs` fails on an unreviewed
+`Expr::Variable(`/`SpannedExprKind::Variable(` match in `claudine/lib/src`.
+
 **Type scope** (`expression/scope/`). `TypeScope` is the one source of
 static presence and type at a site: `DeclaredTypes` (built once per owner
 from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
@@ -168,7 +195,14 @@ only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
 TrueImplies, FalseImplies}` × `FactType::{NonNull, Type(text)}`), read
 through `functions::inspect_registration`, so a built-in (`FunctionBinding::narrowing`),
 a test function, and a host function narrow alike; never key a fact on a
-name. A `Ref` arm is classified by its definition body's top level through
+name. Host functions (`expression::host`): `HostFunctions::builder(HostFunctionCatalog)`
+validates names, catalog parity, eagerness, and facts at `build`;
+`install_host_functions` (process-wide) or `HostFunctions::enter` (thread
+guard, DMLS) make a set visible; lookup order is test hooks → entered →
+installed → built-ins in `functions/mod.rs`. The editor rebuilds facts from
+`<stem>.facts.json` (`facts_artifact` / `analysis_only`); a function it cannot
+trust is *incomplete* (dispatchable, no registration) and
+`incomplete_host_calls` reports it. Docs: `darkmatter/docs/topics/host-functions.md`. A `Ref` arm is classified by its definition body's top level through
 `DeclaredTypes::definitions()` (one level, never expanded); an impossible
 guard returns the incoming type. `invalidate(&WriteSet)` (`WriteSet::destination` for a
 `set` path) and `TypeScope::join` keep facts from leaking past writes or
