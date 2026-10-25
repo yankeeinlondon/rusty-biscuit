@@ -173,8 +173,8 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   IDs after a later marker (about 1 drain in 15). `wt remove` repeats marker
   rounds (create a marker, flush until it arrives) until a round delivers no
   watched-path event, and treats anything later as arriving in a later drain
-  (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
-  idle, up to ~650 ms under suite load.
+  (`wt remove`'s former watcher did this; it was removed 2026-10-23). A round
+  costs ~11 ms idle, up to ~650 ms under suite load.
 - **Wait without the blocking flush, but keep flushing.** `FlushSync` blocks
   for as long as fseventsd takes, so a wait cannot check a deadline or Ctrl-C
   while inside it. `FSEventStreamFlushAsync` returns at once and may be called
@@ -190,8 +190,9 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   children and renaming or removing it.
 - **fseventsd serializes stream registration:** ~20 ms alone, up to 5 s each
   with ~15 test processes starting together. Run FSEvents tests in a nextest
-  group with `max-threads = 1` (`fsevents-l1`). Events also lag 100–600 ms
-  under load, past any fixed wait.
+  group with `max-threads = 1` (the repository had one, `fsevents-l1`, for
+  `wt remove`'s former watcher). Events also lag 100–600 ms under load, past
+  any fixed wait.
 - **History flags are cumulative.** A created-then-deleted (or renamed) path
   can report `Create` with `Remove` or the rename flag. Match "the
   history includes the expected flag" plus the path's current state, never
@@ -237,8 +238,8 @@ administrator can restart it with `sudo killall fseventsd`; launchd restarts
 it at once. **That is system-wide:** every FSEvents client (Spotlight, Time
 Machine, editors, file watchers, build tools) may miss events from around the
 restart or rescan. It is a manual troubleshooting step only: never script it,
-never run it from a test or recipe, and never have `wt` do it. The user-facing
-version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
+never run it from a test or recipe, and never have `wt` do it. `wt remove`
+no longer watches files, so its user docs no longer describe fseventsd.
 
 ### Reading other processes' descriptors and cwd
 
@@ -295,6 +296,15 @@ version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
   - An exported `CDPATH` also makes `cd` print the path, so `$(cd … && pwd)`
     captures it twice. Run `.githooks/tests/test-pre-push.sh` as
     `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
+  - `CDPATH` also lists `~/coding/personal`, which holds unrelated
+    repositories (for example `~/coding/personal/repo`). A scratch script
+    that runs `cd repo` and then `git init`/`git add`/`git commit` there
+    commits into a real repository of the user's; it has happened at least
+    three times (2026-10-04, 2026-10-12, 2026-10-22). Build scratch
+    fixtures under `mktemp -d` and `cd` to that absolute path.
+  - In the agent's own shell `cd` may also be wrapped by zoxide (`zoxide: no
+    match found` is the sign), which can jump to a remembered directory.
+    Prefer absolute paths, `git -C`, and `--manifest-path` to `cd`.
 - **Signing fails or opens pinentry because Claudine shadows `HOME`.** An agent
   session can inherit `HOME=~/.claudine` (Claudine's directory), while the
   OpenPGP keyring lives under the login home. Run commit, verify, and push with

@@ -3,11 +3,16 @@
 //! On Unix a directory is created `0o700` and a file `0o600`, and reading
 //! either requires the current user as owner and no group or other access.
 //! Windows has no mode bits; the files inherit the Git directory's ACL, and
-//! reading refuses any reparse point (symlink or junction).
+//! reading refuses any reparse point (symlink or junction). A Windows drive
+//! seen from WSL (drvfs) is the same: its mode bits are made up and `chmod`
+//! does not change them, so there only ownership is checked.
 
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read, Write};
 use std::path::Path;
+
+#[cfg(unix)]
+use crate::remove::mounts::{Mount, MountInfo, NativeMounts, containing};
 
 /// Why a directory or file in the store cannot be trusted. Nothing in it is
 /// read once one of these is found.
@@ -68,7 +73,7 @@ pub(super) fn validate_dir(path: &Path) -> Result<Metadata, StorageProblem> {
     if !metadata.is_dir() {
         return Err(StorageProblem::NotDirectory);
     }
-    check_owner(&metadata)?;
+    check_owner(path, &metadata)?;
     Ok(metadata)
 }
 
@@ -82,7 +87,7 @@ pub(super) fn read_private_file(path: &Path) -> Result<Vec<u8>, StorageProblem> 
     if !before.is_file() {
         return Err(StorageProblem::NotRegularFile);
     }
-    check_owner(&before)?;
+    check_owner(path, &before)?;
     let mut file = open_no_follow(path)?;
     let after = file.metadata()?;
     if !after.is_file() || !same_file(&before, &after) {
@@ -111,8 +116,8 @@ pub(super) fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// An unused hidden name beside `path` for building its replacement. It is
-/// never an operation ID or a journal generation, so nothing reads it.
-pub(super) fn temp_beside(path: &Path) -> io::Result<std::path::PathBuf> {
+/// never an operation ID, so nothing reads it.
+fn temp_beside(path: &Path) -> io::Result<std::path::PathBuf> {
     let parent = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
     let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
     let mut nonce = [0_u8; 8];
@@ -124,7 +129,7 @@ pub(super) fn temp_beside(path: &Path) -> io::Result<std::path::PathBuf> {
 /// Renames the flushed, closed file `temp` over `path` and flushes the
 /// directory: a reader of `path` sees the old file or the new one, never
 /// neither. Std's rename replaces an existing file on Windows too.
-pub(super) fn publish(temp: &Path, path: &Path) -> io::Result<()> {
+fn publish(temp: &Path, path: &Path) -> io::Result<()> {
     // Replacement is the point here; the no-replacement rule is for the
     // checkout move, not for the store's own files.
     fs::rename(temp, path)?;
@@ -132,7 +137,7 @@ pub(super) fn publish(temp: &Path, path: &Path) -> io::Result<()> {
 }
 
 /// Creates `path` as a new owner-only file; it must not exist.
-pub(super) fn create_private_file(path: &Path) -> io::Result<File> {
+fn create_private_file(path: &Path) -> io::Result<File> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -191,28 +196,35 @@ fn is_link(metadata: &Metadata) -> bool {
 }
 
 #[cfg(unix)]
-fn check_owner(metadata: &Metadata) -> Result<(), StorageProblem> {
+fn check_owner(path: &Path, metadata: &Metadata) -> Result<(), StorageProblem> {
+    check_owner_with(path, metadata, &NativeMounts)
+}
+
+#[cfg(unix)]
+fn check_owner_with(path: &Path, metadata: &Metadata, mounts: &dyn MountInfo) -> Result<(), StorageProblem> {
     use std::os::unix::fs::MetadataExt;
     // SAFETY: `geteuid` has no preconditions and cannot fail.
     if metadata.uid() != unsafe { libc::geteuid() } {
         return Err(StorageProblem::WrongOwner);
     }
-    if metadata.mode() & 0o077 != 0 {
+    // The mount table is read only when the bits are open, which they never
+    // are for a store `wt` created anywhere but drvfs.
+    if metadata.mode() & 0o077 != 0 && !on_drvfs(path, mounts) {
         return Err(StorageProblem::OpenPermissions);
     }
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn check_owner(_metadata: &Metadata) -> Result<(), StorageProblem> {
-    Ok(())
+/// Whether `path` lives on WSL's drvfs. An unreadable table or path is not.
+#[cfg(unix)]
+fn on_drvfs(path: &Path, mounts: &dyn MountInfo) -> bool {
+    let (Ok(table), Ok(real)) = (mounts.mounts(), biscuit_file::canonicalize_simplified(path)) else { return false };
+    containing(&table, &real).is_some_and(Mount::is_drvfs)
 }
 
-/// Opens the existing file `path` for appending, refusing a link.
-pub(super) fn open_append(path: &Path) -> io::Result<File> {
-    let mut options = fs::OpenOptions::new();
-    options.append(true);
-    no_follow(&mut options).open(path)
+#[cfg(not(unix))]
+fn check_owner(_path: &Path, _metadata: &Metadata) -> Result<(), StorageProblem> {
+    Ok(())
 }
 
 fn open_no_follow(path: &Path) -> io::Result<File> {
@@ -291,6 +303,45 @@ mod tests {
         assert_eq!(read_private_file(&file), Err(StorageProblem::OpenPermissions));
         fs::set_permissions(&store, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(ensure_private_dir(&store), Err(StorageProblem::OpenPermissions));
+    }
+
+    /// WSL's drvfs shows every entry as `0o777` and ignores `chmod`, so open
+    /// bits there are not a refusal; on any other filesystem, or when the
+    /// mount table cannot be read, they still are.
+    #[cfg(unix)]
+    #[test]
+    fn open_permissions_are_accepted_only_on_drvfs() {
+        use crate::remove::test_support::FixedMounts;
+        use std::os::unix::fs::PermissionsExt;
+
+        struct Unreadable;
+        impl MountInfo for Unreadable {
+            fn mounts(&self) -> io::Result<Vec<Mount>> {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("store");
+        ensure_private_dir(&store).unwrap();
+        fs::set_permissions(&store, fs::Permissions::from_mode(0o777)).unwrap();
+        let metadata = fs::symlink_metadata(&store).unwrap();
+        let real = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let mount = |fs_type: &str, super_options: &str| {
+            FixedMounts(vec![Mount { mount_point: real.clone(), source: "C:\\".into(), fs_type: fs_type.into(), super_options: super_options.into() }])
+        };
+
+        let drvfs = mount("9p", "rw,aname=drvfs;path=C:\\;uid=1000;gid=1000");
+        assert_eq!(check_owner_with(&store, &metadata, &drvfs), Ok(()));
+        assert_eq!(check_owner_with(&store, &metadata, &mount("drvfs", "")), Ok(()));
+        for (cell, mounts) in [
+            ("ext4", &mount("ext4", "rw") as &dyn MountInfo),
+            ("9p that is not drvfs", &mount("9p", "rw,trans=virtio")),
+            ("an unreadable table", &Unreadable),
+            ("no containing mount", &FixedMounts(Vec::new())),
+        ] {
+            assert_eq!(check_owner_with(&store, &metadata, mounts), Err(StorageProblem::OpenPermissions), "{cell}");
+        }
     }
 
     #[test]

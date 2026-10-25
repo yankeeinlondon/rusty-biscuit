@@ -15,8 +15,9 @@
 //! directory handles at all.
 
 use super::backend::{
-    Enumeration, InspectionContext, InspectionResult, MechanismInspection, MechanismSupport,
-    ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
+    Enumeration, InspectionContext, InspectionResult, LinkError, MechanismInspection,
+    MechanismSupport, ProcessCandidate, ProcessDetails, ProcessLink, RawEvidence, Tally,
+    UsageBackend,
 };
 use super::budget::Budget;
 use super::matching::ObservedObject;
@@ -24,7 +25,8 @@ use super::report::{EvidenceKind, LimitationExample, LimitationKind, Limitations
 use crate::performance::{self, counters};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 pub(crate) const OPEN_HANDLES_UNSUPPORTED: &str =
     "other processes' handles are not inspected in this build: reading a handle's identity can \
@@ -100,6 +102,64 @@ pub(crate) trait Source {
     }
     /// Image path and account SID, read through the handle.
     fn details(&mut self, process: &Self::Process) -> Result<ProcessDetails, String>;
+    /// The PID the process was started from (`InheritedFromUniqueProcessId`).
+    fn parent_pid(&mut self, _process: &Self::Process) -> Result<u32, LinkError> {
+        Err(LinkError::Unsupported)
+    }
+    fn image(&mut self, _process: &Self::Process) -> Option<PathBuf> {
+        None
+    }
+    /// The image's version-resource `FileDescription`.
+    fn description(&mut self, _image: &Path) -> Option<OsString> {
+        None
+    }
+}
+
+/// The `(language, code page)` pairs of a `\VarFileInfo\Translation` value.
+pub(crate) fn parse_translations(bytes: &[u8]) -> Vec<(u16, u16)> {
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pair| {
+            (
+                u16::from_le_bytes([pair[0], pair[1]]),
+                u16::from_le_bytes([pair[2], pair[3]]),
+            )
+        })
+        .collect()
+}
+
+/// `VerQueryValueW` sub-blocks to try for `FileDescription`, in order: each
+/// declared translation, then US English in Unicode and in Windows-1252,
+/// which images without a translation table commonly use.
+pub(crate) fn description_queries(translations: &[(u16, u16)]) -> Vec<String> {
+    let mut pairs = translations.to_vec();
+    for fallback in [(0x0409, 0x04B0), (0x0409, 0x04E4)] {
+        if !pairs.contains(&fallback) {
+            pairs.push(fallback);
+        }
+    }
+    pairs
+        .into_iter()
+        .map(|(language, code_page)| format!("\\StringFileInfo\\{language:04X}{code_page:04X}\\FileDescription"))
+        .collect()
+}
+
+/// A string value's UTF-16 units without its terminator; `None` when blank.
+pub(crate) fn description_text(units: &[u16]) -> Option<OsString> {
+    let end = units.iter().position(|&unit| unit == 0).unwrap_or(units.len());
+    let text = String::from_utf16_lossy(&units[..end]);
+    let text = text.trim();
+    (!text.is_empty()).then(|| OsString::from(text))
+}
+
+fn link_error(fault: Fault) -> LinkError {
+    match fault {
+        Fault::Gone => LinkError::Gone,
+        Fault::Denied => LinkError::Unreadable("permission was denied".to_string()),
+        Fault::Failed(detail) => LinkError::Unreadable(detail),
+    }
 }
 
 /// A process handle kept from enumeration through enrichment.
@@ -115,6 +175,8 @@ pub(crate) struct ModuleBackend<S: Source> {
     /// enrichment reads the same lifetime.
     held: HashMap<u32, Held<S::Process>>,
     path_holders: std::collections::HashSet<u32>,
+    /// Descriptions by image, read once per query: many processes share one.
+    descriptions: HashMap<PathBuf, Option<OsString>>,
 }
 
 impl<S: Source> ModuleBackend<S> {
@@ -123,6 +185,7 @@ impl<S: Source> ModuleBackend<S> {
             source,
             held: HashMap::new(),
             path_holders: std::collections::HashSet::new(),
+            descriptions: HashMap::new(),
         }
     }
 }
@@ -270,7 +333,8 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
         candidates: &[ProcessCandidate<Self::Payload>],
     ) -> Option<(Vec<super::process::Observation>, super::report::Coverage)> {
         let reader = self.source.path_reader()?;
-        let (mut observations, mut coverage) = super::win32_paths::scan(context, &reader);
+        let entries = context.index.probe_entries(&context.root.resolved);
+        let (mut observations, mut coverage) = super::win32_paths::scan(context, &entries, &reader);
         let mut uncertain = Vec::new();
         for observation in &mut observations {
             if let Some(candidate) = candidates.iter().find(|c| c.pid == observation.pid)
@@ -287,7 +351,7 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
                 // A PID first seen after enumeration needs a second file-side
                 // observation while its new process handle is held; otherwise
                 // its creation time might describe a successor.
-                let entry = context.index.entries.iter().find(|entry| observation.evidence.iter()
+                let entry = entries.iter().find(|entry| observation.evidence.iter()
                     .any(|e| e.observed_path.as_ref().is_some_and(|p| p.as_os_str() == entry.path.as_os_str())));
                 if let Some(entry) = entry
                     && let Ok((identity, pids)) = reader(entry, context.budget)
@@ -360,6 +424,40 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
         }
         let opened = self.source.open(pid).ok()?;
         Some(opened.creation_time)
+    }
+
+    /// Reads through one process handle, the held one when there is one, so
+    /// every field names one lifetime.
+    fn link(&mut self, pid: u32) -> Result<ProcessLink, LinkError> {
+        let Self {
+            source,
+            held,
+            descriptions,
+            ..
+        } = self;
+        let opened;
+        let (process, image) = match held.get(&pid) {
+            Some(held) => (&held.process, None),
+            None => {
+                opened = source.open(pid).map_err(link_error)?;
+                (&opened.process, opened.image.clone())
+            }
+        };
+        let parent_pid = source.parent_pid(process)?;
+        let creation_time = source.creation_time(process).map_err(link_error)?;
+        let image = image.or_else(|| source.image(process));
+        let app_name = image.as_ref().and_then(|image| {
+            descriptions
+                .entry(image.clone())
+                .or_insert_with(|| source.description(image))
+                .clone()
+        });
+        Ok(ProcessLink {
+            order: creation_time,
+            parent_pid,
+            name: image.as_deref().and_then(Path::file_name).map(ToOwned::to_owned),
+            app_name,
+        })
     }
 }
 
@@ -468,10 +566,14 @@ fn whole(tally: &mut Tally, fault: Fault) {
 
 #[cfg(windows)]
 pub(crate) mod ffi {
-    use super::{Fault, Module, Opened, ProcessDetails, Source};
+    use super::{Fault, LinkError, Module, Opened, ProcessDetails, Source};
     use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use std::path::PathBuf;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::path::{Path, PathBuf};
+    use windows::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER,
         ERROR_PARTIAL_COPY, FILETIME, HANDLE, HMODULE, STILL_ACTIVE,
@@ -657,8 +759,78 @@ pub(crate) mod ffi {
         }
     }
 
+    /// The bytes of `sub_block` inside a version resource, which they borrow.
+    /// `VerQueryValueW` reports string values in UTF-16 units, others in bytes.
+    fn version_value<'a>(data: &'a [u8], sub_block: &str, unit: usize) -> Option<&'a [u8]> {
+        let sub_block: Vec<u16> = sub_block.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut pointer = std::ptr::null_mut();
+        let mut length = 0u32;
+        // SAFETY: `data` is a version resource from `GetFileVersionInfoW`; the
+        // sub-block is NUL-terminated.
+        let found = unsafe {
+            VerQueryValueW(data.as_ptr().cast(), PCWSTR(sub_block.as_ptr()), &mut pointer, &mut length)
+        };
+        if !found.as_bool() || pointer.is_null() {
+            return None;
+        }
+        let start = (pointer as usize).checked_sub(data.as_ptr() as usize)?;
+        let end = start.checked_add(length as usize * unit)?;
+        data.get(start..end.min(data.len()))
+    }
+
+    fn file_description(image: &Path) -> Option<OsString> {
+        let wide: Vec<u16> = image.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        // SAFETY: a NUL-terminated path.
+        let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(wide.as_ptr()), None) };
+        if size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        // SAFETY: `data` is `size` writable bytes.
+        unsafe { GetFileVersionInfoW(PCWSTR(wide.as_ptr()), None, size, data.as_mut_ptr().cast()) }.ok()?;
+        let translations = version_value(&data, "\\VarFileInfo\\Translation", 1)
+            .map(super::parse_translations)
+            .unwrap_or_default();
+        super::description_queries(&translations).iter().find_map(|sub_block| {
+            let bytes = version_value(&data, sub_block, 2)?;
+            let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|unit| u16::from_le_bytes(*unit)).collect();
+            super::description_text(&units)
+        })
+    }
+
     impl Source for Win32 {
         type Process = ProcessHandle;
+
+        fn parent_pid(&mut self, process: &ProcessHandle) -> Result<u32, LinkError> {
+            let mut basic = PROCESS_BASIC_INFORMATION::default();
+            let mut length = 0u32;
+            // SAFETY: `basic` is the documented output of this class, of the size passed.
+            let status = unsafe {
+                NtQueryInformationProcess(
+                    process.0,
+                    ProcessBasicInformation,
+                    (&raw mut basic).cast(),
+                    size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                    &mut length,
+                )
+            };
+            if status.is_err() {
+                return Err(LinkError::Unreadable(format!(
+                    "the parent could not be read (NTSTATUS {:#010x})",
+                    status.0
+                )));
+            }
+            u32::try_from(basic.InheritedFromUniqueProcessId)
+                .map_err(|_| LinkError::Unreadable("the parent PID is out of range".to_string()))
+        }
+
+        fn image(&mut self, process: &ProcessHandle) -> Option<PathBuf> {
+            image(process.0)
+        }
+
+        fn description(&mut self, image: &Path) -> Option<OsString> {
+            file_description(image)
+        }
 
         fn path_reader(&self) -> Option<super::super::win32_paths::PathReader> {
             Some(std::sync::Arc::new(super::super::win32_paths::ffi::holders))

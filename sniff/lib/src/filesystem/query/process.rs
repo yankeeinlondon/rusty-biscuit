@@ -1,10 +1,14 @@
 //! Process lifetimes: merging observations and enriching identity safely.
 
-use super::backend::{ProcessDetails, UsageBackend};
+use super::ancestry;
+use super::backend::{LinkError, ProcessDetails, UsageBackend};
 use super::budget::Budget;
-use super::report::{Evidence, LimitationExample, LimitationKind, Limitations, ProcessRecord};
+use super::report::{
+    Ancestor, AncestryEnd, Evidence, LimitationExample, LimitationKind, Limitations, ProcessRecord,
+};
 use crate::performance::{self, counters};
 use std::collections::HashMap;
+use std::ffi::OsString;
 
 /// One process acquisition and the in-scope evidence it produced.
 #[derive(Debug, Clone)]
@@ -123,11 +127,117 @@ pub(crate) fn enrich<B: UsageBackend>(
     }
 }
 
-/// Converts finished observations to sorted report records.
-pub(crate) fn into_records(observations: Vec<Observation>) -> Vec<ProcessRecord> {
+/// A process's parent, app name, and verified ancestors.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Context {
+    parent_pid: Option<u32>,
+    app_name: Option<OsString>,
+    ancestors: Vec<Ancestor>,
+    end: AncestryEnd,
+}
+
+impl Context {
+    fn ended(end: AncestryEnd) -> Self {
+        Self {
+            end,
+            ..Self::default()
+        }
+    }
+}
+
+/// Reads each observation's context, aligned with `observations`, under the
+/// same proof of lifetime as [`enrich`].
+pub(crate) fn contextualize<B: UsageBackend>(
+    observations: &[Observation],
+    backend: &mut B,
+    budget: &Budget,
+    limitations: &mut Limitations,
+) -> Vec<Context> {
+    let mut contexts = Vec::with_capacity(observations.len());
+    for observation in observations {
+        let pid = observation.pid;
+        if !observation.lifetime_known() {
+            limitations.record(
+                LimitationKind::ContextUnavailable,
+                "context is not read for a process whose lifetime cannot be verified",
+                1,
+                Some(LimitationExample::pid(pid)),
+            );
+            contexts.push(Context::ended(AncestryEnd::NotRead));
+            continue;
+        }
+        if budget.expired() {
+            limitations.record(
+                LimitationKind::BudgetExhausted,
+                "the budget expired before process context was read",
+                1,
+                Some(LimitationExample::pid(pid)),
+            );
+            contexts.push(Context::ended(AncestryEnd::NotRead));
+            continue;
+        }
+        let mut reader = |pid| backend.link(pid);
+        let own = match ancestry::read(&mut reader, pid) {
+            Ok(own) => own,
+            Err(LinkError::Unsupported) => {
+                contexts.push(Context::ended(AncestryEnd::Unsupported));
+                continue;
+            }
+            Err(LinkError::Gone) => {
+                limitations.record(
+                    LimitationKind::ProcessDisappeared,
+                    "the process exited or its PID was reused before its context was read",
+                    1,
+                    Some(LimitationExample::pid(pid)),
+                );
+                contexts.push(Context::ended(AncestryEnd::NotRead));
+                continue;
+            }
+            Err(LinkError::Unreadable(detail)) => {
+                limitations.record(
+                    LimitationKind::ContextUnavailable,
+                    "process context could not be read",
+                    1,
+                    Some(LimitationExample::pid(pid).with_detail(detail)),
+                );
+                contexts.push(Context::ended(AncestryEnd::Unreadable));
+                continue;
+            }
+        };
+        // Read after the link: an unchanged token proves the PID named the
+        // inspected lifetime for the whole read.
+        if observation.creation_token.is_some()
+            && backend.creation_token(pid) != observation.creation_token
+        {
+            limitations.record(
+                LimitationKind::ProcessDisappeared,
+                "the process exited or its PID was reused before its context was read",
+                1,
+                Some(LimitationExample::pid(pid)),
+            );
+            contexts.push(Context::ended(AncestryEnd::NotRead));
+            continue;
+        }
+        let mut reader = |pid| backend.link(pid);
+        let (ancestors, end) = ancestry::chain(pid, &own, budget, limitations, &mut reader);
+        contexts.push(Context {
+            parent_pid: Some(own.parent_pid),
+            app_name: own.app_name,
+            ancestors,
+            end,
+        });
+    }
+    contexts
+}
+
+/// Converts finished observations and their [`contextualize`]d contexts to
+/// sorted report records.
+pub(crate) fn into_records(observations: Vec<Observation>, contexts: Vec<Context>) -> Vec<ProcessRecord> {
+    let mut contexts = contexts.into_iter();
     let mut records: Vec<ProcessRecord> = observations
         .into_iter()
         .map(|observation| {
+            let context = contexts.next().unwrap_or_default();
             let identity_uncertain = !observation.lifetime_known();
             let mut evidence = observation.evidence;
             evidence.sort_by(|a, b| evidence_key(a).cmp(&evidence_key(b)));
@@ -140,6 +250,10 @@ pub(crate) fn into_records(observations: Vec<Observation>) -> Vec<ProcessRecord>
                 name: observation.details.name.map(Into::into),
                 executable: observation.details.executable.map(Into::into),
                 user: observation.details.user,
+                parent_pid: context.parent_pid,
+                app_name: context.app_name.map(Into::into),
+                ancestors: context.ancestors,
+                ancestry_end: context.end,
                 evidence,
             }
         })

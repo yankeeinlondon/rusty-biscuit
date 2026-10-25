@@ -166,8 +166,11 @@ whether a recreated file should be analyzed.
 
 ## Filesystem Usage Queries
 
-The focused query adds no runtime crates. Linux/WSL2 read `/proc` with `std`
-and existing `libc`; macOS uses direct `libproc` FFI through the system library,
+The focused query adds one runtime crate, macOS-only `plist`, to read an app
+bundle's `Info.plist` (XML or binary) for a process's app name; it was
+already in the workspace through `biscuit-terminal`. Linux/WSL2 read `/proc`
+with `std` and existing `libc`; macOS uses direct `libproc` FFI through the
+system library,
 without a bindgen/libclang build requirement. Windows uses existing `windows`
 bindings plus the system `ntdll` file-side query (class 47); no helper program,
 Restart Manager, elevation, or `filelocksmith` dependency is required.
@@ -179,6 +182,7 @@ Restart Manager, elevation, or `filelocksmith` dependency is required.
 | `sysinfo` | 0.38 / MIT | Existing platform bindings; candidate-only identity enrichment where the backend does not supply it |
 | `libc` | 0.2 / MIT OR Apache-2.0 | System ABI on Unix; Linux device encoding and macOS process inspection |
 | `windows` | 0.62 / MIT OR Apache-2.0 | Windows SDK/system libraries; native Windows process, file identity, and module inspection |
+| `plist` | 1 / MIT | macOS only, no native build; `CFBundleName`/`CFBundleDisplayName` of the bundle enclosing a process's executable |
 
 Live Linux watch fixtures use existing `libc::inotify_init1` and
 `inotify_add_watch`; there is no `inotify` crate dependency.

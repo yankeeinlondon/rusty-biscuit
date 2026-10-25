@@ -3,8 +3,15 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(windows)]
 use std::process::Command;
+
+use super::clock::{Clock, Slept};
+use super::faults::{FsFaults, FsOp};
+use super::mounts::{Mount, MountInfo};
 
 pub struct TestRepo {
     dir: tempfile::TempDir,
@@ -223,4 +230,226 @@ pub fn link_dir(target: &Path, link: &Path) {
             .expect("cmd runs");
         assert!(status.success(), "mklink /J {} {}", link.display(), target.display());
     }
+}
+
+/// A [`Clock`] that records each requested sleep
+/// instead of taking it, and can cancel from a chosen sleep on.
+#[derive(Debug, Default)]
+pub struct ManualClock {
+    slept: Mutex<Vec<Duration>>,
+    /// Sleeps after this many report cancellation.
+    cancel_after: Option<usize>,
+}
+
+impl ManualClock {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancelled_after(sleeps: usize) -> Self {
+        Self { cancel_after: Some(sleeps), ..Self::default() }
+    }
+
+    /// The sleeps taken, in order; a cancelled one is not listed.
+    pub fn slept(&self) -> Vec<Duration> {
+        self.slept.lock().unwrap().clone()
+    }
+}
+
+impl Clock for ManualClock {
+    fn sleep(&self, duration: Duration, cancelled: &dyn Fn() -> bool) -> Slept {
+        let mut slept = self.slept.lock().unwrap();
+        if cancelled() || self.cancel_after.is_some_and(|after| slept.len() >= after) {
+            return Slept::Cancelled;
+        }
+        slept.push(duration);
+        Slept::Elapsed
+    }
+}
+
+/// A fixed mount table.
+#[derive(Debug, Clone, Default)]
+pub struct FixedMounts(pub Vec<Mount>);
+
+impl MountInfo for FixedMounts {
+    fn mounts(&self) -> std::io::Result<Vec<Mount>> {
+        Ok(self.0.clone())
+    }
+}
+
+/// A mount table that changes while removal runs; clones share one table.
+#[derive(Debug, Clone, Default)]
+pub struct LiveMounts(Arc<Mutex<Vec<Mount>>>);
+
+impl LiveMounts {
+    pub fn publish(&self, mount: Mount) {
+        self.0.lock().unwrap().push(mount);
+    }
+
+    pub fn unmount_all(&self) {
+        self.0.lock().unwrap().clear();
+    }
+}
+
+impl MountInfo for LiveMounts {
+    fn mounts(&self) -> std::io::Result<Vec<Mount>> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}
+
+/// [`FsFaults`] that injects nothing, but at the first directory read (the
+/// deletion root's) publishes in `mounts` a same-device mount at `relative`
+/// under that directory, spelled as the OS spells it: a mount made after
+/// deletion began, before it reaches the mount point.
+pub struct MountDuringDeletion {
+    mounts: LiveMounts,
+    relative: PathBuf,
+    published: AtomicBool,
+}
+
+impl MountDuringDeletion {
+    pub fn new(mounts: &LiveMounts, relative: impl Into<PathBuf>) -> Self {
+        Self { mounts: mounts.clone(), relative: relative.into(), published: AtomicBool::new(false) }
+    }
+}
+
+impl FsFaults for MountDuringDeletion {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<std::io::Error> {
+        if op == FsOp::ReadDir && !self.published.swap(true, Ordering::SeqCst) {
+            let real = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+            let mount = Mount { mount_point: real.join(&self.relative), source: "/srv/bound".into(), fs_type: "ext4".into(), super_options: String::new() };
+            self.mounts.publish(mount);
+        }
+        None
+    }
+}
+
+/// One scripted fault: fires while `remaining` is `None` (always) or above
+/// zero.
+struct Fault {
+    op: FsOp,
+    path: PathBuf,
+    remaining: Option<usize>,
+    fired: usize,
+    make: fn() -> std::io::Error,
+}
+
+/// [`FsFaults`] from a script of (operation, path)
+/// faults, each temporary (a fixed number of times) or permanent.
+#[derive(Default)]
+pub struct ScriptedFaults {
+    faults: Mutex<Vec<Fault>>,
+}
+
+impl ScriptedFaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fails `op` on `path` the next `count` times, then lets it through.
+    pub fn times(self, op: FsOp, path: &Path, count: usize, make: fn() -> std::io::Error) -> Self {
+        self.push(op, path, Some(count), make)
+    }
+
+    /// Fails every `op` on `path`.
+    pub fn always(self, op: FsOp, path: &Path, make: fn() -> std::io::Error) -> Self {
+        self.push(op, path, None, make)
+    }
+
+    fn push(self, op: FsOp, path: &Path, remaining: Option<usize>, make: fn() -> std::io::Error) -> Self {
+        self.faults.lock().unwrap().push(Fault { op, path: path.to_path_buf(), remaining, fired: 0, make });
+        self
+    }
+
+    /// How many times the fault for `op` on `path` fired.
+    pub fn fired(&self, op: FsOp, path: &Path) -> usize {
+        self.faults.lock().unwrap().iter().filter(|fault| fault.op == op && fault.path == path).map(|fault| fault.fired).sum()
+    }
+}
+
+impl FsFaults for ScriptedFaults {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<std::io::Error> {
+        let mut faults = self.faults.lock().unwrap();
+        let fault = faults.iter_mut().find(|fault| fault.op == op && fault.path == path && fault.remaining != Some(0))?;
+        if let Some(remaining) = &mut fault.remaining {
+            *remaining -= 1;
+        }
+        fault.fired += 1;
+        Some((fault.make)())
+    }
+}
+
+/// [`Holders`](super::delete::Holders) that answers from a script, one
+/// report per query (the last repeats), and records what each query asked
+/// about.
+#[derive(Default)]
+pub struct ScriptedHolders {
+    reports: Mutex<Vec<super::delete::HolderReport>>,
+    asked: Mutex<Vec<Vec<PathBuf>>>,
+}
+
+impl ScriptedHolders {
+    /// Answers every query with [`HolderReport::Unknown`](super::delete::HolderReport::Unknown).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn answering(reports: Vec<super::delete::HolderReport>) -> Self {
+        Self { reports: Mutex::new(reports), ..Self::default() }
+    }
+
+    /// The blocked paths of each query, in order.
+    pub fn asked(&self) -> Vec<Vec<PathBuf>> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl super::delete::Holders for ScriptedHolders {
+    fn query(&self, _root: &Path, blocked: &[PathBuf]) -> super::delete::HolderReport {
+        self.asked.lock().unwrap().push(blocked.to_vec());
+        let mut reports = self.reports.lock().unwrap();
+        match reports.len() {
+            0 => super::delete::HolderReport::Unknown,
+            1 => reports[0].clone(),
+            _ => reports.remove(0),
+        }
+    }
+}
+
+/// A [`UsageSource`](super::usage::UsageSource) that sees no other process
+/// and complete coverage.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClearUsage;
+
+impl super::usage::UsageSource for ClearUsage {
+    fn query(
+        &self,
+        path: &Path,
+    ) -> Result<sniff::filesystem::query::PathUsageReport, sniff::filesystem::query::PathUsageError> {
+        Ok(clear_report(path))
+    }
+}
+
+/// A complete, usable usage report about `path` with no processes.
+pub fn clear_report(path: &Path) -> sniff::filesystem::query::PathUsageReport {
+    serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "target": {
+            "requested": {"display": path},
+            "resolved": {"display": path},
+            "kind": "directory",
+            "identity": {"kind": "unix", "device": "7", "inode": "3"},
+            "recursive": true
+        },
+        "outcome": "usable",
+        "started_at": "2026-10-22T00:00:00Z",
+        "finished_at": "2026-10-22T00:00:01Z",
+        "budget_ms": 2000,
+        "elapsed_us": 1000,
+        "budget_exhausted": false,
+        "processes": [],
+        "coverage": [],
+        "limitations": []
+    }))
+    .expect("a valid usage report")
 }

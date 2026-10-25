@@ -83,7 +83,7 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
         }
         Commands::Remove {
             name,
-            force_worktree,
+            force,
             force_branch,
             force_remote,
             handoff,
@@ -92,7 +92,7 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
             None => commands::remove(
                 name.as_deref().unwrap_or_default(),
                 commands::RemoveFlags {
-                    force_worktree,
+                    force,
                     force_branch,
                     force_remote,
                 },
