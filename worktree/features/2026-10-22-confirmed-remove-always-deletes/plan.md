@@ -240,6 +240,113 @@ skills_files_updated_during_phase_8:
     - .claude/skills/worktree/warnings.md
     - .claude/skills/os/wsl.md
     - .claude/skills/os/SKILL.md
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+source_code:
+    - .config/nextest.toml
+    - Cargo.lock
+    - sniff/cli/tests/l1/filesystem_query.rs
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/query/ancestry.rs
+    - sniff/lib/src/filesystem/query/backend.rs
+    - sniff/lib/src/filesystem/query/linux.rs
+    - sniff/lib/src/filesystem/query/linux_tests.rs
+    - sniff/lib/src/filesystem/query/macos.rs
+    - sniff/lib/src/filesystem/query/macos_tests.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/process.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_tests.rs
+    - sniff/lib/src/performance/counters.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/interrupt.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/outcome.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/tests/level2_powershell_remove.rs
+    - worktree/cli/tests/level2_remove.rs
+    - worktree/cli/tests/powershell_wrapper_exec.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery.rs
+    - worktree/cli/tests/wrapper_protocol.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/git_metadata.rs
+    - worktree/lib/src/remove/clock.rs
+    - worktree/lib/src/remove/delete/classify.rs
+    - worktree/lib/src/remove/delete/mod.rs
+    - worktree/lib/src/remove/delete/platform.rs
+    - worktree/lib/src/remove/delete/tests.rs
+    - worktree/lib/src/remove/delete/wait.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/faults.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/branches.rs
+    - worktree/lib/src/remove/lifecycle/late.rs
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/missing.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/mounts.rs
+    - worktree/lib/src/remove/mounts/linux.rs
+    - worktree/lib/src/remove/mounts/macos.rs
+    - worktree/lib/src/remove/mounts/mountinfo.rs
+    - worktree/lib/src/remove/mounts/windows.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/association/tests.rs
+    - worktree/lib/src/remove/quarantine/mod.rs
+    - worktree/lib/src/remove/quarantine/placement.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+    - worktree/lib/src/remove/quarantine/rename.rs
+    - worktree/lib/src/remove/quarantine/rename/tests.rs
+    - worktree/lib/src/remove/recovery/compact.rs
+    - worktree/lib/src/remove/recovery/compact/tests.rs
+    - worktree/lib/src/remove/recovery/legacy.rs
+    - worktree/lib/src/remove/recovery/legacy/tests.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/record.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/recovery/store/compact/tests.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/submodules.rs
+    - worktree/lib/src/remove/submodules/tests.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/test_support.rs
+documentation:
+    - docs/dependencies.md
+    - sniff/docs/dependencies.md
+    - sniff/docs/topics/filesystem-query.md
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/cli/remove.md
+    - worktree/docs/performance-testing.md
+completed_phase: 9
+implemented: true
 ---
 
 # Plan: a confirmed `wt remove` always deletes
@@ -946,25 +1053,25 @@ stated with the reason; acceptance numbers recorded.
 
 #### Wave 15 (parallel docs)
 
-- [ ] `worktree/docs/cli/remove.md` — rewrite: the question and warnings,
+- [x] `worktree/docs/cli/remove.md` — rewrite: the question and warnings,
   `--force`, the Windows wait, silent recovery, exit codes. Lead with what the
   reader can do, include a Mermaid flow of the lifecycle, and do not link to or
   name the feature/fix. Remove watcher/coverage/fseventsd/stop/retry sections and
   the **Planned** markers this spec added.
-- [ ] `worktree/README.md` — the `wt remove` bullet and exit-code overview only.
-- [ ] `.claude/skills/worktree/` — `remove.md`, `lifecycle.md`, `observation.md`
+- [x] `worktree/README.md` — the `wt remove` bullet and exit-code overview only.
+- [x] `.claude/skills/worktree/` — `remove.md`, `lifecycle.md`, `observation.md`
   (shrink or retire; update the router table in `SKILL.md`), and `cli-contracts.md`
   for exit codes and `--force`.
-- [ ] `sniff/docs/topics/filesystem-query.md` and Sniff skill (if fields added in
+- [x] `sniff/docs/topics/filesystem-query.md` and Sniff skill (if fields added in
   Wave 7); `worktree/docs/performance-testing.md`; dependency docs.
-- [ ] Add any new OS-specific fact learned (Windows waits, drvfs) to the `os` skill.
+- [x] Add any new OS-specific fact learned (Windows waits, drvfs) to the `os` skill.
 
 #### Wave 16 (sequential)
 
-- [ ] **Final validation** — `just lint`, `just test`, `just test-l2` in
+- [x] **Final validation** — `just lint`, `just test`, `just test-l2` in
   `worktree/`; `just ci-local --plan` reviewed; `/review:docs-code-sync` style
   check that docs match behavior.
-- [ ] **Hand-off state** — implementation log records departures from the spec
+- [x] **Hand-off state** — implementation log records departures from the spec
   (docs are corrected, spec untouched). Do not move the feature to `_completed`
   and do not run `just complete`; the terminal state is "implementation complete,
   ready for review." Do not commit unless explicitly asked.

@@ -17,7 +17,7 @@ packages:
     - worktree
     - sniff
     - worktree-cli
-human_review: true
+human_review: false
 source_files_during_phase_2:
     - worktree/lib/src/remove/recovery/compact.rs
     - worktree/lib/src/remove/recovery/compact/tests.rs
@@ -169,26 +169,6 @@ skills_files_updated_during_phase_6:
     - .claude/skills/worktree/remove.md
     - .claude/skills/worktree/testing.md
     - .claude/skills/os/macos.md
-message_to_agent: |-
-    Phase 8 (verification) changed two behaviors Phase 9's docs must state:
-    - An unreadable pending record (corrupt, unknown version, another
-      operation's) is now explained: `wt remove <name>` that matches
-      nothing while such a record exists exits 1 with "Nothing was removed.
-      The record of an earlier removal could not be read: removal record
-      <id> cannot be used: <reason>." (lifecycle/resolve.rs).
-    - On WSL drvfs (/mnt/<drive>) the removal store skips the owner-only
-      mode-bit check (bits are always 0o777 there and chmod is ignored);
-      ownership is still checked. Before this, every --force removal on
-      /mnt/c failed with "other users can access it" (recovery/storage.rs).
-      Verified on build-win: warns, deletes, exit 0, nothing left.
-    - Open decision (human_review_items): on a ~500k-entry checkout Sniff's
-      2 s usage budget is spent walking the tree, so the question always
-      shows "Some programs could not be checked". Do not describe the
-      process warning as reliable on very large checkouts until that is
-      decided; check the log's Phase 8 "Large-checkout acceptance" section.
-    - worktree/docs/cli/remove.md below "Deleting the checkout" is still the
-      old watcher/journal text (Phase 9 owns it). Code names: the plan's
-      `confirmed` is `remove::lifecycle` since Phase 7.
 source_files_during_phase_7:
     - worktree/lib/Cargo.toml
     - Cargo.lock
@@ -260,30 +240,114 @@ skills_files_updated_during_phase_8:
     - .claude/skills/worktree/warnings.md
     - .claude/skills/os/wsl.md
     - .claude/skills/os/SKILL.md
-human_review_items:
-    - |-
-      **Should `wt remove` give its "which programs are using this worktree" check more time on very large checkouts?**
-
-      Why now: the next phase writes the user documentation for the removal question. What it says about the program warning depends on this choice.
-
-      What happened: before it asks "Delete it?", `wt` asks the system which programs are using files in the worktree. That check has a fixed 2-second allowance and has to look at every file in the worktree first. On a test worktree with 500,000 files (a large Rust or Node build folder is in this range) just looking at the files took about 3.5 seconds. The allowance ran out before any program was checked, so the question always says "Some programs could not be checked". A script that runs `wt remove` without a terminal is then refused unless it adds `--force`. Deleting still works.
-
-      - **A. Leave it as it is.** Pros: the question appears after at most about 2 seconds, and nothing changes. Cons: on big worktrees the program check never runs, and scripts always need `--force` there.
-      - **B. Give the check a longer allowance, for example 10 seconds.** Pros: a one-line change, and the program check works on big worktrees. Cons: on very big worktrees the question takes a few seconds longer to appear (about 3.5 seconds at 500,000 files).
-      - **C. Change Sniff (the library that does the check) so that listing programs does not depend on first looking at every file**, for example by giving the two steps separate time allowances or by matching open files by folder. Pros: fast and complete. Cons: a larger change to a shared library, with its own tests on all four operating systems.
-
-      Recommendation: **B now, C later if it is ever needed.** It removes the misleading warning for a small, predictable wait, and it keeps the rule of asking the system only once.
-    - |-
-      **Please confirm a security trade-off made for WSL drives (`/mnt/c` and similar).**
-
-      Why now: it changes what `wt` trusts, and the next phase documents it.
-
-      What happened: `wt` keeps a small recovery file for an unfinished removal and refuses to use it if other users could change it, judged by Unix permission bits. On Windows drives opened from WSL those bits are always "everyone can do everything" and cannot be changed, so every removal there failed with "other users can access it". The spec says such worktrees must be removable. I changed the check so that on these drives only the owner is checked, not the bits. Native Windows already works this way (it relies on the folder's Windows permissions).
-
-      - **A. Keep the change** (owner is checked, bits are ignored on WSL Windows drives only). Pros: the feature works on WSL Windows drives and matches native Windows. Cons: on that one kind of drive, protection relies on Windows permissions, which `wt` cannot see from WSL.
-      - **B. Refuse removals on WSL Windows drives with a clear message** to run `wt` from Windows instead. Pros: no reliance on permissions `wt` cannot see. Cons: goes against the spec's decision that these worktrees are supported.
-
-      Recommendation: **A.** It is the behavior the spec asked for, it matches native Windows, and the recovery file only ever lets `wt` finish deleting the same worktree it already recorded.
+human_review_items: []
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+    - worktree/docs/cli/remove.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/worktree/remove.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+source_code:
+    - .config/nextest.toml
+    - Cargo.lock
+    - sniff/cli/tests/l1/filesystem_query.rs
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/query/ancestry.rs
+    - sniff/lib/src/filesystem/query/backend.rs
+    - sniff/lib/src/filesystem/query/linux.rs
+    - sniff/lib/src/filesystem/query/linux_tests.rs
+    - sniff/lib/src/filesystem/query/macos.rs
+    - sniff/lib/src/filesystem/query/macos_tests.rs
+    - sniff/lib/src/filesystem/query/mod.rs
+    - sniff/lib/src/filesystem/query/process.rs
+    - sniff/lib/src/filesystem/query/report.rs
+    - sniff/lib/src/filesystem/query/tests.rs
+    - sniff/lib/src/filesystem/query/win32.rs
+    - sniff/lib/src/filesystem/query/win32_tests.rs
+    - sniff/lib/src/performance/counters.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/interrupt.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/outcome.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/tests/level2_powershell_remove.rs
+    - worktree/cli/tests/level2_remove.rs
+    - worktree/cli/tests/powershell_wrapper_exec.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/remove_recovery.rs
+    - worktree/cli/tests/wrapper_protocol.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/git_metadata.rs
+    - worktree/lib/src/remove/clock.rs
+    - worktree/lib/src/remove/delete/classify.rs
+    - worktree/lib/src/remove/delete/mod.rs
+    - worktree/lib/src/remove/delete/platform.rs
+    - worktree/lib/src/remove/delete/tests.rs
+    - worktree/lib/src/remove/delete/wait.rs
+    - worktree/lib/src/remove/facts.rs
+    - worktree/lib/src/remove/facts/tests.rs
+    - worktree/lib/src/remove/faults.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/lifecycle.rs
+    - worktree/lib/src/remove/lifecycle/branches.rs
+    - worktree/lib/src/remove/lifecycle/late.rs
+    - worktree/lib/src/remove/lifecycle/resolve.rs
+    - worktree/lib/src/remove/lifecycle/resume.rs
+    - worktree/lib/src/remove/lifecycle/tests.rs
+    - worktree/lib/src/remove/missing.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/mounts.rs
+    - worktree/lib/src/remove/mounts/linux.rs
+    - worktree/lib/src/remove/mounts/macos.rs
+    - worktree/lib/src/remove/mounts/mountinfo.rs
+    - worktree/lib/src/remove/mounts/windows.rs
+    - worktree/lib/src/remove/quarantine/association.rs
+    - worktree/lib/src/remove/quarantine/association/tests.rs
+    - worktree/lib/src/remove/quarantine/mod.rs
+    - worktree/lib/src/remove/quarantine/placement.rs
+    - worktree/lib/src/remove/quarantine/placement/tests.rs
+    - worktree/lib/src/remove/quarantine/rename.rs
+    - worktree/lib/src/remove/quarantine/rename/tests.rs
+    - worktree/lib/src/remove/recovery/compact.rs
+    - worktree/lib/src/remove/recovery/compact/tests.rs
+    - worktree/lib/src/remove/recovery/legacy.rs
+    - worktree/lib/src/remove/recovery/legacy/tests.rs
+    - worktree/lib/src/remove/recovery/mod.rs
+    - worktree/lib/src/remove/recovery/record.rs
+    - worktree/lib/src/remove/recovery/storage.rs
+    - worktree/lib/src/remove/recovery/store.rs
+    - worktree/lib/src/remove/recovery/store/compact.rs
+    - worktree/lib/src/remove/recovery/store/compact/tests.rs
+    - worktree/lib/src/remove/recovery/store/tests.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/submodules.rs
+    - worktree/lib/src/remove/submodules/tests.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/remove/usage.rs
+    - worktree/lib/src/remove/usage/tests.rs
+    - worktree/lib/src/test_support.rs
+documentation:
+    - docs/dependencies.md
+    - sniff/docs/dependencies.md
+    - sniff/docs/topics/filesystem-query.md
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/cli/remove.md
+    - worktree/docs/performance-testing.md
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Log for 2026-10-22-confirmed-remove-always-deletes (9 phases)
@@ -1766,3 +1830,136 @@ detached tmux pane (no window), answered `y`:
   `Cargo.lock` and `.config/nextest.toml` edits, which bring in the last
   three; this phase changed only `worktree` and `worktree-cli` files, and
   their suites were not run locally.
+
+## Phase 9
+
+### What was done (documentation only; no source code changed)
+
+- **`worktree/docs/cli/remove.md`.** Everything below "Standing in the
+  worktree you remove" was the old watcher/journal text and is replaced:
+    - *Deleting the checkout*: a Mermaid flow of the lifecycle (save →
+      unlock → move or delete in place → late `git status` → delete → wait
+      or keep → unregister → branch steps → delete the approval) with one
+      numbered step each; when the checkout is deleted in place (drvfs,
+      nested mount, a Windows holder, an unrewritable `.git` link or a
+      checkout Git cannot read); what is and is not deleted (links,
+      placeholders, FIFOs, read-only entries, mounts, submodule module
+      data, a replaced root); the Windows wait with its real message and
+      backoff; the refilling folder (3 passes, then the writer is named);
+      a second `wt remove` waiting on the first; the one usage check and
+      its time allowance.
+    - *When a removal does not finish*: one table (permanent failure,
+      mount, Ctrl-C/`SIGTERM`/`SIGHUP`/Ctrl-Break, killed, kept branch) with
+      the message, exit code, and what to do.
+    - *The saved approval*: where it lives, its size and contents, owner-only
+      storage and the drvfs exception, a Mermaid flow of how a later run
+      decides from disk and Git, and the refusals (recreated original kept,
+      a different hidden folder, a reused Git record, a replaced in-place
+      root, an unreadable record with Phase 8's exact message, migration of
+      an older `wt`'s journal-era removal).
+    - *Worktrees Git can't read*: rewritten from refusals and
+      `--force-worktree` to a table of what each case warns and what yes
+      does, with the verified `.git` repair kept as its own subsection. The
+      split-index recheck before removing a gone worktree's record no longer
+      exists in the code (the record is removed by `git worktree remove`
+      after the `StagedChanges`/`StagedUnknown` warning) and is no longer
+      described.
+    - Removed: watching for changes, waiting for changes to be reported,
+      when watching stops, fseventsd, checked deletion, large built
+      checkouts (journal size, free-space refusal, supplied index), the old
+      interrupt report, the refusal list, `report.json`, and "what a retry
+      asks again". No **Planned** marker remains in `worktree/docs` or the
+      README. Every in-page anchor resolves; no other page linked to a
+      removed anchor.
+- **Large-checkout wording.** Per Phase 8's open decision, the doc does not
+  call the process warning reliable on very large checkouts: it states that
+  around 500,000 files the check's allowance is currently spent before any
+  program is checked, so the "Some programs could not be checked" warning
+  appears there on every run, and a script then needs `--force`. If the
+  human picks option B or C, that paragraph ("Which programs are using the
+  checkout") is the one to change.
+- **Departure from the plan's doc list, recorded here:** the claim that a
+  file held open by a Windows program is waited on from WSL (spec R4) is not
+  in the doc. Nothing in `remove::delete` special-cases drvfs, and no run
+  has shown which errno a Windows-side holder produces through drvfs (a
+  `EACCES` would be treated as a denial, then permanent). The doc says only
+  that WSL cannot see Windows programs. Not verified on build-win in this
+  phase.
+- **`worktree/README.md`**: one bullet for the Windows wait / refilling
+  folder and the permanent-failure exit; the rest was already current from
+  Phase 6.
+- **`worktree/docs/performance-testing.md`**: "a clean removal starts 10
+  git processes" was stale. Traced a clean removal with `GIT_TRACE`
+  (debug `wt`, temp repo): `status`, `rev-list --left-right --count`,
+  `log`, `for-each-ref --contains`, `status`, `worktree remove`,
+  `branch -D` = 7, matching `remove::a_clean_removal_starts_7_git_processes`.
+  The paragraph now lists those and names that test; the library test it
+  named (`a_clean_removal_starts_only_its_deliberate_git_processes`) no
+  longer exists.
+- **`docs/dependencies.md`**: the handoff record was described as
+  "one-minute" with a BLAKE3 "dirty-file fingerprint"; it is ten minutes and
+  names the operation id (N9). BLAKE3 is now used for the store's lock-file
+  names (`recovery/lock.rs`).
+- **Skills**: `.claude/skills/worktree/remove.md` — the GitNexus
+  "concurrent writers" note described the pre-lifecycle failure and told
+  agents to stop the watcher first; it now points at R24's refill handling.
+  Its "two tests that pin" the Git process count is now the one CLI test.
+  `.claude/skills/os/SKILL.md` and `macos.md` no longer say `wt remove`
+  stalls on FSEvents or point at the removed "When fseventsd is slow"
+  section. `lifecycle.md`, `deletion.md`, `warnings.md`, `cli-contracts.md`,
+  and `SKILL.md`'s router were already current (Phases 5–8; `observation.md`
+  and `confirmed.md` were retired in Phase 7). The `os` skill already holds
+  the Windows-wait and drvfs facts (Phases 7–8).
+- **Sniff**: no fields were added to Sniff after Phase 4, so
+  `sniff/docs/topics/filesystem-query.md` and the Sniff skill are unchanged.
+
+### Tests (requirement → test)
+
+No behavior changed in this phase, so no test was added. The doc's claims
+were checked against the code and the tests that pin them:
+
+| Doc claim | Code / test |
+|---|---|
+| Wait message and 50 ms → 2 s backoff, no limit | `delete/wait.rs` `Wait` `Display`; `clock::Backoff`; `delete::tests::a_held_file_is_waited_on_after_everything_else_is_deleted` |
+| Refill: 3 passes, then named | `delete::REFILL_PASSES`; `delete::tests::a_directory_that_keeps_refilling_is_waited_on_and_its_writer_named` |
+| A second removal waits | CLI `Stderr::removal_running`; `lifecycle::tests::a_second_run_waits_for_the_running_removal_and_continues_it` |
+| A lock added after the question: exit 3, nothing pending | `lifecycle::tests::a_lock_added_after_the_question_is_never_removed` |
+| Permanent failure sentence, read-only wording | `delete/classify.rs::plain_cause`; `lifecycle::tests::a_permanent_failure_deletes_the_rest_and_a_later_run_finishes` |
+| Unreadable record message, exit 1 | `cli/src/commands/remove/mod.rs` `ResolveError::Store`; `remove_recovery.rs::an_unreadable_record_of_an_interrupted_removal_is_explained_and_nothing_is_deleted` |
+| Gone directory: warnings and final line | `facts.rs` `Warning` `Display`; `outcome.rs::finished_report` |
+| 7 git processes | `remove::a_clean_removal_starts_7_git_processes` and a manual `GIT_TRACE` run |
+
+
+### Gates
+
+- CI scope calculator after every edit (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages` = `darkmatter`, `test-toolkit`;
+  `change_class` = `package`. The skill and `docs/dependencies.md` edits are
+  test inputs of those two, so the gates were run.
+- `just lint` (`worktree/`): clean.
+- `just test` (`worktree/`): 1,528 of 1,528 passed, 14 skipped.
+- `just test-l2` (`worktree/`, tmux, no window focus): 42 of 42.
+- `just check-tier-coverage worktree`: 0 stranded.
+- Dependents reading the changed files, narrowed as CI narrows them:
+  `cargo nextest run -p test-toolkit --test ci_workflow_contracts` 178 of
+  178; darkmatter `shipped_schema_corpus::{shipped_markdown_inline_schemas_parse_passively,
+  shipped_markdown_named_type_references_resolve}` (they read every skill
+  page) 2 of 2.
+- `just ci-local --plan` reviewed: it covers the whole branch (`sniff`,
+  `sniff-cli`, `worktree`, `worktree-cli` on every environment, plus the
+  narrowed `darkmatter` and `test-toolkit` cells this phase adds). Nothing
+  unexpected.
+- Docs-to-code check (the plan's `/review:docs-code-sync` step) done by hand:
+  each message quoted in `remove.md` was compared with its `Display` /
+  markup in `facts.rs`, `delete/wait.rs`, `delete/classify.rs`,
+  `lifecycle.rs`, `outcome.rs`, and `cli/src/commands/remove/mod.rs`.
+- No cross-check: no code changed in this phase.
+
+### Hand-off
+
+Implementation complete, ready for review. The spec is not moved to
+`_completed`, and nothing is committed. `human_review` stays `true`: the two
+decisions Phase 8 raised (the usage-check allowance on very large checkouts,
+and the WSL drvfs permission trade-off) are still open, and their items now
+point at the doc paragraphs a decision would change.

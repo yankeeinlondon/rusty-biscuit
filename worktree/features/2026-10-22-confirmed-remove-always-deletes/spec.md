@@ -23,14 +23,16 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-22
-review_iterations: 0
+review_iterations: 3
 clarified: false
-implemented: false
+implemented: true
 related:
     - 2026-10-22-remove-large-checkout
     - 2026-10-18-remove-observation-under-load
     - 2026-10-19-macos-drain-interval-comparison
     - 2026-10-05-graceful-file-contention
+implemented_by: "claude/opus"
+completed: true
 ---
 
 # A confirmed `wt remove` always deletes
