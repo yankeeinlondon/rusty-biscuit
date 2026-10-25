@@ -1,10 +1,35 @@
 ---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-10-25
-status: draft-spec
+status: finalized-spec
 area: darkmatter
-reviewed: false
-clarified: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol (independent clarification review)
+reviewed_on: 2026-10-25
+clarified: true
+clarified_by: codex/gpt-6.1-sol
+needs_rulings: false
+review_note: the clarification process served as a review
 implemented: false
 review_iterations: 0
 related:
@@ -31,11 +56,9 @@ The first release is **library only**. A small CLI using that library is a
 likely subsequent addition. The package layout should accommodate that CLI,
 but implementing it is not part of this extraction.
 
-This is a draft. The user has established the library-first direction,
-the `simplified-schema` package name, and its ownership of passive expression
-syntax, the pure conversion engine, and the numeric model. The remaining
-ownership and public API decisions below are subject to review. This document
-does not authorize implementation.
+This specification is finalized and ready for implementation planning.
+Its ownership and public API contracts are settled. It does not authorize
+code implementation.
 
 ## Motivation
 
@@ -90,15 +113,14 @@ Out of scope:
 - A general plugin framework or multiple independently versioned schema crates
   without a demonstrated dependency need.
 
-## Proposed Ownership
+## Ownership
 
 The existing `simplified/` directory is a starting inventory, not the final
 extraction boundary. Import resolution, validation, and conversion also live
-in adjacent modules and share rules with expressions. Passive expression
-syntax, conversion, and numeric ownership are confirmed below; the remaining
-proposals still require review.
+in adjacent modules and share rules with expressions. The table defines the
+ownership boundary; planning maps the existing modules onto it.
 
-| Responsibility | Proposed owner |
+| Responsibility | Owner |
 | --- | --- |
 | AST, type grammar, YAML schema envelopes, serialization | Schema library |
 | Passive expression tokenization, syntax tree, parsing modes, errors, and source spans needed for shared parsing | `simplified-schema`; confirmed, reused by Darkmatter |
@@ -108,19 +130,25 @@ proposals still require review.
 | Source maps, scalar decoding, schema cursor queries, suggestions and suggestion linting | Schema library |
 | Pure conversion shapes, rule engine, and conversion failures shared with argument binding | `simplified-schema`; confirmed, reused by Darkmatter |
 | Numeric admission, precision rules, and shared numeric helpers | `simplified-schema`; confirmed, reused by Darkmatter |
-| Schema-file access and file-value checks | Explicit file adapter using `biscuit-file` and caller-supplied context |
-| Markdown extraction, frontmatter origin tracking, document-relative diagnostic projection | Darkmatter adapter |
+| Schema-file access and file-value checks | Default-enabled optional file feature using `biscuit-file`; raw inputs capture once, bound inputs reuse context |
+| Passive frontmatter-envelope extraction | One shared helper below Darkmatter, available without file features; exact module ownership belongs in planning |
+| Markdown document/body parsing, frontmatter origin tracking, document-relative diagnostic projection | Darkmatter adapter |
 | Markdown expression scanning, expression value lookup, function registration, and evaluation | Darkmatter |
 | Baseline selection, trigger discovery, schema-root policy, shipped Darkmatter catalogs | Darkmatter |
 | Composition sequencing, pending-value classification, literal-token handling, lifecycle operand binding | Darkmatter; supplies the necessary facts or checks to the library |
 | Applying defaults, optional-property materialization, and eager-file normalization to a composed document | Darkmatter |
 | Terminal, browser, and editor presentation | Existing CLI, rendering, and DMLS packages |
 
-The schema library may return converted values or proposed changes. It does
-not mutate a Markdown document or decide when composition applies them.
+The schema library returns the accepted borrowed or converted value through
+the validation result defined in R6. Darkmatter decides whether and when to
+apply that value to a Markdown document.
 
 The library must offer a useful in-memory path. Filesystem support must not
 be a prerequisite for parsing an inline schema or validating ordinary data.
+File support is an optional Cargo feature enabled by default. Ordinary
+one-argument file factories are available in the default configuration;
+minimal in-memory consumers can disable default features. Exact feature
+names are planning details.
 
 ```mermaid
 flowchart TD
@@ -131,6 +159,8 @@ flowchart TD
     Claudine["Claudine"] -->|"host operations"| DM
     Claudine -->|"schema-only operations"| Schema
     DM --> Files["biscuit-file: explicit resolution context"]
+    DM --> Passive["Shared passive frontmatter helper below Darkmatter"]
+    Schema --> Passive
     Schema -. "optional file adapter" .-> Files
 ```
 
@@ -142,7 +172,14 @@ documents remain in Darkmatter. No additional package is needed for these
 shared rules. The full dependency graph must remain acyclic, with no
 dependency from the schema library back to Darkmatter.
 
-## Public Object Direction
+Relocate or share the existing passive frontmatter-envelope helper below
+Darkmatter, for example in `biscuit-file`, preserving its behavior and source
+positions. Both hosts and `TryFrom<&str>` use that one helper, including in
+the no-default-features configuration. This does not move full Markdown
+body parsing or introduce another parser. The `biscuit-file` CLI's separate
+extraction behavior is outside incidental consolidation in this work.
+
+## Public Schema Object
 
 The public facade is one `SimplifiedSchema` object with first-class mutable
 layering, direct strict/soft validation, typed inspection, and exports.
@@ -156,8 +193,10 @@ Provide one-argument fallible factories on `SimplifiedSchema`, returning
 `try_from_json_schema(&file_reference)`. Missing files, missing schema-bearing
 structure, and malformed definitions are errors. Do not require a public
 loader object, a second context argument, or separate source-handle setup.
-The exact file-argument types and context plumbing require implementation
-proof while preserving existing provenance and resolution behavior.
+The single argument accepts raw paths or context-bound references. Raw
+standalone paths capture a new request context once at factory entry;
+bound inputs reuse the host's captured context. R4 defines this boundary.
+Exact Rust input-type names are planning details.
 
 `TryFrom<&str>` accepts raw document content only and performs no filesystem
 I/O. Recognize schema-bearing YAML with root `$schema` or Markdown with
@@ -177,20 +216,29 @@ through subsequent explicit resolution without inventing a new policy here.
 
 Use one loaded source buffer for classification and construction, avoiding
 redundant reads or reparsing of the same buffer. Loading a URI and linking
-named references remain distinct operations. The proposed asynchronous
+named references remain distinct operations. The asynchronous
 `resolve(uri)` surface is limited to existing supported non-network
 references and supplied sources. It adds no URI grammar, registry, or
 HTTP(S) fetching. No constructor requires a Markdown parser in this library
 or implicit host discovery.
 
-Layering sketches include `as_base`, an override operation, `layer_under`,
+Illustrative layering names include `as_base`, an override operation, `layer_under`,
 and `layer_over`. Layering methods mutate the receiver and use the fluent
 shape `&mut self -> Result<&mut Self, ...>`. Source schemas are borrowed and
 left unchanged. The returned reference aliases the receiver; producing it
 does not require an independent schema clone or an implicit full-schema
 copy. Successful definition changes invalidate affected derived state;
-unchanged state remains reusable. Failure atomicity is not yet decided.
-Exact method names and base/alias meanings remain open.
+unchanged state remains reusable. Exact method names and equivalent
+convenience aliases are planning details, not new persistent base policy.
+
+Each layering method is atomic across its full incoming list. Stage the
+operation and commit only on success; `Err` leaves the receiver's definition
+and receiver-local cache identities unchanged. Earlier successful method
+calls in a fluent chain remain committed if a later call fails. Borrowed
+source schemas remain unchanged. This is not a transaction API, and it does
+not promise rollback of shared global cache activity. Use existing shared
+snapshots and owned merge working data without unnecessary full-schema
+copies solely for rollback; measure staging cost if it is material.
 
 For both under- and over-layering, incoming lists run from low to high
 priority: the last supplied layer wins an incoming conflict. With
@@ -208,7 +256,10 @@ For example, let incoming `s1` declare `timeout: number` and `s2` declare
 | Declares only `name` | `string` | `string` |
 | Also declares `timeout: boolean` | `boolean` | `string` |
 
-Export simplified YAML through the existing serializer and supported typed
+Full-schema simplified YAML export is a new facade operation assembled from
+the existing type/property serializers. Preserve supported envelope forms,
+union-arm authoring metadata, and finite named-definition/reference graphs
+without expanding recursive definitions indefinitely. Export supported typed
 definitions to JSON Schema through the existing lowerer, preserving metadata,
 vocabulary, and ordering. Lowering a function type retains its located error.
 Arbitrary raw JSON Schema has no general conversion to the simplified
@@ -216,7 +267,7 @@ language: an unsupported export returns a typed error, without lossy
 conversion or a new reverse converter. TypeScript and Rust code generation
 remain outside this release.
 
-Read-only inspection should expose individual types and function schemas,
+Read-only inspection exposes individual types and function schemas,
 illustratively through borrowed `TypeDefinition` and `FunctionType` views.
 Function views retain parameter names, order, types, optional/rest markers,
 return types, fallibility, and original metadata. Query nested schema types
@@ -229,8 +280,8 @@ Read views preserve the underlying graph without expanding recursion or
 cloning the full schema for an ordinary lookup. Programmatic key/index
 segments can avoid reparsing a string path. Preserve existing literal-key
 precedence and union-query helper behavior; do not select a new winning
-arm. Empty-path, missing-match, and union-result shapes still need a check
-against existing query surfaces before choosing any new result contract.
+arm. Map empty-path, missing-match, and union-result shapes to the existing
+query surfaces during planning, preserving their behavior.
 
 Enum-style selection may use caller-provided selectors through existing
 key/trait conventions, and runtime properties remain iterable. Loaded
@@ -288,6 +339,7 @@ Keep `serde_json::Value` as the in-memory data model for existing JSON/YAML
 validation and conversion. Do not introduce a replacement value model or
 wrapper round trips. Callers must be able to parse and inspect the typed
 schema AST without compiling a validator.
+Content-only parsing remains free of I/O in every feature configuration.
 
 A consumer depending only on the schema library and its normal data types
 can:
@@ -317,15 +369,14 @@ A consumer can select `Person` and validate a mapping against it using one
 of the two validation methods. Both accept an immutable reference and return
 the same `Result` contract, exposing diagnostics and a borrowed or owned
 accepted effective value on success while preserving the original input.
-R6 defines the success and failure guarantees. Layering failure behavior
-and nested-query contracts still require clarification.
+R6 defines the success and failure guarantees.
 Routine Rust naming and internal implementation details remain planning
 decisions unless explicitly agreed during clarification. Parsing,
 resolution, and compilation remain distinct internal operations; the object
 may prepare internally when validation is requested. Parsing and inspection
 do not require compilation. Strict validation does not convert; soft uses
-the existing conversion engine. No operation may implicitly discover a host
-environment.
+the existing conversion engine. The only context-capture boundary is the
+explicit raw-path file factory defined in R4; pure operations remain passive.
 
 Function signatures remain inspectable language constructs. Attempting to
 lower a `function` type to a data-validation schema still produces a located
@@ -353,6 +404,16 @@ Audit normal and transitive dependency features, including `biscuit-file`.
 Use the smallest required feature set. The standalone consumer must avoid
 Darkmatter's rendering and effect stack; do not claim a dependency reduction
 without checking the resulting Cargo graph.
+
+Narrowly split `biscuit-file` features so passive `FileReference` syntax is
+usable without its resolution dependencies. Preserve reference grammar,
+capabilities when enabled, and the identity of its public types. The
+schema library's default-enabled file feature opts into resolution;
+existing host adapters enable the support they use. Verify that an isolated
+consumer with default features disabled excludes `gix`, `walkdir`, and
+`globset` resolver dependencies from its normal Cargo graph. YAML parsing
+and source-span dependencies may remain. This is a dependency-feature split,
+not a new reference implementation or remote-schema feature.
 
 ### R3. Preserve authored and semantic compatibility
 
@@ -388,7 +449,7 @@ Preserve generated JSON Schema ordering and vocabulary, including existing
 `darkmatter-*` formats and `x-darkmatter-*` keywords. A package rename is not
 a reason to change schema output. Retaining these compatibility names does
 not authorize Darkmatter-specific runtime dependencies or host knowledge in
-the library. A proposed behavior departure is outside this extraction's
+the library. Any behavior departure is outside this extraction's
 authorization; do not treat it as incidental cleanup.
 
 ### R4. Explicit source and filesystem context
@@ -411,26 +472,34 @@ HTTP(S) schema loading is explicitly outside this extraction. Retain the
 current typed rejection rather than implementing network support through
 an existing general transport.
 
-An explicitly selected file adapter may read schema and example files or
-check eager file values. It uses `biscuit_file::FileReference` and the
-caller's existing `FileResolutionContext`; it never recaptures CWD, home,
-repository roots, environment, or remote policy. Lazy file checks retain
-their syntax-only behavior.
+The explicit one-argument file factories accept two input forms:
 
-The one-argument factories do not relax this requirement. Their accepted
-input types and adapter implementation must preserve the captured context
-and provenance without imposing a second public context parameter. The
-module map must demonstrate how this works; factory ergonomics alone do
-not establish that resolution is correct.
+- **Raw standalone path:** start a new request and capture its context once
+  at factory entry, before resolution, imports, or an asynchronous suspension.
+  All downstream work uses that snapshot. Later process-context changes
+  must not retarget the request.
+- **Context-bound reference:** reuse the supplied captured context with no
+  new capture. Existing Darkmatter and DMLS adapters migrate through this
+  path, preserving document origins, unsaved buffers, and request identity.
 
-**Technical proof needed:** `FileReference` does not carry a
-`FileResolutionContext`; its `resolve_in_context` operation needs the
-existing captured context. An absolute source-file origin can anchor
-ordinary relative imports, but does not establish the behavior of every
-rich reference form. Demonstrate context binding for the locked
-one-argument factory contract without ambient recapture, a mandatory public
-loader, or a second argument. A small focused proof may be useful before
-planning; no binding mechanism has been selected by the signature alone.
+Raw-path factory entry is an explicitly authorized exception to the
+binaries-only request-capture policy. The host-neutral capture helper lives
+below Darkmatter, using `biscuit-file` and `sniff` responsibilities as
+appropriate; its exact ownership belongs in planning. No dependency points
+back to Darkmatter, and no public loader or second argument is required.
+
+`FileReference::new` remains passive; parsing a reference does not capture
+context. Bind the required context explicitly in the accepted input form
+and retain it, origins, and dependency metadata in the returned owned/shared
+schema. The result must not borrow a temporary input wrapper. Do not use
+global state, thread-local state, or side tables to hide request binding.
+
+File adapters use `FileReference` resolution against this captured context
+for schema/example reads and eager file checks. They do not recapture CWD,
+home, repository roots, environment, or remote policy downstream. Lazy
+checks remain syntax-only. Pure content conversion, validation, coercion,
+inspection, and export never capture context. Capturing a request grants no
+HTTP(S) schema permission.
 
 Keep dependency and freshness information through the adapter: selected
 source identities, import/example dependencies, and searched-but-absent
@@ -559,9 +628,10 @@ validation reuses valid prepared state, preserving existing context-sensitive
 identity and typed errors. Track definition changes and invalidate affected
 prepared state after actual successful changes so the next validation
 cannot use an earlier definition revision; unchanged definitions retain
-reusable state. Constructor details and mutation-failure atomicity remain
-open. These guarantees do not select rollback or partial-update behavior
-after a failed layering call.
+reusable state. Constructor argument plumbing is implementation work subject
+to the one-argument capture/reuse contract in R4. Atomic per-method
+layering preserves receiver-local
+definition/cache identity on failure, as defined above.
 
 Function argument binding must reuse prepared target shapes and call the
 same conversion engine directly. It must not construct temporary schema
@@ -728,9 +798,12 @@ The extraction is ready for review when:
 6. Existing source guards enforce the new ownership boundary. They are
    updated for relocated implementations rather than weakened or duplicated.
 7. Existing schema benchmarks and representative recursive/cold/warm
-   validation cases show no unexplained regression. Preserve context-sensitive
-   cache identity and shared compilation; moving code must not recreate
-   validators per request.
+   validation cases have retained before/after measurements using the same
+   host, toolchain, build profile, and fixtures. Report relative changes and
+   their causes, and record the author's review disposition for regressions.
+   Preserve assertions for context-sensitive cache identity, shared
+   compilation, and validator reuse rather than recompilation per request.
+   This evidence introduces no arbitrary percentage threshold or new CI gate.
 8. The new library and changed adapters compile and pass applicable checks
    on macOS, Linux, native Windows, and WSL2 using qualifying evidence where
    available. File-origin and source-position cases include Windows paths
@@ -742,8 +815,12 @@ The extraction is ready for review when:
     copy. Subsequent validation observes successful definition changes;
     unchanged definitions continue to reuse internal prepared state. List
     cases prove the precedence examples above and whole-property replacement
-    through the existing merge algorithm. Cover failure-state behavior once
-    its atomicity contract is settled.
+    through the existing merge algorithm. In one incoming list, let the
+    first layer be valid and a later layer cause an unsupported merge:
+    verify the receiver definition and local cache identities are unchanged
+    and subsequent validation uses the prior state. A failed later method
+    in a chain preserves earlier successful calls. Shared global caches need
+    not roll back.
 11. One-argument factories return typed errors for missing files, absent
     schema-bearing structure, and malformed definitions. Classification
     uses schema structure rather than merely successful YAML parsing,
@@ -761,6 +838,31 @@ The extraction is ready for review when:
     literal-key and union-query behavior. Borrowed inspection retains full
     function-parameter metadata, traverses the existing graph, and does not
     require a full-schema clone or recursive expansion for ordinary lookup.
+14. Build and exercise both default-file and no-default-features
+    configurations with their applicable test groups. Default builds expose
+    the one-argument file factories; minimal builds parse and validate
+    in-memory data with passive reference syntax and no implicit I/O.
+    Inspect the schema-only example's normal dependency graph in both
+    configurations: no Darkmatter/rendering/effect stack, and no `gix`,
+    `walkdir`, or `globset` resolver dependencies in the minimal build.
+    Preserve `biscuit-file` reference grammar and public type identity across
+    the feature split. Content-only Markdown/schema extraction uses the
+    shared passive envelope helper with file features disabled; HTTP(S)
+    schemas remain unsupported.
+15. Instrument the context boundary: raw-path factory entry captures once,
+    bound inputs capture zero times, and downstream imports/validation do
+    not recapture. Changes to ambient CWD, home, or environment after capture
+    do not retarget resolution. Cover source-relative imports, rich captured
+    reference forms, and unsaved-buffer origins. Input files are read once;
+    returned schemas retain their metadata and remain usable after temporary
+    bound-input wrappers are dropped. Pure content parsing, validation,
+    coercion, lookup, and export perform no context capture.
+16. Full-schema simplified YAML export has parse-export-parse coverage for
+    semantic and authoring-metadata equivalence, including union arms,
+    function definitions, and finite recursive named-definition graphs.
+    Unsupported raw JSON Schema-to-simplified exports fail with typed errors;
+    function-type JSON Schema lowering retains its located failure. Export
+    must not silently drop metadata or invent a reverse converter.
 
 Reuse existing fixtures and coverage where they answer the same question.
 Internal prompt trees remain outside CI; any prompt-dependent behavior test
@@ -821,8 +923,11 @@ uses frozen fixtures under the owning package's test tree.
 10. **Fluent receiver mutation — decided:** layering uses
     `&mut self -> Result<&mut Self, ...>`, borrowing source schemas unchanged.
     The result aliases the receiver instead of cloning it. Actual successful
-    definition changes invalidate affected cached state; failure atomicity,
-    exact names, and base/alias meanings remain open.
+    definition changes invalidate affected cached state. Each method stages
+    its entire list and commits atomically; failure preserves the receiver
+    definition and local cache identities while earlier successful chained
+    calls remain committed. Shared global caches are not transactional.
+    Exact names and equivalent convenience aliases are planning details.
 11. **Layer-list precedence — decided:** incoming lists are low-to-high
     priority for both operations; the last supplied layer wins. The receiver
     then wins for under-layering, while the incoming winner wins for
@@ -838,8 +943,9 @@ uses frozen fixtures under the owning package's test tree.
     schema structure. Generic YAML/Markdown detection requires root or
     frontmatter `$schema` structure for these convenience paths. Existing
     kinded/raw-schema parser surfaces remain. A public loader or second
-    context parameter is not required; context/provenance plumbing must be
-    demonstrated behind the accepted input types.
+    context parameter is not required. Raw paths capture context once at
+    factory entry; bound inputs reuse captured host context, preserving
+    origins and dependencies in the returned owned/shared object.
 14. **String content versus file factories — decided:** `TryFrom<&str>`
     parses document content only, recognizing root `$schema` YAML or
     frontmatter `$schema` Markdown without filesystem I/O. File-looking
@@ -856,6 +962,20 @@ uses frozen fixtures under the owning package's test tree.
     precedence, union handling, and full function metadata. Caller-provided
     enum-style selectors do not imply generated compile-time enums. Exact
     names and unsupported/result-shape details follow source-parity review.
+17. **Default-enabled optional file support — decided:** normal builds
+    provide file factories; minimal in-memory consumers disable default
+    features. A narrow `biscuit-file` feature split separates passive
+    reference syntax from resolution dependencies without changing grammar
+    or public type identity. Verify the actual Cargo graphs and both build
+    configurations; exact feature names belong in planning. HTTP(S) schema
+    support remains outside this work.
+18. **File-input context boundary — decided:** raw paths create a new request
+    and capture once at explicit factory entry; context-bound references
+    capture zero times and preserve the host request. This authorizes the
+    narrow standalone-factory exception to binaries-only capture. Metadata
+    survives temporary input wrappers; pure operations and downstream
+    resolvers do not capture. No hidden global binding or HTTP permission
+    is introduced.
 
 The user identified a possible future extraction of an expression engine
 that any package could use to evaluate expressions. This is a nonbinding
@@ -869,25 +989,20 @@ extraction.
 
 ## Decisions to Resolve Before Planning
 
-1. **Query result parity:** check empty paths, missing matches, and union
-   result shapes against existing helpers before defining any missing
-   contract. Dot/bracket notation, quoted literal keys, passive borrowed
-   inspection, and full parameter metadata are decided; avoid reopening
-   existing lookup semantics or adding a speculative interface.
-2. **Layering failure atomicity and helper meanings:** settle state after a
-   failed operation and remaining base/alias meanings. Receiver mutation
-   with `Result<&mut Self, ...>`, unchanged borrowed sources, low-to-high
-   list order, existing whole-property precedence, and cache invalidation
-   after successful changes are decided. Neither rollback nor partial
-   updates after failure are selected.
-3. **File-factory feature availability:** decide whether file support is a
-   library module or an opt-in feature, its dependency features, and the
-   exact guarantees available without it. Preserve one-argument factories
-   and existing resolution behavior.
+No required human rulings remain from this clarification. Exact Rust names,
+argument-type plumbing, feature names, and equivalent convenience aliases
+belong in planning under the contracts above.
+
+## Implementation Mapping and Parity Review
 
 The implementation plan must map current modules and consumer operations to
 these owners, show an acyclic dependency graph including numeric and
-conversion types, and name parity evidence for each moved boundary. That
-map includes source-origin and pending-state facts and existing special
-runtime paths; it must not redesign them. Settle the caller-facing choices
-above before finalizing the implementation contract.
+conversion types, and name parity evidence for each moved boundary. Include
+raw-path capture and bound-reference reuse, retained source/dependency
+metadata, pending-state facts, and existing callable special paths.
+
+Confirm query edge/result behavior (empty paths, missing matches, and union
+views) against current helpers during source-parity review. Preserve those
+semantics and avoid a speculative new interface. The accepted context
+boundary is verified through implementation/parity tests; it no longer
+requires a decision spike or a new caller-facing policy.
