@@ -471,17 +471,15 @@ fn dm1a_composed_key_referencing_deferred_fails_through_compose() {
 fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
     use super::subtree::{InjectedGlobal, compose_subtree};
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("phase".to_string(), serde_json::json!(2))].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
-    let mut globals = HashMap::new();
+    let mut globals = std::collections::HashMap::new();
     globals.insert(
         "err".to_string(),
         InjectedGlobal::eager(serde_json::json!({"msg": "disk full"})),
@@ -508,16 +506,13 @@ fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
 fn dm2_subtree_layered_seed_state_still_resolves() {
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> = [
+    let fm: serde_json::Map<String, serde_json::Value> = [
         ("phase".to_string(), serde_json::json!(3)),
         (
             "config".to_string(),
             serde_json::json!({"artifact": {"path": "/tmp/out"}}),
         ),
-    ]
-    .into();
+    ].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
@@ -527,7 +522,7 @@ fn dm2_subtree_layered_seed_state_still_resolves() {
     let result = compose_subtree(
         &serde_json::json!("artifact={{config.artifact.path}} phase={{phase}}"),
         &state,
-        HashMap::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("artifact=/tmp/out phase=3"));
@@ -539,10 +534,8 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
     // compose as main compose's frontmatter interpolation does.
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("count".to_string(), serde_json::json!(5))].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("count".to_string(), serde_json::json!(5))].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
@@ -553,7 +546,7 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
     let result = compose_subtree(
         &serde_json::json!("{{count}}"),
         &state,
-        HashMap::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(result, serde_json::json!(5));
@@ -563,10 +556,8 @@ fn dm2_subtree_parity_with_main_compose_whole_value() {
 fn dm2_subtree_parity_with_main_compose_mixed_string() {
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("count".to_string(), serde_json::json!(5))].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("count".to_string(), serde_json::json!(5))].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
@@ -576,7 +567,7 @@ fn dm2_subtree_parity_with_main_compose_mixed_string() {
     let result = compose_subtree(
         &serde_json::json!("count={{count}}"),
         &state,
-        HashMap::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("count=5"));
@@ -648,17 +639,15 @@ fn dm2_subtree_lazy_global_evaluated_at_most_once() {
 fn dm2_subtree_absent_property_is_null_not_an_error() {
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("phase".to_string(), serde_json::json!(2))].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
         .build()
         .unwrap();
 
-    let result = compose_subtree(&serde_json::json!("{{spec_fil}}"), &state, HashMap::new())
+    let result = compose_subtree(&serde_json::json!("{{spec_fil}}"), &state, std::collections::HashMap::new())
         .expect("an absent property is valid");
     assert_eq!(result, serde_json::Value::Null);
 }
@@ -667,10 +656,8 @@ fn dm2_subtree_absent_property_is_null_not_an_error() {
 fn dm2_subtree_null_property_renders_empty() {
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("spec_file".to_string(), serde_json::Value::Null)].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("spec_file".to_string(), serde_json::Value::Null)].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
@@ -681,7 +668,7 @@ fn dm2_subtree_null_property_renders_empty() {
     let result = compose_subtree(
         &serde_json::json!("spec={{spec_file}}"),
         &state,
-        HashMap::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(result, serde_json::json!("spec="));
@@ -712,10 +699,8 @@ fn dm2_subtree_rejects_malformed_span() {
 fn dm2_subtree_rejects_unknown_function() {
     use super::subtree::compose_subtree;
     use crate::markdown::compose::EffectiveStateBuilder;
-    use std::collections::HashMap;
-
-    let fm: HashMap<String, serde_json::Value> =
-        [("phase".to_string(), serde_json::json!(2))].into();
+    let fm: serde_json::Map<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into_iter().collect();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_minimal())
@@ -725,7 +710,7 @@ fn dm2_subtree_rejects_unknown_function() {
     let err = compose_subtree(
         &serde_json::json!("{{ bogus_fn(phase) }}"),
         &state,
-        HashMap::new(),
+        std::collections::HashMap::new(),
     )
     .unwrap_err()
     .to_string();

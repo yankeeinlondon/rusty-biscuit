@@ -30,6 +30,42 @@ command = 'cargo build --quiet --no-default-features --features build-tools --ma
 filter = 'binary_id(repo-deps::bin/ci-build)'
 setup = 'build-ci-build'
 
+# A process's first CoreText font scan lists the directory its executable is
+# in, and concurrent listings are served one after another. A test binary's is
+# `target/debug/deps`, which a long-lived target fills with 100,000+ entries:
+# eleven `wt list` graph-layout tests starting together then took 7-15 s each,
+# against 0.7 s with this. Naming another executable's path as the process's
+# own (`CFProcessPath`) makes the scan list `/usr/bin` instead; nothing else in
+# these tests reads the main bundle. An installed `wt` lists its own small
+# directory, so production never pays this.
+[scripts.setup.coretext-small-bundle]
+command = 'sh -c "echo CFProcessPath=/usr/bin/true >> $NEXTEST_ENV"'
+
+[[profile.default.scripts]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(worktree-cli) & (test(/^commands::git_graph::tests::gathered_graph_lays_out_/) | test(=commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60) | test(=commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal))'
+setup = 'coretext-small-bundle'
+
+# Every biscuit-visualized render over the host's fonts asks fontique, so the
+# same scan: about 150 such L1 tests ran at 4.5-5.8 s each together, against
+# about 1 s with this. The tier markers are left out because those tests may
+# start applications, which must keep their own main bundle.
+[[profile.default.scripts]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(biscuit-visualized) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
+setup = 'coretext-small-bundle'
+
+# Darkmatter's Mermaid tests render over the host's fonts too: the static-SVG
+# page tests took about 3.5 s each without this, and unit tests that render a
+# diagram from a module of another name (the SVG sanitizer, the code renderer,
+# the terminal hook) took 2.4-10 s alone and up to the 30 s timeout under load.
+# Any test naming Mermaid or Merman is selected so a new one is not missed; the
+# tier markers are left out for the same reason as above.
+[[profile.default.scripts]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(darkmatter) & test(/mer(maid|man)/) & !test(/(^|::)(level2_|level3_|browser_|real_)/)'
+setup = 'coretext-small-bundle'
+
 [test-groups]
 # Claudine's L1 library tests repeatedly perform repository discovery, so CI
 # keeps their concurrency bounded on contended runners. Local runs use the
@@ -48,11 +84,6 @@ schematic-fresh-output = { max-threads = 1 }
 # the developer's desktop. Parallel L2 runs them one at a time so at most one
 # window is open, while the rest of the tier keeps its parallel workers.
 apple-terminal-l2 = { max-threads = 1 }
-# Every FSEvents stream registers with the one fseventsd, which serves those
-# registrations one after another: fifteen `wt remove` observer tests starting
-# streams together each waited up to 5s, while one alone starts in about 20ms.
-# macOS runs them one at a time; the rest of the suite keeps its workers.
-fsevents-l1 = { max-threads = 1 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -166,11 +197,6 @@ test-group = 'apple-terminal-l2'
 # nothing is actually hung. Raise the termination ceiling to 30s×3 = 90s so a
 # contended run is governed by its own 40s deadline + assertion, while a
 # genuine deadlock still trips the longer window.
-[[profile.default.overrides]]
-platform = { host = "cfg(target_os = \"macos\")" }
-filter = 'package(worktree) & (test(/^remove::.*::native_/) | test(/^remove::observation::fsevents::/))'
-test-group = 'fsevents-l1'
-
 [[profile.default.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
 slow-timeout = { period = "30s", terminate-after = 3 }

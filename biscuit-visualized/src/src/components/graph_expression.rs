@@ -638,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_render_emits_svg() {
+    fn render_browser_svg_emits_svg() {
         let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto).unwrap();
         let html = graph.render_browser_svg();
         assert!(
@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_render_dot_input_emits_svg() {
+    fn render_browser_svg_emits_svg_for_dot_input() {
         let graph =
             GraphExpression::parse("digraph G { A -> B; B -> C; }", GraphInputSyntax::Dot).unwrap();
         let html = graph.render_browser_svg();

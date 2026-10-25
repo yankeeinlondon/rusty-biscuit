@@ -62,6 +62,28 @@ pub(crate) struct ProcessDetails {
     pub(crate) start_time: Option<DateTime<Utc>>,
 }
 
+/// One process's parent and names, read by PID as one lifetime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ProcessLink {
+    /// Orders lifetimes by start: a parent's is never greater than its
+    /// child's. Comparable only with other links from the same backend.
+    pub(crate) order: u64,
+    /// As the OS reports it; 0 when the process has no parent.
+    pub(crate) parent_pid: u32,
+    pub(crate) name: Option<OsString>,
+    pub(crate) app_name: Option<OsString>,
+}
+
+/// Why a [`ProcessLink`] could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LinkError {
+    /// This backend does not read parents.
+    Unsupported,
+    /// No process has the PID, or it changed lifetime during the read.
+    Gone,
+    Unreadable(String),
+}
+
 /// One enumerated process, as one acquisition.
 #[derive(Debug, Clone)]
 pub(crate) struct ProcessCandidate<P> {
@@ -183,6 +205,13 @@ pub(crate) trait UsageBackend {
     /// Reads identity fields for a matching process.
     fn details(&mut self, pid: u32) -> Result<ProcessDetails, String> {
         sysinfo_details(pid)
+    }
+
+    /// Reads `pid`'s parent and names from per-PID reads only, never a
+    /// process-table refresh. Every field must describe one lifetime: a PID
+    /// reused during the read is [`LinkError::Gone`].
+    fn link(&mut self, _pid: u32) -> Result<ProcessLink, LinkError> {
+        Err(LinkError::Unsupported)
     }
 }
 

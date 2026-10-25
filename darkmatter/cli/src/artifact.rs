@@ -3,8 +3,10 @@
 //! Builds, emits, opens, and writes the temporary files produced by
 //! non-terminal output paths (Markdown, MarkdownPlus, HTML, JSON).
 
-use crate::args::Cli;
-use crate::render::{ResolvedTheme, apply_cli_layout_flags, apply_style_frontmatter};
+use crate::args::{Cli, Feature};
+use crate::render::{
+    ResolvedTheme, apply_cli_layout_flags, apply_features, apply_style_frontmatter,
+};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result};
 use darkmatter::layout::DarkmatterPage;
@@ -29,15 +31,17 @@ pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
     }
 }
 
-/// Build an HTML artifact.
-pub fn html_artifact(
+/// Build the page that renders HTML output: CLI layout flags, `style:`
+/// frontmatter, then `features`.
+pub fn html_page(
     md: &Markdown,
     cli: &Cli,
     input_path: Option<&PathBuf>,
-) -> Result<OutputArtifact> {
+    features: &[Feature],
+) -> Result<DarkmatterPage> {
     let term = Terminal::new_optimistic(120);
     let theme = ResolvedTheme::from_cli(cli, &term);
-    let mut page = apply_cli_layout_flags(
+    let page = apply_cli_layout_flags(
         DarkmatterPage::new(&term)
             .with_prose_theme(theme.prose.kebab_name())
             .with_code_theme(theme.code.kebab_name())
@@ -45,9 +49,18 @@ pub fn html_artifact(
         cli,
     );
 
-    page = apply_style_frontmatter(page, md, cli, input_path)?;
+    let page = apply_style_frontmatter(page, md, cli, input_path)?;
+    Ok(apply_features(page, features))
+}
 
-    let content = page
+/// Build an HTML artifact.
+pub fn html_artifact(
+    md: &Markdown,
+    cli: &Cli,
+    input_path: Option<&PathBuf>,
+    features: &[Feature],
+) -> Result<OutputArtifact> {
+    let content = html_page(md, cli, input_path, features)?
         .render_to_browser_document(md)
         .context("Failed to convert to HTML")?;
 

@@ -82,8 +82,21 @@ impl CodeHighlighter {
     }
 
     /// Returns a reference to the syntax set.
+    ///
+    /// This set carries every grammar except Mermaid; use
+    /// [`syntax_set_for`](Self::syntax_set_for) to highlight a grammar that
+    /// may be Mermaid.
     pub fn syntax_set(&self) -> &SyntaxSet {
         self.syntax_set
+    }
+
+    /// Returns the syntax set that carries `grammar`'s syntax.
+    ///
+    /// Mermaid lives in a set of its own. A syntax resolved from one set only
+    /// highlights against that set, so resolve `grammar` and highlight its
+    /// lines against the set this returns.
+    pub fn syntax_set_for(&self, grammar: &LanguageGrammar) -> &SyntaxSet {
+        grammars::syntax_set_for(grammar)
     }
 
     /// Returns a reference to the current theme.

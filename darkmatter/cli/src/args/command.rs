@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
-    CodeBlockOutput, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
+    CodeBlockOutput, Feature, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
     complete_compose_args, complete_fixed_width_values, complete_indent_values,
     complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size,
     parse_theme_name,
@@ -34,6 +34,18 @@ pub enum Command {
             add = ArgValueCompleter::new(complete_indent_values)
         )]
         indent: Option<usize>,
+
+        /// Turn on a named feature (repeatable and comma-separated; names are
+        /// case-insensitive)
+        #[arg(
+            long = "feature",
+            value_name = "NAME",
+            value_enum,
+            value_delimiter = ',',
+            ignore_case = true,
+            action = clap::ArgAction::Append
+        )]
+        features: Vec<Feature>,
     },
 
     /// Clean up markdown formatting.

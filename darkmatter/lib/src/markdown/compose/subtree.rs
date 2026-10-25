@@ -128,9 +128,8 @@ fn undeclared_view(globals: &HashMap<String, RuntimeBinding<'_>>) -> Result<Bind
 /// use darkmatter::markdown::compose::subtree::{InjectedGlobal, SubtreeCompose};
 /// use darkmatter::markdown::compose::EffectiveStateBuilder;
 /// use serde_json::json;
-/// use std::collections::HashMap;
 ///
-/// let mut fm = HashMap::new();
+/// let mut fm = serde_json::Map::new();
 /// fm.insert("phase".to_string(), json!(2));
 /// let state = EffectiveStateBuilder::new()
 ///     .with_frontmatter(fm)
@@ -230,7 +229,7 @@ impl<'a> SubtreeCompose<'a> {
 /// use std::collections::HashMap;
 ///
 /// let state = EffectiveStateBuilder::new()
-///     .with_frontmatter([("phase".to_string(), json!(2))].into())
+///     .with_frontmatter([("phase".to_string(), json!(2))].into_iter().collect())
 ///     .build()
 ///     .unwrap();
 ///
@@ -303,7 +302,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn state_with(fm: Vec<(&str, Value)>) -> EffectiveState {
-        let fm: HashMap<String, Value> = fm
+        let fm: serde_json::Map<String, Value> = fm
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();

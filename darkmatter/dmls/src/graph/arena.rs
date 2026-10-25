@@ -1,14 +1,19 @@
 //! The workspace graph arena and its snapshot builder.
 //!
 //! A [`WorkspaceGraph`] is an immutable snapshot: documents, nodes, edges, the
-//! reverse index, and the wiki key index, all minted together and swapped in
-//! atomically by the invalidation engine (AD-3). The arena-and-build-pass
+//! reverse index, and the wiki key index, swapped in atomically by the
+//! invalidation engine (AD-3). The path-derived part (documents, wiki slots,
+//! basename keys, portability collisions) is an immutable table that
+//! consecutive live snapshots share while their paths, dependencies, listing
+//! state, and wiki universe are unchanged; nodes, edges, and resolutions are
+//! minted for every snapshot. The arena-and-build-pass
 //! shape (ID-indexed `Vec`s, resolution deferred to a single assembly pass) is
 //! a fresh implementation of the pattern proven by the Apache-2.0 `iwe`
 //! project (IWE, Dmytro Halichenko) per the AD-1 decision record; DMLS owns
 //! the multi-edge-kind graph outright rather than overlaying a second index on
 //! a two-edge-kind model.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,23 +30,26 @@ use super::node::{
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
 use crate::context::{ContextFailure, ReferenceTarget, plan_reference, resolve_reference};
+use crate::wiki::universe::counted_portability_key;
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc, WikiUniverse};
 
 /// Stable index of a document inside a [`WorkspaceGraph`] snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DocumentId(pub u32);
 
-/// Per-document metadata in the snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentRecord {
+/// A view of one document of a snapshot: its path-derived facts, shared
+/// by every snapshot whose path inputs are equal, plus that snapshot's
+/// content state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentRecord<'a> {
     /// Logical (workspace) path.
-    pub path: PathBuf,
+    pub path: &'a PathBuf,
     /// xxHash of the source at index time (invalidation identity).
     pub content_hash: u64,
-    /// The document's root node.
+    /// The document's root node: `NodeId(d)` for `DocumentId(d)`.
     pub root: NodeId,
     /// Canonical wiki logical-path segments (NFC, final extension elided).
-    pub canonical: Vec<String>,
+    pub canonical: &'a Vec<String>,
     /// Owning wiki root index, or [`WikiDoc::NO_ROOT`] when outside every root.
     pub workspace_id: usize,
     /// Whether the document's contents were parsed. An unparsed document is
@@ -84,57 +92,194 @@ pub enum Listing {
 }
 
 /// An immutable workspace graph snapshot.
+///
+/// Path-derived facts live in a [`DocumentTable`] that consecutive live
+/// snapshots share while their path inputs are equal; everything drawn from
+/// document contents (states, nodes, edges, the reverse index, awaited
+/// paths) is rebuilt for every snapshot. Document roots are the first nodes,
+/// so `DocumentId(d)`'s root is `NodeId(d)`; node and edge ids are local to
+/// one snapshot.
 #[derive(Debug)]
 pub struct WorkspaceGraph {
-    documents: Vec<DocumentRecord>,
-    by_path: HashMap<PathBuf, DocumentId>,
+    table: Arc<DocumentTable>,
+    /// Indexed by `DocumentId`.
+    states: Vec<DocumentState>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     reverse: ReverseIndex,
-    keys: KeyIndex,
-    /// Documents whose canonical logical paths collide under case-fold/NFC —
-    /// the R-8 `wiki.portability-collision` set (each maps to its twins).
-    portability: HashMap<DocumentId, Vec<DocumentId>>,
-    wiki: WikiSlots,
-    listing: Listing,
     generation: u64,
     /// Every planned target of a path reference that resolved to nothing.
     awaited: HashSet<PathBuf>,
 }
 
-/// The wiki universe a snapshot resolved against, and how its slots map to
-/// the snapshot's documents.
+/// One document's path-derived facts.
+#[derive(Debug)]
+struct DocumentPathRecord {
+    path: PathBuf,
+    canonical: Vec<String>,
+    workspace_id: usize,
+    dependency: bool,
+    wiki_slot: usize,
+}
+
+/// One document's content state in one snapshot.
+#[derive(Debug, Clone, Copy, Default)]
+struct DocumentState {
+    content_hash: u64,
+    parsed: bool,
+}
+
+/// The path-derived part of a snapshot: documents in path order, their
+/// wiki slots and canonical facts, the wiki basename index, portability
+/// collisions, and the listing state.
 ///
-/// Invariant: every document has a slot. A document missing from the
-/// supplied universe is appended to it at build time (a dependency as a slot
-/// no target matches), so a universe derived from the documents themselves
-/// resolves exactly as the graph did before the universe was external.
-#[derive(Debug, Clone)]
-struct WikiSlots {
-    universe: Arc<WikiUniverse>,
+/// It holds nothing read from document contents, so a content-only edit
+/// shares it with the previous snapshot (see [`DocumentTable::matches`]).
+///
+/// Invariant: every document has a slot in `universe`. The live index
+/// supplies a universe that already holds a slot for every document, its
+/// dependencies included as slots no target matches, so its build never
+/// copies the universe. A document missing from a supplied universe is
+/// appended to it at build time (a dependency as an unmatchable slot), so a
+/// universe derived from the documents themselves resolves exactly as the
+/// graph did before the universe was external.
+#[derive(Debug)]
+struct DocumentTable {
     /// Indexed by `DocumentId`.
-    document_slots: Vec<usize>,
+    records: Vec<DocumentPathRecord>,
+    by_path: HashMap<PathBuf, DocumentId>,
     slot_documents: HashMap<usize, DocumentId>,
+    keys: KeyIndex,
+    /// Documents whose canonical logical paths collide under case-fold/NFC —
+    /// the R-8 `wiki.portability-collision` set (each maps to its twins).
+    portability: HashMap<DocumentId, Vec<DocumentId>>,
+    universe: Arc<WikiUniverse>,
+    listing: Listing,
+}
+
+/// Every graph document in path order, with its parse when it has one:
+/// the parsed documents merged with the unparsed file-list entries.
+fn sorted_entries<'a>(
+    indices: &'a BTreeMap<PathBuf, DocumentIndex>,
+    unparsed: &'a BTreeSet<PathBuf>,
+) -> Vec<(&'a PathBuf, Option<&'a DocumentIndex>)> {
+    let mut entries = Vec::with_capacity(indices.len().max(unparsed.len()));
+    let mut parsed = indices.iter().peekable();
+    let mut listed = unparsed.iter().peekable();
+    loop {
+        let entry = match (parsed.peek(), listed.peek()) {
+            (Some((path, _)), Some(other)) if *path == *other => {
+                listed.next();
+                parsed.next().map(|(path, index)| (path, Some(index)))
+            }
+            (Some((path, _)), Some(other)) if *path > *other => listed.next().map(|path| (path, None)),
+            (Some(_), _) => parsed.next().map(|(path, index)| (path, Some(index))),
+            (None, Some(_)) => listed.next().map(|path| (path, None)),
+            (None, None) => None,
+        };
+        let Some(entry) = entry else { break };
+        entries.push(entry);
+    }
+    entries
+}
+
+impl DocumentTable {
+    /// Builds the table over `indices` plus the `unparsed` entries.
+    fn build(
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        unparsed: &BTreeSet<PathBuf>,
+        dependencies: &BTreeSet<PathBuf>,
+        listing: Listing,
+        mut universe: Arc<WikiUniverse>,
+    ) -> Self {
+        crate::work_counters::record_document_table();
+        let entries = sorted_entries(indices, unparsed);
+        let mut records = Vec::with_capacity(entries.len());
+        let mut by_path = HashMap::with_capacity(entries.len());
+        let mut slot_documents = HashMap::with_capacity(entries.len());
+        for (position, (path, index)) in entries.into_iter().enumerate() {
+            let doc_id = DocumentId(position as u32);
+            let dependency = index.is_some() && dependencies.contains(path);
+            // A candidate's slot already holds its canonical facts. A
+            // dependency's slot is unmatchable, so its record takes the real
+            // facts of its path, as does a document whose supplied slot is
+            // unmatchable (a request graph over a live dependency).
+            let (wiki_slot, WikiDoc { canonical, workspace_id }) = match universe.slot(path) {
+                Some(slot) if !dependency && !universe.docs()[slot].is_unmatchable() => {
+                    (slot, universe.docs()[slot].clone())
+                }
+                Some(slot) => (slot, WikiDoc::for_path(path, universe.wiki_roots())),
+                None => {
+                    let facts = WikiDoc::for_path(path, universe.wiki_roots());
+                    let doc = if dependency { WikiDoc::unmatchable() } else { facts.clone() };
+                    (Arc::make_mut(&mut universe).push(path.clone(), doc), facts)
+                }
+            };
+            by_path.insert(path.clone(), doc_id);
+            slot_documents.insert(wiki_slot, doc_id);
+            records.push(DocumentPathRecord {
+                path: path.clone(),
+                canonical,
+                workspace_id,
+                dependency,
+                wiki_slot,
+            });
+        }
+        let keys = KeyIndex::build(
+            records
+                .iter()
+                .enumerate()
+                .filter(|(_, record)| !record.dependency)
+                .map(|(position, record)| (DocumentId(position as u32), record.path.as_path())),
+        );
+        let portability = portability_collisions(&records, &universe);
+        Self {
+            records,
+            by_path,
+            slot_documents,
+            keys,
+            portability,
+            universe,
+            listing,
+        }
+    }
+
+    /// Whether a table built from these inputs would equal this one: the
+    /// same documents in the same order with the same dependency flags, the
+    /// same listing state, and the very same universe.
+    ///
+    /// Parse state and hashes are not compared; they belong to each
+    /// snapshot. The universe is compared by identity, since the live index
+    /// hands back the same `Arc` while the universe's inputs are unchanged.
+    fn matches(
+        &self,
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        unparsed: &BTreeSet<PathBuf>,
+        dependencies: &BTreeSet<PathBuf>,
+        listing: Listing,
+        universe: &Arc<WikiUniverse>,
+    ) -> bool {
+        if self.listing != listing || !Arc::ptr_eq(&self.universe, universe) {
+            return false;
+        }
+        let entries = sorted_entries(indices, unparsed);
+        entries.len() == self.records.len()
+            && entries.iter().zip(&self.records).all(|((path, index), record)| {
+                *path == &record.path
+                    && record.dependency == (index.is_some() && dependencies.contains(*path))
+            })
+    }
 }
 
 /// The product of the node/edge assembly pass, handed to
-/// [`WorkspaceGraph::finalize`].
-///
-/// Exists so the bench harness can time graph construction ([`assemble`]) and
-/// reverse-index construction ([`finalize`]) as the separate R-6 stages the
-/// design's stage list calls for, without duplicating the build logic —
-/// production runs both back to back through [`build_with_roots`].
-///
-/// [`assemble`]: WorkspaceGraph::assemble
-/// [`finalize`]: WorkspaceGraph::finalize
-/// [`build_with_roots`]: WorkspaceGraph::build_with_roots
-pub(crate) struct GraphAssembly {
-    documents: Vec<DocumentRecord>,
-    by_path: HashMap<PathBuf, DocumentId>,
+/// [`WorkspaceGraph::finalize`]: every node and resolved edge over a
+/// document table, before the reverse index over them exists. Every builder
+/// runs the two passes back to back.
+struct GraphAssembly {
+    table: Arc<DocumentTable>,
+    states: Vec<DocumentState>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
-    wiki: WikiSlots,
-    listing: Listing,
     generation: u64,
     /// Every planned target of a path reference that resolved to nothing
     /// (see [`WorkspaceGraph::awaits`]).
@@ -172,7 +317,9 @@ impl WorkspaceGraph {
         universe: impl Into<Arc<WikiUniverse>>,
         contexts: &dyn DocumentContexts,
     ) -> Self {
-        Self::finalize(Self::assemble(indices, generation, universe.into(), contexts))
+        let none = BTreeSet::new();
+        let listing = Listing::Ready { complete: true };
+        Self::build_from(indices, &none, &none, listing, generation, universe.into(), contexts, None)
     }
 
     /// Assembles a snapshot over parsed documents plus `unparsed` file-list
@@ -192,64 +339,71 @@ impl WorkspaceGraph {
         universe: impl Into<Arc<WikiUniverse>>,
         contexts: &dyn DocumentContexts,
     ) -> Self {
-        let mut assembly = Self::assemble_listed(
-            indices,
-            unparsed,
-            dependencies,
-            generation,
-            universe.into(),
-            contexts,
-        );
-        assembly.listing = listing;
-        Self::finalize(assembly)
+        Self::build_from(indices, unparsed, dependencies, listing, generation, universe.into(), contexts, None)
     }
 
-    /// Node/edge assembly pass: mints every node and resolves every edge,
-    /// deferring reverse-index and key-index construction to [`finalize`].
-    ///
-    /// Split from [`finalize`] purely so the bench harness can time the two
-    /// as separate R-6 stages (`graph_build` vs `reverse_index`);
-    /// [`build_with_roots`] runs them back to back.
-    ///
-    /// [`finalize`]: WorkspaceGraph::finalize
-    /// [`build_with_roots`]: WorkspaceGraph::build_with_roots
-    pub(crate) fn assemble(
-        indices: &BTreeMap<PathBuf, DocumentIndex>,
-        generation: u64,
-        universe: Arc<WikiUniverse>,
-        contexts: &dyn DocumentContexts,
-    ) -> GraphAssembly {
-        let none = BTreeSet::new();
-        Self::assemble_listed(indices, &none, &none, generation, universe, contexts)
-    }
-
-    /// [`assemble`](Self::assemble) over parsed documents plus unparsed
-    /// file-list entries, all assigned ids in one path-sorted order.
-    fn assemble_listed(
+    /// [`build_listed`](Self::build_listed), sharing `previous`'s document
+    /// table when these inputs would build an equal one. Contents are
+    /// assembled and every reference resolved anew either way.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_listed_reusing(
         indices: &BTreeMap<PathBuf, DocumentIndex>,
         unparsed: &BTreeSet<PathBuf>,
         dependencies: &BTreeSet<PathBuf>,
+        listing: Listing,
         generation: u64,
-        mut universe: Arc<WikiUniverse>,
+        universe: Arc<WikiUniverse>,
+        contexts: &dyn DocumentContexts,
+        previous: &WorkspaceGraph,
+    ) -> Self {
+        Self::build_from(indices, unparsed, dependencies, listing, generation, universe, contexts, Some(previous))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_from(
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        unparsed: &BTreeSet<PathBuf>,
+        dependencies: &BTreeSet<PathBuf>,
+        listing: Listing,
+        generation: u64,
+        universe: Arc<WikiUniverse>,
+        contexts: &dyn DocumentContexts,
+        previous: Option<&WorkspaceGraph>,
+    ) -> Self {
+        let table = match previous {
+            Some(previous) if previous.table.matches(indices, unparsed, dependencies, listing, &universe) => {
+                Arc::clone(&previous.table)
+            }
+            _ => Arc::new(DocumentTable::build(indices, unparsed, dependencies, listing, universe)),
+        };
+        Self::finalize(Self::assemble(table, indices, generation, contexts))
+    }
+
+    /// Node/edge assembly pass over `table`: mints every root, then every
+    /// parsed document's content nodes, and resolves every edge, deferring
+    /// the reverse index to [`finalize`], which only reads what this pass
+    /// produced.
+    ///
+    /// [`finalize`]: WorkspaceGraph::finalize
+    fn assemble(
+        table: Arc<DocumentTable>,
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        generation: u64,
         contexts: &dyn DocumentContexts,
     ) -> GraphAssembly {
-        let mut entries: Vec<(&PathBuf, Option<&DocumentIndex>)> = indices
-            .iter()
-            .map(|(path, index)| (path, Some(index)))
-            .chain(
-                unparsed
-                    .iter()
-                    .filter(|path| !indices.contains_key(*path))
-                    .map(|path| (path, None)),
-            )
+        let mut states = vec![DocumentState::default(); table.records.len()];
+        let mut nodes: Vec<Node> = (0..table.records.len())
+            .map(|position| Node {
+                document: DocumentId(position as u32),
+                kind: NodeKind::Document,
+                span: 0..0,
+                payload: NodePayload::Document,
+            })
             .collect();
-        entries.sort_by(|left, right| left.0.cmp(right.0));
-        let mut nodes: Vec<Node> = Vec::new();
-        let mut documents: Vec<DocumentRecord> = Vec::new();
-        let mut by_path: HashMap<PathBuf, DocumentId> = HashMap::new();
         // (DocumentId, slug) → heading node, for anchor resolution.
         let mut heading_by_slug: HashMap<(DocumentId, String), NodeId> = HashMap::new();
-        // Per-document heading facts (node, title, slug) for wiki heading rules.
+        // Parsed documents' heading facts (node, title, slug) for wiki
+        // heading rules.
         let mut headings_by_doc: HashMap<DocumentId, Vec<(NodeId, String, String)>> = HashMap::new();
         // Deferred link resolution: (source link node, owning doc, target).
         let mut pending_links: Vec<(NodeId, DocumentId, LinkTarget, String)> = Vec::new();
@@ -268,47 +422,14 @@ impl WorkspaceGraph {
         // Document root + its heading nodes, to emit defines_* edges after all
         // nodes exist.
         let mut heading_nodes: Vec<(NodeId, NodeId)> = Vec::new();
-        let mut document_slots: Vec<usize> = Vec::with_capacity(entries.len());
-        let mut slot_documents: HashMap<usize, DocumentId> = HashMap::with_capacity(entries.len());
 
-        for (position, (path, index)) in entries.into_iter().enumerate() {
-            let doc_id = DocumentId(position as u32);
-            by_path.insert(path.clone(), doc_id);
-            let dependency = index.is_some() && dependencies.contains(path);
-            let WikiDoc { canonical, workspace_id } = WikiDoc::for_path(path, universe.wiki_roots());
-            let slot = match universe.slot(path) {
-                Some(slot) => slot,
-                None => {
-                    let doc = if dependency {
-                        WikiDoc::unmatchable()
-                    } else {
-                        WikiDoc { canonical: canonical.clone(), workspace_id }
-                    };
-                    Arc::make_mut(&mut universe).push(path.clone(), doc)
-                }
-            };
-            document_slots.push(slot);
-            slot_documents.insert(slot, doc_id);
-
-            let root = NodeId(nodes.len() as u32);
-            nodes.push(Node {
-                document: doc_id,
-                kind: NodeKind::Document,
-                span: 0..0,
-                payload: NodePayload::Document,
-            });
-            documents.push(DocumentRecord {
-                path: path.clone(),
-                content_hash: index.map_or(0, |index| index.content_hash),
-                root,
-                canonical,
-                workspace_id,
-                parsed: index.is_some(),
-                dependency,
-            });
-            let Some(index) = index else {
-                headings_by_doc.insert(doc_id, Vec::new());
-                continue;
+        for (path, index) in indices {
+            let doc_id = table.by_path[path];
+            let root = NodeId(doc_id.0);
+            let dependency = table.records[doc_id.0 as usize].dependency;
+            states[doc_id.0 as usize] = DocumentState {
+                content_hash: index.content_hash,
+                parsed: true,
             };
 
             let mut doc_headings: Vec<(NodeId, String, String)> = Vec::new();
@@ -454,7 +575,7 @@ impl WorkspaceGraph {
         }
 
         let mut edges: Vec<Edge> = Vec::new();
-        let mut resolver = ReferenceResolver::new(contexts, &documents, &by_path);
+        let mut resolver = ReferenceResolver::new(contexts, &table, &states);
 
         // Each heading defines an anchor and a symbol on its document.
         for (root, heading) in heading_nodes {
@@ -482,22 +603,8 @@ impl WorkspaceGraph {
 
         // Resolve wiki links against the workspace (R-8), emitting a
         // `references` edge to every resolved (or candidate) target node.
-        let wiki = WikiSlots {
-            universe,
-            document_slots,
-            slot_documents,
-        };
-        let doc_roots: Vec<NodeId> = documents.iter().map(|record| record.root).collect();
-        let parsed: Vec<bool> = documents.iter().map(|record| record.parsed).collect();
         for (source, doc_id, fact) in pending_wiki {
-            let (resolution, info) = resolve_wiki_link(
-                &fact,
-                doc_id,
-                &wiki,
-                &doc_roots,
-                &headings_by_doc,
-                &parsed,
-            );
+            let (resolution, info) = resolve_wiki_link(&fact, doc_id, &table, &headings_by_doc, &states);
             for target in wiki_edge_targets(&resolution) {
                 edges.push(Edge::to_node(source, EdgeKind::References, target));
             }
@@ -513,9 +620,7 @@ impl WorkspaceGraph {
         for (source, doc_id, path) in pending_transclusions {
             match resolver.locate(doc_id, &path) {
                 Some(Located::Document(target_doc)) => {
-                    if let Some(record) = documents.get(target_doc.0 as usize) {
-                        edges.push(Edge::to_node(source, EdgeKind::Transcludes, record.root));
-                    }
+                    edges.push(Edge::to_node(source, EdgeKind::Transcludes, NodeId(target_doc.0)));
                 }
                 Some(Located::File(file)) => {
                     edges.push(Edge::to_file(source, EdgeKind::Transcludes, file));
@@ -528,10 +633,10 @@ impl WorkspaceGraph {
         // naming a graph document resolves to its root, feeding invalidation
         // fan-out; an existing schema file or asset resolves to that file.
         for (source, doc_id, path) in pending_schema_uses {
-            edges.push(resolve_file_edge(source, EdgeKind::UsesSchema, doc_id, &path, &mut resolver, &documents));
+            edges.push(resolve_file_edge(source, EdgeKind::UsesSchema, doc_id, &path, &mut resolver));
         }
         for (source, doc_id, path) in pending_file_uses {
-            edges.push(resolve_file_edge(source, EdgeKind::UsesFile, doc_id, &path, &mut resolver, &documents));
+            edges.push(resolve_file_edge(source, EdgeKind::UsesFile, doc_id, &path, &mut resolver));
         }
 
         // Resolve interpolation variables (uses_variable) against a same-document
@@ -546,58 +651,45 @@ impl WorkspaceGraph {
             }
         }
 
+        let awaited = std::mem::take(&mut resolver.awaited);
+        drop(resolver);
         GraphAssembly {
-            awaited: std::mem::take(&mut resolver.awaited),
-            documents,
-            by_path,
+            table,
+            states,
             nodes,
             edges,
-            wiki,
-            listing: Listing::Ready { complete: true },
             generation,
+            awaited,
         }
     }
 
-    /// Reverse-index / key-index construction pass: builds the lookups over the
+    /// Reverse-index construction pass: builds the edge lookups over the
     /// assembled nodes and edges and freezes the immutable snapshot.
-    ///
-    /// See [`assemble`] for why the two passes are separate.
-    ///
-    /// [`assemble`]: WorkspaceGraph::assemble
-    pub(crate) fn finalize(assembly: GraphAssembly) -> Self {
+    fn finalize(assembly: GraphAssembly) -> Self {
         let GraphAssembly {
-            documents,
-            by_path,
+            table,
+            states,
             nodes,
             edges,
-            wiki,
-            listing,
             generation,
             awaited,
         } = assembly;
         let reverse = ReverseIndex::build(&edges);
-        let keys = KeyIndex::build(
-            documents
-                .iter()
-                .enumerate()
-                .filter(|(_, record)| !record.dependency)
-                .map(|(position, record)| (DocumentId(position as u32), record.path.as_path())),
-        );
-        let portability = portability_collisions(&documents);
-
         Self {
-            documents,
-            by_path,
+            table,
+            states,
             nodes,
             edges,
             reverse,
-            keys,
-            portability,
-            wiki,
-            listing,
             generation,
             awaited,
         }
+    }
+
+    /// Whether `self` and `other` share one document table.
+    #[cfg(test)]
+    pub(crate) fn shares_document_table(&self, other: &WorkspaceGraph) -> bool {
+        Arc::ptr_eq(&self.table, &other.table)
     }
 
     /// The snapshot generation.
@@ -614,12 +706,12 @@ impl WorkspaceGraph {
 
     /// The state of the file list behind this snapshot.
     pub fn listing(&self) -> Listing {
-        self.listing
+        self.table.listing
     }
 
     /// Number of documents.
     pub fn document_count(&self) -> usize {
-        self.documents.len()
+        self.table.records.len()
     }
 
     /// Number of nodes.
@@ -634,7 +726,7 @@ impl WorkspaceGraph {
 
     /// The wiki basename index.
     pub fn key_index(&self) -> &KeyIndex {
-        &self.keys
+        &self.table.keys
     }
 
     /// A node by id.
@@ -643,18 +735,33 @@ impl WorkspaceGraph {
     }
 
     /// A document record by id.
-    pub fn document(&self, id: DocumentId) -> Option<&DocumentRecord> {
-        self.documents.get(id.0 as usize)
+    pub fn document(&self, id: DocumentId) -> Option<DocumentRecord<'_>> {
+        let position = id.0 as usize;
+        (position < self.table.records.len()).then(|| self.record_at(position))
+    }
+
+    fn record_at(&self, position: usize) -> DocumentRecord<'_> {
+        let record = &self.table.records[position];
+        let state = self.states[position];
+        DocumentRecord {
+            path: &record.path,
+            content_hash: state.content_hash,
+            root: NodeId(position as u32),
+            canonical: &record.canonical,
+            workspace_id: record.workspace_id,
+            parsed: state.parsed,
+            dependency: record.dependency,
+        }
     }
 
     /// The document id for a logical path.
     pub fn document_id(&self, path: &Path) -> Option<DocumentId> {
-        self.by_path.get(path).copied()
+        self.table.by_path.get(path).copied()
     }
 
-    /// All document records.
-    pub fn documents(&self) -> &[DocumentRecord] {
-        &self.documents
+    /// All document records, in id order.
+    pub fn documents(&self) -> impl ExactSizeIterator<Item = DocumentRecord<'_>> + DoubleEndedIterator + '_ {
+        (0..self.table.records.len()).map(|position| self.record_at(position))
     }
 
     /// An edge by id.
@@ -824,31 +931,31 @@ impl WorkspaceGraph {
     /// The wiki universe this snapshot resolved wiki links against. It holds
     /// every document of the snapshot and may hold files that are not.
     pub fn wiki_universe(&self) -> &WikiUniverse {
-        &self.wiki.universe
+        &self.table.universe
     }
 
     /// [`wiki_universe`](Self::wiki_universe), shared: what a request-scoped
     /// graph over a few of these documents resolves wiki links against.
     pub fn shared_wiki_universe(&self) -> Arc<WikiUniverse> {
-        Arc::clone(&self.wiki.universe)
+        Arc::clone(&self.table.universe)
     }
 
     /// `document`'s slot in [`wiki_universe`](Self::wiki_universe).
     pub fn wiki_slot(&self, document: DocumentId) -> Option<usize> {
-        self.wiki.document_slots.get(document.0 as usize).copied()
+        self.table.records.get(document.0 as usize).map(|record| record.wiki_slot)
     }
 
     /// The document holding universe `slot`, or `None` when that file is
     /// not a document of this snapshot.
     pub fn slot_document(&self, slot: usize) -> Option<DocumentId> {
-        self.wiki.slot_documents.get(&slot).copied()
+        self.table.slot_documents.get(&slot).copied()
     }
 
     /// Documents whose canonical logical path collides with `document`'s under
     /// case-fold/NFC normalization (empty when there is no collision) — the
     /// R-8 `wiki.portability-collision` twins.
     pub fn portability_twins(&self, document: DocumentId) -> &[DocumentId] {
-        self.portability.get(&document).map_or(&[], Vec::as_slice)
+        self.table.portability.get(&document).map_or(&[], Vec::as_slice)
     }
 
     /// Classifies why a link target failed to resolve, so link diagnostics can
@@ -875,7 +982,7 @@ impl WorkspaceGraph {
             }
             LinkTarget::RelativePath { path, fragment } => {
                 let context = context.ok()?;
-                match locate(context, path, &self.by_path) {
+                match locate(context, path, &self.table.by_path) {
                     Located::Missing(failure) => Some(LinkDiagnostic::BrokenPath { failure }),
                     // An unindexed file's headings are unknown, so its anchor
                     // is not checked.
@@ -941,19 +1048,20 @@ fn resolve_link(
                 Some(Located::File(file)) => return LinkResolution::File(file),
                 Some(Located::Missing(_)) | None => return LinkResolution::Unresolved,
             };
-            let Some(record) = resolver.documents.get(target_doc.0 as usize) else {
+            let Some(state) = resolver.states.get(target_doc.0 as usize) else {
                 return LinkResolution::Unresolved;
             };
+            let root = NodeId(target_doc.0);
             match fragment {
                 // An unparsed target's headings are unknown, so its anchor is
                 // not checked; the link lands on the document until a feature
                 // needs the target parsed.
-                Some(_) if !record.parsed => LinkResolution::Node(record.root),
+                Some(_) if !state.parsed => LinkResolution::Node(root),
                 Some(slug) => match heading_by_slug.get(&(target_doc, slug.clone())) {
                     Some(node) => LinkResolution::Node(*node),
                     None => LinkResolution::Unresolved,
                 },
-                None => LinkResolution::Node(record.root),
+                None => LinkResolution::Node(root),
             }
         }
     }
@@ -969,13 +1077,9 @@ fn resolve_file_edge(
     source_doc: DocumentId,
     path: &str,
     resolver: &mut ReferenceResolver<'_>,
-    documents: &[DocumentRecord],
 ) -> Edge {
     match resolver.locate(source_doc, path) {
-        Some(Located::Document(target_doc)) => match documents.get(target_doc.0 as usize) {
-            Some(record) => Edge::to_node(source, kind, record.root),
-            None => Edge::unresolved(source, kind, path.to_string()),
-        },
+        Some(Located::Document(target_doc)) => Edge::to_node(source, kind, NodeId(target_doc.0)),
         Some(Located::File(file)) => Edge::to_file(source, kind, file),
         Some(Located::Missing(_)) | None => Edge::unresolved(source, kind, path.to_string()),
     }
@@ -1056,8 +1160,8 @@ fn locate(
 /// pair is located once per build.
 struct ReferenceResolver<'a> {
     contexts: &'a dyn DocumentContexts,
-    documents: &'a [DocumentRecord],
-    by_path: &'a HashMap<PathBuf, DocumentId>,
+    table: &'a DocumentTable,
+    states: &'a [DocumentState],
     by_folder: HashMap<PathBuf, Result<FileResolutionContext, ContextFailure>>,
     located: HashMap<(PathBuf, String), Option<Located>>,
     /// The planned candidates of every reference that located nothing.
@@ -1067,13 +1171,13 @@ struct ReferenceResolver<'a> {
 impl<'a> ReferenceResolver<'a> {
     fn new(
         contexts: &'a dyn DocumentContexts,
-        documents: &'a [DocumentRecord],
-        by_path: &'a HashMap<PathBuf, DocumentId>,
+        table: &'a DocumentTable,
+        states: &'a [DocumentState],
     ) -> Self {
         Self {
             contexts,
-            documents,
-            by_path,
+            table,
+            states,
             by_folder: HashMap::new(),
             located: HashMap::new(),
             awaited: HashSet::new(),
@@ -1083,7 +1187,7 @@ impl<'a> ReferenceResolver<'a> {
     /// Where `raw`, authored in `source`, lands; `None` when the document has
     /// no context.
     fn locate(&mut self, source: DocumentId, raw: &str) -> Option<Located> {
-        let path = &self.documents.get(source.0 as usize)?.path;
+        let path = &self.table.records.get(source.0 as usize)?.path;
         let folder = path.parent().unwrap_or(path).to_path_buf();
         let key = (folder.clone(), raw.to_string());
         if let Some(located) = self.located.get(&key) {
@@ -1092,7 +1196,7 @@ impl<'a> ReferenceResolver<'a> {
         let contexts = self.contexts;
         let context = self.by_folder.entry(folder).or_insert_with(|| contexts.context_for(path)).as_ref().ok();
         let located = context.map(|context| {
-            let located = locate(context, raw, self.by_path);
+            let located = locate(context, raw, &self.table.by_path);
             if matches!(located, Located::Missing(_))
                 && let Ok(candidates) = plan_reference(context, raw)
             {
@@ -1121,10 +1225,9 @@ fn wiki_edge_targets(resolution: &WikiResolution) -> Vec<NodeId> {
 fn resolve_wiki_link(
     fact: &WikiLinkFact,
     source: DocumentId,
-    wiki: &WikiSlots,
-    doc_roots: &[NodeId],
+    table: &DocumentTable,
     headings_by_doc: &HashMap<DocumentId, Vec<(NodeId, String, String)>>,
-    parsed_docs: &[bool],
+    states: &[DocumentState],
 ) -> (WikiResolution, Option<WikiInfo>) {
     if fact.unsupported {
         return (WikiResolution::Unsupported, None);
@@ -1134,13 +1237,7 @@ fn resolve_wiki_link(
     if fact.target.is_empty() {
         return match &fact.heading {
             None => (WikiResolution::EmptyTarget, None),
-            Some(heading) => resolve_in_document(
-                source,
-                doc_roots[source.0 as usize],
-                heading,
-                headings_by_doc,
-                None,
-            ),
+            Some(heading) => resolve_in_document(source, NodeId(source.0), heading, headings_by_doc, None),
         };
     }
 
@@ -1153,8 +1250,8 @@ fn resolve_wiki_link(
         .invalid_percent
         .then_some(WikiInfo::InvalidPercentEscape);
 
-    let wiki_docs = wiki.universe.docs();
-    let source_slot = wiki.document_slots[source.0 as usize];
+    let wiki_docs = table.universe.docs();
+    let source_slot = table.records[source.0 as usize].wiki_slot;
     match wiki::resolve_file(&parsed, wiki_docs, source_slot) {
         Match::None => (WikiResolution::Unresolved, percent_info),
         Match::Many(slots) => {
@@ -1162,17 +1259,16 @@ fn resolve_wiki_link(
             // candidates that are documents of this snapshot get an edge.
             let candidates = slots
                 .into_iter()
-                .filter_map(|slot| wiki.slot_documents.get(&slot))
-                .map(|document| doc_roots[document.0 as usize])
+                .filter_map(|slot| table.slot_documents.get(&slot))
+                .map(|document| NodeId(document.0))
                 .collect();
             (WikiResolution::Ambiguous(candidates), percent_info)
         }
         Match::One(slot) => {
-            let Some(&target_doc) = wiki.slot_documents.get(&slot) else {
+            let Some(&target_doc) = table.slot_documents.get(&slot) else {
                 return (WikiResolution::OutsideGraph, percent_info);
             };
-            let index = target_doc.0 as usize;
-            let file_root = doc_roots[index];
+            let file_root = NodeId(target_doc.0);
             // A file whose name keeps a Markdown extension after elision.
             let confusing = wiki_docs[slot]
                 .canonical
@@ -1184,7 +1280,7 @@ fn resolve_wiki_link(
                 None => (WikiResolution::Resolved(file_root), base_info),
                 // An unparsed target's headings are unknown: the link lands on
                 // the file until a feature needs the target parsed.
-                Some(_) if !parsed_docs[index] => (WikiResolution::Resolved(file_root), base_info),
+                Some(_) if !states[target_doc.0 as usize].parsed => (WikiResolution::Resolved(file_root), base_info),
                 Some(heading) => {
                     resolve_in_document(target_doc, file_root, heading, headings_by_doc, base_info)
                 }
@@ -1234,13 +1330,23 @@ fn resolve_in_document(
 
 /// Groups documents whose canonical logical paths collide under case-fold/NFC
 /// normalization, mapping each colliding document to its twins.
-fn portability_collisions(documents: &[DocumentRecord]) -> HashMap<DocumentId, Vec<DocumentId>> {
-    let mut by_key: HashMap<String, Vec<DocumentId>> = HashMap::new();
-    for (position, record) in documents.iter().enumerate().filter(|(_, record)| !record.dependency) {
-        by_key
-            .entry(wiki::portability_key(&record.canonical))
-            .or_default()
-            .push(DocumentId(position as u32));
+///
+/// Only the graph's non-dependency documents are grouped, never every
+/// universe slot: a request graph holds fewer documents than its universe.
+/// Each key is the one cached in the document's slot, unless that slot is
+/// unmatchable and the record's real canonical path is keyed instead.
+fn portability_collisions(
+    records: &[DocumentPathRecord],
+    universe: &WikiUniverse,
+) -> HashMap<DocumentId, Vec<DocumentId>> {
+    let mut by_key: HashMap<Cow<'_, str>, Vec<DocumentId>> = HashMap::new();
+    for (position, record) in records.iter().enumerate().filter(|(_, record)| !record.dependency) {
+        let slot = record.wiki_slot;
+        let key = match universe.portability_key(slot) {
+            Some(key) if !universe.docs()[slot].is_unmatchable() => Cow::Borrowed(key),
+            _ => Cow::Owned(counted_portability_key(&record.canonical)),
+        };
+        by_key.entry(key).or_default().push(DocumentId(position as u32));
     }
     let mut collisions = HashMap::new();
     for members in by_key.into_values() {
@@ -1699,5 +1805,171 @@ mod tests {
         let slot = g.wiki_slot(extra).unwrap();
         assert_eq!(g.slot_document(slot), Some(extra));
         assert_eq!(g.wiki_universe().path(slot), Some(abs("/w/extra.md").as_path()));
+    }
+
+    #[test]
+    fn test_collisions_group_only_graph_documents_by_their_cached_slot_keys() {
+        use crate::work_counters::work_counts;
+
+        // The universe holds a case-only collision pair and a second pair
+        // with only one member in the graph.
+        let universe = WikiUniverse::new(
+            [abs("/w/Note.md"), abs("/w/note.md"), abs("/w/Solo.md"), abs("/w/solo.md")],
+            &[abs("/w")],
+        );
+        let docs = indices(&[("/w/Note.md", "# N\n"), ("/w/note.md", "# n\n"), ("/w/solo.md", "# s\n")]);
+        let before = work_counts();
+        let g = WorkspaceGraph::build_with_roots(&docs, 1, universe, &workspace_contexts());
+        let work = work_counts().since(before);
+        // Every document's canonical path and key come from its slot.
+        assert_eq!((work.wiki_path_facts, work.wiki_portability_keys, work.wiki_universes), (0, 0, 0));
+        assert_eq!(work.document_tables, 1);
+
+        let [upper, lower, solo] = ["/w/Note.md", "/w/note.md", "/w/solo.md"].map(|path| g.document_id(&abs(path)).unwrap());
+        assert_eq!(g.portability_twins(upper), &[lower]);
+        assert_eq!(g.portability_twins(lower), &[upper]);
+        // `Solo.md` is a universe slot but not a graph document.
+        assert!(g.portability_twins(solo).is_empty());
+        let record = g.document(upper).unwrap();
+        assert_eq!((record.canonical.to_vec(), record.workspace_id), (vec!["Note".to_string()], 0));
+    }
+
+    #[test]
+    fn test_a_document_on_an_unmatchable_supplied_slot_keeps_its_real_facts() {
+        // A request graph over a live dependency: the supplied universe holds
+        // the dependency's unmatchable slot, while the request graph treats it
+        // as an ordinary document.
+        let mut universe = WikiUniverse::new([abs("/w/Note.md")], &[abs("/w")]);
+        universe.push(abs("/w/note.md"), WikiDoc::unmatchable());
+        let docs = indices(&[("/w/Note.md", "# N\n"), ("/w/note.md", "# n\n")]);
+        let g = WorkspaceGraph::build_with_roots(&docs, 1, universe, &workspace_contexts());
+        let [upper, lower] = ["/w/Note.md", "/w/note.md"].map(|path| g.document_id(&abs(path)).unwrap());
+        let record = g.document(lower).unwrap();
+        assert_eq!((record.canonical.to_vec(), record.workspace_id), (vec!["note".to_string()], 0));
+        assert_eq!(g.wiki_slot(lower), Some(1), "the supplied slot is kept");
+        assert!(g.wiki_universe().docs()[1].is_unmatchable());
+        assert_eq!(g.portability_twins(upper), &[lower]);
+    }
+
+    /// Asserts `DocumentId(d)`'s root is `NodeId(d)`, roots precede every
+    /// content node, and each document's own nodes start at its root.
+    fn assert_roots_first(g: &WorkspaceGraph) {
+        let documents = g.document_count();
+        for (position, record) in g.documents().enumerate() {
+            assert_eq!(record.root, NodeId(position as u32));
+            let root = g.node(record.root).unwrap();
+            assert_eq!((root.kind, root.document), (NodeKind::Document, DocumentId(position as u32)));
+            let own: Vec<usize> = (0..g.node_count())
+                .filter(|&id| g.node(NodeId(id as u32)).unwrap().document == DocumentId(position as u32))
+                .collect();
+            assert_eq!(own.first(), Some(&position), "{}", record.path.display());
+            assert!(own[1..].iter().all(|&id| id >= documents), "content follows every root");
+        }
+    }
+
+    #[test]
+    fn test_roots_are_numbered_first_and_content_follows_in_path_order() {
+        let docs = indices(&[("/w/b.md", "# B\n\n[[d]]\n"), ("/w/d.md", "# D\n\n## Two\n")]);
+        let unparsed = BTreeSet::from([abs("/w/a.md"), abs("/w/c.md"), abs("/w/d.md")]);
+        let none = BTreeSet::new();
+        let universe = WikiUniverse::new(
+            [abs("/w/a.md"), abs("/w/b.md"), abs("/w/c.md"), abs("/w/d.md")],
+            &[abs("/w")],
+        );
+        let g = WorkspaceGraph::build_listed(
+            &docs,
+            &unparsed,
+            &none,
+            Listing::Ready { complete: true },
+            1,
+            universe,
+            &workspace_contexts(),
+        );
+        let paths: Vec<PathBuf> = g.documents().map(|record| record.path.to_path_buf()).collect();
+        assert_eq!(paths, ["/w/a.md", "/w/b.md", "/w/c.md", "/w/d.md"].map(abs));
+        let parsed: Vec<bool> = g.documents().map(|record| record.parsed).collect();
+        assert_eq!(parsed, vec![false, true, false, true]);
+        assert_eq!(g.documents().next_back().unwrap().path, &abs("/w/d.md"));
+        assert_roots_first(&g);
+        // b's content precedes d's: parsed documents append in path order.
+        let b = g.document_id(&abs("/w/b.md")).unwrap();
+        let d = g.document_id(&abs("/w/d.md")).unwrap();
+        let (b_heading, _) = g.headings(b).next().unwrap();
+        let (d_heading, _) = g.headings(d).next().unwrap();
+        assert!(b_heading < d_heading);
+        assert_eq!(wiki_resolution(&g, "/w/b.md"), WikiResolution::Resolved(NodeId(d.0)));
+        // An unparsed document has a root and nothing else.
+        assert_eq!(g.headings(g.document_id(&abs("/w/a.md")).unwrap()).count(), 0);
+    }
+
+    #[test]
+    fn test_a_table_is_reused_only_for_equal_structural_inputs() {
+        use crate::work_counters::work_counts;
+
+        let contexts = workspace_contexts();
+        let universe = Arc::new(WikiUniverse::new([abs("/w/a.md"), abs("/w/b.md")], &[abs("/w")]));
+        let listed = BTreeSet::from([abs("/w/a.md"), abs("/w/b.md")]);
+        let none = BTreeSet::new();
+        let ready = Listing::Ready { complete: true };
+        let build = |docs: &BTreeMap<PathBuf, DocumentIndex>, listing, universe: &Arc<WikiUniverse>, previous: Option<&WorkspaceGraph>| {
+            match previous {
+                Some(previous) => WorkspaceGraph::build_listed_reusing(
+                    docs, &listed, &none, listing, 2, Arc::clone(universe), &contexts, previous,
+                ),
+                None => WorkspaceGraph::build_listed(docs, &listed, &none, listing, 1, Arc::clone(universe), &contexts),
+            }
+        };
+        let first_docs = indices(&[("/w/a.md", "# A\n")]);
+        let first = build(&first_docs, ready, &universe, None);
+
+        // The public builder always constructs a table, even over equal inputs.
+        let before = work_counts();
+        let fresh = build(&first_docs, ready, &universe, None);
+        assert_eq!(work_counts().since(before).document_tables, 1);
+        assert!(!fresh.shares_document_table(&first));
+
+        // An edit, and a listed document becoming parsed, share the table;
+        // the snapshot's state is its own.
+        let edited_docs = indices(&[("/w/a.md", "# A edited\n"), ("/w/b.md", "# B\n")]);
+        let before = work_counts();
+        let edited = build(&edited_docs, ready, &universe, Some(&first));
+        let work = work_counts().since(before);
+        assert_eq!((work.document_tables, work.wiki_path_facts, work.wiki_portability_keys), (0, 0, 0), "{work:?}");
+        assert!(edited.shares_document_table(&first));
+        let b = edited.document_id(&abs("/w/b.md")).unwrap();
+        assert!(edited.document(b).unwrap().parsed && !first.document(b).unwrap().parsed);
+        assert_eq!(edited.document(b).unwrap().content_hash, edited_docs[&abs("/w/b.md")].content_hash);
+        assert_eq!(first.document(b).unwrap().content_hash, 0);
+        assert_roots_first(&edited);
+
+        // A listing state, or an equal universe that is not the same one,
+        // is a different input.
+        let before = work_counts();
+        let pending = build(&edited_docs, Listing::Pending, &universe, Some(&edited));
+        assert!(!pending.shares_document_table(&edited));
+        assert_eq!(pending.listing(), Listing::Pending);
+        let incomplete = build(&edited_docs, Listing::Ready { complete: false }, &universe, Some(&pending));
+        assert!(!incomplete.shares_document_table(&pending));
+        let equal = Arc::new(WikiUniverse::new([abs("/w/a.md"), abs("/w/b.md")], &[abs("/w")]));
+        let rebuilt = build(&edited_docs, Listing::Ready { complete: false }, &equal, Some(&incomplete));
+        assert!(!rebuilt.shares_document_table(&incomplete));
+        assert_eq!(work_counts().since(before).document_tables, 3);
+
+        // A parsed document turning into a dependency changes its record.
+        let dependency = BTreeSet::from([abs("/w/b.md")]);
+        let as_dependency = WorkspaceGraph::build_listed_reusing(
+            &edited_docs, &listed, &dependency, ready, 3, Arc::clone(&universe), &contexts, &edited,
+        );
+        assert!(!as_dependency.shares_document_table(&edited));
+        assert!(as_dependency.document(b).unwrap().dependency);
+
+        // A request graph's extended universe lives in its own table, so the
+        // universe it was given never matches that table again.
+        let short = Arc::new(WikiUniverse::new([abs("/w/a.md")], &[abs("/w")]));
+        let extended = build(&first_docs, ready, &short, None);
+        assert_eq!(extended.wiki_universe().len(), 2);
+        assert_eq!(short.len(), 1, "the supplied universe is never mutated");
+        let again = build(&first_docs, ready, &short, Some(&extended));
+        assert!(!again.shares_document_table(&extended));
     }
 }

@@ -11,7 +11,21 @@ path = "src/lib.rs"
 [features]
 clap = ["dep:clap"]
 # Enables SVG rasterization and Mermaid diagram rendering (both require resvg).
-image = ["dep:resvg", "dep:png", "dep:mermaid-rs-renderer"]
+image = [
+    "dep:resvg",
+    "dep:png",
+    "dep:rustybuzz",
+    "dep:ttf-parser",
+    "dep:unicode-bidi",
+    "dep:unicode-script",
+    "dep:fontique",
+    "dep:merman",
+    "dep:svgtypes",
+    "dep:allsorts",
+    "dep:roxmltree",
+    "dep:simplecss",
+    "dep:base64",
+]
 # The diagram components (`components::{MermaidDiagram, GraphExpression,
 # GitGraph}`) and the render-tree diagram hook. This crate depends on
 # `biscuit-terminal`, never the reverse, so no feature here may make
@@ -23,16 +37,47 @@ clap = { version = "4", features = ["derive"], optional = true }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 thiserror = "2.0"
 tempfile = "3"
-resvg = { version = "0.45", optional = true }
+resvg = { version = "0.47", optional = true }
 # The PNG encoder resvg's tiny-skia already uses, configured for smaller output
 # (see `raster::png::encode_png`); keep it on tiny-skia's major version.
-png = { version = "0.17", optional = true }
+png = { version = "0.18", optional = true }
+# Shapes labels for text measurement, so the measured face is the drawn face;
+# keep on the version usvg uses, so the lock holds one copy.
+rustybuzz = { version = "0.20.1", optional = true }
+# Reads font tables (names, OS/2 class, cmap) for font resolution; keep on the
+# version usvg uses, so the lock holds one copy.
+ttf-parser = { version = "0.25.1", optional = true }
+# Bidi runs and script itemization for shaping, as usvg's text layout does.
+unicode-bidi = { version = "0.3", optional = true }
+unicode-script = { version = "0.5", optional = true }
+# Parses the colors an author writes (CSS names included) for the contrast
+# pass; keep on the version usvg uses, so the lock holds one copy.
+svgtypes = { version = "0.16.1", optional = true }
+# Subsets the font the HTML static target embeds, keeping `cmap`, `OS/2` and
+# `name`. `flate2_rust` instead of the default `flate2_zlib`, which builds the
+# C library libz-sys.
+allsorts = { version = "0.17.0", default-features = false, features = ["flate2_rust"], optional = true }
+# Read a static SVG's labels through its CSS cascade for the embedded font's
+# code points; keep on the versions usvg uses, so the lock holds one copy.
+roxmltree = { version = "0.21.1", optional = true }
+simplecss = { version = "0.2.2", optional = true }
+# The embedded font's `data:` URI.
+base64 = { version = "0.22", optional = true }
+# The OS's own generic font family (fontconfig, CoreText, DirectWrite) for
+# font resolution; the version Merman pins. `fontconfig-dlopen` loads
+# libfontconfig at run time, so Linux builds need no fontconfig development
+# package and a host without the library skips this step instead of failing.
+fontique = { version = "0.12.0", default-features = false, features = ["system", "fontconfig-dlopen"], optional = true }
+# The Mermaid backend. Pinned to a commit on
+# Ken's fork carrying the gitGraph `commitSpacing` key (branch
+# `gitgraph-commit-spacing`, based on upstream 482fcde7). `png`,
+# `native-fonts`, ELK, and `math` stay off: we rasterize and measure with our
+# own usvg and font chain. `ascii` is the text target the terminal components
+# fall back to when a terminal cannot show images.
+merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "ascii", "all-diagrams", "layout-cytoscape"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-# `default-features = false`: we rasterize with our own resvg, so the crate's
-# `png` (a second resvg/usvg) and `cli` (clap) features are unused.
-mermaid-rs-renderer = { version = "0.3.1", default-features = false, optional = true }
 layout-rs = "0.1"
 biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
 renderable = { path = "../../renderable", optional = true }
@@ -51,18 +96,13 @@ name = "l1"
 path = "tests/l1/main.rs"
 required-features = ["terminal"]
 
-# CI exclusion: 71 tests that currently run in no CI job. Promotion is blocked
-# on the canonical just recipe set.
+# Gating: the golden SVG/PNG corpus and every other L1 test run on each CI
+# environment.
 [package.metadata.ci]
-gates = false
-exclusion-class = "promotion-pending"
-owner = "@yankeeinlondon"
-reason = "71 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set — biscuit-visualized/ defines only test and lint."
-expiry = "2026-10-31"
+gates = true
 
-# The package's test contract, recorded NOW so promotion cannot silently drop
-# it: `image` (resvg + Mermaid) gates 56 of the 71 tests, and the only
-# consumer (biscuit-terminal) enables it — so the justfile tests with
+# `image` (resvg + Mermaid) gates most tests, and the consumers
+# (biscuit-terminal, darkmatter) enable it, so the justfile tests with
 # `--all-features` throughout, and CI must too (same shape as messenger's
 # `--features desktop`).
 [package.metadata.ci.tests]

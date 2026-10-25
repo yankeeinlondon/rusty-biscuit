@@ -17,12 +17,12 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 /// order the format's deserializer reports them, which for a streaming parser
 /// is source order. Both routes produce the same pointers.
 ///
-/// The source records the order an author wrote their keys in; the JSON value model
-/// Darkmatter and its consumers pass around does not. This index is the narrow
-/// side channel that carries that order without changing the representation of
-/// every `serde_json::Map` in the graph: a consumer that needs authored order
-/// at one boundary looks the mapping up by pointer, and everything else keeps
-/// ordinary canonical-order behavior.
+/// Darkmatter builds `serde_json` with `preserve_order`, so a parsed value's
+/// maps already iterate in authored order and agree with this index. The index
+/// stays useful where a value is not at hand or has been rebuilt: a consumer
+/// can look a mapping's authored order up by pointer, and a JSON value that
+/// reaches it through a crate built without `preserve_order` can be restored
+/// to authored order.
 ///
 /// Only mappings with string keys are indexed, and only string keys are
 /// recorded, because a JSON Pointer has no spelling for a non-string key.

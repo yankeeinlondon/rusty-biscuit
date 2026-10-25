@@ -126,13 +126,17 @@ mod unix {
         let mut request = Vec::new();
         request.extend_from_slice(OSC10_QUERY);
         request.extend_from_slice(OSC11_QUERY);
+        for index in 0..16 {
+            request.extend_from_slice(format!("\x1b]4;{index};?\x07").as_bytes());
+        }
         request.extend_from_slice(
             format!("\x1b_Gi={},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\", ids[0]).as_bytes(),
         );
         request.extend_from_slice(DA1_QUERY);
         assert!(
             position(&collected, &request).is_some(),
-            "expected OSC 10 + OSC 11 + Kitty query + DA1 as one contiguous request; {}",
+            "expected OSC 10 + OSC 11 + OSC 4 slots 0-15 + Kitty query + DA1 as one \
+             contiguous request; {}",
             raw(&collected)
         );
 

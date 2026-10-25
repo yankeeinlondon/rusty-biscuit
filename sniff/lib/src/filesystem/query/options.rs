@@ -1,4 +1,6 @@
+use super::TreeIndex;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Default shared budget for one query.
@@ -22,10 +24,11 @@ pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(2);
 ///     .with_deadline(Duration::from_millis(500));
 /// assert!(!options.recursive());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PathUsageOptions {
     recursive: bool,
     deadline: Duration,
+    tree_index: Option<Arc<TreeIndex>>,
 }
 
 impl Default for PathUsageOptions {
@@ -33,9 +36,26 @@ impl Default for PathUsageOptions {
         Self {
             recursive: true,
             deadline: DEFAULT_DEADLINE,
+            tree_index: None,
         }
     }
 }
+
+/// Two options are equal when they would run the same query: the same
+/// supplied index (by identity, never by comparing its entries), or none.
+impl PartialEq for PathUsageOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.recursive == other.recursive
+            && self.deadline == other.deadline
+            && match (&self.tree_index, &other.tree_index) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for PathUsageOptions {}
 
 #[allow(missing_docs)]
 impl PathUsageOptions {
@@ -52,6 +72,25 @@ impl PathUsageOptions {
     pub fn with_deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
+    }
+
+    /// Match against `index` instead of walking the target directory.
+    ///
+    /// For a caller that has already walked the tree, so the query's budget
+    /// goes to processes rather than a second walk. The query still resolves
+    /// and verifies the root itself, and rejects with
+    /// [`PathUsageError::InvalidOption`] an index whose root identity is not
+    /// the target's, a file target, and [`target_only`](Self::target_only).
+    /// The index is shared, not copied, so one index can serve several
+    /// queries of the same tree; it describes the tree as the caller captured
+    /// it, so entries created since are not matched.
+    pub fn with_tree_index(mut self, index: Arc<TreeIndex>) -> Self {
+        self.tree_index = Some(index);
+        self
+    }
+
+    pub fn tree_index(&self) -> Option<&Arc<TreeIndex>> {
+        self.tree_index.as_ref()
     }
 
     pub fn recursive(&self) -> bool {

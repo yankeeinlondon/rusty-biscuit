@@ -19,8 +19,6 @@
 //! action values are rendered") and `docs/topics/composition.md` (§"Loop vs
 //! lifecycle interpolation").
 
-use std::collections::HashMap;
-
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use darkmatter::markdown::MarkdownError;
@@ -62,12 +60,8 @@ fn effective_state(
     frontmatter: &Map<String, Value>,
     context: &ComposeContext,
 ) -> EffectiveState {
-    let fm: HashMap<String, Value> = frontmatter
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
     EffectiveStateBuilder::new()
-        .with_frontmatter(fm)
+        .with_frontmatter(frontmatter.clone())
         .with_context(context.clone())
         .build()
         .expect("effective state builds")

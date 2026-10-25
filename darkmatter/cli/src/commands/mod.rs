@@ -62,8 +62,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             output,
             show,
             indent,
+            features,
         } => {
-            run_render(input.as_ref(), output, show, indent, cli, request)?;
+            // `md --feature a render --feature b` turns on both.
+            let features = [cli.features.as_slice(), features.as_slice()].concat();
+            run_render(input.as_ref(), output, show, indent, &features, cli, request)?;
         }
         CliCommand::Clean {
             input,

@@ -100,6 +100,15 @@ The graphics probe (`detection::probe`, live exchange in
   Sixel read from the DA1 sentinel's reply. Whichever of color lookup / route
   resolution needs it first sends both parts. Inside a multiplexer only the
   graphics part is sent (colors stay off).
+- The color part also carries sixteen OSC 4 palette queries
+  (`ESC ] 4 ; N ; ? BEL`, N = 0–15) between OSC 11 and the Kitty query,
+  behind the same color gate (`palette_query_wanted()` = `color_query_wanted()`)
+  on every platform; native Windows sends them through the console backend
+  (`tty_query/windows.rs`, proven by `level2_windows_console_query`'s palette
+  tests). The hidden `osc_queries::ansi_palette()` reads them, and
+  `biscuit-visualized`'s `TerminalColors::detect()` turns ANSI 1–6 into
+  diagram accents. A PTY test that matches the exact startup request must
+  include them.
 - Outcomes: correlated Kitty `OK` → Kitty `Verified` (beats Sixel); DA1
   attribute `4` (never the class, never a digit of another number) → Sixel
   `Verified`; DA1 without either or a Kitty rejection → NoSupport `Verified`;
@@ -344,7 +353,8 @@ the direct graphics probe share one cached request
 (`discovery::startup_exchange`); the wrapped exchange is cached separately.
 Remote sessions (`SSH_CLIENT`, Mosh) get the full timeout;
 `BISCUIT_TERMINAL_QUERY_SILENCE_MS` overrides the budget. On native Windows
-only colors (color-list terminals plus Windows Terminal), the cell size
+only colors and the OSC 4 palette (color-list terminals plus Windows
+Terminal, one gate for both), the cell size
 (`CSI 16 t`, riding in the startup exchange and cached per process, because
 Windows has no pixel ioctl), and the graphics probe are queried, never in a
 Windows SSH server session (there the 8×16 `CellSize::FALLBACK` applies);

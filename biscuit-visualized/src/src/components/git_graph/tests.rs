@@ -278,7 +278,7 @@ fn geometry_of(text: &str) -> crate::mermaid::GitGraphGeometry {
         .expect("a gitGraph")
 }
 
-/// Parent IDs of `id` as the renderer lays the text out (merge repair included).
+/// Parent IDs of `id` as Merman lays the text out.
 fn parents_of(text: &str, id: &str) -> Vec<String> {
     geometry_of(text)
         .commit(id)
@@ -1398,7 +1398,10 @@ struct Expected<'a> {
 fn assert_real_backend(name: &str, graph: &GitGraph, expected: &Expected) -> Vec<String> {
     let graph = graph.clone().with_theme(MermaidTheme::Default);
     let mut report = Vec::new();
-    for vp in [viewport(120, 40), viewport(56, 60)] {
+    // 48 rows: Merman draws three lanes 269 units tall (22 rows at scale
+    // 1.25), past the base view's cap of half a 40-row viewport, which would
+    // leave observation-2's merged lanes out.
+    for vp in [viewport(120, 48), viewport(56, 60)] {
         let planned = graph.plan(vp).expect("a plan");
         let geometry = geometry_of(&planned.mermaid);
         assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{name} {vp:?}: {}", planned.mermaid);

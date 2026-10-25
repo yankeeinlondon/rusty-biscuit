@@ -36,6 +36,8 @@ darkmatter = { path = "../lib" }
 renderable = { path = "../../renderable" }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["json5", "yaml", "toml", "file-reference"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+# `clap` supplies the shared `--feature` names for the Mermaid fallback policy.
+biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"] }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 sniff = { path = "../../sniff/lib" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

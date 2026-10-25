@@ -13,8 +13,9 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::prelude::WordWrap;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::query::{
-    Coverage, CoverageStatus, Evidence, EvidenceKind, Limitation, LimitationExample, Mechanism,
-    NativeString, Outcome, PathUsageReport, ProcessRecord, TargetKind,
+    Coverage, CoverageStatus, Evidence, EvidenceKind, IndexProvenance, Limitation,
+    LimitationExample, Mechanism, NativeString, Outcome, PathUsageReport, ProcessRecord,
+    TargetKind,
 };
 
 /// Processes shown before the rest are counted as omitted.
@@ -135,6 +136,14 @@ fn render_target(out: &mut String, report: &PathUsageReport, view: &View) {
         (TargetKind::Directory, false) => "directory only (target-only)",
     };
     details.push(format!("Scope: {scope}"));
+    // A walk is the default and needs no line.
+    match report.index_provenance {
+        IndexProvenance::Walked => {}
+        IndexProvenance::Supplied => details.push("Tree index: supplied by the caller".into()),
+        IndexProvenance::Unknown => {
+            details.push("Tree index: unknown (recorded before provenance was)".into());
+        }
+    }
     details.push(format!(
         "Budget: {} ms, used {} ms{}",
         report.budget_ms,

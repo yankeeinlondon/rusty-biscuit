@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::{CliContext, Run};
 use clap::Args as ClapArgs;
@@ -39,6 +39,9 @@ pub struct FlowchartArgs {
     #[command(flatten)]
     pub layout: LayoutArgs,
 
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
+
     /// Render an example diagram and show the command used
     #[arg(long, short = 'e')]
     pub example: bool,
@@ -65,14 +68,10 @@ impl Run for FlowchartArgs {
         let direction = if self.vertical { "TD" } else { "LR" };
         let body = content.join("\n    ");
 
-        let instructions = if let Some(title) = &self.title {
-            format!(
-                "---\ntitle: {}\n---\nflowchart {}\n    {}",
-                title, direction, body
-            )
-        } else {
-            format!("flowchart {}\n    {}", direction, body)
-        };
+        let instructions = crate::commands::mermaid::with_mermaid_frontmatter_title(
+            &format!("flowchart {}\n    {}", direction, body),
+            self.title.as_deref(),
+        );
 
         if ctx.json {
             let output = serde_json::json!({
@@ -90,9 +89,11 @@ impl Run for FlowchartArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            self.title.as_deref(),
             self.inverse,
             width_str.as_deref(),
             &self.layout,
+            &self.features,
         )?;
         let terminal = terminal_for_render(ctx.plain);
         display_mermaid(

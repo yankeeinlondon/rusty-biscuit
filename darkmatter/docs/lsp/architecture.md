@@ -52,6 +52,125 @@ live snapshot's universe (`WorkspaceGraph::shared_wiki_universe`), so both
 graphs judge wiki links identically. The universe is a required parameter:
 no caller can silently judge ambiguity against a partial set.
 
+### Rebuilding the live snapshot
+
+Every change the live snapshot must reflect (a keystroke that alters an open
+buffer, a target parsed for the first time, a file joining the list)
+publishes a new `WorkspaceGraph` with the next generation.
+`WorkspaceIndex::rebuild` in
+[`graph/invalidate.rs`](../../dmls/src/graph/invalidate.rs) builds it. A
+change that leaves a document's bytes as they were publishes nothing, unless
+it changes the document's role: opening a
+[dependency](./indexing.md#targets-outside-the-file-list) with its disk
+bytes publishes it as an ordinary open document. A batch of disk changes
+(one watched-files notification) publishes once, at the end.
+
+Snapshots are immutable. A reader still holding the previous snapshot keeps
+getting exactly the answers it got before; nothing in a new snapshot
+reaches back into an old one.
+
+A snapshot has two parts:
+
+- **Path-derived**, read from paths and never from file contents: the wiki
+  universe, and the **document table**. The table holds each document's
+  path, canonical wiki path, workspace, dependency flag, and wiki slot; the
+  wiki **basename** index (`[[topic]]` → every document whose file is named
+  `topic`); and the portability collisions (paths that differ only by case
+  or Unicode normalization).
+- **Content-derived**: every node and edge, heading and frontmatter-key
+  nodes, the resolution of every link, transclusion, wiki link, `$schema`
+  and file use, and variable use, the paths a broken reference is waiting
+  for, and the reverse index over the edges.
+
+Nearly every rebuild is typing in an open buffer, which changes content and
+no path. So the live index reuses the path-derived part whenever its inputs
+are unchanged, and rebuilds the content-derived part every time:
+
+```mermaid
+flowchart TD
+    A["rebuild requested"] --> B{"universe inputs equal<br/>to the last rebuild's?"}
+    B -- yes --> C["reuse the cached universe"]
+    B -- no --> D["build a universe:<br/>sorted candidates, then dependency slots"]
+    C --> E{"table inputs equal,<br/>and the same universe?"}
+    E -- yes --> F["share the previous document table"]
+    E -- no --> G["build a document table:<br/>records, basename index, collisions"]
+    D --> G
+    F --> H["assemble content: every root,<br/>then each parsed document's nodes;<br/>resolve every reference"]
+    G --> H
+    H --> I["build the reverse index"]
+    I --> J["publish the snapshot"]
+```
+
+The **universe** is reused when all three of its inputs equal the previous
+rebuild's, compared by value:
+
+- the **candidates**: every listed Markdown file plus every parsed document
+  that is not a dependency (an open buffer outside the list), sorted and
+  without duplicates;
+- the **dependencies**, sorted;
+- the **wiki roots**, in configured order. Order matters because the first
+  root containing a path names it, so reordering the same roots is a change.
+
+The **document table** is reused when:
+
+- the sorted union of parsed and listed paths is the table's documents, in
+  the same order;
+- every document has the same dependency flag;
+- the `Listing` state is equal. `Pending`, `Ready { complete: false }`, and
+  `Ready { complete: true }` are three different inputs, because diagnostics
+  that depend on which files exist read it;
+- the universe is the very same one (pointer identity, not value equality).
+  A rebuilt universe therefore always means a rebuilt table.
+
+Parse state and content hashes are not table inputs; they belong to each
+snapshot. A listed file parsed for the first time, or a listed buffer closed
+back to unparsed, reuses both the universe and the table.
+
+For example, with `a.md` and `guide.md` listed and `a.md` open:
+
+| Change | Universe | Document table | Content |
+| --- | --- | --- | --- |
+| typing in `a.md` | reused | reused | rebuilt |
+| hovering a link parses `guide.md` | reused | reused | rebuilt |
+| a watched creation adds `notes/new.md` to the list | rebuilt | rebuilt | rebuilt |
+| a re-walk lists the same files but one folder fails (`Ready { complete: false }`) | reused | rebuilt | rebuilt |
+| `../README.md`, a dependency of `a.md`, is opened and edited | rebuilt | rebuilt | rebuilt |
+
+Even when both are reused, every parsed document's nodes, edges, headings,
+frontmatter keys, references and wiki resolutions, awaited paths, and the
+reverse index are built anew, and every reference is resolved again. The
+table records paths, never whether a reference's target exists, so a
+shared table cannot hide a target that appeared or a probe that now fails.
+
+**Basename keys are cached; frontmatter keys are not.** The basename index
+in the table is derived from file names, so it survives an edit. A
+document's frontmatter keys (the `FrontmatterKey` nodes that `{{ title }}`
+interpolations resolve to through `uses_variable` edges) come from its
+contents and are rebuilt on every edit: after renaming `title:` to
+`heading:`, the next snapshot resolves `{{ heading }}` and no longer
+resolves `{{ title }}`.
+
+**Numbering.** `DocumentId`s are dense and follow path order over every
+document, parsed or not. Roots come first: `DocumentId(d)`'s root is
+`NodeId(d)`. Each parsed document's content nodes follow, documents in path
+order, each in its usual node order. Node and edge IDs are local to one
+snapshot. An edit that adds a heading shifts every later node, so never
+compare node or edge IDs across snapshots; compare a document's path and a
+node's span instead.
+
+**Dependency slots.** The live universe holds every candidate in sorted
+order, then one **unmatchable** slot per dependency, sorted, which no wiki
+link can match. Because every document already has a slot, building a
+table never has to append to a universe an older snapshot still shares
+(which would copy it). A slot number is not a `DocumentId`: always map
+between them with `WorkspaceGraph::wiki_slot` and `slot_document`. A
+dependency's record still carries the real canonical path of its file.
+
+Only the live index reuses. The public builders
+(`WorkspaceGraph::build`, `build_with_roots`, and `build_listed`) always
+build a fresh table, and request graphs are built that way. Tests compare
+the live index against them as the uncached reference.
+
 ## File resolution contexts
 
 Every feature that follows a file reference (document links,

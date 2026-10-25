@@ -218,9 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn yolo_permission_block_serializes_independent_of_insertion_order() {
-        // Build the same logical block with the three keys inserted in a
-        // different order; serialization must be byte-identical cross-platform.
+    fn yolo_permission_block_round_trips_independent_of_insertion_order() {
         let mut permission = Map::new();
         permission.insert("doom_loop".into(), Value::String("allow".into()));
         permission.insert("*".into(), Value::String("allow".into()));
@@ -230,8 +228,11 @@ mod tests {
         let reordered = Value::Object(root);
 
         assert_eq!(
-            serde_json::to_string(&yolo_permission_block()).unwrap(),
-            serde_json::to_string(&reordered).unwrap()
+            serde_json::from_str::<Value>(
+                &serde_json::to_string(&yolo_permission_block()).unwrap()
+            )
+            .unwrap(),
+            reordered
         );
     }
 }

@@ -115,7 +115,7 @@ fn exit_3_when_removal_would_lose_files_and_nobody_can_confirm() {
         let assert = cmd.args(["remove", "feat/dirty"]).assert().code(3);
         let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
         let refusal = stderr.lines().find(|line| line.contains("Nothing was removed"));
-        let advice = stderr.lines().find(|line| line.contains("to discard them."));
+        let advice = stderr.lines().find(|line| line.contains("to delete it anyway."));
         assert!(
             refusal.is_some() && advice.is_some() && refusal != advice,
             "the refusal and its advice are separate lines:\n{stderr}"

@@ -3,7 +3,7 @@
 //! Callers gather the git facts (lines of work with full commit SHAs, ref
 //! tips, merge destinations, open PRs) and hand them over typed; the component
 //! runs no git commands. It owns the lane/tag rule, lane ordering, merges,
-//! elision markers, the `mermaid-rs-renderer` workarounds, and fitting the
+//! elision markers, the Mermaid emission rules, and fitting the
 //! graph to the terminal by trimming.
 //!
 //! ## Lanes and tags
@@ -48,16 +48,14 @@
 //! base view's height cap leaves out, and their merges, are counted by its own
 //! note instead.
 //!
-//! ## Renderer workarounds
+//! ## Emission rules
 //!
-//! - `mermaid-rs-renderer` reads everything after `branch` or `merge` as the
-//!   branch name, attributes included, so no attributes are emitted on
-//!   `branch`. A `merge` carries its ID and tags, and `biscuit-visualized`
-//!   restores the merge's second parent that this costs. The parser drops a
-//!   labeled merge into a lane with no commit yet, so a merge is emitted only
-//!   where its lane already has one. Lane order is the order of the `branch`
-//!   statements.
-//! - Its parser always names the first lane `main`, whatever the default
+//! - No attributes are emitted on `branch`. A `merge` carries its ID and
+//!   tags; Merman, like Mermaid.js, keeps both parents of such a merge. A
+//!   merge is emitted only where its lane already has a commit: Mermaid.js
+//!   and Merman reject a merge into a branch with no commits. Lane order is
+//!   the order of the `branch` statements.
+//! - The first lane is Mermaid's default branch, `main`, whatever the default
 //!   branch is called. The default branch is that lane, and its real name
 //!   appears as a tag when the caller passes its ref.
 //! - Commit IDs double as labels, and a parent is found by ID, so every ID in

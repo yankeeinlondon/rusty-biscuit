@@ -86,11 +86,11 @@ fn path_completions(
     };
     let start = offset - partial.len();
     let mut out = Vec::new();
-    for record in ctx.graph.documents().iter().filter(|record| !record.dependency) {
-        if ctx.graph.document_id(&record.path) == Some(doc_id) {
+    for record in ctx.graph.documents().filter(|record| !record.dependency) {
+        if ctx.graph.document_id(record.path) == Some(doc_id) {
             continue;
         }
-        let relative = relativize(base_dir, &record.path);
+        let relative = relativize(base_dir, record.path);
         if !partial.is_empty() && !relative.starts_with(partial) {
             continue;
         }

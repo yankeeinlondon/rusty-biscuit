@@ -1,0 +1,367 @@
+{
+  "call": 0,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "c49c39c",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "b4fa091",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "c49c39c"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "+50",
+      "index": 2,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "b4fa091"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "2d3cbf0",
+      "index": 3,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "+50"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "cd62bdf",
+      "index": 4,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "2d3cbf0"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "d8d1da9",
+      "index": 5,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "cd62bdf"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "8ba53e3",
+      "index": 6,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "d8d1da9"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "8585669",
+      "index": 7,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "8ba53e3"
+      ],
+      "tags": [],
+      "x": 302.0
+    },
+    {
+      "id": "+2",
+      "index": 8,
+      "lane": "main",
+      "parents": [
+        "b4fa091"
+      ],
+      "tags": [],
+      "x": 344.0
+    },
+    {
+      "id": "073f40b",
+      "index": 9,
+      "lane": "main",
+      "parents": [
+        "+2"
+      ],
+      "tags": [],
+      "x": 386.0
+    },
+    {
+      "id": "+7",
+      "index": 10,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "073f40b"
+      ],
+      "tags": [],
+      "x": 428.0
+    },
+    {
+      "id": "a5fab41",
+      "index": 11,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+7"
+      ],
+      "tags": [],
+      "x": 470.0
+    },
+    {
+      "id": "+89",
+      "index": 12,
+      "lane": "fix/sniff",
+      "parents": [
+        "a5fab41"
+      ],
+      "tags": [],
+      "x": 512.0
+    },
+    {
+      "id": "20580e7",
+      "index": 13,
+      "lane": "fix/sniff",
+      "parents": [
+        "+89"
+      ],
+      "tags": [],
+      "x": 554.0
+    },
+    {
+      "id": "aa90eb4",
+      "index": 14,
+      "lane": "fix/sniff",
+      "parents": [
+        "20580e7"
+      ],
+      "tags": [],
+      "x": 596.0
+    },
+    {
+      "id": "e7bf71d",
+      "index": 15,
+      "lane": "fix/sniff",
+      "parents": [
+        "aa90eb4"
+      ],
+      "tags": [],
+      "x": 638.0
+    },
+    {
+      "id": "6d21514",
+      "index": 16,
+      "lane": "fix/sniff",
+      "parents": [
+        "e7bf71d"
+      ],
+      "tags": [],
+      "x": 680.0
+    },
+    {
+      "id": "7efd8b0",
+      "index": 17,
+      "lane": "fix/sniff",
+      "parents": [
+        "6d21514"
+      ],
+      "tags": [],
+      "x": 722.0
+    },
+    {
+      "id": "292eb2f",
+      "index": 18,
+      "lane": "main",
+      "parents": [
+        "073f40b"
+      ],
+      "tags": [],
+      "x": 764.0
+    },
+    {
+      "id": "e25d42f",
+      "index": 19,
+      "lane": "main",
+      "parents": [
+        "292eb2f"
+      ],
+      "tags": [],
+      "x": 806.0
+    },
+    {
+      "id": "0a3af5b",
+      "index": 20,
+      "lane": "main",
+      "parents": [
+        "e25d42f"
+      ],
+      "tags": [],
+      "x": 848.0
+    },
+    {
+      "id": "1b7362d",
+      "index": 21,
+      "lane": "main",
+      "parents": [
+        "0a3af5b"
+      ],
+      "tags": [],
+      "x": 890.0
+    },
+    {
+      "id": "ed40291",
+      "index": 22,
+      "lane": "main",
+      "parents": [
+        "1b7362d"
+      ],
+      "tags": [],
+      "x": 932.0
+    },
+    {
+      "id": "847ab69",
+      "index": 23,
+      "lane": "main",
+      "parents": [
+        "ed40291"
+      ],
+      "tags": [],
+      "x": 974.0
+    },
+    {
+      "id": "099cd8b",
+      "index": 24,
+      "lane": "main",
+      "parents": [
+        "847ab69"
+      ],
+      "tags": [],
+      "x": 1016.0
+    },
+    {
+      "id": "b8bcf18",
+      "index": 25,
+      "lane": "main",
+      "parents": [
+        "099cd8b",
+        "a5fab41"
+      ],
+      "tags": [],
+      "x": 1058.0
+    },
+    {
+      "id": "+63",
+      "index": 26,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "a5fab41"
+      ],
+      "tags": [],
+      "x": 1100.0
+    },
+    {
+      "id": "cb6989b",
+      "index": 27,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+63"
+      ],
+      "tags": [],
+      "x": 1142.0
+    },
+    {
+      "id": "cc0fdde",
+      "index": 28,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "cb6989b"
+      ],
+      "tags": [],
+      "x": 1184.0
+    },
+    {
+      "id": "1b18434",
+      "index": 29,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "cc0fdde"
+      ],
+      "tags": [],
+      "x": 1226.0
+    },
+    {
+      "id": "6b1d056",
+      "index": 30,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "1b18434"
+      ],
+      "tags": [],
+      "x": 1268.0
+    },
+    {
+      "id": "7edee8b",
+      "index": 31,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "6b1d056"
+      ],
+      "tags": [],
+      "x": 1310.0
+    },
+    {
+      "id": "fb257ea",
+      "index": 32,
+      "lane": "main",
+      "parents": [
+        "b8bcf18"
+      ],
+      "tags": [],
+      "x": 1352.0
+    },
+    {
+      "id": "218c029",
+      "index": 33,
+      "lane": "main",
+      "parents": [
+        "fb257ea",
+        "7efd8b0"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 1358.22314453125,
+          "x2": 1423.27685546875,
+          "y1": -23.5,
+          "y2": -8.5
+        },
+        {
+          "text": "main",
+          "x1": 1358.22314453125,
+          "x2": 1423.27685546875,
+          "y1": -39.5,
+          "y2": -24.5
+        }
+      ],
+      "x": 1394.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 322.1575927734375,
+  "mermaid": "gitGraph\n    commit id: \"c49c39c\"\n    commit id: \"b4fa091\"\n    branch feat/schema-enhancement\n    checkout feat/schema-enhancement\n    commit id: \"+50\" type: HIGHLIGHT\n    commit id: \"2d3cbf0\"\n    commit id: \"cd62bdf\"\n    commit id: \"d8d1da9\"\n    commit id: \"8ba53e3\"\n    commit id: \"8585669\"\n    checkout main\n    commit id: \"+2\" type: HIGHLIGHT\n    commit id: \"073f40b\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+7\" type: HIGHLIGHT\n    commit id: \"a5fab41\"\n    branch fix/sniff\n    checkout fix/sniff\n    commit id: \"+89\" type: HIGHLIGHT\n    commit id: \"20580e7\"\n    commit id: \"aa90eb4\"\n    commit id: \"e7bf71d\"\n    commit id: \"6d21514\"\n    commit id: \"7efd8b0\"\n    checkout fix/wt-ux\n    checkout main\n    commit id: \"292eb2f\"\n    commit id: \"e25d42f\"\n    commit id: \"0a3af5b\"\n    commit id: \"1b7362d\"\n    commit id: \"ed40291\"\n    commit id: \"847ab69\"\n    commit id: \"099cd8b\"\n    merge fix/wt-ux id: \"b8bcf18\"\n    checkout fix/wt-ux\n    commit id: \"+63\" type: HIGHLIGHT\n    commit id: \"cb6989b\"\n    commit id: \"cc0fdde\"\n    commit id: \"1b18434\"\n    commit id: \"6b1d056\"\n    commit id: \"7edee8b\"\n    checkout main\n    commit id: \"fb257ea\"\n    merge fix/sniff id: \"218c029\" tag: \"main\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment",
+  "width": 1677.3125
+}

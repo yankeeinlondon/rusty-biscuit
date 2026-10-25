@@ -1,6 +1,6 @@
-/// Theme selection for Mermaid diagrams.
-///
-/// Determines the color scheme used for diagram rendering.
+/// Theme selection for Mermaid diagrams: each theme is a fixed
+/// [`Palette`](super::Palette) starting from Mermaid.js's theme of the same
+/// name.
 ///
 /// ## Examples
 ///
@@ -29,7 +29,9 @@ pub enum MermaidTheme {
 }
 
 impl MermaidTheme {
-    /// Returns the theme string for rendering.
+    /// The theme's lowercase name (`"dark"`, `"default"`, …), as CLIs and
+    /// config spell it. Rendering never passes it to Merman: each theme is a
+    /// fixed [`Palette`](super::Palette).
     pub fn as_str(&self) -> &'static str {
         match self {
             MermaidTheme::Dark => "dark",
@@ -104,7 +106,7 @@ impl MermaidTheme {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum QuadrantTheme {
-    /// Default Mermaid colors (no customization).
+    /// No quadrant overrides: the quadrants take the diagram's palette colors.
     #[default]
     Default,
     /// Magic Quadrangle style (Gartner-inspired): subtle green for top-right (leaders),

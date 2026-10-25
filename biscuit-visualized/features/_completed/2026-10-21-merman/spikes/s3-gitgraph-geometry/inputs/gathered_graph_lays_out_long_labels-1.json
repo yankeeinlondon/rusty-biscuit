@@ -1,0 +1,122 @@
+{
+  "call": 1,
+  "commit_step": 127.5849609375,
+  "commits": [
+    {
+      "id": "+1",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "def4132",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+1"
+      ],
+      "tags": [],
+      "x": 143.5849609375
+    },
+    {
+      "id": "+1 ",
+      "index": 2,
+      "lane": "feature/very-long-exact-branch-reference-alpha",
+      "parents": [
+        "def4132"
+      ],
+      "tags": [],
+      "x": 279.169921875
+    },
+    {
+      "id": "08f9335",
+      "index": 3,
+      "lane": "feature/very-long-exact-branch-reference-alpha",
+      "parents": [
+        "+1 "
+      ],
+      "tags": [
+        {
+          "text": "PR #104 → main",
+          "x1": 370.81427001953125,
+          "x2": 452.19549560546875,
+          "y1": 48.5,
+          "y2": 63.5
+        }
+      ],
+      "x": 414.7548828125
+    },
+    {
+      "id": "+1  ",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "def4132"
+      ],
+      "tags": [],
+      "x": 550.33984375
+    },
+    {
+      "id": "b7ec728",
+      "index": 5,
+      "lane": "main",
+      "parents": [
+        "+1  "
+      ],
+      "tags": [
+        {
+          "text": "fix/very-long-exact-branch-reference-beta",
+          "x1": 580.27490234375,
+          "x2": 785.07470703125,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 685.9248046875
+    },
+    {
+      "id": "e10ccc1",
+      "index": 6,
+      "lane": "main",
+      "parents": [
+        "b7ec728"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 801.07470703125,
+          "x2": 835.44482421875,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 821.509765625
+    },
+    {
+      "id": "d8dde22",
+      "index": 7,
+      "lane": "main",
+      "parents": [
+        "e10ccc1"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 921.31787109375,
+          "x2": 986.37158203125,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 957.0947265625
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 160.49090576171875,
+  "mermaid": "gitGraph\n    commit id: \"+1\" type: HIGHLIGHT\n    commit id: \"def4132\"\n    branch feature/very-long-exact-branch-reference-alpha\n    checkout feature/very-long-exact-branch-reference-alpha\n    commit id: \"+1 \" type: HIGHLIGHT\n    commit id: \"08f9335\" tag: \"PR #104 → main\"\n    checkout main\n    commit id: \"+1  \" type: HIGHLIGHT\n    commit id: \"b7ec728\" tag: \"fix/very-long-exact-branch-reference-beta\"\n    commit id: \"e10ccc1\" tag: \"main\"\n    commit id: \"d8dde22\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_long_labels",
+  "width": 1488.7421875
+}

@@ -45,20 +45,118 @@ flowchart LR
 
 ## Optional Dependencies
 
-- [resvg](https://github.com/linebender/resvg) _v0.45_ (feature: `image`)
+- [resvg](https://github.com/linebender/resvg) _v0.47_ (feature: `image`)
 
-    _Rasterizes SVG to PNG._
+    _Rasterizes SVG to PNG (with `usvg` 0.47, `fontdb` 0.23, and `tiny-skia`
+    0.12)._
 
-- [png](https://github.com/image-rs/image-png) _v0.17_ (feature: `image`)
+- [png](https://github.com/image-rs/image-png) _v0.18_ (feature: `image`)
 
-    _Encodes rasterized PNGs at zlib's default level with adaptive filtering,
-    which is smaller than tiny-skia's fast `encode_png`. Kept on the major
-    version resvg's tiny-skia already uses, so it adds no second copy._
+    _Encodes rasterized PNGs at zlib level 1 with the `Up` filter, chosen to
+    keep large diagrams under the 50 ms warm render limit (zlib's default
+    level took most of it) at about twice the file size.
+    The settings are explicit because they are part of the PNG cache key, so
+    a change in tiny-skia's defaults cannot change the bytes behind a key.
+    Kept on the major version tiny-skia already uses, so it adds no second
+    copy._
 
-- [mermaid-rs-renderer](https://crates.io/crates/mermaid-rs-renderer) _v0.3.1_ (feature: `image`)
+- [rustybuzz](https://github.com/harfbuzz/rustybuzz) _v0.20.1_ (feature: `image`)
 
-    _Pure-Rust Mermaid parser, layout engine, and SVG renderer, with
-    `default-features = false`: this crate rasterizes with its own `resvg`._
+    _Shapes label text to measure it, so the measured face is the face resvg
+    draws. Kept on the version `usvg` uses, so the lockfile holds one copy._
+
+- [ttf-parser](https://github.com/harfbuzz/ttf-parser) _v0.25.1_ (feature: `image`)
+
+    _Reads font tables (family names, OS/2 class, character maps) for font
+    resolution. Kept on the version `usvg` uses, so the lockfile holds one
+    copy._
+
+- [unicode-bidi](https://github.com/servo/unicode-bidi) _v0.3_ and [unicode-script](https://github.com/unicode-rs/unicode-script) _v0.5_ (feature: `image`)
+
+    _Split label text into bidi and script runs for shaping, as `usvg`'s text
+    layout does; both are already in the graph through `usvg`._
+
+- [svgtypes](https://github.com/linebender/svgtypes) _v0.16.1_ (feature: `image`)
+
+    _Parses the colors an author writes in a Mermaid source, CSS color names
+    included, so the contrast pass can tell the author's text colors from the
+    ones the library chose. Kept on the version `usvg` uses, so the lockfile
+    holds one copy._
+
+- [fontique](https://github.com/linebender/parley) _v0.12.0_ (feature: `image`)
+
+    _The OS's own generic font family (fontconfig on Linux, CoreText on
+    macOS, DirectWrite on Windows), with `default-features = false` and
+    features `system` and `fontconfig-dlopen`. On Linux it loads
+    `libfontconfig` at run time, so builds need no fontconfig development
+    package, and a host without the library skips this step instead of
+    failing._
+
+- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`_ (feature: `image`; license MIT OR Apache-2.0)
+
+    _The Mermaid parser, layout engine, and SVG renderer, modeling Mermaid.js
+    12.2.0 (see [Merman rendering](./merman.md)). With
+    `default-features = false` and features `svg`, `ascii`, `all-diagrams`,
+    and `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off,
+    because this crate rasterizes with its own `resvg` and measures text with
+    its own font chain. `ascii` is Merman's text target: it draws a diagram
+    with box-drawing (or plain ASCII) characters for a terminal that cannot
+    show images, and publishes which families it can draw
+    (`ascii_capabilities()`), which decides when a text drawing may replace
+    the source. Brings `merman-core`, `merman-render`, `merman-ascii`,
+    `merman-theme-contract`, and `merman-unicode-linebreak` from the same
+    rev._
+
+    ```toml
+    merman = { git = "https://github.com/yankeeinlondon/merman.git", rev = "6e6b1e6554e8e75d468c1f991652c1c53a85bace", default-features = false, features = ["svg", "ascii", "all-diagrams", "layout-cytoscape"], optional = true }
+    ```
+
+    - **Why a fork.** The dependency is Ken's fork of
+      [Latias94/merman](https://github.com/Latias94/merman), pinned to an
+      exact commit on its `gitgraph-commit-spacing` branch (based on upstream
+      `482fcde7`). The fork adds one gitGraph setting, `commitSpacing`, which
+      [tag spacing](./mermaid-gitgraph.md) writes so tags on neighboring
+      commits do not overlap; stock Merman lays commits out at a fixed 50 px.
+    - **Return path.** When upstream Merman merges or releases a
+      commit-spacing setting, the dependency moves back to upstream Merman in
+      its own change, the goldens are re-reviewed, and the fork is no longer
+      referenced. If upstream's setting differs in name or meaning, the tag
+      spacing code adapts in that same change.
+    - **Side effect on `serde_json`.** `merman-core` enables `serde_json`'s
+      `preserve_order` and `float_roundtrip` features. Cargo unifies features,
+      so every build that reaches this crate's `image` feature gets a
+      `serde_json::Map` that keeps insertion order (an `IndexMap` rather than
+      a `BTreeMap`) and exact float parsing, including in crates that never
+      asked for either. Code that relied on sorted `Map` keys must sort them
+      itself._
+
+- [allsorts](https://github.com/yeslogic/allsorts) _v0.17.0_ (feature: `image`; license Apache-2.0)
+
+    _Subsets the face the [embedded-font opt-in](./mermaid-embedded-font.md)
+    puts into an HTML page, keeping the `cmap`, `OS/2`, and `name` tables a
+    browser and the font's license need (Typst's `subsetter` drops `cmap` and
+    `OS/2`, so its output does not load as a web font). With
+    `default-features = false` and feature `flate2_rust`: the default
+    `flate2_zlib` would build the C zlib through `libz-sys`. Brings
+    `aliasable`, `bitreader`, `glyph-names`, `ouroboros` and
+    `ouroboros_macro`, `pathfinder_geometry` and `pathfinder_simd`,
+    `proc-macro2-diagnostics`, `unicode-canonical-combining-class`, and
+    `unicode-joining-type` into the lockfile._
+
+    ```toml
+    allsorts = { version = "0.17.0", default-features = false, features = ["flate2_rust"], optional = true }
+    ```
+
+- [roxmltree](https://github.com/RazrFalcon/roxmltree) _v0.21.1_ and [simplecss](https://github.com/linebender/simplecss) _v0.2.2_ (feature: `image`)
+
+    _Read a finished static SVG and apply its stylesheet, as `usvg` does, to
+    find which characters each font family draws at which weight for the
+    embedded-font opt-in. Kept on the versions `usvg` uses, so the lockfile
+    holds one copy of each._
+
+- [base64](https://github.com/marshallpierce/rust-base64) _v0.22_ (feature: `image`)
+
+    _Encodes the embedded font as a `data:font/ttf;base64,…` URL._
 
 - [biscuit-terminal](../../biscuit-terminal/lib) _v0.1.0_ (feature: `terminal`, with its `image` feature)
 
@@ -73,6 +171,22 @@ flowchart LR
 - [clap](https://github.com/clap-rs/clap) _v4_ (feature: `clap`)
 
     _Derives `clap::ValueEnum` on `QuadrantTheme`._
+
+## Bundled Assets
+
+Font files compiled into the library under the `image` feature, from
+`biscuit-visualized/src/assets/fonts/` (embedded by
+[`fonts/bundled.rs`](../src/src/fonts/bundled.rs); see
+[Bundled fonts](./merman.md#bundled-fonts) for how each is used). Each directory holds the license
+text (`OFL.txt`) and a `README.md` with the source, release, and SHA-256 of
+every file.
+
+- **Inter** 4.1, Regular and Bold (static TrueType, SIL Open Font License
+  1.1, about 0.8 MB together), on every OS. Registered as the family `Inter`
+  and matched only by name.
+- **Noto Emoji**, monochrome (variable TrueType, `wght` 300–700, default
+  Regular 400; SIL Open Font License 1.1, about 2.0 MB), in Linux builds
+  only. The last fallback face for emoji.
 
 ## Development Dependencies
 

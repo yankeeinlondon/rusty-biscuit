@@ -239,7 +239,8 @@ Diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) live in
 `terminal` feature; they decide what a diagram shows and hand its pixels to
 `TerminalImage`. This crate never depends on them: its render-tree renderer
 draws a Mermaid fence only through a caller-installed diagram hook
-(`TerminalRenderOptions::with_diagram_renderer`) and otherwise shows it as code.
+(`TerminalRenderOptions::with_diagram_renderer`) and otherwise shows it as code;
+see [the render-tree hooks page](../docs/render-tree.md).
 
 ## Terminal Detection
 

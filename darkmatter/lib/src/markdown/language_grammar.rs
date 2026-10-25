@@ -29,7 +29,7 @@ use std::str::FromStr;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use thiserror::Error;
 
-use crate::markdown::highlighting::grammars::load_syntax_set;
+use crate::markdown::highlighting::grammars::{load_syntax_set, syntax_set_for};
 
 /// Errors that can occur when resolving a [`LanguageGrammar`] to a
 /// [`syntect::parsing::SyntaxReference`].
@@ -112,9 +112,10 @@ pub enum LanguageGrammar {
     Toml,
     /// Mermaid diagram source.
     ///
-    /// Darkmatter renders Mermaid as a diagram rather than highlighting it, and
-    /// syntect ships no Mermaid grammar, so this resolves to plain text. It is a
-    /// recognized language so tooling never flags it as unknown.
+    /// Resolves to Darkmatter's vendored Mermaid syntax, which lives in a
+    /// syntax set of its own (see
+    /// [`CodeHighlighter::syntax_set_for`](crate::markdown::highlighting::CodeHighlighter::syntax_set_for)).
+    /// Against a set without it, such as two-face's, it resolves to plain text.
     Mermaid,
     /// Plain text / no grammar.
     ///
@@ -325,7 +326,9 @@ impl LanguageGrammar {
         }
     }
 
-    /// Resolves this grammar against Darkmatter's default two-face syntax set.
+    /// Resolves this grammar against Darkmatter's default syntax sets: the
+    /// vendored Mermaid set for [`Mermaid`](LanguageGrammar::Mermaid) and
+    /// two-face's set for everything else.
     ///
     /// Known variants such as [`Yaml`](LanguageGrammar::Yaml) and
     /// [`Rust`](LanguageGrammar::Rust) are expected to resolve successfully
@@ -335,7 +338,7 @@ impl LanguageGrammar {
     pub fn resolve_default(
         &self,
     ) -> Result<&'static SyntaxReference, LanguageGrammarError> {
-        self.resolve(load_syntax_set())
+        self.resolve(syntax_set_for(self))
     }
 
     /// Resolves this grammar against a [`SyntaxSet`], returning the
@@ -397,7 +400,9 @@ impl LanguageGrammar {
             LanguageGrammar::Toml => {
                 find_first(syntax_set, &[("extension", "toml"), ("name", "TOML")])
             }
-            LanguageGrammar::Mermaid => Ok(syntax_set.find_syntax_plain_text()),
+            LanguageGrammar::Mermaid => Ok(syntax_set
+                .find_syntax_by_name("Mermaid")
+                .unwrap_or_else(|| syntax_set.find_syntax_plain_text())),
             LanguageGrammar::OtherByExtension(ext) => syntax_set
                 .find_syntax_by_extension(ext)
                 .ok_or_else(|| LanguageGrammarError::UnknownGrammar(format!("extension:{ext}"))),
@@ -799,16 +804,16 @@ mod tests {
 
     #[test]
     fn json5_and_mermaid_are_recognized_languages() {
-        // Neither has a syntect grammar, but both are recognized so tooling
-        // (e.g. DMLS's fence diagnostic) never flags them as unknown.
+        // Both are recognized so tooling (e.g. DMLS's fence diagnostic) never
+        // flags them as unknown.
         for token in ["json5", "mermaid", "mmd", "JSON5", "Mermaid"] {
             let grammar = LanguageGrammar::from_token(token)
                 .unwrap_or_else(|_| panic!("{token} should resolve"));
             assert!(grammar.resolve_default().is_ok(), "{token} should resolve to a syntax");
         }
 
-        // JSON5 highlights through the JSON grammar; Mermaid falls back to plain
-        // text (it is rendered as a diagram, not highlighted).
+        // JSON5 highlights through the JSON grammar; Mermaid through the
+        // vendored Mermaid syntax.
         let json5 = LanguageGrammar::from_token("json5").unwrap();
         assert!(matches!(json5, LanguageGrammar::Json5));
         assert_eq!(json5.resolve_default().unwrap().name, "JSON");
@@ -816,7 +821,12 @@ mod tests {
 
         let mermaid = LanguageGrammar::from_token("mermaid").unwrap();
         assert!(matches!(mermaid, LanguageGrammar::Mermaid));
-        assert_eq!(mermaid.resolve_default().unwrap().name, "Plain Text");
+        assert_eq!(mermaid.resolve_default().unwrap().name, "Mermaid");
+        assert_eq!(
+            mermaid.resolve(load_syntax_set()).unwrap().name,
+            "Plain Text",
+            "two-face's set carries no Mermaid syntax"
+        );
         assert_eq!(format!("{mermaid}"), "mermaid");
     }
 

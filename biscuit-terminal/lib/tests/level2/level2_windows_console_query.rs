@@ -209,7 +209,13 @@ impl ProbeConsole {
     }
 
     /// Waits for the probe to exit and returns its output.
-    fn finish(mut self) -> String {
+    fn finish(self) -> String {
+        self.finish_after("graphics_done")
+    }
+
+    /// Waits for the probe to exit and returns its output, which must hold
+    /// `done` (the probe mode's last line).
+    fn finish_after(mut self, done: &str) -> String {
         let deadline = Instant::now() + STEP;
         while !matches!(self.child.try_wait(), Ok(Some(_))) {
             assert!(
@@ -221,7 +227,7 @@ impl ProbeConsole {
         }
         let output = self.output();
         assert!(
-            output.contains("graphics_done"),
+            output.contains(done),
             "probe did not finish; {}",
             self.diagnostics()
         );
@@ -382,4 +388,78 @@ fn a_probe_off_terminal_never_asks_for_the_cell_size() {
     let output = console.finish();
 
     assert_eq!(line(&output, "graphics_cell_size[0]"), "None", "{output}");
+}
+
+/// The OSC 4 query for ANSI slot `index`, as the startup exchange writes it.
+fn osc4_query(index: u8) -> Vec<u8> {
+    format!("\x1b]4;{index};?\x07").into_bytes()
+}
+
+/// `discovery_probe`'s palette mode in a pseudoconsole that answers `answers`.
+fn palette_probe(answers: Vec<Answer>) -> (String, String) {
+    let console = ProbeConsole::launch(answers, &[("PROBE", "palette")]);
+    let stream_handle = Arc::clone(&console.stream);
+    let output = console.finish_after("palette_done");
+    let stream = String::from_utf8_lossy(&stream_handle.lock().unwrap()).into_owned();
+    (output, stream)
+}
+
+/// D71: native Windows sends the OSC 4 palette query through the console
+/// backend that carries OSC 10/11, and a terminal that answers gives the
+/// program its ANSI colors; the slots it leaves unanswered stay unknown.
+#[test]
+fn the_ansi_palette_reaches_a_windows_program() {
+    require_level!(Level::L2, true, "ConPTY");
+    let replies: [(u8, &'static [u8]); 6] = [
+        (1, b"\x1b]4;1;rgb:f7f7/7676/8e8e\x1b\\"),
+        (2, b"\x1b]4;2;rgb:9e9e/cece/6a6a\x1b\\"),
+        (3, b"\x1b]4;3;rgb:e0e0/afaf/6868\x1b\\"),
+        (4, b"\x1b]4;4;rgb:7a7a/a2a2/f7f7\x1b\\"),
+        (5, b"\x1b]4;5;rgb:bbbb/9a9a/f7f7\x1b\\"),
+        (6, b"\x1b]4;6;rgb:7d7d/cfcf/ffff\x1b\\"),
+    ];
+    // Answers are written in list order, which is the request's order: every
+    // palette reply lands before DA1 ends the exchange.
+    let mut answers = vec![
+        answer(OSC10_QUERY, b"\x1b]10;rgb:c0c0/caca/f5f5\x1b\\"),
+        answer(OSC11_QUERY, b"\x1b]11;rgb:1a1a/1b1b/2626\x1b\\"),
+    ];
+    for (index, reply) in replies {
+        answers.push(Answer { query: osc4_query(index).leak(), reply, keys: b"" });
+    }
+    answers.push(answer(DA1_QUERY, PLAIN_DA1_REPLY));
+    let (output, stream) = palette_probe(answers);
+
+    assert!(stream.contains("\x1b]4;1;?"), "the console never forwarded OSC 4; {stream:?}");
+    let expected = [(247, 118, 142), (158, 206, 106), (224, 175, 104), (122, 162, 247), (187, 154, 247), (125, 207, 255)];
+    for (slot, (r, g, b)) in (1..=6).zip(expected) {
+        assert_eq!(
+            line(&output, &format!("palette[{slot}]")),
+            format!("Some(RgbValue {{ r: {r}, g: {g}, b: {b} }})"),
+            "{output}"
+        );
+    }
+    for slot in [0, 7, 15] {
+        assert_eq!(line(&output, &format!("palette[{slot}]")), "None", "{output}");
+    }
+    assert_eq!(line(&output, "palette_stable"), "true", "{output}");
+}
+
+/// A Windows terminal that does not answer OSC 4 leaves the whole palette
+/// unknown within the query's bounded wait, so diagrams fall back to
+/// background-derived accents (R-P4).
+#[test]
+fn an_unanswered_palette_query_leaves_every_slot_unknown() {
+    require_level!(Level::L2, true, "ConPTY");
+    let (output, stream) = palette_probe(vec![
+        answer(OSC11_QUERY, b"\x1b]11;rgb:1a1a/1b1b/2626\x1b\\"),
+        answer(DA1_QUERY, PLAIN_DA1_REPLY),
+    ]);
+
+    assert!(stream.contains("\x1b]4;0;?"), "the console never forwarded OSC 4; {stream:?}");
+    for slot in 0..16 {
+        assert_eq!(line(&output, &format!("palette[{slot}]")), "None", "{output}");
+    }
+    let first_ms: u64 = line(&output, "palette_first_ms").parse().expect("milliseconds");
+    assert!(first_ms < 5_000, "the palette wait was not bounded: {first_ms} ms");
 }

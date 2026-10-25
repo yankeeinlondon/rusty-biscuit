@@ -313,8 +313,8 @@ fn visualization_kind_as_str() {
 
 #[test]
 fn cache_key_different_mermaid_backend() {
-    // Artifacts laid out before the gitGraph merge repair (bv2) or the
-    // collision-driven tag spacing (bv3) must never be served again.
+    // Artifacts of mermaid-rs-renderer, the backend Merman replaced, and of
+    // an earlier post-process version must never be served again (AC-C6).
     let key = |backend: &str| {
         FileCache::cache_key(
             VisualizationKind::Mermaid,
@@ -324,9 +324,12 @@ fn cache_key_different_mermaid_backend() {
             OutputFormat::Png,
         )
     };
-    assert_eq!(MERMAID_BACKEND, "mermaid-rs-renderer@0.3.x+bv3");
+    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv6");
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv5"));
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv4"));
+    assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv3"));
     assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv2"));
-    assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.2.x+bv1"));
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv0"));
 }
 
 

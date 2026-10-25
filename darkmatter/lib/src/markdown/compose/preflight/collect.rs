@@ -498,7 +498,7 @@ fn collect_recursive(
     let child_state =
         crate::markdown::compose::pipeline::document_state_builder(&prepared, options).build()?;
     let mut child_state_data = child_state.data().clone();
-    child_state_data.remove("$schema");
+    child_state_data.shift_remove("$schema");
 
     // ── Body `::shell` directives ──────────────────────────────────
     let directive_lines = crate::markdown::compose::shell_expansion::parser::scan_directive_lines(

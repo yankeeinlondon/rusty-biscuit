@@ -63,10 +63,23 @@ pub struct HtmlOptions {
     pub include_styles: bool,
     /// Controls how Mermaid diagrams are rendered.
     ///
-    /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
-    /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
+    /// - `Off` (default): no static diagram; the page path emits the
+    ///   interactive `<pre class="mermaid">` source for mermaid.js
+    /// - `Image`: a static SVG rendered by `biscuit-visualized`, sanitized and
+    ///   embedded in the page
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
+    /// Embeds, once per page, the font the static Mermaid SVGs were measured
+    /// with, so every reader sees label widths as laid out (default `false`).
+    ///
+    /// Acts only with [`MermaidMode::Image`]; any other mode is unchanged.
+    /// The page then carries one `<style>` of `@font-face` rules (one per
+    /// face and weight its diagrams draw, as a TrueType subset of the
+    /// characters they use) before its first diagram, preceded by an HTML
+    /// comment per family naming the embedded face and why it was chosen.
+    /// When the font cannot be built, the diagrams are emitted without it
+    /// and a warning is logged.
+    pub embed_mermaid_font: bool,
     /// Page-level declarations for horizontal-rule CSS custom properties.
     ///
     /// When non-empty, the browser render path emits a `:root` CSS block
@@ -115,6 +128,7 @@ impl Default for HtmlOptions {
             include_line_numbers: false,
             include_styles: true,
             mermaid_mode: MermaidMode::default(),
+            embed_mermaid_font: false,
             hr_css_variables: std::collections::HashMap::new(),
             hr_defaults: None,
             hyperlink_style: None,
@@ -168,5 +182,6 @@ mod tests {
         assert_eq!(options.color_mode, ColorMode::Dark);
         assert!(!options.include_line_numbers);
         assert!(options.include_styles);
+        assert!(!options.embed_mermaid_font);
     }
 }

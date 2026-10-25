@@ -277,6 +277,9 @@ pub(crate) fn checkout_layout(dir: &Path) -> Option<Option<[std::path::PathBuf; 
     })
 }
 
+/// An index file's signature, version, and entry count.
+const INDEX_HEADER_BYTES: u64 = 12;
+
 /// What `git ls-files --stage -z` prints for the index file `index`, byte
 /// for byte: each entry as `<mode> <object> <stage>\t<path>` and a NUL, in
 /// index order. `None`, so the caller runs git, for a missing or unreadable
@@ -290,6 +293,11 @@ pub(crate) fn staged_entries(index: &Path) -> Option<Vec<u8>> {
         if entry.ok()?.file_name().to_string_lossy().starts_with("sharedindex.") {
             return None;
         }
+    }
+    // gix-index 0.52 panics on a file shorter than its trailing checksum
+    // rather than failing; git reports such an index as corrupt.
+    if std::fs::metadata(index).ok()?.len() < INDEX_HEADER_BYTES + gix::hash::Kind::Sha1.len_in_bytes() as u64 {
+        return None;
     }
     let options = gix::index::decode::Options { thread_limit: Some(1), ..Default::default() };
     let file = gix::index::File::at(index, gix::hash::Kind::Sha1, false, options).ok()?;
@@ -637,6 +645,22 @@ mod tests {
                     }
                 });
             assert_eq!(checkout_layout(from), Some(expected), "{from:?}");
+        }
+    }
+
+    /// gix-index 0.52 panics on an index shorter than its checksum; such a
+    /// file goes to git, whose own error is the answer.
+    #[test]
+    fn a_truncated_index_is_left_to_git_rather_than_panicking() {
+        let dir = repo();
+        let path = dir.path();
+        let index = index_path(path).unwrap();
+        for length in [0, 4, 31] {
+            std::fs::write(&index, vec![b'D'; length]).unwrap();
+
+            assert_eq!(staged_entries(&index), None, "{length} bytes");
+            let listed = crate::git::staged_entries_of(path, &index);
+            assert!(matches!(&listed, Err(error) if error.to_string().contains("index")), "{length} bytes: {listed:?}");
         }
     }
 

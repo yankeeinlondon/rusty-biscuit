@@ -124,10 +124,10 @@ fn move_first_removes_the_worktree_powershell_was_launched_inside() {
     assert!(log.contains("Moving you to the base repo"), "{log}");
 }
 
-/// The usage check sees the program holding the directory and pauses the
-/// removal (exit 3) before anything moves, naming its PID.
+/// The program holding the directory is a warning (R1) naming its PID;
+/// without a terminal and without `--force` nothing is removed (exit 3).
 #[test]
-fn a_directory_held_by_another_program_refuses_with_exit_3_and_nothing_removed() {
+fn a_directory_held_by_another_program_is_a_warning_and_refuses_without_force() {
     let scene = Scene::new();
     let wt = scene.add_worktree("feat/x", "feat-x");
     // Spawned directly, not through `cmd /C`: killing `cmd` would leave its
@@ -155,8 +155,9 @@ fn a_directory_held_by_another_program_refuses_with_exit_3_and_nothing_removed()
     let _ = holder.wait();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Removal paused: another process is using feat-x."), "{stderr}");
-    assert!(stderr.contains(&format!("PID {pid}")), "{stderr}");
+    assert!(stderr.contains("1 program is using files in this worktree:"), "{stderr}");
+    assert!(stderr.contains(&format!("pid {pid}")), "{stderr}");
+    assert!(stderr.contains("Add --force to delete it anyway."), "{stderr}");
     assert!(wt.join("README.md").exists(), "files survive");
     assert!(
         git(&scene.repo(), &["worktree", "list", "--porcelain"]).contains("feat/x"),

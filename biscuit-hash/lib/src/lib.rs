@@ -6,6 +6,7 @@
 //! - **`xx_hash`** (default): Fast non-cryptographic hashing using XXH64
 //! - **`blake3`**: Fast cryptographic hashing using BLAKE3
 //! - **`argon2id`**: Secure password hashing using Argon2id
+//! - **`json`**: Canonical (key-sorted) JSON rendering and hashing
 //!
 //! ## Feature Flags
 //!
@@ -14,6 +15,7 @@
 //! | `xx_hash` | Yes | XXH64 for content hashing, change detection |
 //! | `blake3` | No | BLAKE3 for cryptographic integrity |
 //! | `argon2id` | No | Argon2id for password storage |
+//! | `json` | No | [`canonical_json`]; with `xx_hash`/`blake3` also `xx_hash_json`/`blake3_hash_json` |
 //!
 //! ## Examples
 //!
@@ -35,6 +37,9 @@ pub mod blake;
 #[cfg(feature = "argon2id")]
 pub mod argon;
 
+#[cfg(feature = "json")]
+pub mod json;
+
 // Re-exports for convenience
 
 #[cfg(feature = "xx_hash")]
@@ -49,3 +54,12 @@ pub use argon::{
     DEFAULT_TIME_COST, hash_password, hash_password_with_params, hash_password_with_salt,
     verify_password,
 };
+
+#[cfg(feature = "json")]
+pub use json::canonical_json;
+
+#[cfg(all(feature = "json", feature = "xx_hash"))]
+pub use json::xx_hash_json;
+
+#[cfg(all(feature = "json", feature = "blake3"))]
+pub use json::blake3_hash_json;

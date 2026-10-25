@@ -30,6 +30,7 @@
 use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
+use biscuit_visualized::components::MermaidFallbackPolicy;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::terminal_image::{
     ImageOutput, ImageWidth, TerminalImage, parse_width_spec,
@@ -295,8 +296,9 @@ pub enum HyperlinkMode {
 
 /// Controls how Mermaid diagrams are rendered to the terminal.
 ///
-/// Mermaid diagrams can be rendered as images (via mermaid.ink service)
-/// or displayed as code blocks.
+/// Mermaid diagrams can be rendered as images, drawn as text, or displayed as
+/// code blocks. Browser output treats [`Automatic`](Self::Automatic) like
+/// [`Image`](Self::Image).
 ///
 /// ## Examples
 ///
@@ -321,13 +323,21 @@ pub enum MermaidMode {
     #[default]
     Off,
 
-    /// Render mermaid diagrams as images via mermaid.ink service.
+    /// Render mermaid diagrams as images.
     ///
-    /// Uses mermaid.ink to convert diagrams to SVG, then resvg to convert
-    /// to PNG, and biscuit-terminal to display it in the terminal's graphics
-    /// format. Falls back to `Text` mode if terminal doesn't support graphics
-    /// or rendering fails.
+    /// Renders each diagram locally and displays it as a terminal image. With
+    /// terminal graphics off ([`TerminalImageMode::Never`]) it shows the code
+    /// block.
     Image,
+
+    /// Render mermaid diagrams as images where the terminal supports them, and
+    /// otherwise as a text drawing when the diagram can be drawn as text and
+    /// fits; any other diagram shows its code block.
+    ///
+    /// [`TerminalOptions::mermaid_fallback_policy`] decides whether a text
+    /// drawing may replace the code block and whether a partial drawing
+    /// carries a note.
+    Automatic,
 
     /// Display mermaid diagrams as fenced code blocks.
     ///
@@ -692,9 +702,15 @@ pub struct TerminalOptions {
     /// Controls how Mermaid diagrams are rendered.
     ///
     /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
-    /// - `Image`: Render as images via mermaid.ink service
-    /// - `Text`: Show as fenced code blocks (fallback format)
+    /// - `Image`: Render as terminal images
+    /// - `Automatic`: Render as images where the terminal shows pixels, else
+    ///   as a text drawing, else as code
+    /// - `Text`: Show as syntax-highlighted code
     pub mermaid_mode: MermaidMode,
+    /// When a [`MermaidMode::Automatic`] diagram may be drawn as text, and
+    /// whether a partial drawing carries a note. A setting left unset is
+    /// resolved at render time (the text fallback reads `MERMAID_FALLBACK`).
+    pub mermaid_fallback_policy: MermaidFallbackPolicy,
     /// Controls how hyperlinks are rendered.
     ///
     /// - `Auto` (default): Detect terminal capability via `supports_hyperlinks` crate
@@ -739,6 +755,7 @@ impl Default for TerminalOptions {
             dim_mode: DimMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
+            mermaid_fallback_policy: MermaidFallbackPolicy::default(),
             hyperlink_mode: HyperlinkMode::default(),
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),
@@ -919,6 +936,7 @@ mod tests {
             dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),

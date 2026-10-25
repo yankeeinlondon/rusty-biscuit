@@ -19,9 +19,8 @@
 //! use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
 //! use darkmatter::markdown::compose::replacement::apply_replacements;
 //! use serde_json::json;
-//! use std::collections::HashMap;
 //!
-//! let mut fm = HashMap::new();
+//! let mut fm = serde_json::Map::new();
 //! fm.insert("replace".to_string(), json!({"foo": "bar", "foobar": "baz"}));
 //!
 //! let state = EffectiveStateBuilder::new()
@@ -73,9 +72,8 @@ struct ReplacementRule {
 /// use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
 /// use darkmatter::markdown::compose::replacement::apply_replacements;
 /// use serde_json::json;
-/// use std::collections::HashMap;
 ///
-/// let mut fm = HashMap::new();
+/// let mut fm = serde_json::Map::new();
 /// fm.insert("replace".to_string(), json!({"foo": "bar"}));
 ///
 /// let state = EffectiveStateBuilder::new()
@@ -234,14 +232,13 @@ mod tests {
     use super::*;
     use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn test_context() -> ComposeContext {
         ComposeContext::fixed_for_testing()
     }
 
     fn make_state_with_replace(replace: Value) -> EffectiveState {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("replace".to_string(), replace);
 
         EffectiveStateBuilder::new()
@@ -453,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_no_replace_key() {
-        let fm = HashMap::new();
+        let fm = serde_json::Map::new();
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())

@@ -3,11 +3,18 @@ use super::{
     error::GraphError,
     expression::GraphExpression,
 };
+use std::sync::Arc;
+
 use crate::{
     artifact::{Background, OutputFormat, RenderRequest, RenderedArtifact},
     cache::{file_cache::GRAPH_BACKEND, FileCache, VisualizationKind},
+    fonts::{FontChain, FontQuery, default_chain},
     raster,
 };
+
+/// The `font-family` layout-rs writes for every label, kept when no color
+/// theme replaces it.
+const LAYOUT_FONT_FAMILY: &str = "Times, serif";
 
 /// Syntax mode for parsing graph source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,8 +378,17 @@ impl GraphDiagram {
 
     /// Renders the graph to the requested output format.
     pub fn render(&self, request: &RenderRequest) -> Result<RenderedArtifact, GraphError> {
+        self.render_in(default_chain(), request)
+    }
+
+    /// [`render`](Self::render) with `chain` drawing every label of a PNG.
+    pub(crate) fn render_in(
+        &self,
+        chain: &Arc<FontChain>,
+        request: &RenderRequest,
+    ) -> Result<RenderedArtifact, GraphError> {
         let cache = FileCache::new();
-        let cache_key = self.cache_key(request);
+        let cache_key = self.cache_key_with(chain, request);
 
         if let Some(path) = cache.get(VisualizationKind::Graph, &cache_key, request.format) {
             return Ok(RenderedArtifact {
@@ -403,7 +419,7 @@ impl GraphDiagram {
         let (final_content, final_format) = match request.format {
             OutputFormat::Svg => (svg_content.into_bytes(), OutputFormat::Svg),
             OutputFormat::Png => (
-                raster::png::rasterize_svg_for_request(&svg_content, request)?,
+                raster::png::rasterize_svg_for_request_with(&svg_content, request, chain)?,
                 OutputFormat::Png,
             ),
         };
@@ -423,7 +439,8 @@ impl GraphDiagram {
         })
     }
 
-    fn cache_key(&self, request: &RenderRequest) -> String {
+    /// The cache key [`render_in`](Self::render_in) checks for `request`.
+    pub(crate) fn cache_key_with(&self, chain: &FontChain, request: &RenderRequest) -> String {
         let theme_key = self.color_theme.as_ref().map(|t| {
             format!(
                 "{}/{}/{}/{}/{}/{}",
@@ -435,14 +452,22 @@ impl GraphDiagram {
                 t.font_family
             )
         });
-        let options_json = serde_json::to_string(&serde_json::json!({
+        let mut options = serde_json::json!({
             "syntax": self.syntax.as_str(),
             "orientation": self.orientation.as_str(),
             "title": self.title,
             "request": request.cache_identity(),
             "color_theme": theme_key,
-        }))
-        .unwrap_or_else(|_| "{}".to_string());
+        });
+        // An SVG stores the requested `font-family`, never a resolved face, so
+        // only PNG keys carry the fonts; SVG keys and their artifacts stay.
+        if request.format == OutputFormat::Png {
+            let family = self.label_font_family();
+            options["fonts"] = chain
+                .cache_identity(&[FontQuery::from_css(family, 400, false)])
+                .into();
+        }
+        let options_json = serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
 
         FileCache::cache_key(
             VisualizationKind::Graph,
@@ -451,6 +476,14 @@ impl GraphDiagram {
             GRAPH_BACKEND,
             request.format,
         )
+    }
+
+    /// The `font-family` every label of the rendered SVG requests (all at
+    /// layout-rs's normal weight).
+    fn label_font_family(&self) -> &str {
+        self.color_theme
+            .as_ref()
+            .map_or(LAYOUT_FONT_FAMILY, |theme| theme.font_family.as_str())
     }
 
     fn generate_alt_text(&self) -> String {
@@ -597,7 +630,7 @@ fn trim_svg_padding(svg: &str, pad: f64) -> String {
 fn apply_text_style(svg: &str, color: &str, font_family: &str) -> String {
     let svg = svg.replace("<text ", &format!("<text fill=\"{color}\" "));
     svg.replace(
-        "font-family: Times, serif;",
+        &format!("font-family: {LAYOUT_FONT_FAMILY};"),
         &format!("font-family: {font_family};"),
     )
 }

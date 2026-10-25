@@ -4,7 +4,7 @@
 //! stacks), checks them against the whitelist, prompts the user for any that
 //! need approval, and returns the full pre-approved set.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use darkmatter::markdown::Markdown;
@@ -637,10 +637,7 @@ pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
     owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
     options: Option<&super::PrepareOptions>,
 ) -> Result<(), CompositionError> {
-    let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
-        .as_object()
-        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
+    let frontmatter = effective_frontmatter.as_object().cloned().unwrap_or_default();
 
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(frontmatter.clone())
@@ -760,7 +757,7 @@ pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
 fn resolve_set_shell_value(
     key: &str,
     shell: &mut crate::composition::lifecycle::actions::SetShellValue,
-    frontmatter: &HashMap<String, serde_json::Value>,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
     context: &ComposeContext,
     state: &darkmatter::markdown::compose::EffectiveState,
     resolution_ctx: &ResolutionContext,

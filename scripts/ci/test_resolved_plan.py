@@ -250,14 +250,14 @@ class SelectionTests(PlannerFixture):
         # visible in its area with no gates and no cells. Dropping it would
         # hide a governed absence; giving it cells would demand results
         # nothing produces.
-        plan = self.plan("biscuit-visualized/src/src/lib.rs")
-        record = self.package_record(plan, "biscuit-visualized")
+        plan = self.plan("biscuit-clipboard/lib/src/lib.rs")
+        record = self.package_record(plan, "biscuit-clipboard")
         self.assertEqual([], record["gates"])
-        self.assertEqual("biscuit-visualized", record["area"])
-        self.assertNotIn("biscuit-visualized", self.job_packages(plan))
+        self.assertEqual("biscuit-clipboard", record["area"])
+        self.assertNotIn("biscuit-clipboard", self.job_packages(plan))
         self.assertEqual(
             [],
-            [cell for cell in self.cells(plan) if cell["package"] == "biscuit-visualized"],
+            [cell for cell in self.cells(plan) if cell["package"] == "biscuit-clipboard"],
         )
 
     def test_documentation_only_change_selects_no_package_job(self) -> None:

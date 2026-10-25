@@ -54,9 +54,11 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
 - `RefusedToLoseWork`, `BlockedByEnvironment`, and `RemovalFailed` carry
   Prose markup that `main.rs` prints as-is after one blank line. Other errors
   are escaped with `Prose::escape_text`.
-- `wt remove` maps the lifecycle's `ExitClass`, never its outcome, to these
-  variants (`commands/remove/recovery.rs::refusal_error`): `Refused` → 3,
-  `Blocked` → 4, `Failure` → `RemovalFailed`.
+- `wt remove` maps the lifecycle's `ExitClass` (N5), never its outcome, to
+  these variants (`commands/remove/outcome.rs::error_for`): `Refused` → 3,
+  `Blocked` → 4 (only the Windows shell-inside blocker), `Failure` →
+  `RemovalFailed`. A non-interactive run with warnings and no `--force` is
+  `RefusedToLoseWork` (3); `--force-worktree` is a clap error (2).
 - `env::is_interactive()` means stdin **and** stderr are terminals and `CI` is
   unset or empty. Stdout is never consulted.
 

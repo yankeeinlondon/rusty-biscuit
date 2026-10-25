@@ -1,18 +1,18 @@
-//! Durable state of a contention-aware removal, kept so that a stopped or
-//! crashed operation can be found, explained, and resumed.
+//! Durable state of a confirmed removal, kept so that an interrupted
+//! operation is finished by the next `wt remove` without asking again.
 //!
-//! Each operation owns `<common-git-dir>/wt-removal/<operation-id>/`:
+//! Each operation owns `<common-git-dir>/wt-removal/<operation-id>/`, which
+//! holds one compact `record.json` ([`compact::CompactRecord`],
+//! `record_version` 3). It is saved before the first unlock, move,
+//! deletion, or unregistration of any kind of target, records each step as
+//! it finishes, and is the approval a later
+//! run finishes from; a finished operation's directory is deleted
+//! ([`store::PendingRemoval`]).
 //!
-//! | File | Written | Kept after completion |
-//! | --- | --- | --- |
-//! | `record.json` ([`record`]) | before any mutation; rewritten as phases finish | yes, marked completed |
-//! | `journal.jsonl` ([`journal`]) | the deletion inventory before any mutation; intent before each deletion batch, result after | only when the final report could not list its entries |
-//! | `journal-<n>.jsonl` | when a retry resumes the operation with a fresh inventory, a copy of the journal so far is kept under the next free `<n>` | as `journal.jsonl` |
-//! | `report.json` ([`super::outcome::OperationReport`]) | when the operation stops or completes; a retry carries the earlier attempt's report into its own | yes |
-//!
-//! Every attempt's journal counts toward the report: the archives are read
-//! with the current journal (see [`store::Operation::journal_entries`]), and
-//! the completed report lists every entry before the journals are deleted.
+//! An operation an earlier `wt` saved (`record_version` 1, [`record`], with
+//! an optional `report.json` and deletion journals beside it) is migrated to
+//! a compact record when it is resumed ([`legacy`]); its journals and report
+//! are then deleted unread.
 //!
 //! The store lives in the common Git directory, outside both checkout paths
 //! and outside the target's own worktree record, which removal deletes.
@@ -27,30 +27,19 @@
 //!   temporary name, flushed, and renamed into place. A crash before the
 //!   rename leaves only a hidden directory that names no operation, and
 //!   nothing has been mutated yet.
-//! - `record.json` and `report.json` are replaced by write-temp, `fsync`,
-//!   rename, then `fsync` of the directory, so a reader sees the old or the
-//!   new record, never a torn one.
-//! - A retry replaces `journal.jsonl` without ever leaving the operation
-//!   without a readable journal: it first copies the old journal durably to
-//!   `journal-<n>.jsonl` (reusing the newest archive when a stopped retry
-//!   already wrote the same bytes), builds and flushes the new journal under a
-//!   hidden name, then renames it over `journal.jsonl`. A crash or failed write
-//!   before that rename leaves the previous attempt's journal in place, so
-//!   recovery reads it as before and nothing new is authorized; at worst a
-//!   hidden temporary file is left beside it, which nothing reads.
-//! - A discarded operation's directory is renamed to a hidden name before it
-//!   is deleted, so a crash part-way never leaves a record without its journal.
-//! - The journal is append-only. A batch's intent is flushed before any of
-//!   its entries is unlinked, and its result is flushed after. A crash between
-//!   the two leaves an intent without a result; recovery reports an absent
-//!   entry of that batch as `uncertain`, never as deleted by this operation.
-//!   A torn final line is a write the crash interrupted and is ignored.
+//! - `record.json` is replaced by write-temp, `fsync`, rename, then `fsync`
+//!   of the directory, so a reader sees the old or the new record, never a
+//!   torn one. A legacy record is migrated the same way, before its leftovers
+//!   are deleted.
+//! - A finished operation's directory is renamed to a hidden name before it
+//!   is deleted, so a crash part-way never leaves a partial record.
 //! - On Windows a directory cannot be opened to `fsync` it, so the rename of
 //!   a replaced file is durable only once the filesystem flushes its
 //!   metadata. Std's rename replaces an existing file there as on Unix, which
 //!   every replacement above relies on; each replaced file is closed first.
 
-pub mod journal;
+pub mod compact;
+pub mod legacy;
 pub mod lock;
 pub mod record;
 pub mod store;

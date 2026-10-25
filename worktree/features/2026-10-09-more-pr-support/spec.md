@@ -158,6 +158,12 @@ existing legend with these meanings when visible PR markers are present;
 unknown means a bare `PR #n`. Keep the glyphs distinct from the circles that
 already indicate the current worktree.
 
+> **Note (2026-10-23).** The Worktree column's legend now also has `✕`
+> (red: Git can't read the worktree) and `⊘` (yellow: being removed). In
+> many fonts, and always without color, `✗` is hard to tell apart from
+> `✕`. Phase 3 should confirm the failing glyph is distinguishable from both
+> before it lands, or choose another (R8).
+
 Replace the green table-badge background with one shared neutral badge
 style in the worktree-cli renderer. Give the style a name beside the shared
 marker helper rather than introducing a theme system. Its foreground and

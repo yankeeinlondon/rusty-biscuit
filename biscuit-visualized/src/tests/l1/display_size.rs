@@ -172,7 +172,7 @@ fn a_graph_with_margins_is_displayed_at_its_resolved_columns() {
 
 fn promoting(term: &Terminal) -> TerminalRenderOptions {
     let mut opts = TerminalRenderOptions::new(term, RenderStrictness::Strict)
-        .with_diagram_renderer(Rc::new(TerminalDiagramRenderer));
+        .with_diagram_renderer(Rc::new(TerminalDiagramRenderer::default()));
     opts.context.graphics_mode = GraphicsMode::Rich;
     opts.context.mermaid_mode = TerminalMermaidMode::Image;
     opts

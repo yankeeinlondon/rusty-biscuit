@@ -1,0 +1,187 @@
+{
+  "call": 1,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "+1",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "a51ef88",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+1"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "+54",
+      "index": 2,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "a51ef88"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "1690344",
+      "index": 3,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "+54"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "+2",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "a51ef88"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "b14297e",
+      "index": 5,
+      "lane": "main",
+      "parents": [
+        "+2"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "+7",
+      "index": 6,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "b14297e"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "0056338",
+      "index": 7,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+7"
+      ],
+      "tags": [],
+      "x": 302.0
+    },
+    {
+      "id": "+93",
+      "index": 8,
+      "lane": "fix/sniff",
+      "parents": [
+        "0056338"
+      ],
+      "tags": [],
+      "x": 344.0
+    },
+    {
+      "id": "02ed3d5",
+      "index": 9,
+      "lane": "fix/sniff",
+      "parents": [
+        "+93"
+      ],
+      "tags": [],
+      "x": 386.0
+    },
+    {
+      "id": "+7 ",
+      "index": 10,
+      "lane": "main",
+      "parents": [
+        "b14297e"
+      ],
+      "tags": [],
+      "x": 428.0
+    },
+    {
+      "id": "4ad7b02",
+      "index": 11,
+      "lane": "main",
+      "parents": [
+        "+7 ",
+        "0056338"
+      ],
+      "tags": [],
+      "x": 470.0
+    },
+    {
+      "id": "+67",
+      "index": 12,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "0056338"
+      ],
+      "tags": [],
+      "x": 512.0
+    },
+    {
+      "id": "8f99915",
+      "index": 13,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+67"
+      ],
+      "tags": [],
+      "x": 554.0
+    },
+    {
+      "id": "+1 ",
+      "index": 14,
+      "lane": "main",
+      "parents": [
+        "4ad7b02"
+      ],
+      "tags": [],
+      "x": 596.0
+    },
+    {
+      "id": "38ec4a1",
+      "index": 15,
+      "lane": "main",
+      "parents": [
+        "+1 ",
+        "02ed3d5"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 602.22314453125,
+          "x2": 667.27685546875,
+          "y1": -23.5,
+          "y2": -8.5
+        },
+        {
+          "text": "main",
+          "x1": 602.22314453125,
+          "x2": 667.27685546875,
+          "y1": -39.5,
+          "y2": -24.5
+        }
+      ],
+      "x": 638.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 322.4012145996094,
+  "mermaid": "gitGraph\n    commit id: \"+1\" type: HIGHLIGHT\n    commit id: \"a51ef88\"\n    branch feat/schema-enhancement\n    checkout feat/schema-enhancement\n    commit id: \"+54\" type: HIGHLIGHT\n    commit id: \"1690344\"\n    checkout main\n    commit id: \"+2\" type: HIGHLIGHT\n    commit id: \"b14297e\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+7\" type: HIGHLIGHT\n    commit id: \"0056338\"\n    branch fix/sniff\n    checkout fix/sniff\n    commit id: \"+93\" type: HIGHLIGHT\n    commit id: \"02ed3d5\"\n    checkout fix/wt-ux\n    checkout main\n    commit id: \"+7 \" type: HIGHLIGHT\n    merge fix/wt-ux id: \"4ad7b02\"\n    checkout fix/wt-ux\n    commit id: \"+67\" type: HIGHLIGHT\n    commit id: \"8f99915\"\n    checkout main\n    commit id: \"+1 \" type: HIGHLIGHT\n    merge fix/sniff id: \"38ec4a1\" tag: \"main\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_sparse_lanes",
+  "width": 921.3125
+}

@@ -1425,6 +1425,33 @@ fn default_capacity() -> usize {
     })
 }
 
+/// Hash of a schema's canonical JSON: equal schemas share a hash whatever
+/// their object key order, while array order (`enum`, `required`, `anyOf`, ...)
+/// stays significant.
+fn schema_content_hash(schema: &Value) -> u64 {
+    biscuit_hash::xx_hash_json(schema)
+}
+
+/// A schema's content hash, and whether it judges any file value.
+#[derive(Clone, Copy)]
+struct SchemaDigest {
+    hash: u64,
+    /// `false` only when the schema names neither a `darkmatter-file*` format
+    /// nor the `match()` keyword, so no part of its verdict reads a context.
+    /// A mention inside a description reads as `true`, which only costs a
+    /// context-keyed validator.
+    judges_files: bool,
+}
+
+fn schema_digest(schema: &Value) -> SchemaDigest {
+    let text = biscuit_hash::canonical_json(schema);
+    SchemaDigest {
+        hash: biscuit_hash::xx_hash_bytes(text.as_bytes()),
+        judges_files: text.contains(super::format::DARKMATTER_FILE_FORMAT)
+            || text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD),
+    }
+}
+
 /// xxHash (XXH64) of the canonicalised JSON Schema bytes plus both file-reference
 /// anchors (the document `base_dir` and the launch-area `fallback`) used as the
 /// cache key.
@@ -1441,32 +1468,6 @@ fn default_capacity() -> usize {
 /// security boundary. An accidental collision could only serve a wrong
 /// validator, and XXH64's collision resistance over these small distinct inputs
 /// is more than adequate (repo convention — [`biscuit_hash`]).
-/// Hash of a schema's content: identical `Value`s serialize to identical
-/// bytes, so equal schemas share a hash.
-fn schema_content_hash(schema: &Value) -> u64 {
-    biscuit_hash::xx_hash_bytes(&serde_json::to_vec(schema).expect("schema serialises to JSON"))
-}
-
-/// A schema's content hash, and whether it judges any file value.
-#[derive(Clone, Copy)]
-struct SchemaDigest {
-    hash: u64,
-    /// `false` only when the schema names neither a `darkmatter-file*` format
-    /// nor the `match()` keyword, so no part of its verdict reads a context.
-    /// A mention inside a description reads as `true`, which only costs a
-    /// context-keyed validator.
-    judges_files: bool,
-}
-
-fn schema_digest(schema: &Value) -> SchemaDigest {
-    let text = serde_json::to_string(schema).expect("schema serialises to JSON");
-    SchemaDigest {
-        hash: biscuit_hash::xx_hash_bytes(text.as_bytes()),
-        judges_files: text.contains(super::format::DARKMATTER_FILE_FORMAT)
-            || text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD),
-    }
-}
-
 fn canonical_hash(
     content: u64,
     base_dir: Option<&Path>,
@@ -1630,6 +1631,58 @@ mod tests {
             let b = cache.validator_for_shared(&judging, Some(&second_dir), &second).unwrap();
             assert!(!Arc::ptr_eq(&a, &b), "a file-judging schema is keyed by context: {judging}");
         }
+    }
+
+    /// Schemas parsed from JSON whose objects list the same keys in another
+    /// order, at the root and nested, and with an array (`enum`, `required`)
+    /// either kept or reordered.
+    fn key_order_schema_pair() -> (Value, Value, Value) {
+        let authored = r#"{"type":"object","required":["a","b"],"properties":{"a":{"type":"string","enum":["x","y"]},"b":{"type":"number"}}}"#;
+        let reordered = r#"{"properties":{"b":{"type":"number"},"a":{"enum":["x","y"],"type":"string"}},"required":["a","b"],"type":"object"}"#;
+        let array_reordered = r#"{"type":"object","required":["b","a"],"properties":{"a":{"type":"string","enum":["y","x"]},"b":{"type":"number"}}}"#;
+        let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+        let (authored, reordered, array_reordered) = (parse(authored), parse(reordered), parse(array_reordered));
+        let root_keys = |value: &Value| value.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_ne!(root_keys(&authored), root_keys(&reordered), "the fixture must differ in key order");
+        assert_eq!(authored, reordered);
+        (authored, reordered, array_reordered)
+    }
+
+    #[test]
+    fn reordered_schema_keys_share_a_structural_validator() {
+        let (authored, reordered, array_reordered) = key_order_schema_pair();
+        let cache = ValidatorCache::with_capacity(8);
+        let first = cache.structural_validator_for(&authored).unwrap();
+        let second = cache.structural_validator_for(&reordered).unwrap();
+        assert!(Arc::ptr_eq(&first, &second), "object key order is not schema identity");
+        assert_eq!(cache.len(), 1);
+
+        let third = cache.structural_validator_for(&array_reordered).unwrap();
+        assert!(!Arc::ptr_eq(&first, &third), "array order stays significant");
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn reordered_schema_keys_share_a_context_validator() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let (authored, reordered, array_reordered) = key_order_schema_pair();
+        let with_file = |mut schema: Value| {
+            schema["properties"]["doc"] = json!({"type": "string", "format": "darkmatter-file"});
+            schema
+        };
+        let (authored, reordered, array_reordered) =
+            (with_file(authored), with_file(reordered), with_file(array_reordered));
+
+        let cache = ValidatorCache::with_capacity(8);
+        let first = cache.validator_for(&authored, Some(dir.path()), &context).unwrap();
+        let second = cache.validator_for(&reordered, Some(dir.path()), &context).unwrap();
+        assert!(Arc::ptr_eq(&first, &second), "object key order is not schema identity");
+        assert_eq!(cache.len(), 1);
+
+        let third = cache.validator_for(&array_reordered, Some(dir.path()), &context).unwrap();
+        assert!(!Arc::ptr_eq(&first, &third), "array order stays significant");
+        assert_eq!(cache.len(), 2);
     }
 
     #[test]

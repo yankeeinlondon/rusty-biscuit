@@ -11,23 +11,45 @@ a `biscuit-visualized` dependency to the library; that restores a cycle.
 
 The render-tree renderer draws a `mermaid` fence only through a
 caller-installed `DiagramRenderer` (`render_tree::{DiagramRenderer,
-DiagramRenderRequest, DiagramRenderError}`) on
+DiagramRenderRequest, DiagramOutcome, DiagramRenderError}`) on
 `TerminalRenderOptions::diagram_renderer` / `with_diagram_renderer`:
 
-- consulted only at `GraphicsMode::Rich` with `TerminalMermaidMode::Image`,
-  and **before** the `CodeRenderer` hook
+- consulted **before** the `CodeRenderer` hook, with `TerminalMermaidMode::Image`
+  at `GraphicsMode::Rich`, and with `TerminalMermaidMode::Automatic` at `Rich`
+  or `Vector`; never at `Off`, never in `Code` mode
+- the request carries the source, node attrs (layout is `attrs.layout`), the
+  `force_graphics`-applied terminal, `available_width`, `graphics_mode`
+  (the ceiling: a hook never answers with an image at `Vector`), and
+  `mermaid_mode` (`Image` = image or error, `Automatic` = may answer with
+  text); it is
+  `#[non_exhaustive]`, so only this crate constructs it
+- `Ok(DiagramOutcome::Rendered(s))`: `s` printed verbatim (an image)
+- `Ok(DiagramOutcome::Nodes(fragment))`: laid out in place at the fence's
+  width (`render_diagram_fragment`), code nodes through the `CodeRenderer`;
+  rendered with `mermaid_mode = Code` so a `mermaid` source node in the
+  fragment cannot re-enter the hook (that would recurse forever). Every
+  finished row is then measured (`visible_width`); one wider than
+  `available_width` makes the answer a `Declined` (fragment and its
+  diagnostics dropped). This is the only place a code renderer's
+  line-number gutter (`context.line_numbers`; digits + 3 cells in
+  darkmatter) is accounted for, since the hook judges fit before it. Never
+  applied to `Rendered`
+- `Ok(DiagramOutcome::Declined)`: the ordinary code block, **no diagnostic**
+  under Strict, Warn and Lossy
 - no hook installed: the fence renders exactly as `TerminalMermaidMode::Code`
   would, with no diagnostic (a `tracing::debug!` notes the missing hook)
 - hook `Err`: `Strict` returns `RenderError::LossyRejected` ("Mermaid promotion
   failed: …"); `Warn` records a lossy diagnostic and falls back to code;
   `Lossy` falls back silently
-- the request carries the source, node attrs (layout is `attrs.layout`), the
-  `force_graphics`-applied terminal, and `available_width`; it is
-  `#[non_exhaustive]`, so only this crate constructs it
 - cloned child options keep the hook (`Rc`), so nested fences reach it
+- user-facing page: `biscuit-terminal/docs/render-tree.md`
 
 `biscuit_visualized::components::TerminalDiagramRenderer` is the real hook;
-darkmatter installs it. It sizes the diagram to `available_width` (the
+darkmatter installs it. It decides image availability with
+`TerminalImage::route_has_pixels(&Terminal)` (true iff `render_with_route`
+would pick a pixel encoder: the format is not `None` and a Zellij route has a
+measured cell size); use that, never a bare `image_support()`, to choose an
+image route up front. It sizes the diagram to `available_width` (the
 fence's columns: a list item's or quote's inner width), not the full terminal
 width. The diagram components rasterize at that display size (width =
 columns × cell width, height padded to whole cell rows) and hand the PNG to
@@ -37,12 +59,60 @@ this crate never decodes or re-encodes a diagram for Kitty or iTerm2. `bt` has n
 it installs none. The library's own tests use fakes
 (`lib/tests/l1/render_tree_diagram_hook.rs`).
 
+## Diagram colors (the OSC 4 palette)
+
+The only diagram-specific thing this crate provides is color discovery.
+`biscuit-visualized`'s `TerminalColors::detect()` (used by
+`components::mermaid::MermaidDiagram::new`) reads
+`discovery::osc_queries::{bg_color, text_color, ansi_palette}`; ANSI slots
+1–6 become the diagram's six accents. `ansi_palette()` is `#[doc(hidden)]`,
+not public API, and reads the once-per-process startup exchange: sixteen
+`ESC ] 4 ; N ; ? BEL` queries ride with OSC 10/11 behind the same gate
+(`palette_query_wanted()` = `color_query_wanted()`: TTY, not CI, no
+multiplexer, probing on, not the Windows SSH server, a terminal known to
+answer). **Native Windows sends them too**, through the same console query
+backend (`tty_query/windows.rs`) as OSC 10/11, so Windows Terminal gives
+diagrams its own accents. An unanswered slot is `None` (never an error);
+`biscuit-visualized` then derives that accent from the background. See
+[Discovery](./discovery.md).
+
 ## `bt` diagram commands
 
 The CLI depends on `biscuit-visualized` (`clap`, `terminal`) for these
-commands; the library does not. Rendering is pure Rust (`mermaid-rs-renderer`
-and `layout-rs`); no Node.js or `mmdc` is involved. `bt` does not auto-fallback
-to code blocks on render errors; it reports the error and exits non-zero.
+commands; the library does not. Rendering is pure Rust (Merman, a
+Mermaid.js 12.2.0 reimplementation, and `layout-rs`); no Node.js or `mmdc` is
+involved. Diagrams use the terminal-derived palette above; `--inverse` swaps
+in the opposite fixed theme (`MermaidDiagram::inverted`) on a solid
+background.
+
+Without images (`TerminalImage::route_has_pixels(term)` false), `bt` takes
+the component's fallible `MermaidDiagram::try_present` and lays the text
+drawing (`txt` node + partial note) or the source (`mermaid` node) out with
+darkmatter's code renderer at `text_columns`, then applies margins once
+(`commands/mermaid.rs::render_mermaid_fallback`). Ineligible families, a
+drawing too wide, and a policy that forbids text exit 0 with the source; a
+source that does not parse, or that has a math label (`$$…$$`; Merman's
+`math` capability is not built in), is an error and exits non-zero whenever
+the source is shown (restrictive `--feature`, `MERMAID_FALLBACK=code-block`,
+or a drawing too wide), via the component's parse-and-capability-plan check;
+a text drawing that fits shows the formula literally and exits 0. Never use the infallible `present` in a
+CLI: it hides the error. With images, the image route is unchanged: an
+image-export failure reports the error and exits non-zero, and
+`--meta`/`--debug` describe images only. Every Mermaid subcommand takes
+`--feature` (`no-mermaid-fallbacks`, `no-mermaid-partial-fallbacks`,
+`no-mermaid-partial-warning`; shared `MermaidFeatureArgs` in `cli/src/args.rs`)
+folded into the component's `MermaidFallbackPolicy`; with none,
+`MERMAID_FALLBACK=code-block` means source. User docs:
+`biscuit-terminal/docs/cli.md`.
+
+**Code highlighting in `bt`.** The CLI (not the library) depends on
+darkmatter's library and installs its code renderer
+(`commands/shared.rs::darkmatter_code_renderer`, the one allowed use of the
+deprecated `TerminalCodeRenderer`) in the Mermaid fallback, `quote`, and
+`block`, so `bt` and `md` highlight identically, Mermaid syntax included. The
+chain `bt` → darkmatter → biscuit-visualized → biscuit-terminal has no cycle;
+`cargo tree -p biscuit-visualized -p biscuit-terminal` must list neither
+darkmatter nor syntect.
 
 ### Shared options
 

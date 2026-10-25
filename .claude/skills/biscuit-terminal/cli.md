@@ -44,6 +44,7 @@ All diagram commands support:
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON (for scripting)
 - `--meta`: Output rendering metadata to stderr (filename, cache hit, file size, render time)
+- `--feature <NAME>`: Mermaid text-fallback opt-outs (every command above except `graph-expression`; see Diagram Commands)
 
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 
@@ -107,7 +108,14 @@ Protocol selection:
 
 See [Diagrams](./diagrams.md) for comprehensive diagram documentation.
 
-Render failures are reported as errors and return a non-zero exit code. `bt` does not auto-print Mermaid code-block fallback output.
+With images, a render failure is reported as an error with a non-zero exit
+code. Without images, a Mermaid command prints a text drawing (`txt` block +
+partial note) when Merman draws the family as a diagram and it fits, else the
+`mermaid` source block, both highlighted by darkmatter, exit 0. `--feature
+no-mermaid-fallbacks|no-mermaid-partial-fallbacks|no-mermaid-partial-warning`
+(repeatable, comma-separated, case-insensitive) on every Mermaid command
+changes that; `MERMAID_FALLBACK=code-block` applies when no flag does. User
+docs: `biscuit-terminal/docs/cli.md`.
 
 ### Quick Examples
 

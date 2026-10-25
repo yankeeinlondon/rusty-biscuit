@@ -7,7 +7,8 @@
 //!
 //! Color detection uses a cascading fallback chain:
 //!
-//! 1. **Actual OSC query** (Unix only, supported terminals) - Most accurate.
+//! 1. **Actual OSC query** (supported terminals; on native Windows through the
+//!    console query backend) - Most accurate.
 //!    The query is followed by a DA1 sentinel and bounded by a silence budget;
 //!    see `docs/discovery/terminal-queries.md` for the cost contract
 //! 2. **`COLORFGBG` environment variable** - Set by some terminals with
@@ -33,11 +34,23 @@
 //! - **CI environments**: Actual queries are skipped in CI to avoid hangs.
 //! - **Non-TTY**: When stdout is not a terminal, returns `None`.
 //!
+//! ## ANSI Palette (OSC 4)
+//!
+//! The startup exchange also asks for ANSI palette slots 0–15 with one
+//! `ESC ] 4 ; <index> ; ? BEL` query per slot, behind the same gate as the
+//! live color queries. The result is crate-internal (exposed to sibling
+//! crates only through the hidden [`ansi_palette`]): an unanswered, partial,
+//! or malformed reply leaves the affected slots unknown, never an error. Native
+//! Windows sends the OSC 4 queries too, through the same console query backend
+//! as OSC 10/11.
+//!
 //! ## Submodules
 //!
 //! - [`types`] — `RgbValue`, `OscQueryError`, `DEFAULT_TIMEOUT`
-//! - [`parse`] — `parse_osc_color_response` and helpers
-//! - [`query`] — Hybrid query logic and Unix `query_osc_actual`
+//! - [`parse`] — `parse_osc_color_response`, the OSC 4 palette parser, and
+//!   helpers
+//! - [`query`] — Hybrid query logic, `query_osc_actual`, and the color and
+//!   palette query gates
 //! - [`support`] — Cached OSC support heuristics (`osc10_support`, etc.)
 //!
 //! ## Examples
@@ -133,6 +146,22 @@ pub fn cursor_color_with_source() -> Option<(RgbValue, ColorSource)> {
     query::query_osc_color(12)
 }
 
+/// The terminal's ANSI palette, slots 0–15; `None` marks a slot the
+/// terminal did not report.
+///
+/// Not public API: this exists for `biscuit-visualized`'s diagram palette
+/// and may change without notice. It reads the per-process startup exchange
+/// (one OSC 4 query per slot, sent with the OSC 10/11 colors and ended by the
+/// same DA1 sentinel), so it never writes to the terminal more than once per
+/// process and never sets a palette entry. Every slot is `None` where no
+/// live query is allowed (no TTY, CI, a multiplexer, probing off, a terminal
+/// not known to answer color queries) and when the terminal
+/// stayed silent.
+#[doc(hidden)]
+pub fn ansi_palette() -> [Option<RgbValue>; 16] {
+    crate::discovery::startup_exchange::live_palette()
+}
+
 /// Query background color with a custom timeout.
 pub fn bg_color_with_timeout(timeout: Duration) -> Option<RgbValue> {
     query::query_osc_color_with_timeout(11, timeout)
@@ -165,5 +194,17 @@ mod cache_tests {
     #[test]
     fn bg_color_is_stable_across_calls() {
         assert_eq!(bg_color(), bg_color(), "cached bg_color must be stable");
+    }
+
+    /// The palette query follows the color-query gate on every platform,
+    /// native Windows included (it rides the same console query backend).
+    #[test]
+    fn the_palette_query_follows_the_color_gate_on_every_platform() {
+        use super::query::{color_query_wanted, palette_query_wanted};
+
+        assert_eq!(palette_query_wanted(), color_query_wanted());
+        if !color_query_wanted() {
+            assert_eq!(super::ansi_palette(), [None; 16]);
+        }
     }
 }

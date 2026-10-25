@@ -1044,6 +1044,9 @@ fn fallback_areas(
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
+///
+/// The config bytes are already key-order-insensitive: `SchemaConfig` holds
+/// only a `bool` and a `BTreeMap`, which serializes sorted.
 fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
     let config_bytes = serde_json::to_vec(&config.schema).unwrap_or_default();
     xx_hash_bytes(text.as_bytes()) ^ xx_hash_bytes(&config_bytes)

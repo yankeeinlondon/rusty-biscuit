@@ -1,0 +1,95 @@
+{
+  "call": 1,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "+5",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "b2e5e8c",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+5"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 29.56494140625,
+          "x2": 63.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 50.0
+    },
+    {
+      "id": "+10",
+      "index": 2,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "b2e5e8c"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "6dc2a7c",
+      "index": 3,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+10"
+      ],
+      "tags": [
+        {
+          "text": "fix/sniff-pr",
+          "x1": 99.65625,
+          "x2": 161.84375,
+          "y1": 48.5,
+          "y2": 63.5
+        }
+      ],
+      "x": 134.0
+    },
+    {
+      "id": "96925a6",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "b2e5e8c",
+        "6dc2a7c"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 140.22314453125,
+          "x2": 205.27685546875,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 176.0
+    },
+    {
+      "id": "fe75f09",
+      "index": 5,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "6dc2a7c"
+      ],
+      "tags": [],
+      "x": 218.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 161.51953125,
+  "mermaid": "gitGraph\n    commit id: \"+5\" type: HIGHLIGHT\n    commit id: \"b2e5e8c\" tag: \"main\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+10\" type: HIGHLIGHT\n    commit id: \"6dc2a7c\" tag: \"fix/sniff-pr\"\n    checkout main\n    merge fix/wt-ux id: \"96925a6\" tag: \"origin/main\"\n    checkout fix/wt-ux\n    commit id: \"fe75f09\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_continued_after_merge_behind",
+  "width": 374.765625
+}

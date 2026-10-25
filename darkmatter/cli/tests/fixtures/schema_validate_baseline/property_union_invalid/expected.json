@@ -1,1 +1,1 @@
-{"file":"doc.md","problems":[{"arm_index":null,"column":3,"description":"a union type of: number | string","kind":"invalid","line":7,"message":"[\"a\",\"b\"] is not valid under any of the schemas listed in the 'anyOf' keyword","path":"/count","property":null}],"schema":null,"valid":false}
+{"file":"doc.md","valid":false,"schema":null,"problems":[{"path":"/count","property":null,"message":"[\"a\",\"b\"] is not valid under any of the schemas listed in the 'anyOf' keyword","kind":"invalid","line":7,"column":3,"arm_index":null,"description":"a union type of: number | string"}]}

@@ -3,7 +3,6 @@
 //! a host's registration is checked before anything runs, and how passive
 //! validation reports what runtime evaluation would reject.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,7 +21,7 @@ const NO_ERROR: &str = "host.event-has-no-error";
 const OUTSIDE_GROUP: &str = "host.outside-group";
 
 fn document(frontmatter: Value) -> EffectiveState {
-    let map: HashMap<String, Value> = serde_json::from_value(frontmatter).unwrap();
+    let map: serde_json::Map<String, Value> = serde_json::from_value(frontmatter).unwrap();
     EffectiveStateBuilder::new().with_frontmatter(map).build().unwrap()
 }
 

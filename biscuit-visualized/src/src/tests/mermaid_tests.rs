@@ -1,7 +1,85 @@
+use std::time::Duration;
+
 use crate::artifact::{Background, OutputFormat, RenderRequest};
-use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
-use crate::tests::isolated_cache_dir;
+use crate::cache::file_cache::take_stored_files;
+use crate::fonts::chain::take_default_chain_requests;
+use crate::mermaid::render::take_merman_calls;
+use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidError, MermaidTheme, Palette, QuadrantTheme};
+use crate::tests::{capture_warnings, isolated_cache_dir};
 use serial_test::serial;
+
+const THEMES: [MermaidTheme; 4] = [
+    MermaidTheme::Dark,
+    MermaidTheme::Default,
+    MermaidTheme::Forest,
+    MermaidTheme::Neutral,
+];
+
+/// How far past its budget a cancelled Merman call may return: Merman stops
+/// at its next checkpoint, not at the deadline itself.
+const BUDGET_MARGIN: Duration = Duration::from_millis(250);
+
+fn svg_request(background: Background) -> RenderRequest {
+    RenderRequest {
+        format: OutputFormat::Svg,
+        background,
+        ..RenderRequest::default()
+    }
+}
+
+fn render_svg(diagram: &MermaidDiagram, background: Background) -> String {
+    let artifact = diagram.render(&svg_request(background)).unwrap();
+    std::fs::read_to_string(artifact.path).unwrap()
+}
+
+fn render_failure(result: Result<impl std::fmt::Debug, MermaidError>) -> String {
+    match result {
+        Err(MermaidError::RenderFailed(reason)) => reason,
+        other => panic!("expected RenderFailed, got {other:?}"),
+    }
+}
+
+/// The root `<svg>` element's opening tag.
+fn root_tag(svg: &str) -> &str {
+    let start = svg.find("<svg").expect("an <svg> root");
+    &svg[start..start + svg[start..].find('>').expect("a closed root tag")]
+}
+
+fn root_attribute<'a>(svg: &'a str, name: &str) -> &'a str {
+    let tag = root_tag(svg);
+    let pattern = format!(" {name}=\"");
+    let start = tag.find(&pattern).unwrap_or_else(|| panic!("root {name}")) + pattern.len();
+    &tag[start..start + tag[start..].find('"').unwrap()]
+}
+
+/// A flowchart large enough that Merman needs well over a few milliseconds.
+fn large_flowchart() -> String {
+    let mut source = String::from("flowchart LR\n");
+    for index in 0..15 {
+        source.push_str(&format!("    N{index}[Node number {index}] --> N{}\n", index + 1));
+    }
+    source
+}
+
+/// The Merman time of an uncancelled render of `source` plus a comment line,
+/// so its cache key differs from the timed render's. Run first, it also warms
+/// the process's font chain: a fresh test process otherwise resolves faces
+/// for the measurer's styles inside the first Merman call, and that work,
+/// stretched by host load, would be timed as Merman overrunning its budget.
+fn warm_merman_time(source: &str, request: impl FnOnce(MermaidDiagram)) -> Duration {
+    take_merman_calls();
+    request(MermaidDiagram::new(format!("{source}\n%% warm-up twin\n")));
+    take_merman_calls().into_iter().sum()
+}
+
+/// A gitGraph large enough that Merman needs well over a few milliseconds.
+fn large_gitgraph() -> String {
+    let mut source = String::from("gitGraph\n");
+    for index in 0..400 {
+        source.push_str(&format!("    commit id: \"c{index}\"\n"));
+    }
+    source
+}
 
 #[test]
 #[serial]
@@ -63,38 +141,19 @@ fn mermaid_builder_methods_are_chainable() {
     let diagram = MermaidDiagram::new("graph LR; A-->B")
         .with_theme(MermaidTheme::Forest)
         .with_title("Test Diagram")
-        .with_config(MermaidConfig::new().with_point_label_font_size(14));
+        .with_config(MermaidConfig::new().with_point_label_font_size(14))
+        .with_time_budget(Duration::from_millis(750));
 
     assert_eq!(diagram.instructions(), "graph LR; A-->B");
+    assert_eq!(diagram.time_budget(), Duration::from_millis(750));
 }
 
 #[test]
-#[serial]
-fn mermaid_handles_unusual_syntax_gracefully() {
-    let _cache_dir = isolated_cache_dir();
+fn mermaid_time_budget_defaults_to_two_seconds() {
+    let diagram = MermaidDiagram::new("graph LR; A-->B");
 
-    // mermaid-rs-renderer tends to handle invalid syntax gracefully
-    // by producing a simple diagram or placeholder, rather than failing.
-    // This test verifies that rendering completes without panicking.
-    let diagram = MermaidDiagram::new("this is not valid mermaid syntax");
-    let request = RenderRequest::default();
-
-    let result = diagram.render(&request);
-    // The renderer should complete (either with success or a specific error)
-    // but should not panic
-    match result {
-        Ok(artifact) => {
-            // If it renders successfully, verify the artifact exists
-            assert!(artifact.path.exists(), "Output file should exist");
-        }
-        Err(e) => {
-            // If it fails, ensure it's a proper error
-            assert!(
-                e.to_string().contains("render") || e.to_string().contains("parse"),
-                "Error message should indicate render/parse failure"
-            );
-        }
-    }
+    assert_eq!(diagram.time_budget(), Duration::from_secs(2));
+    assert_eq!(MermaidDiagram::DEFAULT_TIME_BUDGET, Duration::from_secs(2));
 }
 
 #[test]
@@ -118,36 +177,268 @@ fn mermaid_renders_to_svg() {
     assert!(content.contains("<svg"), "Content should be valid SVG");
 }
 
-/// A `HIGHLIGHT` git-graph node (e.g. the worktree "+N" elision marker) must
-/// take its branch's color, not the inverse hue mermaid-rs-renderer defaults
-/// to. The second branch's color is yellow (`hsl(60, 100%`); its inverse is a
-/// blue (`rgb(0, 0, 160`) that must not appear.
+// ---------------------------------------------------------------------------
+// Fallback cases (AC-C9, AC-C13): each is a render failure, which callers
+// show as the code block
+// ---------------------------------------------------------------------------
+
+/// The two deliberately malformed flowcharts (D53): Mermaid.js and Merman
+/// reject both.
 #[test]
 #[serial]
-fn mermaid_highlight_node_uses_branch_color() {
+fn malformed_flowcharts_are_parse_errors() {
     let _cache_dir = isolated_cache_dir();
 
-    let instructions = "gitGraph\n    commit id: \"a\"\n    branch feature\n    \
-         checkout feature\n    commit id: \"+3\" type: HIGHLIGHT\n    commit id: \"b\"";
-    let request = RenderRequest {
-        format: OutputFormat::Svg,
-        ..RenderRequest::default()
+    for source in ["graph TD; A to B", "graph TD; A --&gt; B"] {
+        let diagram = MermaidDiagram::new(source);
+
+        let reason = render_failure(diagram.render(&RenderRequest::default()));
+
+        assert!(reason.contains("parse error"), "{source}: {reason}");
+        assert!(diagram.fallback_code_block().contains(source));
+    }
+}
+
+#[test]
+#[serial]
+fn an_unknown_diagram_type_is_a_render_failure() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("this is not valid mermaid syntax");
+
+    let reason = render_failure(diagram.render(&RenderRequest::default()));
+
+    assert!(reason.contains("No Mermaid diagram type detected"), "{reason}");
+}
+
+/// A frontmatter title written as a JSON string literal, which is a YAML
+/// double-quoted scalar (how `bt --title` writes it), is read back as
+/// exactly the text it encodes: YAML indicators, quotes, a backslash, and
+/// non-ASCII included.
+#[test]
+#[serial]
+fn a_json_string_frontmatter_title_is_read_back_verbatim() {
+    let _cache_dir = isolated_cache_dir();
+    let title = r#"Q: [draft] a "quoted" #hash, back\slash 'single' {brace} Café: ünï ✓"#;
+    let scalar = serde_json::to_string(title).unwrap();
+    let diagram = MermaidDiagram::new(format!("---\ntitle: {scalar}\n---\nflowchart LR\n    A --> B"));
+
+    let artifact = diagram.render_in(super::golden_tests::golden_chain(), &svg_request(Background::Theme)).unwrap();
+
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+    let shown = svg
+        .split("flowchartTitleText\">")
+        .nth(1)
+        .and_then(|rest| rest.split("</text>").next())
+        .unwrap_or_else(|| panic!("no title text in {svg}"));
+    let unescaped = shown
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    assert_eq!(unescaped, title);
+}
+
+/// Merman renders ZenUML outside its primary matrix; D20 keeps today's
+/// fallback, so no Merman call is made for it.
+#[test]
+#[serial]
+fn zenuml_is_a_render_failure_without_a_merman_call() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("zenuml\n    title Demo\n    Alice->Bob: Hello");
+    take_merman_calls();
+
+    let reason = render_failure(diagram.render(&RenderRequest::default()));
+
+    assert!(reason.contains("ZenUML"), "{reason}");
+    assert!(take_merman_calls().is_empty());
+}
+
+/// D58: Merman's math support is not built in. Merman refuses a diagram with
+/// a `$$…$$` label rather than drawing the label as text, so the diagram is
+/// a render failure and its source, the math label included, is what the
+/// caller shows.
+#[test]
+#[serial]
+fn a_math_label_shows_as_its_source_text() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("flowchart LR\n    A[\"$$x^2$$\"] --> B");
+
+    let reason = render_failure(diagram.render(&RenderRequest::default()));
+
+    assert!(reason.to_lowercase().contains("math"), "{reason}");
+    assert!(diagram.fallback_code_block().contains("$$x^2$$"));
+}
+
+/// `validate` checks the parse only, so a math label passes it;
+/// `validate_renderable` finds the missing capability from Merman's plan for
+/// the parsed model and reports the error the image render gives, with no
+/// fonts and no artifact.
+#[test]
+#[serial]
+fn a_math_label_parses_but_is_not_renderable() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("flowchart LR\n    A[\"$$x^2$$\"] --> B");
+    let rendered = render_failure(diagram.render(&RenderRequest::default()));
+    take_default_chain_requests();
+    take_stored_files();
+
+    let validated = diagram.validate();
+    let planned = render_failure(diagram.validate_renderable());
+
+    assert!(validated.is_ok(), "{validated:?}");
+    assert_eq!(planned, rendered);
+    assert_eq!(take_default_chain_requests(), 0, "no font chain");
+    assert_eq!(take_stored_files(), 0, "no artifact");
+    assert_eq!(MermaidDiagram::new("flowchart LR\n    A --> B").validate_renderable().ok(), Some(()));
+}
+
+// ---------------------------------------------------------------------------
+// Time budget (AC-C10, library level)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn an_svg_render_over_its_time_budget_fails_with_a_warning() {
+    let _cache_dir = isolated_cache_dir();
+    let budget = Duration::from_millis(2);
+    let full = warm_merman_time(&large_flowchart(), |twin| {
+        twin.render(&RenderRequest::default()).expect("the twin fits 2 s");
+    });
+    let diagram = MermaidDiagram::new(large_flowchart()).with_time_budget(budget);
+
+    let (result, warnings) = capture_warnings(|| diagram.render(&RenderRequest::default()));
+
+    let reason = render_failure(result);
+    assert!(reason.contains("time budget"), "{reason}");
+    assert!(
+        warnings.iter().any(|warning| warning.contains("time budget")),
+        "{warnings:?}"
+    );
+    let calls = take_merman_calls();
+    let merman = calls.last().expect("one Merman call");
+    assert!(
+        *merman <= budget + BUDGET_MARGIN && *merman < full,
+        "Merman ran {merman:?} on a {budget:?} budget; uncancelled {full:?}"
+    );
+}
+
+#[test]
+fn a_gitgraph_geometry_request_over_its_time_budget_fails_with_a_warning() {
+    let budget = Duration::from_millis(2);
+    let full = warm_merman_time(&large_gitgraph(), |twin| {
+        twin.gitgraph_geometry().expect("the twin fits 2 s");
+    });
+    let diagram = MermaidDiagram::new(large_gitgraph()).with_time_budget(budget);
+
+    let (result, warnings) = capture_warnings(|| diagram.gitgraph_geometry());
+
+    let reason = render_failure(result);
+    assert!(reason.contains("time budget"), "{reason}");
+    assert!(
+        warnings.iter().any(|warning| warning.contains("time budget")),
+        "{warnings:?}"
+    );
+    let calls = take_merman_calls();
+    let merman = calls.last().expect("one Merman call");
+    assert!(
+        *merman <= budget + BUDGET_MARGIN && *merman < full,
+        "Merman ran {merman:?} on a {budget:?} budget; uncancelled {full:?}"
+    );
+}
+
+/// Control for the budget tests: the same diagrams fit the default budget.
+#[test]
+#[serial]
+fn the_large_diagrams_render_within_the_default_budget() {
+    let _cache_dir = isolated_cache_dir();
+
+    take_merman_calls();
+
+    MermaidDiagram::new(large_flowchart())
+        .render(&svg_request(Background::Transparent))
+        .expect("the flowchart fits 2 s");
+    MermaidDiagram::new(large_gitgraph())
+        .gitgraph_geometry()
+        .expect("the gitGraph fits 2 s")
+        .expect("a gitGraph");
+
+    // Each needs several times the budget tests' 2 ms.
+    let calls = take_merman_calls();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls.iter().all(|call| *call > Duration::from_millis(5)), "{calls:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Themes (AC-C15) and backgrounds
+// ---------------------------------------------------------------------------
+
+/// AC-C15 after the palette phase: no theme maps to a Merman built-in theme.
+/// Every theme hands Merman the `base` theme and its own fixed palette,
+/// compiled; the four render four different SVGs, each carrying its
+/// palette's accent strokes.
+#[test]
+#[serial]
+fn each_theme_renders_through_its_compiled_palette_not_a_built_in_theme() {
+    let _cache_dir = isolated_cache_dir();
+    let source = "flowchart LR\n    A[Start] --> B{Decide}\n    B --> C[Done]";
+
+    let mut rendered = Vec::new();
+    for theme in THEMES {
+        let diagram = MermaidDiagram::new(source).with_theme(theme);
+        assert_eq!(diagram.prepared_site_config()["theme"], "base", "{theme:?}");
+        assert_eq!(diagram.palette(), Palette::fixed(theme));
+
+        let svg = render_svg(&diagram, Background::Transparent);
+        let palette = Palette::fixed(theme);
+        assert!(
+            svg.contains(&format!("stroke:{} !important", palette.accents()[0])),
+            "{theme:?}: the first node's accent stroke"
+        );
+        rendered.push(svg);
+    }
+    for (index, svg) in rendered.iter().enumerate() {
+        for other in &rendered[index + 1..] {
+            assert_ne!(svg, other, "two themes render the same SVG");
+        }
+    }
+}
+
+/// `Theme` paints the palette's background, `Solid` its own color,
+/// and `Transparent` nothing, in SVG and in PNG.
+#[test]
+#[serial]
+fn backgrounds_paint_the_theme_a_solid_color_or_nothing() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Dark);
+    let backdrop = |svg: &str| {
+        let after_root = &svg[svg.find("<svg").unwrap() + root_tag(svg).len() + 1..];
+        after_root
+            .starts_with("<rect ")
+            .then(|| after_root[..after_root.find("/>").unwrap()].to_string())
     };
 
-    let artifact = MermaidDiagram::new(instructions)
-        .with_theme(MermaidTheme::Dark)
-        .render(&request)
-        .unwrap();
-    let svg = std::fs::read_to_string(artifact.path).unwrap();
+    let theme = render_svg(&diagram, Background::Theme);
+    let solid = render_svg(&diagram, Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
+    let transparent = render_svg(&diagram, Background::Transparent);
 
-    assert!(
-        svg.contains("hsl(60, 100%"),
-        "highlight node should use the branch (yellow) color:\n{svg}"
+    assert!(backdrop(&theme).unwrap().contains("fill=\"#333333\""), "{theme}");
+    assert!(backdrop(&solid).unwrap().contains("fill=\"#123456\""), "{solid}");
+    assert_eq!(backdrop(&transparent), None, "{transparent}");
+
+    let corner = |background| {
+        let artifact = diagram
+            .render(&RenderRequest::default().with_background(background))
+            .unwrap();
+        let png = image::load_from_memory(&std::fs::read(artifact.path).unwrap()).unwrap();
+        png.to_rgba8().get_pixel(0, 0).0
+    };
+    assert_eq!(corner(Background::Theme), [0x33, 0x33, 0x33, 0xff]);
+    assert_eq!(
+        corner(Background::Solid { r: 0x12, g: 0x34, b: 0x56 }),
+        [0x12, 0x34, 0x56, 0xff]
     );
-    assert!(
-        !svg.contains("rgb(0, 0, 160"),
-        "highlight node must not fall back to the inverse (blue) color:\n{svg}"
-    );
+    assert_eq!(corner(Background::Transparent)[3], 0);
 }
 
 #[test]
@@ -177,7 +468,8 @@ fn mermaid_theme_changes_svg_output() {
     let light_svg = std::fs::read_to_string(light.path).unwrap();
     let dark_svg = std::fs::read_to_string(dark.path).unwrap();
     assert_ne!(light_svg, dark_svg);
-    assert!(dark_svg.contains("#020617"));
+    // The Dark palette's background (Mermaid.js 12.2.0's dark theme's).
+    assert!(dark_svg.contains("fill=\"#333333\""));
 }
 
 #[test]
@@ -186,32 +478,21 @@ fn mermaid_transparent_background_changes_svg_output() {
     let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
-    let opaque = diagram
-        .render(&RenderRequest {
-            format: OutputFormat::Svg,
-            scale: 1,
-            target_width: None,
-            row_height: None,
-            background: Background::Theme,
-        })
-        .unwrap();
-    let transparent = diagram
-        .render(&RenderRequest {
-            format: OutputFormat::Svg,
-            scale: 1,
-            target_width: None,
-            row_height: None,
-            background: Background::Transparent,
-        })
-        .unwrap();
+    let opaque = diagram.render(&svg_request(Background::Theme)).unwrap();
+    let transparent = diagram.render(&svg_request(Background::Transparent)).unwrap();
 
     assert_ne!(opaque.path, transparent.path);
 
     let opaque_svg = std::fs::read_to_string(opaque.path).unwrap();
     let transparent_svg = std::fs::read_to_string(transparent.path).unwrap();
     assert_ne!(opaque_svg, transparent_svg);
-    assert!(transparent_svg.contains("fill=\"none\"") || transparent_svg.contains(">none<"));
+    assert!(opaque_svg.contains("fill=\"#ffffff\" style=\"fill:#ffffff"), "{opaque_svg}");
+    assert!(!transparent_svg.contains("fill=\"#ffffff\" style=\"fill:#ffffff"), "{transparent_svg}");
 }
+
+// ---------------------------------------------------------------------------
+// MermaidConfig and QuadrantTheme
+// ---------------------------------------------------------------------------
 
 #[test]
 #[serial]
@@ -227,19 +508,31 @@ fn mermaid_quadrant_config_changes_svg_output() {
                 .with_point_label_font_size(18),
         )
         .with_theme(MermaidTheme::Neutral);
-    let artifact = diagram
-        .render(&RenderRequest {
-            format: OutputFormat::Svg,
-            scale: 1,
-            target_width: None,
-            row_height: None,
-            background: Background::Theme,
-        })
-        .unwrap();
+    let svg = render_svg(&diagram, Background::Theme);
 
-    let svg = std::fs::read_to_string(artifact.path).unwrap();
     assert!(svg.contains("#112233"));
     assert!(svg.contains(" r=\"9\""));
+    assert!(svg.contains("font-size=\"18\""), "point labels at 18 px");
+}
+
+/// Every quadrant fill `QuadrantTheme` sets reaches Merman's SVG.
+#[test]
+#[serial]
+fn magic_quadrangle_fills_reach_the_svg() {
+    let _cache_dir = isolated_cache_dir();
+    let instructions = "quadrantChart\n    title Sample\n    A: [0.2, 0.8]";
+    let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), true);
+
+    let svg = render_svg(
+        &MermaidDiagram::new(instructions)
+            .with_config(config)
+            .with_theme(MermaidTheme::Dark),
+        Background::Theme,
+    );
+
+    for fill in ["#1e2a1e", "#2a1e1e", "#1a1a1a"] {
+        assert!(svg.contains(fill), "{fill}");
+    }
 }
 
 #[test]
@@ -411,24 +704,16 @@ fn mermaid_alt_text_uses_title() {
     assert_eq!(artifact.alt_text, "My Custom Diagram");
 }
 
+/// An author's `%%{init}%%` theme variables reach Merman (D54's precedence
+/// check).
 #[test]
 #[serial]
 fn mermaid_pie_chart_init_directive_applies_custom_colors() {
     let _cache_dir = isolated_cache_dir();
 
     let instructions = "%%{init: {'themeVariables': {'pie1': '#3178C6', 'pie2': '#A72145'}}}%%\npie\n    \"TypeScript\" : 45\n    \"Rust\" : 35\n    \"Python\" : 20";
-    let diagram = MermaidDiagram::new(instructions);
-    let artifact = diagram
-        .render(&RenderRequest {
-            format: OutputFormat::Svg,
-            scale: 1,
-            target_width: None,
-            row_height: None,
-            background: Background::Transparent,
-        })
-        .unwrap();
+    let svg = render_svg(&MermaidDiagram::new(instructions), Background::Transparent);
 
-    let svg = std::fs::read_to_string(artifact.path).unwrap();
     assert!(
         svg.contains("#3178C6"),
         "SVG should contain custom TypeScript color #3178C6"
@@ -436,34 +721,6 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
     assert!(
         svg.contains("#A72145"),
         "SVG should contain custom Rust color #A72145"
-    );
-
-    // Verify legend text uses dominant-baseline="central" for proper vertical alignment
-    // with the color marker rectangles
-    assert!(
-        svg.contains("dominant-baseline=\"central\""),
-        "Legend text should use dominant-baseline=\"central\" for vertical alignment"
-    );
-
-    // Each label takes the text color with the higher WCAG contrast ratio.
-    // The Python slice uses mermaid-rs-renderer 0.3's default third color,
-    // `hsl(0, 0%, 60%)` (mid gray), and the TypeScript blue is marginally
-    // better with dark text (3.9:1 vs 3.6:1); only the Rust red keeps light text.
-    assert!(
-        svg.contains("fill=\"hsl(0.0000000000, 0.0000000000%, 60.0000000000%)\""),
-        "Python slice should use the renderer's default hsl() gray"
-    );
-    assert!(
-        svg.contains("fill=\"#1a1a1a\">20%"),
-        "Gray pie slice (Python) should have dark text for contrast"
-    );
-    assert!(
-        svg.contains("fill=\"#1a1a1a\">45%"),
-        "TypeScript blue should have dark text"
-    );
-    assert!(
-        svg.contains("fill=\"#e2e8f0\">35%"),
-        "Dark pie slice (Rust) should keep light text"
     );
 }
 
@@ -480,57 +737,9 @@ fn mermaid_alt_text_defaults_to_mermaid_diagram() {
     assert_eq!(artifact.alt_text, "Mermaid diagram");
 }
 
-#[test]
-#[serial]
-fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
-    let _cache_dir = isolated_cache_dir();
-
-    let diagrams = [
-        (
-            "flowchart",
-            "flowchart LR\n    A[Start] --> B{Decision}\n    B --> C[Done]",
-        ),
-        (
-            "git-graph",
-            "gitGraph\n    commit\n    branch feature\n    checkout feature\n    commit\n    checkout main\n    merge feature",
-        ),
-        (
-            "bar-chart",
-            "xychart-beta\n    title \"Monthly Revenue\"\n    x-axis [Jan, Feb, Mar]\n    y-axis \"Revenue\" 0 --> 30\n    bar [12, 28, 20]",
-        ),
-        (
-            "line-chart",
-            "xychart-beta\n    title \"Weekly Temperature\"\n    x-axis [Mon, Tue, Wed]\n    y-axis \"C\" 0 --> 30\n    line [20, 22, 19]",
-        ),
-        (
-            "timeline",
-            "timeline\n    title Company History\n    2020 : Founded\n    2022 : IPO",
-        ),
-        (
-            "state-diagram",
-            "---\ntitle: Process States\n---\nstateDiagram-v2\n    [*] --> Idle\n    Idle --> Running\n    Running --> [*]",
-        ),
-        (
-            "erd",
-            "---\ntitle: E-Commerce Schema\n---\nerDiagram\n    Customer ||--o{ Order : places",
-        ),
-    ];
-
-    for (name, instructions) in diagrams {
-        let artifact = MermaidDiagram::new(instructions)
-            .render(&RenderRequest {
-                format: OutputFormat::Svg,
-                scale: 1,
-                target_width: None,
-                row_height: None,
-                background: Background::Transparent,
-            })
-            .unwrap_or_else(|err| panic!("{name} should render successfully: {err}"));
-
-        let svg = std::fs::read_to_string(artifact.path).unwrap();
-        assert!(svg.contains("<svg"), "{name} should produce SVG output");
-    }
-}
+// ---------------------------------------------------------------------------
+// Natural size
+// ---------------------------------------------------------------------------
 
 #[test]
 #[serial]
@@ -541,39 +750,63 @@ fn mermaid_natural_size_matches_the_rendered_viewbox() {
     for theme in [MermaidTheme::Default, MermaidTheme::Dark] {
         let diagram = MermaidDiagram::new(instructions).with_theme(theme);
         let size = diagram.natural_size().expect("gitGraph measures");
-        let artifact = diagram
-            .render(&RenderRequest {
-                format: OutputFormat::Svg,
-                scale: 1,
-                target_width: None,
-                row_height: None,
-                background: Background::Transparent,
-            })
-            .unwrap();
-        let svg = std::fs::read_to_string(artifact.path).unwrap();
-        let viewbox = svg
-            .split("viewBox=\"")
-            .nth(1)
-            .and_then(|rest| rest.split('"').next())
-            .expect("root viewBox");
-        let values: Vec<f32> = viewbox.split_whitespace().map(|v| v.parse().unwrap()).collect();
-        assert!((values[2] - size.width).abs() < 0.01, "{theme:?}: {viewbox} vs {size:?}");
-        assert!((values[3] - size.height).abs() < 0.01, "{theme:?}: {viewbox} vs {size:?}");
+        let svg = render_svg(&diagram, Background::Transparent);
+        let viewbox = root_attribute(&svg, "viewBox");
+        let values: Vec<f32> = viewbox
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert!(
+            (values[2] - size.width).abs() < 0.01,
+            "{theme:?}: {viewbox} vs {size:?}"
+        );
+        assert!(
+            (values[3] - size.height).abs() < 0.01,
+            "{theme:?}: {viewbox} vs {size:?}"
+        );
     }
 }
 
+/// The PNG the rasterizer draws at scale 1 has the natural size.
 #[test]
+#[serial]
+fn mermaid_natural_size_is_the_drawn_png_size() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("flowchart LR\n    A[Start] --> B[Done]");
+
+    let size = diagram.natural_size().unwrap();
+    let artifact = diagram
+        .render(&RenderRequest {
+            scale: 1,
+            ..RenderRequest::default()
+        })
+        .unwrap();
+    let png = image::load_from_memory(&std::fs::read(artifact.path).unwrap()).unwrap();
+
+    assert_eq!(png.width(), size.width.ceil() as u32, "{size:?}");
+    assert_eq!(png.height(), size.height.ceil() as u32, "{size:?}");
+}
+
+#[test]
+#[serial]
 fn mermaid_natural_size_rejects_unparseable_input() {
+    let _cache_dir = isolated_cache_dir();
     let diagram = MermaidDiagram::new("not a diagram header\n    A --> B");
     assert!(diagram.natural_size().is_err());
 }
 
 #[test]
+#[serial]
 fn mermaid_natural_size_grows_with_commits() {
-    let short = MermaidDiagram::new("gitGraph\n    commit id: \"a\"").natural_size().unwrap();
-    let long = MermaidDiagram::new("gitGraph\n    commit id: \"a\"\n    commit id: \"b\"\n    commit id: \"c\"")
+    let _cache_dir = isolated_cache_dir();
+    let short = MermaidDiagram::new("gitGraph\n    commit id: \"a\"")
         .natural_size()
         .unwrap();
+    let long = MermaidDiagram::new(
+        "gitGraph\n    commit id: \"a\"\n    commit id: \"b\"\n    commit id: \"c\"",
+    )
+    .natural_size()
+    .unwrap();
     assert!(long.width > short.width, "{long:?} vs {short:?}");
 }
 
@@ -585,18 +818,8 @@ fn mermaid_render_separates_backgrounds_and_geometry() {
     let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
-    let svg = |background| {
-        let artifact = diagram
-            .render(&RenderRequest {
-                format: OutputFormat::Svg,
-                background,
-                ..RenderRequest::default()
-            })
-            .unwrap();
-        std::fs::read_to_string(artifact.path).unwrap()
-    };
-    let theme = svg(Background::Theme);
-    let solid = svg(Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
+    let theme = render_svg(&diagram, Background::Theme);
+    let solid = render_svg(&diagram, Background::Solid { r: 0x12, g: 0x34, b: 0x56 });
     assert!(!theme.contains("#123456"));
     assert!(solid.contains("#123456"), "{solid}");
 
@@ -604,12 +827,16 @@ fn mermaid_render_separates_backgrounds_and_geometry() {
     let requests = [
         png.clone(),
         png.clone().with_background(Background::Transparent),
-        png.clone().with_background(Background::Solid { r: 0x12, g: 0x34, b: 0x56 }),
+        png.clone()
+            .with_background(Background::Solid { r: 0x12, g: 0x34, b: 0x56 }),
         png.clone().with_row_height(16),
         png.clone().with_row_height(17),
         png.clone().with_target_width(241),
     ];
-    let artifacts: Vec<_> = requests.iter().map(|request| diagram.render(request).unwrap()).collect();
+    let artifacts: Vec<_> = requests
+        .iter()
+        .map(|request| diagram.render(request).unwrap())
+        .collect();
     for (i, a) in artifacts.iter().enumerate() {
         for b in &artifacts[i + 1..] {
             assert_ne!(a.path, b.path);
@@ -623,4 +850,21 @@ fn mermaid_render_separates_backgrounds_and_geometry() {
     let padded = image::load_from_memory(&std::fs::read(&artifacts[3].path).unwrap()).unwrap();
     assert_eq!(padded.width(), 240);
     assert_eq!(padded.height() % 16, 0);
+}
+
+/// Two different diagrams never share a diagram id, and the id is never
+/// Merman's default.
+#[test]
+#[serial]
+fn diagram_ids_are_unique_per_diagram() {
+    let _cache_dir = isolated_cache_dir();
+    let first = render_svg(&MermaidDiagram::new("graph LR; A-->B"), Background::Transparent);
+    let second = render_svg(&MermaidDiagram::new("graph LR; A-->C"), Background::Transparent);
+    let again = render_svg(&MermaidDiagram::new("graph LR; A-->B"), Background::Theme);
+
+    let ids = [first.as_str(), second.as_str(), again.as_str()].map(|svg| root_attribute(svg, "id"));
+
+    assert!(ids.iter().all(|id| id.starts_with("bv-")), "{ids:?}");
+    assert_ne!(ids[0], ids[1]);
+    assert!(first.contains(&format!("#{}", ids[0])), "the stylesheet is scoped by the id");
 }

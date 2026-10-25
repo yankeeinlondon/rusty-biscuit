@@ -238,7 +238,7 @@ pub(crate) struct HintLayers<'a> {
     pub(crate) with_origin: &'a Path,
     pub(crate) task_property: &'a str,
     /// The early-binding state the `with` values read.
-    pub(crate) step_frontmatter: &'a HashMap<String, Value>,
+    pub(crate) step_frontmatter: &'a Map<String, Value>,
     pub(crate) caller_setters: &'a Map<String, Value>,
     /// The sequence source, which a caller setter is attributed to.
     pub(crate) sequence_path: &'a Path,
@@ -262,7 +262,7 @@ pub(crate) fn predict(
     evaluate: &mut Evaluator<'_>,
 ) -> Result<ProviderPrediction, crate::composition::CompositionError> {
     let mut dependencies = Vec::new();
-    let mut document_state: HashMap<String, Value> = layers
+    let mut document_state: Map<String, Value> = layers
         .document
         .iter()
         .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
@@ -289,7 +289,7 @@ fn reject_empty_agent_list(state: HintState) -> HintState {
 /// What [`predict`] evaluates a document value with.
 pub(crate) type Evaluator<'a> = dyn FnMut(
         &Value,
-        &HashMap<String, Value>,
+        &Map<String, Value>,
     ) -> Result<
         Result<Value, crate::composition::lifecycle_context::LifecycleCause>,
         crate::composition::CompositionError,
@@ -298,7 +298,7 @@ pub(crate) type Evaluator<'a> = dyn FnMut(
 fn predict_key(
     key: &str,
     layers: &HintLayers<'_>,
-    document_state: &HashMap<String, Value>,
+    document_state: &Map<String, Value>,
     dependencies: &mut Vec<(String, Value)>,
     evaluate: &mut Evaluator<'_>,
 ) -> Result<HintState, crate::composition::CompositionError> {
@@ -322,7 +322,7 @@ fn predict_key(
         // document's; a synthetic key keeps the entry apart from a step key of
         // the same name.
         let entry = format!("\u{0}with.{key}");
-        let mut state: HashMap<String, Value> = layers.step_frontmatter.clone();
+        let mut state = layers.step_frontmatter.clone();
         state.insert(entry.clone(), value.clone());
         let decided = classify_reads(&entry, &state, &HashSet::new(), dependencies);
         if let Some(state) = decided.into_state(source.clone()) {
@@ -347,7 +347,7 @@ fn predict_key(
         source_path: layers.document_path.to_path_buf(),
         property: key.to_string(),
     };
-    let mut raw_state: HashMap<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut raw_state: Map<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     raw_state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
     raw_state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
     let late_with: HashSet<String> = layers
@@ -375,7 +375,7 @@ fn predict_key(
 /// The failure of the first (by name) failed `with` entry `key` of
 /// `raw_state` reads, directly or through another key, located at that entry.
 /// An entry a caller setter replaces is not read.
-fn failed_with_read(key: &str, layers: &HintLayers<'_>, raw_state: &HashMap<String, Value>) -> Option<HintState> {
+fn failed_with_read(key: &str, layers: &HintLayers<'_>, raw_state: &Map<String, Value>) -> Option<HintState> {
     let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
     let mut failed: Vec<_> = layers
         .with_failed
@@ -419,7 +419,7 @@ impl ReadClass {
 /// keys already known to be late.
 fn classify_reads(
     key: &str,
-    state: &HashMap<String, Value>,
+    state: &Map<String, Value>,
     late: &HashSet<String>,
     dependencies: &mut Vec<(String, Value)>,
 ) -> ReadClass {

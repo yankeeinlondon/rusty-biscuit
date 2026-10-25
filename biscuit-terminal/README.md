@@ -256,6 +256,9 @@ Entry points:
   `TerminalRenderable::render` is infallible, `TreeComponent` always renders
   non-strict and emits a visible diagnostic fallback string if rendering still
   fails — it never panics.
+- Two optional hooks let a program add what this crate does not know: a code
+  renderer (highlighting) and a diagram renderer (Mermaid fences). See
+  [docs/render-tree.md](docs/render-tree.md).
 
 ```rust
 use biscuit_terminal::components::block_quote::BlockQuote;
@@ -315,3 +318,4 @@ For more information on either the library or CLI refer to more detailed documen
 
 - [Biscuit Terminal Library](./lib/README.md) for details on how to use `biscuit-terminal` programmatically
 - [The Biscuit Terminal CLI](./cli/README.md) for details on how to leverage `biscuit-terminal` from the terminal
+- [The `bt` CLI reference](./docs/cli.md) for how the Mermaid commands fall back to text or source without images, their `--feature` flags, and `bt`'s code highlighting

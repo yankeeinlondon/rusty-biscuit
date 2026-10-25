@@ -1,0 +1,335 @@
+{
+  "reference_host": "build-linux",
+  "families": {
+    "agentflow": {
+      "warm": {
+        "median_ms": 5.566,
+        "p95_ms": 5.738
+      },
+      "cold": {
+        "median_ms": 16.088,
+        "p95_ms": 17.655
+      }
+    },
+    "architecture": {
+      "warm": {
+        "median_ms": 9.185,
+        "p95_ms": 10.425
+      },
+      "cold": {
+        "median_ms": 20.438,
+        "p95_ms": 22.093
+      }
+    },
+    "block": {
+      "warm": {
+        "median_ms": 7.553,
+        "p95_ms": 7.579
+      },
+      "cold": {
+        "median_ms": 17.957,
+        "p95_ms": 19.814
+      }
+    },
+    "c4": {
+      "warm": {
+        "median_ms": 18.375,
+        "p95_ms": 18.684
+      },
+      "cold": {
+        "median_ms": 31.626,
+        "p95_ms": 32.912
+      }
+    },
+    "class": {
+      "warm": {
+        "median_ms": 14.187,
+        "p95_ms": 14.236
+      },
+      "cold": {
+        "median_ms": 25.031,
+        "p95_ms": 27.055
+      }
+    },
+    "cynefin": {
+      "warm": {
+        "median_ms": 11.773,
+        "p95_ms": 11.824
+      },
+      "cold": {
+        "median_ms": 23.365,
+        "p95_ms": 24.135
+      }
+    },
+    "er": {
+      "warm": {
+        "median_ms": 19.934,
+        "p95_ms": 20.021
+      },
+      "cold": {
+        "median_ms": 31.194,
+        "p95_ms": 31.773
+      }
+    },
+    "eventmodeling": {
+      "warm": {
+        "median_ms": 16.81,
+        "p95_ms": 16.941
+      },
+      "cold": {
+        "median_ms": 31.081,
+        "p95_ms": 33.121
+      }
+    },
+    "flowchart": {
+      "warm": {
+        "median_ms": 13.306,
+        "p95_ms": 13.781
+      },
+      "cold": {
+        "median_ms": 25.684,
+        "p95_ms": 26.433
+      }
+    },
+    "gantt": {
+      "warm": {
+        "median_ms": 10.282,
+        "p95_ms": 10.904
+      },
+      "cold": {
+        "median_ms": 20.268,
+        "p95_ms": 22.496
+      }
+    },
+    "gitgraph": {
+      "warm": {
+        "median_ms": 8.985,
+        "p95_ms": 9.456
+      },
+      "cold": {
+        "median_ms": 19.82,
+        "p95_ms": 21.024
+      }
+    },
+    "info": {
+      "warm": {
+        "median_ms": 1.96,
+        "p95_ms": 1.97
+      },
+      "cold": {
+        "median_ms": 11.85,
+        "p95_ms": 12.709
+      }
+    },
+    "ishikawa": {
+      "warm": {
+        "median_ms": 9.122,
+        "p95_ms": 9.144
+      },
+      "cold": {
+        "median_ms": 19.679,
+        "p95_ms": 20.035
+      }
+    },
+    "journey": {
+      "warm": {
+        "median_ms": 9.798,
+        "p95_ms": 9.83
+      },
+      "cold": {
+        "median_ms": 22.259,
+        "p95_ms": 23.112
+      }
+    },
+    "kanban": {
+      "warm": {
+        "median_ms": 31.766,
+        "p95_ms": 32.721
+      },
+      "cold": {
+        "median_ms": 44.291,
+        "p95_ms": 45.851
+      }
+    },
+    "mindmap": {
+      "warm": {
+        "median_ms": 27.135,
+        "p95_ms": 27.197
+      },
+      "cold": {
+        "median_ms": 41.426,
+        "p95_ms": 48.949
+      }
+    },
+    "packet": {
+      "warm": {
+        "median_ms": 8.988,
+        "p95_ms": 9.023
+      },
+      "cold": {
+        "median_ms": 20.001,
+        "p95_ms": 21.789
+      }
+    },
+    "pie": {
+      "warm": {
+        "median_ms": 10.612,
+        "p95_ms": 10.633
+      },
+      "cold": {
+        "median_ms": 21.926,
+        "p95_ms": 22.894
+      }
+    },
+    "quadrantchart": {
+      "warm": {
+        "median_ms": 6.969,
+        "p95_ms": 7.0
+      },
+      "cold": {
+        "median_ms": 17.454,
+        "p95_ms": 18.25
+      }
+    },
+    "radar": {
+      "warm": {
+        "median_ms": 13.509,
+        "p95_ms": 13.559
+      },
+      "cold": {
+        "median_ms": 24.736,
+        "p95_ms": 25.78
+      }
+    },
+    "railroad": {
+      "warm": {
+        "median_ms": 7.476,
+        "p95_ms": 7.485
+      },
+      "cold": {
+        "median_ms": 18.127,
+        "p95_ms": 19.282
+      }
+    },
+    "requirement": {
+      "warm": {
+        "median_ms": 9.589,
+        "p95_ms": 9.602
+      },
+      "cold": {
+        "median_ms": 19.966,
+        "p95_ms": 21.052
+      }
+    },
+    "sankey": {
+      "warm": {
+        "median_ms": 14.032,
+        "p95_ms": 14.048
+      },
+      "cold": {
+        "median_ms": 25.348,
+        "p95_ms": 26.146
+      }
+    },
+    "sequence": {
+      "warm": {
+        "median_ms": 33.815,
+        "p95_ms": 33.937
+      },
+      "cold": {
+        "median_ms": 49.217,
+        "p95_ms": 56.755
+      }
+    },
+    "state": {
+      "warm": {
+        "median_ms": 16.664,
+        "p95_ms": 16.697
+      },
+      "cold": {
+        "median_ms": 27.84,
+        "p95_ms": 31.85
+      }
+    },
+    "swimlane": {
+      "warm": {
+        "median_ms": 15.88,
+        "p95_ms": 17.488
+      },
+      "cold": {
+        "median_ms": 27.468,
+        "p95_ms": 29.444
+      }
+    },
+    "timeline": {
+      "warm": {
+        "median_ms": 40.756,
+        "p95_ms": 41.012
+      },
+      "cold": {
+        "median_ms": 57.527,
+        "p95_ms": 59.001
+      }
+    },
+    "treeView": {
+      "warm": {
+        "median_ms": 4.532,
+        "p95_ms": 4.543
+      },
+      "cold": {
+        "median_ms": 14.2,
+        "p95_ms": 15.592
+      }
+    },
+    "treemap": {
+      "warm": {
+        "median_ms": 16.839,
+        "p95_ms": 16.912
+      },
+      "cold": {
+        "median_ms": 27.502,
+        "p95_ms": 29.826
+      }
+    },
+    "usecase": {
+      "warm": {
+        "median_ms": 15.243,
+        "p95_ms": 15.285
+      },
+      "cold": {
+        "median_ms": 25.661,
+        "p95_ms": 26.893
+      }
+    },
+    "venn": {
+      "warm": {
+        "median_ms": 9.396,
+        "p95_ms": 9.426
+      },
+      "cold": {
+        "median_ms": 19.422,
+        "p95_ms": 19.751
+      }
+    },
+    "wardley": {
+      "warm": {
+        "median_ms": 8.355,
+        "p95_ms": 8.422
+      },
+      "cold": {
+        "median_ms": 20.645,
+        "p95_ms": 22.595
+      }
+    },
+    "xychart": {
+      "warm": {
+        "median_ms": 6.354,
+        "p95_ms": 6.363
+      },
+      "cold": {
+        "median_ms": 16.453,
+        "p95_ms": 17.21
+      }
+    }
+  }
+}

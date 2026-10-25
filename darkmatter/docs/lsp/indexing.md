@@ -598,9 +598,12 @@ The code is `WorkspaceIndex::prepare_targets` and `ensure_parsed` in
   headings are never served. A listed target stays in the list, unparsed.
   A target outside the list is dropped.
 - **Open buffers win.** An open buffer replaces the disk parse, including an
-  unsaved file that is not on disk. Closing it restores the disk view: a
-  listed file becomes unparsed again, and an unsaved or unlisted document
-  leaves the index.
+  unsaved file that is not on disk. Opening a
+  [dependency](#targets-outside-the-file-list) makes it an ordinary document
+  at once, even with unchanged text: wiki links resolve to it and
+  completion offers it. Closing it restores the disk view: a listed file
+  becomes unparsed again, and an unsaved or unlisted document leaves the
+  index.
 - **Markdown only.** A target is parsed only when it is a Markdown file
   (`.md` or `.markdown`). `::code ./mod.rs` resolves, but `mod.rs` is never
   read as Markdown.
@@ -610,6 +613,15 @@ The code is `WorkspaceIndex::prepare_targets` and `ensure_parsed` in
 All parsing runs on the dispatch thread under the index lock, so two
 requests for the same target share one parse, and a newer buffer can never
 be overwritten by an older read.
+
+A parse that changes a document's bytes publishes a new live graph
+snapshot. That rebuild reads no file: it reuses the wiki universe and the
+document table (everything derived from paths alone) while the paths,
+dependencies, list state, and wiki roots are unchanged, and rebuilds every
+parsed document's nodes and references. Typing in an open buffer therefore
+costs no path work. See
+[Rebuilding the live snapshot](./architecture.md#rebuilding-the-live-snapshot)
+for exactly what is reused.
 
 ### Targets outside the file list
 
