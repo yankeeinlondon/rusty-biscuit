@@ -91,10 +91,18 @@ fn host_global_completion_offers_the_catalogs_roots_and_members() {
 }
 
 /// The catalog's file is not reported as a schema dependency of a document.
+/// Its lifecycle artifact sits beside it, as it ships, so the document's
+/// analysis is complete.
 #[test]
 fn the_host_catalog_is_not_a_trigger_for_a_document() {
     let shipped = include_str!("../../../../claudine/schemas/globals.yaml");
     let workspace = LspWorkspace::new();
+    std::fs::create_dir_all(workspace.path().join("schemas")).unwrap();
+    std::fs::write(
+        workspace.path().join("schemas/globals.lifecycle.json"),
+        include_str!("../../../../claudine/schemas/globals.lifecycle.json"),
+    )
+    .unwrap();
     let mut fixture = session(&workspace, Some(shipped));
     let text = "---\nseq: authored\n---\n\nBody\n";
     let (_, diagnostics) = open_text(&mut fixture, &workspace, "doc.md", text);

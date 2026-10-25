@@ -81,6 +81,7 @@ pub mod effects;
 pub mod envelope;
 pub mod error;
 pub mod executor;
+pub mod host_profile;
 pub mod md_host;
 mod operands;
 mod parse;

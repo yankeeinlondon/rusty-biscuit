@@ -121,7 +121,9 @@ fn pending_values_are_deferred_before_parsing() {
             assert!(rejecting.problems.iter().any(|problem| problem.path == "/when"));
             let expression_values = crate::providers::frontmatter::expression_values(ctx, ast);
             let mut out = Vec::new();
-            expression_diagnostics(ctx, ast, &rejecting, &expression_values, &mut out);
+            let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+            let guarded = GuardedStackCalls::for_document(ctx, &lifecycle);
+            expression_diagnostics(ctx, ast, &rejecting, &expression_values, &lifecycle, &guarded, &mut out);
             assert!(out.is_empty(), "{value}: {out:#?}");
         });
     }
@@ -144,7 +146,9 @@ fn a_literal_token_is_not_parsed_as_an_expression() {
         );
         let expression_values = crate::providers::frontmatter::expression_values(ctx, ast);
         let mut out = Vec::new();
-        expression_diagnostics(ctx, ast, &rejecting, &expression_values, &mut out);
+        let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+        let guarded = GuardedStackCalls::for_document(ctx, &lifecycle);
+        expression_diagnostics(ctx, ast, &rejecting, &expression_values, &lifecycle, &guarded, &mut out);
         assert!(out.is_empty(), "{out:#?}");
     });
 }

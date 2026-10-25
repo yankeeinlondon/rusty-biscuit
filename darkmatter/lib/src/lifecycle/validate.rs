@@ -215,7 +215,10 @@ pub fn lifecycle_call_checks(
 /// ## Errors
 ///
 /// [`LifecycleError::LifecycleCallRejected`] for the first rejected call, in
-/// [`LifecycleSignal::ALL`] order and then authored order.
+/// [`LifecycleSignal::ALL`] order and then authored order. It carries the
+/// call's shared category 5 record, located in `authored` exactly as a
+/// warning is, and the warnings found before it in that order: every
+/// earlier surface's, and those of its own surface that start before it.
 pub fn reject_incompatible_calls(
     frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
@@ -225,48 +228,50 @@ pub fn reject_incompatible_calls(
     schema: Option<&crate::markdown::schemas::EffectiveSchema>,
 ) -> Result<Vec<ComposeWarning>, LifecycleError> {
     let surfaces = lifecycle_call_checks(frontmatter, lifecycle, registry, schema);
-    let rejected = surfaces.iter().find_map(|surface| {
-        surface.checks.iter().find(|found| found.check.is_rejected()).map(|found| (&surface.property, found))
-    });
-    if let Some((property, found)) = rejected {
+    let mut warnings = Vec::new();
+    for surface in &surfaces {
+        let rejected = surface
+            .checks
+            .iter()
+            .filter_map(|found| found.check.rejection_diagnostic().map(|finding| (found, finding)))
+            .min_by_key(|(_, finding)| finding.span.start);
+        let Some((found, finding)) = rejected else {
+            warnings.extend(surface_warnings(surface, source_path, authored, usize::MAX));
+            continue;
+        };
+        warnings.extend(surface_warnings(surface, source_path, authored, finding.span.start));
         return Err(LifecycleError::LifecycleCallRejected {
             source_path: source_path.to_path_buf(),
-            property: property.to_string(),
+            property: surface.property.to_string(),
             expression: found.expression.clone(),
+            diagnostic: Box::new(finding.at(Some(source_path.to_path_buf()), surface.position(&finding, authored))),
+            earlier: warnings,
             source: Box::new(ExpressionError::CallCheck(Box::new(found.check.clone()))),
         });
     }
-    Ok(surfaces.iter().flat_map(|surface| surface_warnings(surface, source_path, authored)).collect())
+    Ok(warnings)
 }
 
-/// The warnings of one lifecycle surface's checks; see
+/// The warnings of one lifecycle surface's checks that start before byte
+/// `before` of its scalar, in position order; see
 /// [`reject_incompatible_calls`].
-fn surface_warnings(surface: &LifecycleSurfaceCalls, source_path: &Path, authored: Option<&str>) -> Vec<ComposeWarning> {
-    use crate::markdown::compose::expression::one_based_position;
-    use crate::markdown::compose::value_origin::ValuePathSegment;
-
-    let path: Vec<_> = surface
-        .location
-        .iter()
-        .map(|segment| match segment {
-            AuthoredSegment::Key(key) => ValuePathSegment::Key(key.clone()),
-            AuthoredSegment::Index(index) => ValuePathSegment::Index(*index),
-        })
-        .collect();
-    surface
+fn surface_warnings(
+    surface: &LifecycleSurfaceCalls,
+    source_path: &Path,
+    authored: Option<&str>,
+    before: usize,
+) -> Vec<ComposeWarning> {
+    let mut findings: Vec<_> = surface
         .checks
         .iter()
         .flat_map(|found| found.check.diagnostics(false).into_iter().map(move |finding| (found, finding)))
+        .filter(|(_, finding)| finding.span.start < before)
+        .collect();
+    findings.sort_by_key(|(_, finding)| finding.span.start);
+    findings
+        .into_iter()
         .map(|(found, finding)| {
-            let position = authored.and_then(|loaded| {
-                let range = crate::markdown::compose::locate_frontmatter_span(
-                    loaded,
-                    path.clone(),
-                    &surface.text,
-                    finding.span.start..finding.span.end,
-                )?;
-                one_based_position(loaded, range.start)
-            });
+            let position = surface.position(&finding, authored);
             let function = &found.check.function;
             let detail = finding.message.strip_prefix(&format!("{function}: ")).unwrap_or(&finding.message);
             let location = match position {
@@ -286,6 +291,36 @@ fn surface_warnings(surface: &LifecycleSurfaceCalls, source_path: &Path, authore
             }
         })
         .collect()
+}
+
+impl LifecycleSurfaceCalls {
+    /// The one-based position of `finding`'s start in `authored`, the loaded
+    /// document text; `None` without it, or when the scalar no longer decodes
+    /// to this surface's text.
+    fn position(
+        &self,
+        finding: &crate::markdown::compose::expression::ExpressionDiagnostic,
+        authored: Option<&str>,
+    ) -> Option<(usize, usize)> {
+        use crate::markdown::compose::value_origin::ValuePathSegment;
+
+        let loaded = authored?;
+        let path = self
+            .location
+            .iter()
+            .map(|segment| match segment {
+                AuthoredSegment::Key(key) => ValuePathSegment::Key(key.clone()),
+                AuthoredSegment::Index(index) => ValuePathSegment::Index(*index),
+            })
+            .collect();
+        let range = crate::markdown::compose::locate_frontmatter_span(
+            loaded,
+            path,
+            &self.text,
+            finding.span.start..finding.span.end,
+        )?;
+        crate::markdown::compose::expression::one_based_position(loaded, range.start)
+    }
 }
 
 /// One expression surface [`walk_stack`] reaches.

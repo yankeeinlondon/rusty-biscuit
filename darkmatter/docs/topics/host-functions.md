@@ -220,4 +220,6 @@ use:
 - [Darkmatter Expressions](./darkmatter-expressions.md) — guards, narrowing
   facts, and the built-in functions
 - [Call checks](../inline/call-check.md) — argument categories
+- [Host Lifecycle Artifacts](./lifecycle/host-artifact.md) — the same
+  companion-file design for a host's lifecycle events and verbs
 - [DMLS diagnostics](../../dmls/docs/diagnostics.md)

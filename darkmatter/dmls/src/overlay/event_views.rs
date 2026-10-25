@@ -1,16 +1,30 @@
-//! Which [`BindingView`] an expression is classified against.
+//! Which [`BindingView`] an expression is classified against, and under which
+//! host's lifecycle.
 //!
-//! An expression inside the value of a root frontmatter key that the `md`
-//! event registry ([`md_host::registry`]) resolves to one of its events reads
-//! that event's view, at any depth of the stack: `when` guards, action
-//! operands, and `set`/`with` data alike. Every other expression reads
-//! Darkmatter's baseline view. Event names come from the registry's
-//! descriptors, never from a list kept here.
+//! A document's lifecycle stacks are analyzed under one [`LifecycleHost`]:
+//! the host lifecycle profile recorded beside a host catalog in the
+//! document's schema roots
+//! ([`darkmatter::markdown::schemas::catalog::host_lifecycle_profiles`]), or
+//! the `md` host ([`md_host::registry`]) when no catalog records one. Its
+//! registry decides which root frontmatter keys are stacks, and its parse
+//! options which verbs carry expression operands. An expression inside the
+//! value of a root key the registry resolves to one of its events reads that
+//! event's view, at any depth of the stack: `when` guards, action operands,
+//! and `set`/`with` data alike. Every other expression reads Darkmatter's
+//! baseline view. Event names come from the registry's descriptors, never
+//! from a list kept here.
 //!
-//! Passive: views are built from descriptors and catalogs only.
+//! Passive: views are built from descriptors, catalogs, and artifacts only;
+//! DMLS never runs host code and does not depend on any host.
 
+use std::path::Path;
+use std::sync::Arc;
+
+use darkmatter::lifecycle::host_profile::HostLifecycleProfile;
 use darkmatter::lifecycle::md_host;
-use darkmatter::lifecycle::registry::{EventId, KeyResolution};
+use darkmatter::lifecycle::registry::{EventId, EventRegistry, KeyResolution};
+use darkmatter::lifecycle::LifecycleConfig;
+use darkmatter::lifecycle::error::LifecycleError;
 use darkmatter::markdown::compose::expression::{
     Availability, BindingView, ParseError, SpannedExpr, is_reserved_namespace,
 };
@@ -20,30 +34,107 @@ use darkmatter::markdown::span::SourceSpan;
 use crate::overlay::expressions::{self, ScalarProjection};
 use crate::overlay::{FmEntry, FmPathSegment, FmValueKind, FrontmatterAst};
 
-/// The `md` event whose stack `path` (rooted at the frontmatter) lies in.
-pub fn stack_event(path: &[FmPathSegment<'_>]) -> Option<EventId> {
-    match path.first()? {
-        FmPathSegment::Key(key) => event_of_key(key),
-        FmPathSegment::Index(_) => None,
+/// The host whose lifecycle a document's stacks are analyzed under.
+#[derive(Debug, Clone)]
+pub struct LifecycleHost {
+    registry: Arc<EventRegistry>,
+    profile: Option<Arc<HostLifecycleProfile>>,
+    incomplete: Vec<String>,
+}
+
+impl LifecycleHost {
+    /// The `md` host, with nothing reported.
+    pub fn md() -> Self {
+        Self { registry: md_host::registry().clone(), profile: None, incomplete: Vec::new() }
+    }
+
+    /// The first host lifecycle profile in the document's schema roots, in
+    /// [`host_catalogs`](darkmatter::markdown::schemas::catalog::host_catalogs)
+    /// order. Without one, the `md` host, plus each catalog's reason its
+    /// artifact could not be trusted ([`Self::incomplete`]); without a
+    /// resolution context, the `md` host alone.
+    pub fn for_document(ctx: &crate::providers::DocumentContext) -> Self {
+        let Ok(context) = ctx.file_context() else {
+            return Self::md();
+        };
+        let mut incomplete = Vec::new();
+        for discovery in darkmatter::markdown::schemas::catalog::host_lifecycle_profiles(context) {
+            match discovery.profile {
+                Ok(profile) => {
+                    return Self { registry: profile.registry().clone(), profile: Some(profile), incomplete: Vec::new() };
+                }
+                Err(reason) => incomplete.push(reason),
+            }
+        }
+        Self { incomplete, ..Self::md() }
+    }
+
+    /// The host's event registry.
+    pub fn registry(&self) -> &Arc<EventRegistry> {
+        &self.registry
+    }
+
+    /// Why each host catalog's lifecycle artifact was not used, when none
+    /// was: the document's host lifecycle is then analyzed as the `md` host's,
+    /// which may not be the host's.
+    pub fn incomplete(&self) -> &[String] {
+        &self.incomplete
+    }
+
+    /// Parses and statically validates the document's lifecycle under this
+    /// host's parse options, as the host does before anything runs.
+    ///
+    /// ## Errors
+    ///
+    /// The parser's [`LifecycleError`].
+    pub fn parse_lifecycle(&self, frontmatter: &serde_json::Value, path: &Path) -> Result<LifecycleConfig, LifecycleError> {
+        let Some(profile) = &self.profile else {
+            return md_host::parse_lifecycle(frontmatter, path, None);
+        };
+        let config = darkmatter::lifecycle::parse_lifecycle_config_with(frontmatter, path, &profile.parse_options(None))?;
+        darkmatter::lifecycle::validate_no_nested_spans_in_literals_in(frontmatter, &config, path, &self.registry)?;
+        Ok(config)
+    }
+
+    /// The event whose stack `path` (rooted at the frontmatter) lies in.
+    pub fn stack_event(&self, path: &[FmPathSegment<'_>]) -> Option<StackEvent> {
+        match path.first()? {
+            FmPathSegment::Key(key) => self.event_of_key(key),
+            FmPathSegment::Index(_) => None,
+        }
+    }
+
+    /// The event a root frontmatter key holds the stack of.
+    pub fn event_of_key(&self, key: &str) -> Option<StackEvent> {
+        match self.registry.resolve_key(key) {
+            KeyResolution::Event(id) => Some(StackEvent { registry: self.registry.clone(), id }),
+            KeyResolution::Renamed { .. } | KeyResolution::Data => None,
+        }
     }
 }
 
-/// The `md` event a root frontmatter key holds the stack of.
-pub fn event_of_key(key: &str) -> Option<EventId> {
-    match md_host::registry().resolve_key(key) {
-        KeyResolution::Event(id) => Some(id),
-        KeyResolution::Renamed { .. } | KeyResolution::Data => None,
+/// One event of a [`LifecycleHost`], with the registry it belongs to.
+#[derive(Debug, Clone)]
+pub struct StackEvent {
+    registry: Arc<EventRegistry>,
+    id: EventId,
+}
+
+impl StackEvent {
+    /// The event's identity in its registry.
+    pub fn id(&self) -> EventId {
+        self.id
     }
-}
 
-/// The event's authored name.
-pub fn event_name(id: EventId) -> &'static str {
-    md_host::registry().name(id)
-}
+    /// The event's authored name.
+    pub fn name(&self) -> &str {
+        self.registry.name(self.id)
+    }
 
-/// The registry's own view of `id`, without host-catalog globals.
-pub fn event_globals(id: EventId) -> &'static BindingView {
-    md_host::registry().globals(id)
+    /// The registry's own view of the event, without host-catalog globals.
+    pub fn globals(&self) -> &BindingView {
+        self.registry.globals(self.id)
+    }
 }
 
 /// The view DMLS classifies an expression's roots against: the registry view
@@ -60,10 +151,10 @@ pub fn event_globals(id: EventId) -> &'static BindingView {
 /// stays a document property. A registry declaration of the same
 /// root wins over a catalog's, and a catalog name that cannot be a global
 /// (a reserved namespace or a non-identifier) is ignored.
-pub fn validation_view(event: Option<EventId>, catalogs: &[GlobalCatalog]) -> BindingView {
+pub fn validation_view(event: Option<&StackEvent>, catalogs: &[GlobalCatalog]) -> BindingView {
     let baseline = BindingView::baseline();
     let base: &BindingView = match event {
-        Some(event) => event_globals(event),
+        Some(event) => event.globals(),
         None => &baseline,
     };
     let mut builder = BindingView::builder(base.scope().clone());
@@ -118,7 +209,7 @@ impl Dialect {
 #[derive(Debug, Clone)]
 pub struct StackExpression<'a> {
     /// The event whose stack holds it.
-    pub event: EventId,
+    pub event: StackEvent,
     /// The scalar entry holding it.
     pub entry: &'a FmEntry,
     /// The entry's arena index.
@@ -180,6 +271,7 @@ impl StackExpression<'_> {
 /// guard that holds no span. `skip` names entries another surface already
 /// analyzes (an Expression-typed value), which contribute nothing here.
 pub fn stack_expressions<'a>(
+    host: &LifecycleHost,
     document: &str,
     ast: &'a FrontmatterAst,
     skip: impl Fn(usize) -> bool,
@@ -189,7 +281,7 @@ pub fn stack_expressions<'a>(
         if skip(interpolation.index) {
             continue;
         }
-        let Some(event) = stack_event(&ast.path_at(interpolation.index)) else {
+        let Some(event) = host.stack_event(&ast.path_at(interpolation.index)) else {
             continue;
         };
         out.push(StackExpression {
@@ -208,7 +300,7 @@ pub fn stack_expressions<'a>(
             continue;
         }
         let path = ast.path_at(index);
-        let Some(event) = stack_event(&path) else { continue };
+        let Some(event) = host.stack_event(&path) else { continue };
         if !crate::diagnostics::nested_span::lifecycle::is_stack_predicate(&path[1..]) {
             continue;
         }
@@ -244,12 +336,13 @@ mod tests {
 
     #[test]
     fn every_registry_event_key_is_a_stack_and_nothing_else_is() {
+        let host = LifecycleHost::md();
         for key in md_host::registry().authored_event_keys() {
-            let id = event_of_key(key).unwrap_or_else(|| panic!("{key}"));
-            assert_eq!(event_name(id), key);
+            let event = host.event_of_key(key).unwrap_or_else(|| panic!("{key}"));
+            assert_eq!(event.name(), key);
         }
         for key in ["start", "success", "failure", "loop", "title", "err"] {
-            assert!(event_of_key(key).is_none(), "{key}");
+            assert!(host.event_of_key(key).is_none(), "{key}");
         }
     }
 
@@ -262,10 +355,11 @@ mod tests {
         )
         .expect("the test catalog loads");
         let catalogs = [catalog];
+        let host = LifecycleHost::md();
         for event in std::iter::once(None).chain(
-            md_host::registry().authored_event_keys().into_iter().map(event_of_key),
+            md_host::registry().authored_event_keys().into_iter().map(|key| host.event_of_key(key)),
         ) {
-            let view = validation_view(event, &catalogs);
+            let view = validation_view(event.as_ref(), &catalogs);
             assert_eq!(
                 view.global("seq").map(|global| global.availability()),
                 Some(&Availability::ExecutionDependent),
@@ -280,9 +374,9 @@ mod tests {
     fn guards_and_spans_beneath_an_event_key_are_stack_expressions() {
         let text = "---\ncomposed:\n  - when: err.message != ''\n    then:\n      - info: \"{{ err.message }}\"\nnotes:\n  - info: \"{{ err }}\"\n---\n";
         let ast = ast(text);
-        let found = stack_expressions(text, &ast, |_| false);
+        let found = stack_expressions(&LifecycleHost::md(), text, &ast, |_| false);
         let texts: Vec<(&str, Dialect)> = found.iter().map(|e| (e.text.as_str(), e.dialect)).collect();
         assert_eq!(texts, [("err.message != ''", Dialect::Condition), ("err.message", Dialect::Value)]);
-        assert!(found.iter().all(|e| event_name(e.event) == "composed"));
+        assert!(found.iter().all(|e| e.event.name() == "composed"));
     }
 }

@@ -86,9 +86,13 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                     crate::providers::frontmatter::expression_values(ctx, ast);
                 schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
-                expression_diagnostics(ctx, ast, &report, &expression_values, &mut out);
-                stack_expression_diagnostics(ctx, ast, &expression_values, &mut out);
-                interpolation_call_diagnostics(ctx, ast, &mut out);
+                // One lifecycle host and one library walk serve every
+                // expression inside a stack, schema-typed or not.
+                let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+                let guarded = GuardedStackCalls::for_document(ctx, &lifecycle);
+                expression_diagnostics(ctx, ast, &report, &expression_values, &lifecycle, &guarded, &mut out);
+                stack_expression_diagnostics(ctx, ast, &expression_values, &lifecycle, &guarded, &mut out);
+                interpolation_call_diagnostics(ctx, ast, &lifecycle, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -668,6 +672,8 @@ fn expression_diagnostics(
     ast: &FrontmatterAst,
     report: &ValidationReport,
     expression_values: &[ExpressionValue<'_>],
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    guarded: &GuardedStackCalls,
     out: &mut Vec<Diagnostic>,
 ) {
     let union_rejected = union_rejected_paths(report);
@@ -744,11 +750,28 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
-                for found in calls.check(&parsed) {
-                    let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
-                    calls.push(ctx, doc_span, found, out);
+                match guarded.surface(ast, value.index) {
+                    // A stack surface is typed at its site by the library's
+                    // walk, under the `when` items around it.
+                    Some(surface) => {
+                        let checks: Vec<_> = surface.checks.iter().map(|found| found.check.clone()).collect();
+                        for found in crate::diagnostics::call_check::check_diagnostics(&checks, calls.strict) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                        for found in crate::diagnostics::call_check::incomplete_diagnostics(&parsed) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                    }
+                    None => {
+                        for found in calls.check(&parsed) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                    }
                 }
-                let event = crate::overlay::event_views::stack_event(&path);
+                let event = lifecycle.stack_event(&path);
                 for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
                     let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
@@ -764,7 +787,7 @@ fn expression_diagnostics(
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
-                let view = known_roots.view(event);
+                let view = known_roots.view(event.as_ref());
                 for (span, message) in crate::overlay::expressions::unavailable_global_reads(&parsed, &view) {
                     let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
@@ -833,6 +856,8 @@ fn stack_expression_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     expression_values: &[ExpressionValue<'_>],
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    guarded: &GuardedStackCalls,
     out: &mut Vec<Diagnostic>,
 ) {
     if ctx.overlay.is_some_and(|overlay| overlay.stale) {
@@ -842,10 +867,10 @@ fn stack_expression_diagnostics(
         return;
     };
     let typed: std::collections::HashSet<usize> = expression_values.iter().map(|value| value.index).collect();
-    let stacks = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index));
+    let stacks =
+        crate::overlay::event_views::stack_expressions(lifecycle, ctx.text, ast, |index| typed.contains(&index));
     let declared = crate::diagnostics::call_check::declared_types(ctx);
     let calls = FrontmatterCalls::new(ctx, &declared);
-    let guarded = GuardedStackCalls::for_document(ctx);
     let mut checked_entries = std::collections::HashSet::new();
     let mut views = std::collections::HashMap::new();
     for expression in stacks {
@@ -875,7 +900,7 @@ fn stack_expression_diagnostics(
                 }
             }
         }
-        let view = views.entry(expression.event).or_insert_with(|| known_roots.view(Some(expression.event)));
+        let view = views.entry(expression.event.id()).or_insert_with(|| known_roots.view(Some(&expression.event)));
         let mut push = |span: std::ops::Range<usize>, severity, code_value: &str, message: String| {
             if let Some(range) = ctx.source_map.byte_range_to_lsp(expression.range(span)) {
                 out.push(diagnostic(range, severity, source::FRONTMATTER, code_value, message));
@@ -915,29 +940,31 @@ fn stack_expression_diagnostics(
     }
 }
 
-/// The library's call check of every surface of the document's `md`
-/// lifecycle ([`darkmatter::lifecycle::lifecycle_call_checks`]): each typed at
-/// its own site, narrowed by the `when` items around it, with facts ended by
-/// writes and never carried across events, exactly as composition types it.
+/// The library's call check of every surface of the document's lifecycle
+/// under its host ([`LifecycleHost`](crate::overlay::event_views::LifecycleHost):
+/// the host's recorded profile, else `md`), through
+/// [`darkmatter::lifecycle::lifecycle_call_checks`]: each typed at its own
+/// site, narrowed by the `when` items around it, with facts ended by writes
+/// and never carried across events, exactly as the host's composition types
+/// it.
 ///
-/// Empty when the lifecycle does not parse (the parser's error to report);
-/// a stack scalar the library does not check (a `set` shell value) keeps the
-/// unguarded per-expression check.
+/// Empty when the lifecycle does not parse under the host (the parser's
+/// error to report); a stack scalar the library does not check (a `set`
+/// shell value) keeps the unguarded per-expression check.
 struct GuardedStackCalls {
     surfaces: std::collections::HashMap<Vec<darkmatter::lifecycle::AuthoredSegment>, darkmatter::lifecycle::LifecycleSurfaceCalls>,
 }
 
 impl GuardedStackCalls {
-    fn for_document(ctx: &DocumentContext) -> Self {
-        use darkmatter::lifecycle::md_host;
+    fn for_document(ctx: &DocumentContext, host: &crate::overlay::event_views::LifecycleHost) -> Self {
         let mut surfaces = std::collections::HashMap::new();
         if let Some(bundle) = ctx.overlay.and_then(|overlay| overlay.bundle())
-            && let Ok(lifecycle) = md_host::parse_lifecycle(&bundle.frontmatter_json, ctx.path, None)
+            && let Ok(lifecycle) = host.parse_lifecycle(&bundle.frontmatter_json, ctx.path)
         {
             let found = darkmatter::lifecycle::lifecycle_call_checks(
                 &bundle.frontmatter_json,
                 &lifecycle,
-                md_host::registry(),
+                host.registry(),
                 Some(&bundle.effective),
             );
             for surface in found {
@@ -966,7 +993,12 @@ impl GuardedStackCalls {
 /// which frontmatter interpolation evaluates. `$schema` declarations are not
 /// interpolated; a span that does not parse, and a stale tree, report
 /// nothing.
-fn interpolation_call_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<Diagnostic>) {
+fn interpolation_call_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    out: &mut Vec<Diagnostic>,
+) {
     if ctx.overlay.is_some_and(|overlay| overlay.stale) {
         return;
     }
@@ -975,7 +1007,7 @@ fn interpolation_call_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, o
     for interpolation in crate::overlay::expressions::frontmatter_interpolations(ctx.text, ast) {
         let path = ast.path_at(interpolation.index);
         if matches!(path.first(), Some(crate::overlay::FmPathSegment::Key("$schema")))
-            || crate::overlay::event_views::stack_event(&path).is_some()
+            || lifecycle.stack_event(&path).is_some()
         {
             continue;
         }

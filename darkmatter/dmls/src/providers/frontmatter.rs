@@ -82,13 +82,13 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
         Some((key, value_partial)) => {
             let ancestors = enclosing_path(ctx, offset, line_start, indent);
             let root = ancestors.first().map_or(key.as_str(), String::as_str);
-            let event = crate::overlay::event_views::event_of_key(root);
-            if let Some(event) = event
+            let event = crate::overlay::event_views::LifecycleHost::for_document(ctx).event_of_key(root);
+            if let Some(event) = &event
                 && let Some(items) = stack_completions(ctx, offset, &key, &value_partial, event)
             {
                 return items;
             }
-            value_completions(ctx, offset, &ancestors, &key, &value_partial, event)
+            value_completions(ctx, offset, &ancestors, &key, &value_partial, event.as_ref())
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
@@ -774,7 +774,7 @@ fn value_completions(
     ancestors: &[String],
     key: &str,
     partial: &str,
-    event: Option<darkmatter::lifecycle::registry::EventId>,
+    event: Option<&crate::overlay::event_views::StackEvent>,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
@@ -929,7 +929,7 @@ fn expression_value_completions(
     offset: usize,
     value_partial: &str,
     value_start: usize,
-    event: Option<darkmatter::lifecycle::registry::EventId>,
+    event: Option<&crate::overlay::event_views::StackEvent>,
 ) -> Vec<CompletionItem> {
     let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
     expression_candidates(ctx, token_start, offset, token, event)
@@ -943,7 +943,7 @@ fn expression_candidates(
     token_start: usize,
     offset: usize,
     token: &str,
-    event: Option<darkmatter::lifecycle::registry::EventId>,
+    event: Option<&crate::overlay::event_views::StackEvent>,
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = expression_property_keys(ctx);
     let host = expressions::host_global_candidates(token, &crate::providers::dsl::host_catalogs(ctx));
@@ -965,7 +965,7 @@ fn stack_completions(
     offset: usize,
     key: &str,
     value_partial: &str,
-    event: darkmatter::lifecycle::registry::EventId,
+    event: &crate::overlay::event_views::StackEvent,
 ) -> Option<Vec<CompletionItem>> {
     let value_start = offset - value_partial.len();
     if let Some((token_start, token)) = expressions::completion_partial(value_partial, value_partial.len()) {
@@ -1147,7 +1147,7 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) 
     let value = expression_value_at(ctx, ast, offset)?;
     let expr_offset = value.decoded_offset(offset)?;
     let host = crate::providers::dsl::host_catalogs(ctx);
-    let event = crate::overlay::event_views::stack_event(&ast.path_at(value.index));
+    let event = crate::overlay::event_views::LifecycleHost::for_document(ctx).stack_event(&ast.path_at(value.index));
     let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
         let scalar = |name: &str| frontmatter_scalar(ctx, name);
         let property =
@@ -1160,7 +1160,7 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) 
                 site,
                 scalar,
                 property,
-                event,
+                &event,
             ),
             None => expressions::hover_markdown_condition(value.expression(), expr_offset, site, scalar, property),
         }
@@ -1175,7 +1175,8 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) 
 /// frontmatter site.
 fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
     let typed: Vec<usize> = expression_values(ctx, ast).iter().map(|value| value.index).collect();
-    let expression = crate::overlay::event_views::stack_expressions(ctx.text, ast, |index| typed.contains(&index))
+    let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+    let expression = crate::overlay::event_views::stack_expressions(&lifecycle, ctx.text, ast, |index| typed.contains(&index))
         .into_iter()
         .find(|expression| expression.reach().contains(&offset))?;
     let expr_offset = expression.text_offset(offset).unwrap_or(0).min(expression.text.len());
@@ -1188,7 +1189,7 @@ fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: u
             site,
             |name| frontmatter_scalar(ctx, name),
             |name| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name)),
-            expression.event,
+            &expression.event,
         )
     });
     markup_hover(ctx, expression.reach().clone(), markdown)

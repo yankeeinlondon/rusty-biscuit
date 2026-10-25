@@ -49,7 +49,7 @@
 //! assert!(functions.facts_artifact().contains("\"twice\""));
 //! ```
 
-mod artifact;
+pub(crate) mod artifact;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

@@ -69,7 +69,8 @@ pub fn facts_artifact_path(catalog: &Path) -> PathBuf {
     catalog.with_extension("facts.json")
 }
 
-/// The facts artifact as the reader received it.
+/// A companion artifact (the facts artifact, or a host lifecycle artifact
+/// ([`crate::lifecycle::host_profile`])) as the reader received it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactsArtifact<'a> {
     /// The file's text.
@@ -221,7 +222,7 @@ fn kind_text(kind: FactKind) -> &'static str {
 
 /// `value` with every object's keys in byte order (the crate's `serde_json`
 /// preserves insertion order).
-fn sorted(value: Value) -> Value {
+pub(crate) fn sorted(value: Value) -> Value {
     match value {
         Value::Object(map) => {
             let mut entries: Vec<(String, Value)> = map.into_iter().collect();
@@ -447,7 +448,7 @@ fn value_kind(value: &Value, field: &str) -> Result<ValueKind, String> {
 // ── strict field access: absent, null, and wrong type are distinct ─────────
 
 /// "a string", "null", …, for messages.
-fn describe(value: &Value) -> &'static str {
+pub(crate) fn describe(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
         Value::Bool(_) => "a boolean",
@@ -458,7 +459,7 @@ fn describe(value: &Value) -> &'static str {
     }
 }
 
-fn reject_unknown(object: &Map<String, Value>, known: &[&str]) -> Result<(), String> {
+pub(crate) fn reject_unknown(object: &Map<String, Value>, known: &[&str]) -> Result<(), String> {
     match object.keys().find(|key| !known.contains(&key.as_str())) {
         Some(key) => Err(format!("has unknown field `{key}`")),
         None => Ok(()),
@@ -466,7 +467,7 @@ fn reject_unknown(object: &Map<String, Value>, known: &[&str]) -> Result<(), Str
 }
 
 /// The non-null value of a top-level or entry field.
-fn required<'v>(object: &'v Map<String, Value>, key: &str) -> Result<&'v Value, String> {
+pub(crate) fn required<'v>(object: &'v Map<String, Value>, key: &str) -> Result<&'v Value, String> {
     match object.get(key) {
         None => Err(format!("has no `{key}` field")),
         Some(Value::Null) => Err(format!("has `{key}: null`")),
@@ -475,7 +476,7 @@ fn required<'v>(object: &'v Map<String, Value>, key: &str) -> Result<&'v Value, 
 }
 
 /// [`required`] for a field of the nested object `owner`.
-fn required_in<'v>(object: &'v Map<String, Value>, key: &str, owner: &str) -> Result<&'v Value, String> {
+pub(crate) fn required_in<'v>(object: &'v Map<String, Value>, key: &str, owner: &str) -> Result<&'v Value, String> {
     match object.get(key) {
         None => Err(format!("has no `{owner}.{key}` field")),
         Some(Value::Null) => Err(format!("has `{owner}.{key}: null`")),
@@ -484,7 +485,7 @@ fn required_in<'v>(object: &'v Map<String, Value>, key: &str, owner: &str) -> Re
 }
 
 /// A field whose explicit `null` means "none"; absence is still an error.
-fn nullable<'v>(object: &'v Map<String, Value>, key: &str) -> Result<Option<&'v Value>, String> {
+pub(crate) fn nullable<'v>(object: &'v Map<String, Value>, key: &str) -> Result<Option<&'v Value>, String> {
     match object.get(key) {
         None => Err(format!("has no `{key}` field (write `null` for none)")),
         Some(Value::Null) => Ok(None),
@@ -492,21 +493,21 @@ fn nullable<'v>(object: &'v Map<String, Value>, key: &str) -> Result<Option<&'v 
     }
 }
 
-fn string<'v>(value: &'v Value, field: &str) -> Result<&'v str, String> {
+pub(crate) fn string<'v>(value: &'v Value, field: &str) -> Result<&'v str, String> {
     match value {
         Value::String(text) => Ok(text),
         other => Err(format!("has `{field}` {} instead of a string", describe(other))),
     }
 }
 
-fn array<'v>(value: &'v Value, field: &str) -> Result<&'v Vec<Value>, String> {
+pub(crate) fn array<'v>(value: &'v Value, field: &str) -> Result<&'v Vec<Value>, String> {
     match value {
         Value::Array(items) => Ok(items),
         other => Err(format!("has `{field}` {} instead of an array", describe(other))),
     }
 }
 
-fn object<'v>(value: &'v Value, field: &str) -> Result<&'v Map<String, Value>, String> {
+pub(crate) fn object<'v>(value: &'v Value, field: &str) -> Result<&'v Map<String, Value>, String> {
     match value {
         Value::Object(object) => Ok(object),
         other => Err(format!("has `{field}` {} instead of an object", describe(other))),
@@ -524,8 +525,8 @@ fn position(value: &Value, field: &str) -> Result<usize, String> {
 
 /// Parses `text` as one JSON value, rejecting a duplicate object key
 /// (`serde_json` keeps the last) and anything after the value. `Err`
-/// completes "the facts artifact `…` …".
-fn parse_strict(text: &str) -> Result<Value, String> {
+/// completes a sentence naming the artifact ("the facts artifact `…` …").
+pub(crate) fn parse_strict(text: &str) -> Result<Value, String> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
     let StrictValue(value) =
         StrictValue::deserialize(&mut deserializer).map_err(|error| format!("is not valid JSON: {error}"))?;

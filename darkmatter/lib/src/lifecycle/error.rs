@@ -129,6 +129,13 @@ pub enum LifecycleError {
         property: String,
         /// The expression holding the call, as authored.
         expression: String,
+        /// The call's shared category 5 record: the code, message, types,
+        /// and authored position DMLS reports for the same call.
+        diagnostic: Box<crate::markdown::compose::expression::Diagnostic>,
+        /// The lifecycle call warnings found before the rejected call, in
+        /// the order a successful check returns them; a failure report
+        /// shows them before the rejection.
+        earlier: Vec<crate::markdown::compose::ComposeWarning>,
         /// Always [`ExpressionError::CallCheck`](crate::markdown::compose::expression::ExpressionError::CallCheck).
         #[source]
         source: Box<crate::markdown::compose::expression::ExpressionError>,
@@ -562,6 +569,24 @@ impl LifecycleError {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    /// The shared record of the call this error rejects, when it is a
+    /// [`LifecycleError::LifecycleCallRejected`].
+    pub fn call_diagnostic(&self) -> Option<&crate::markdown::compose::expression::Diagnostic> {
+        match self {
+            Self::LifecycleCallRejected { diagnostic, .. } => Some(diagnostic),
+            _ => None,
+        }
+    }
+
+    /// The lifecycle call warnings found before the call this error rejects;
+    /// empty for any other error.
+    pub fn earlier_warnings(&self) -> &[crate::markdown::compose::ComposeWarning] {
+        match self {
+            Self::LifecycleCallRejected { earlier, .. } => earlier,
+            _ => &[],
         }
     }
 }

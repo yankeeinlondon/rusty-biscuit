@@ -398,7 +398,9 @@ finalize:                       # finalize:
 ```
 
 Under Claudine a `composed:` key is an error that says to use `start`, and an
-unknown verb is an error rather than a warning. Claudine's events, recovery
+unknown verb is an error rather than a warning. Claudine records this
+registration in a [host lifecycle artifact](host-artifact.md) beside its host
+catalog, so the editor checks its stacks with the same events and verbs. Claudine's events, recovery
 directives, and loop are documented in
 [Claudine's Composition Lifecycle](../../../../claudine/docs/topics/flow-control/lifecycle.md).
 

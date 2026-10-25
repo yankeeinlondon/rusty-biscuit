@@ -962,7 +962,8 @@ impl EventRegistry {
         }
     }
 
-    fn host_events(&self) -> impl Iterator<Item = EventId> + '_ {
+    /// The host's own events, in registration order.
+    pub fn host_events(&self) -> impl Iterator<Item = EventId> + '_ {
         (0..self.inner.events.len()).map(|index| EventId(Slot::Host(index)))
     }
 }
