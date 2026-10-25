@@ -1,5 +1,5 @@
 //! Differential evidence against production APIs; the candidate model imports no Claudine types.
-#[path = "../../../features/2026-10-27-darkmatter-lifecycle-ownership/spike/model.rs"]
+#[path = "../fixtures/lifecycle_control_flow_spike/model.rs"]
 mod model;
 
 use claudine::composition::{LifecycleCatchProtocolExt, LifecycleErrorInfoExt};

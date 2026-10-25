@@ -88,11 +88,33 @@ fn argv(words: &[&str]) -> Vec<String> {
 
 const COMMIT_RULE: &str = "template argv-recorder commit -m {{ string }}\n";
 
+macro_rules! guarded_shell_cases {
+    ($schedule:ident, $helper:ident; $($name:ident: $index:literal),+ $(,)?) => {
+        const $schedule: &[usize] = &[$($index),+];
+
+        $(
+            #[test]
+            fn $name() {
+                $helper($index);
+            }
+        )+
+    };
+}
+
+const LIFECYCLE_COMMIT_CASES: &[bool] = &[false, true];
+
+
 /// The motivating lifecycle guard: `commit_message` absent passes pre-flight
 /// once the template is approved and the false branch launches nothing; set,
 /// the selected branch passes it as one argument.
-#[test]
-fn a_lifecycle_guard_proves_its_commit_message_present() {
+guarded_shell_cases! {
+    LIFECYCLE_COMMIT_SCHEDULE, lifecycle_commit_case;
+    a_lifecycle_guard_proves_its_commit_message_present: 0,
+    a_selected_lifecycle_guard_passes_its_commit_message_as_one_argument: 1,
+}
+
+fn lifecycle_commit_case(index: usize) {
+    let selected = LIFECYCLE_COMMIT_CASES[index];
     let document = Run::new(
         "guarded-lifecycle-commit",
         r#"---
@@ -107,13 +129,14 @@ Body.
         COMMIT_RULE,
     );
 
-    let skipped = document.run("compose", &[]);
-    assert!(skipped.success, "{}", skipped.stderr);
-    assert!(document.runs().is_empty(), "the false branch launches nothing");
-
-    let selected = document.run("compose", &["commit_message=a b; c"]);
-    assert!(selected.success, "{}", selected.stderr);
-    assert_eq!(document.runs(), vec![argv(&["commit", "-m", "a b; c"])]);
+    let setters = if selected { &["commit_message=a b; c"][..] } else { &[] };
+    let outcome = document.run("compose", setters);
+    assert!(outcome.success, "{}", outcome.stderr);
+    if selected {
+        assert_eq!(document.runs(), vec![argv(&["commit", "-m", "a b; c"])]);
+    } else {
+        assert!(document.runs().is_empty(), "the false branch launches nothing");
+    }
 }
 
 #[test]
@@ -224,25 +247,32 @@ fn a_false_task_guard_does_not_fail_the_late_value_barrier() {
 /// sequence and settled again, closed, when the document composes at its
 /// turn: missing, it waits as a template and its false guard runs nothing;
 /// passed through `with:`, it runs with that value as one argument.
-#[test]
-fn a_prompt_documents_guarded_command_settles_under_the_sequence_approval() {
-    for (with, expected) in [("", Vec::<Vec<String>>::new()), ("      with:\n          msg: a b\n", vec![argv(&["guarded", "a b"])])] {
-        let sequence = Run::new(
-            "guarded-prompt-lifecycle",
-            &format!("---\nsequence:\n    - name: review\n      prompt: prompt.md\n{with}---\nBody.\n"),
-            "template argv-recorder guarded {{ string }}\n",
-        );
-        std::fs::write(
-            sequence.fixture.cwd().join("prompt.md"),
-            "---\nstart:\n    - when: msg\n      then:\n          - shell: argv-recorder guarded {{ msg }}\n---\nPrompt body.\n",
-        )
-        .unwrap();
+const PROMPT_GUARD_CASES: &[(&str, bool)] = &[("", false), ("      with:\n          msg: a b\n", true)];
 
-        let outcome = sequence.run("sequence", &[]);
+guarded_shell_cases! {
+    PROMPT_GUARD_SCHEDULE, prompt_guard_case;
+    a_prompt_documents_guarded_command_settles_under_the_sequence_approval: 0,
+    a_prompt_documents_with_value_settles_under_the_sequence_approval: 1,
+}
 
-        assert!(outcome.success, "{with:?}: {}", outcome.stderr);
-        assert_eq!(sequence.runs(), expected, "{with:?}");
-    }
+fn prompt_guard_case(index: usize) {
+    let (with, selected) = PROMPT_GUARD_CASES[index];
+    let expected = if selected { vec![argv(&["guarded", "a b"])] } else { Vec::new() };
+    let sequence = Run::new(
+        "guarded-prompt-lifecycle",
+        &format!("---\nsequence:\n    - name: review\n      prompt: prompt.md\n{with}---\nBody.\n"),
+        "template argv-recorder guarded {{ string }}\n",
+    );
+    std::fs::write(
+        sequence.fixture.cwd().join("prompt.md"),
+        "---\nstart:\n    - when: msg\n      then:\n          - shell: argv-recorder guarded {{ msg }}\n---\nPrompt body.\n",
+    )
+    .unwrap();
+
+    let outcome = sequence.run("sequence", &[]);
+
+    assert!(outcome.success, "{with:?}: {}", outcome.stderr);
+    assert_eq!(sequence.runs(), expected, "{with:?}");
 }
 
 /// A `start` stack whose first action runs before `guarded`, so an empty
@@ -319,9 +349,7 @@ fn a_non_null_declaration_does_not_hide_an_actual_null() {
 /// The value is absent now, so each command is a missing value at pre-flight;
 /// a proof that outlived the write would let the command run with the written
 /// value instead.
-#[test]
-fn a_write_through_an_alias_an_ancestor_or_an_inner_branch_ends_the_guards_proof() {
-    for (row, guarded, placeholder) in [
+const WRITE_INVALIDATION_CASES: &[(&str, &str, &str)] = &[
         (
             "fm. write, bare read",
             "    - when: msg\n      then:\n          - set:\n                fm.msg: replaced\n          - shell: argv-recorder second {{ msg }}\n",
@@ -342,22 +370,44 @@ fn a_write_through_an_alias_an_ancestor_or_an_inner_branch_ends_the_guards_proof
             "    - when: msg\n      then:\n          - when: other\n            then:\n                - set:\n                      msg: replaced\n          - shell: argv-recorder second {{ msg }}\n",
             "msg",
         ),
+    ];
+
+guarded_shell_cases! {
+    WRITE_INVALIDATION_SCHEDULE, write_invalidation_case;
+    a_write_through_an_alias_an_ancestor_or_an_inner_branch_ends_the_guards_proof: 0,
+    a_bare_write_ends_the_fm_guards_proof: 1,
+    an_ancestor_write_ends_the_guards_proof: 2,
+    an_inner_branch_write_ends_the_guards_proof: 3,
+}
+
+fn write_invalidation_case(index: usize) {
+    let (row, guarded, placeholder) = WRITE_INVALIDATION_CASES[index];
+    let document = Run::new(
+        "guarded-write-ends-proof",
+        &after_a_first_action("other: true\n", guarded),
+        "exact argv-recorder first\ntemplate argv-recorder second {{ string }}\n",
+    );
+
+    let outcome = document.run("compose", &[]);
+
+    assert!(!outcome.success, "{row}: {}", outcome.stderr);
+    assert!(
+        outcome.stderr.contains(&format!("reads `{placeholder}`, which is missing")),
+        "{row}: {}",
+        outcome.stderr
+    );
+    assert!(document.runs().is_empty(), "{row}: {:?}", document.runs());
+}
+
+#[test]
+fn every_guarded_shell_matrix_case_is_scheduled_once() {
+    for (scheduled, count) in [
+        (LIFECYCLE_COMMIT_SCHEDULE, LIFECYCLE_COMMIT_CASES.len()),
+        (PROMPT_GUARD_SCHEDULE, PROMPT_GUARD_CASES.len()),
+        (WRITE_INVALIDATION_SCHEDULE, WRITE_INVALIDATION_CASES.len()),
     ] {
-        let document = Run::new(
-            "guarded-write-ends-proof",
-            &after_a_first_action("other: true\n", guarded),
-            "exact argv-recorder first\ntemplate argv-recorder second {{ string }}\n",
-        );
-
-        let outcome = document.run("compose", &[]);
-
-        assert!(!outcome.success, "{row}: {}", outcome.stderr);
-        assert!(
-            outcome.stderr.contains(&format!("reads `{placeholder}`, which is missing")),
-            "{row}: {}",
-            outcome.stderr
-        );
-        assert!(document.runs().is_empty(), "{row}: {:?}", document.runs());
+        let expected: Vec<usize> = (0..count).collect();
+        assert_eq!(scheduled, expected, "schedule every case exactly once");
     }
 }
 

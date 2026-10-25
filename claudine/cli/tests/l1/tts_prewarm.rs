@@ -476,6 +476,61 @@ fn a_mixed_sequence_prepares_prompts_with_their_playback_configuration() {
     assert!(!fixture.audio_spool().exists(), "nothing was spoken");
 }
 
+#[test]
+fn container_captured_phrases_are_prepared_before_their_first_child_launches() {
+    let fixture = CliProcessFixture::named("prewarm-containers");
+    let record = record_path(&fixture);
+    let launches = common::launch_recorder::install(&fixture, "goose", &format!(
+        "seen=missing; i=0\n\
+         while [ $i -lt 40 ]; do\n\
+         if grep -q '^root Ada' '{record}' 2>/dev/null && \
+         grep -q '^group Ada' '{record}' && grep -q '^inline Ada' '{record}' && \
+         grep -q '^referenced Ada' '{record}'; then seen=prepared; break; fi\n\
+         sleep 0.025; i=$((i + 1))\n\
+         done\n\
+         echo $seen > \"$dir/containers-seen\"\nexit 0",
+        record = record.display(),
+    ));
+    write_document(&fixture, "prompt.md", "---\n---\nWork.\n");
+    write_document(&fixture, "nested.md", r#"---
+failure:
+    - say: "referenced {{ env.PREWARM_NAME }}"
+sequence:
+    - name: prompt
+      prompt: prompt.md
+---
+Nested.
+"#);
+    let sequence = write_document(&fixture, "seq.md", r#"---
+failure:
+    - say: "root {{ env.PREWARM_NAME }}"
+sequence:
+    - name: group
+      group:
+          failure:
+              - say: "group {{ env.PREWARM_NAME }}"
+          tasks:
+              - name: inline
+                failure:
+                    - say: "inline {{ env.PREWARM_NAME }}"
+                sequence:
+                    - name: referenced
+                      sequence: nested.md
+---
+Sequence.
+"#);
+    let output = observed(&fixture, "record")
+        .env("PREWARM_NAME", "Ada")
+        .args(["sequence", "--goose", sequence.to_str().unwrap()])
+        .output().unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(common::launch_recorder::launches(&launches).len(), 1, "{stderr}");
+    assert_eq!(fs::read_to_string(launches.join("containers-seen")).unwrap().trim(), "prepared", "{stderr}");
+    assert_eq!(sorted(recorded(&record)), ["group Ada", "inline Ada", "referenced Ada", "root Ada"], "{stderr}");
+    assert!(!fixture.audio_spool().exists(), "nothing was spoken");
+}
+
 /// The prompt document every deferred-task test runs: its own `env` and
 /// `ctx` reads are the control, prepared when the document is prepared.
 const DEFERRED_DOCUMENT: &str = "---\nfailure:\n    - when: \"false\"\n      then:\n          - say: \"doc env {{ env.PREWARM_NAME }}\"\n          - say: \"doc ctx {{ ctx.today_utc }}\"\n---\nWork.\n";

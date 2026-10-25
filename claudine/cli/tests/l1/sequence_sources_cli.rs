@@ -159,31 +159,25 @@ fn every_source_format_has_a_same_plan_test() {
     assert_eq!(SAME_PLAN_DATA_FILES, ["d.yaml", "d.json", "d.json5", "d.jsonl", "d.ndjson"]);
 }
 
-#[test]
-fn the_three_operators_each_produce_a_usable_name() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(
-        &workspace,
-        "d.yaml",
-        "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
-    );
-
-    // `map` renames (the source key is gone), `name` copies (it is retained),
-    // and `template` computes. All three answer the same produce-a-name
-    // question, which is why v1 allows exactly one per reference.
-    let mapped = source_doc(&workspace, "map.md", "\"d.yaml -> colors.data::map(color, name)\"");
-    assert_eq!(composed_steps(&workspace, &mapped, &[]), ["blue", "green"]);
-
-    let named = source_doc(&workspace, "name.md", "\"d.yaml -> colors.data::name(color)\"");
-    assert_eq!(composed_steps(&workspace, &named, &[]), ["blue", "green"]);
-
-    let templated = source_doc(
-        &workspace,
-        "template.md",
-        "\"d.yaml -> colors.data::template(color + '-' + rank)\"",
-    );
-    assert_eq!(composed_steps(&workspace, &templated, &[]), ["blue-5", "green-3"]);
+macro_rules! named_source_case {
+    ($name:ident, $source:literal, [$($expected:literal),+]) => {
+        #[test]
+        fn $name() {
+            let workspace = CliProcessFixture::named("sequence-sources-cli");
+            write(
+                &workspace,
+                "d.yaml",
+                "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
+            );
+            let doc = source_doc(&workspace, "source.md", $source);
+            assert_eq!(composed_steps(&workspace, &doc, &[]), [$($expected),+]);
+        }
+    };
 }
+
+named_source_case!(the_three_operators_each_produce_a_usable_name, "\"d.yaml -> colors.data::map(color, name)\"", ["blue", "green"]);
+named_source_case!(the_name_operator_produces_a_usable_name, "\"d.yaml -> colors.data::name(color)\"", ["blue", "green"]);
+named_source_case!(the_template_operator_produces_a_usable_name, "\"d.yaml -> colors.data::template(color + '-' + rank)\"", ["blue-5", "green-3"]);
 
 #[test]
 fn map_removes_the_source_key_while_name_retains_it() {
@@ -395,34 +389,26 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
 // `FileReference` families
 // ============================================================================
 
-/// Resolution is delegated to `biscuit_file::FileReference::resolve_from` with
-/// the *authoring document's* directory, so the families below work without the
-/// sequence code reimplementing any of them — including the two that a
-/// hand-rolled suffix splitter would break: a path holding a space, and a path
-/// holding an `@`. The home-pinned case uses the same explicit request-context
-/// seam because native Windows home discovery cannot be isolated by overriding
-/// environment variables in a child process.
+macro_rules! authoring_reference_case {
+    ($name:ident, $relative:literal, $source:literal, $expected:literal) => {
+        #[test]
+        fn $name() {
+            let workspace = CliProcessFixture::named("sequence-sources-cli");
+            write(&workspace, $relative, concat!("items:\n  - ", $expected, "\n"));
+            let doc = source_doc(&workspace, "reference.md", $source);
+            assert_eq!(composed_steps(&workspace, &doc, &[]), [$expected]);
+        }
+    };
+}
+
+authoring_reference_case!(file_references_resolve_from_the_authoring_document, "nested/data.yaml", "\"nested/data.yaml -> items\"", "nested-hit");
+authoring_reference_case!(spaced_file_references_resolve_from_the_authoring_document, "my data/data.yaml", "\"my data/data.yaml -> items\"", "spaced-hit");
+authoring_reference_case!(at_file_references_resolve_from_the_authoring_document, "a@b/data.yaml", "\"a@b/data.yaml -> items\"", "at-hit");
+
 #[test]
-fn file_references_resolve_from_the_authoring_document() {
+fn home_file_references_resolve_through_the_captured_request_context() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "nested/data.yaml", "items:\n  - nested-hit\n");
-    write(&workspace, "my data/data.yaml", "items:\n  - spaced-hit\n");
-    write(&workspace, "a@b/data.yaml", "items:\n  - at-hit\n");
     write(&workspace, "tilde.yaml", "items:\n  - tilde-hit\n");
-
-    for (name, source, expected) in [
-        ("relative.md", "\"nested/data.yaml -> items\"", "nested-hit"),
-        ("spaced.md", "\"my data/data.yaml -> items\"", "spaced-hit"),
-        ("at.md", "\"a@b/data.yaml -> items\"", "at-hit"),
-    ] {
-        let doc = source_doc(&workspace, name, source);
-        assert_eq!(
-            composed_steps(&workspace, &doc, &[]),
-            [expected],
-            "`{source}` did not resolve"
-        );
-    }
-
     let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
     let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
         .with_home_dir(workspace.cwd())

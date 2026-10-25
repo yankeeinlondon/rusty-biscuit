@@ -175,20 +175,45 @@ fn header_document(fixture: &CliProcessFixture, file: &str, name: Option<&str>) 
     document
 }
 
-#[test]
-fn header_document_label_and_model_render_exactly_as_authored() {
+fn assert_header_document_and_model(columns: &str, name: Option<&str>) {
     let fixture = CliProcessFixture::named("header-label-model");
     // The `Model` row shows a model only once a provider is resolved.
     write_dry_run_provider_stub(fixture.bin_dir(), "claude");
-    let from_file = header_document(&fixture, UNDERSCORED_FILE, None);
-    let named = header_document(&fixture, "named.md", Some(MARKUP_NAME));
+    let file = if name.is_some() { "named.md" } else { UNDERSCORED_FILE };
+    let document = header_document(&fixture, file, name);
+    let label = name.unwrap_or(UNDERSCORED_FILE);
+    let (_, stderr) = dry_run_with(&fixture, &document, columns, &["--claude"]);
+    let words = |cell: Vec<String>| cell.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(words(field_cell(&stderr, "Document")), label, "{columns} columns:\n{stderr}");
+    assert_eq!(words(field_cell(&stderr, "Model")), MARKUP_MODEL, "{columns} columns:\n{stderr}");
+}
 
+macro_rules! header_document_tests {
+    ($($test:ident => ($columns:literal, $name:expr)),+ $(,)?) => {
+        const HEADER_CASES: &[(&str, Option<&str>)] = &[$(($columns, $name)),+];
+
+        $(
+            #[test]
+            fn $test() {
+                assert_header_document_and_model($columns, $name);
+            }
+        )+
+    };
+}
+
+header_document_tests! {
+    wide_header_file_label_and_model_render_as_authored => ("200", None),
+    wide_header_frontmatter_name_and_model_render_as_authored => ("200", Some(MARKUP_NAME)),
+    narrow_header_file_label_and_model_render_as_authored => ("40", None),
+    narrow_header_frontmatter_name_and_model_render_as_authored => ("40", Some(MARKUP_NAME)),
+}
+
+#[test]
+fn header_cases_cover_each_width_and_document_label_once() {
+    assert_eq!(HEADER_CASES.len(), 4);
     for columns in ["200", "40"] {
-        for (document, label) in [(&from_file, UNDERSCORED_FILE), (&named, MARKUP_NAME)] {
-            let (_, stderr) = dry_run_with(&fixture, document, columns, &["--claude"]);
-            let words = |cell: Vec<String>| cell.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
-            assert_eq!(words(field_cell(&stderr, "Document")), label, "{columns} columns:\n{stderr}");
-            assert_eq!(words(field_cell(&stderr, "Model")), MARKUP_MODEL, "{columns} columns:\n{stderr}");
+        for name in [None, Some(MARKUP_NAME)] {
+            assert_eq!(HEADER_CASES.iter().filter(|case| **case == (columns, name)).count(), 1);
         }
     }
 }

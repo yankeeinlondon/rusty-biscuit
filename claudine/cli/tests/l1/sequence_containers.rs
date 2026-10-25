@@ -103,6 +103,68 @@ sequence:
 }
 
 #[test]
+fn nested_sequence_retry_overlay_is_runtime_only_and_clears_abandoned_results() {
+    let (stdout, stderr, code) = run(r#"---
+ready: false
+attempt_note: original
+success: [{ stdout: "root={{ seq.outputs }}" }]
+sequence:
+  - name: nested
+    initialize: [{ stdout: nested-initialize }]
+    start: [{ stdout: "nested-start={{ ready }}:{{ attempt_note }}" }]
+    failure:
+      - stdout: nested-failure
+      - retry: { max_attempts: 1, with: { ready: true, attempt_note: second } }
+    finalize: [{ stdout: "nested-finalize={{ attempt_note }}" }]
+    sequence:
+      - { name: first, sequence: [] }
+      - name: gate
+        sequence: []
+        start:
+          - when: "!ready"
+            then: [{ error: not-ready }]
+---
+"#, false);
+    assert_eq!(code, 0, "{stderr}\n{stdout}");
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), [
+        "nested-initialize", "nested-start=false:original", "nested-failure",
+        "nested-start=true:second", "nested-finalize=second", "root=[[[],[]]]",
+    ]);
+}
+
+#[test]
+fn nested_group_retry_overlay_reaches_legs_without_persisting_or_duplicate_results() {
+    let (stdout, stderr, code) = run(r#"---
+ready: false
+attempt_note: original
+success: [{ stdout: "root={{ seq.outputs }}" }]
+sequence:
+  - name: nested
+    group:
+      name: nested
+      initialize: [{ stdout: group-initialize }]
+      start: [{ stdout: "group-start={{ ready }}:{{ attempt_note }}" }]
+      failure:
+        - stdout: group-failure
+        - retry: { max_attempts: 1, with: { ready: true, attempt_note: second } }
+      finalize: [{ stdout: "group-finalize={{ attempt_note }}" }]
+      tasks:
+        - name: gate
+          sequence: []
+          start:
+            - when: "!ready"
+              then: [{ error: not-ready }]
+          success: [{ stdout: "leg={{ attempt_note }}" }]
+---
+"#, false);
+    assert_eq!(code, 0, "{stderr}\n{stdout}");
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), [
+        "group-initialize", "group-start=false:original", "group-failure",
+        "group-start=true:second", "leg=second", "group-finalize=second", "root=[{\"gate\":[]}]",
+    ]);
+}
+
+#[test]
 fn finalize_failure_changes_success_to_failure() {
     let (stdout, stderr, code) = run("---\nfinalize: [{ error: cleanup-failed }]\nsequence: [{ name: first, shell: echo first }]\n---\n", false);
     assert_eq!(code, 1, "{stderr}\n{stdout}");

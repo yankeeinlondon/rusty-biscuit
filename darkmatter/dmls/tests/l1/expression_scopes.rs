@@ -580,10 +580,45 @@ fn body_guard_rows_agree_with_the_library_in_hover_and_nullable_targets() {
 /// sites: the then-branch of `(G) ? read : …` and the right operand of
 /// `(G) && read`, in a body interpolation and in an Expression-typed
 /// frontmatter value, each hover the library's `TypeScope::assume` type.
+macro_rules! expression_branch_groups {
+    ($($name:ident: $start:literal..$end:literal),+ $(,)?) => {
+        const EXPRESSION_BRANCH_GROUPS: &[(usize, usize)] = &[$(($start, $end)),+];
+
+        $(
+            #[test]
+            fn $name() {
+                let _ = include_str!("../../../lib/tests/common/type_scope_cases.rs");
+                let rows: Vec<&cases::BlockCase> = cases::BLOCK_CASES
+                    .iter()
+                    .filter(|row| row.guards.len() == 1)
+                    .collect();
+                expression_branch_rows(&rows[$start..$end]);
+            }
+        )+
+    };
+}
+
+expression_branch_groups! {
+    expression_branch_rows_agree_with_the_library: 0..7,
+    expression_branch_rows_agree_with_the_library_second_group: 7..14,
+    expression_branch_rows_agree_with_the_library_third_group: 14..21,
+    expression_branch_rows_agree_with_the_library_fourth_group: 21..28,
+}
+
 #[test]
-fn expression_branch_rows_agree_with_the_library() {
+fn every_single_guard_row_is_scheduled_once_in_a_bounded_expression_group() {
     let _ = include_str!("../../../lib/tests/common/type_scope_cases.rs");
-    let rows: Vec<&cases::BlockCase> = cases::BLOCK_CASES.iter().filter(|row| row.guards.len() == 1).collect();
+    let count = cases::BLOCK_CASES.iter().filter(|row| row.guards.len() == 1).count();
+    let mut next = 0;
+    for &(start, end) in EXPRESSION_BRANCH_GROUPS {
+        assert_eq!(start, next, "groups must cover the single-guard rows without gaps or overlap");
+        assert!((1..=7).contains(&(end - start)), "each group must contain one to seven rows");
+        next = end;
+    }
+    assert_eq!(next, count, "schedule every single-guard row when adding cases");
+}
+
+fn expression_branch_rows(rows: &[&cases::BlockCase]) {
     let mut schema_lines: String = cases::SCHEMA.lines().map(|line| format!("  {line}\n")).collect();
     let mut values = String::new();
     let mut body = String::new();

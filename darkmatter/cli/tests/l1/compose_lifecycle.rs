@@ -198,6 +198,26 @@ fn an_unselected_branch_warns_nothing() {
 }
 
 #[test]
+fn ignored_actions_warn_per_reached_occurrence_without_checking_their_calls() {
+    let fixture = CliProcessFixture::named("lifecycle-ignored-occurrences");
+    let doc = fixture.write_file(
+        "cwd/doc.md",
+        "---\ncomposed:\n  - say: \"{{ length(42) }}\"\n  - when: \"false\"\n\
+         \x20   then:\n      - say: \"{{ length(42) }}\"\n\
+         \x20 - say: \"{{ length(42) }}\"\nfinalize:\n  - say: \"{{ length(42) }}\"\n---\nbody\n",
+    );
+
+    let ran = compose(&fixture, &doc, &[]);
+
+    assert_eq!(ran.status, Some(0), "{}", ran.stderr);
+    assert_eq!(ran.stdout.trim(), "body");
+    let stderr = common::unwrapped(&ran.stderr).replace('`', "");
+    assert_eq!(stderr.matches("does not run say; skipped it in composed").count(), 2, "{stderr}");
+    assert_eq!(stderr.matches("does not run say; skipped it in finalize").count(), 1, "{stderr}");
+    assert_eq!(stderr.matches("does not run say").count(), 3, "{stderr}");
+}
+
+#[test]
 fn host_only_keys_are_plain_frontmatter() {
     let fixture = CliProcessFixture::named("lifecycle-host-only-keys");
     let doc = fixture.write_file(

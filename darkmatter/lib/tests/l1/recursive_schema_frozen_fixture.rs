@@ -243,10 +243,9 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
 /// generator writes into its own adjacent `schemas/` and nowhere else.
 #[test]
 fn generator_writes_beside_itself_from_an_unrelated_cwd() {
-    let Some(python) = python_interpreter() else {
-        eprintln!("no Python interpreter is available; skipping the generator portability check");
-        return;
-    };
+    let interpreter = python_interpreter();
+    test_toolkit::expect_level!(test_toolkit::Level::L1, interpreter.is_some(), "Python interpreter");
+    let python = interpreter.expect("the L1 interpreter requirement was checked");
     let generator =
         include_str!("../../../../claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py");
 

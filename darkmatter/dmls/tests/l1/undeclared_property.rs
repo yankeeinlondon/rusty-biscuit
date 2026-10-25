@@ -321,6 +321,34 @@ fn an_undeclared_doc_path_is_one_ordinary_advisory() {
     assert_eq!((source.as_str(), *severity, message.as_str()), ("darkmatter.compose", 2, advisory("doc").as_str()));
 }
 
+#[test]
+fn current_env_completes_and_hovers_as_a_schema_declared_property() {
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  current_env: string -> A caller-owned environment label\n",
+        "---\n",
+        "R1: {{ current_en }}\n",
+        "H1: {{ current_env }}\n",
+    );
+    let workspace = LspWorkspace::new();
+    let (mut fixture, uri, diagnostics) = open_document(&workspace, "current-env.md", text);
+
+    let roots = completions_at(&mut fixture, &uri, text, "R1:", "current_en");
+    assert!(offers(&roots, "current_env", 5), "{roots:#?}");
+    assert!(!offers(&roots, "current_env", 9), "a released name is no built-in root: {roots:#?}");
+    let hover = hover_at(&mut fixture, &uri, text, "H1:", "current_env");
+    assert!(hover.contains("A caller-owned environment label"), "{hover}");
+    assert!(!hover.contains("Static value:"), "an unset property has no runtime value: {hover}");
+    fixture.shutdown();
+
+    let undeclared: Vec<String> = with_code(&diagnostics, UNDECLARED)
+        .into_iter()
+        .map(|(.., message)| message)
+        .collect();
+    assert_eq!(undeclared, [advisory("current_en")], "{diagnostics:#?}");
+}
+
 /// Every non-test `src/` line, as `(path relative to src, line number, text)`.
 /// A file stops at its trailing `#[cfg(test)] mod … {`, and `*tests.rs`
 /// files are skipped.

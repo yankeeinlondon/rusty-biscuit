@@ -152,3 +152,64 @@ fn a_host_function_catalog_that_fails_to_load_is_reported() {
     assert_eq!(messages.len(), 1, "{found:#?}");
     assert!(messages[0].contains("project.yaml") && messages[0].contains("built-in"), "{}", messages[0]);
 }
+
+#[test]
+fn a_running_editor_recovers_and_withdraws_host_facts_after_watched_changes() {
+    let catalog = include_str!("../../../lib/tests/fixtures/host_functions/project.yaml");
+    let artifact = include_str!("../../../lib/tests/fixtures/host_functions/project.facts.json");
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    for directory in [".git/objects", ".git/refs/heads", "schemas"] {
+        std::fs::create_dir_all(root.join(directory)).unwrap();
+    }
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(root.join(".dmls.toml"), "[expressions]\nstrict = true\n").unwrap();
+    let catalog_path = root.join("schemas/project.yaml");
+    let artifact_path = root.join("schemas/project.facts.json");
+    std::fs::write(&catalog_path, catalog).unwrap();
+    let document_path = root.join("doc.md");
+    std::fs::write(&document_path, DOCUMENT).unwrap();
+    let uri = url::Url::from_file_path(&document_path).unwrap().to_string();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(root));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": DOCUMENT } }),
+    );
+    let latest = |fixture: &mut LspFixture<'_>| {
+        fixture.flush_server();
+        let mut publication = fixture.wait_for_diagnostics_params(&uri);
+        while let Some(next) = fixture.take_buffered_diagnostics(&uri) {
+            publication = next;
+        }
+        publication["diagnostics"].as_array().unwrap().clone()
+    };
+    let changed = |fixture: &LspFixture<'_>, path: &std::path::Path, kind: u8| {
+        let changed_uri = url::Url::from_file_path(path).unwrap();
+        fixture.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": [{ "uri": changed_uri.as_str(), "type": kind }] }),
+        );
+    };
+    let complete = expect(&[(4, INCOMPATIBLE), (8, UNCERTAIN), (9, INCOMPATIBLE)]);
+    assert_eq!(findings(&latest(&mut fixture)), both_incomplete());
+
+    std::fs::write(&artifact_path, artifact).unwrap();
+    changed(&fixture, &artifact_path, 1);
+    assert_eq!(findings(&latest(&mut fixture)), complete, "created artifact restores narrowing");
+
+    let edited = catalog.replace("the project's label", "the project's edited label");
+    assert_ne!(edited, catalog);
+    std::fs::write(&catalog_path, edited).unwrap();
+    changed(&fixture, &catalog_path, 2);
+    assert_eq!(findings(&latest(&mut fixture)), both_incomplete(), "stale facts cannot keep a verdict");
+
+    std::fs::write(&catalog_path, catalog).unwrap();
+    changed(&fixture, &catalog_path, 2);
+    assert_eq!(findings(&latest(&mut fixture)), complete, "matching catalog restores narrowing");
+
+    std::fs::remove_file(&artifact_path).unwrap();
+    changed(&fixture, &artifact_path, 3);
+    assert_eq!(findings(&latest(&mut fixture)), both_incomplete(), "deleted facts withdraw narrowing");
+    fixture.shutdown();
+}

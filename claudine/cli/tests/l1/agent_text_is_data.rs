@@ -1,12 +1,6 @@
-//! Red reproductions for `2026-09-27-agent-text-is-data`: one test per row of
-//! the spec's "Where agent text re-enters" table.
-//!
-//! Each assertion states the post-fix contract — agent text arrives as exact
-//! raw text, is never evaluated, never asks for shell approval, and the run
-//! succeeds. A test stays ignored until the plan phase that fixes its row
-//! removes the marker. The regression tests at the end pin what must not
-//! change: a value a person typed is still a template, and the authoring
-//! guards still refuse before any provider starts.
+//! Agent text remains exact data across loop output, sequence state,
+//! inline edits, and lifecycle persistence. Authored templates still evaluate,
+//! and authoring guards refuse invalid expressions before provider launch.
 
 use std::fs;
 
@@ -233,6 +227,7 @@ Body.
 #[test]
 fn inline_agent_added_frontmatter_survives_a_second_run() {
     let fixture = CliProcessFixture::named("agent-text-inline");
+    fixture.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
@@ -300,6 +295,7 @@ fn frontmatter_value(document: &str, key: &str) -> serde_json::Value {
 #[test]
 fn inline_agent_values_are_stored_as_data_and_read_back_exactly() {
     let fixture = CliProcessFixture::named("agent-text-inline-accept");
+    fixture.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
@@ -396,34 +392,63 @@ fn unrepairable_agent_frontmatter_names_the_line_and_rolls_back() {
     }
 }
 
-/// Review 1, "Malformed structured YAML is silently converted into text": a
-/// value that starts a quoted scalar or flow collection but does not close it
-/// is refused on its line and attributed to the agent, and the rollback
-/// restores the pre-run bytes; plain text with a `: ` is still repaired.
-#[test]
-fn malformed_structured_agent_values_are_refused_not_saved_as_text() {
+/// Malformed quoted scalars and flow collections are refused on the agent's
+/// line, and rollback restores the pre-run bytes.
+fn assert_malformed_structured_value(value: &str, schema: &str) {
     let original = "---\nprompt: write it\ntitle: t\n---\nold body\n";
-    for value in ["\"half\" quoted", "'half' quoted", "[a, b", "{k: v"] {
-        let fixture = CliProcessFixture::named("agent-text-inline-malformed");
-        let md = fixture.cwd().join("doc.md");
-        fs::write(&md, original).unwrap();
-        whole_file_agent(
-            &fixture,
-            &md,
-            &format!("---\nprompt: write it\ntitle: t\nadded: {value}\n---\nnew body\n"),
-        );
-
-        let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
-
-        assert_ne!(code, 0, "{value}: stderr:\n{stderr}");
-        let flat = stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
-        assert!(flat.contains("(line 4, `added`)"), "{value}: names the line:\n{stderr}");
-        assert!(flat.contains("The agent wrote this line"), "{value}: names the agent:\n{stderr}");
-        assert_eq!(fs::read_to_string(&md).unwrap(), original, "{value}: rolled back");
-    }
-
-    // Control: plain text the agent meant as a string is still repaired.
     let fixture = CliProcessFixture::named("agent-text-inline-malformed");
+    fixture.seed_inline_metadata_schema(schema);
+    let md = fixture.cwd().join("doc.md");
+    fs::write(&md, original).unwrap();
+    whole_file_agent(
+        &fixture,
+        &md,
+        &format!("---\nprompt: write it\ntitle: t\nadded: {value}\n---\nnew body\n"),
+    );
+
+    let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+
+    assert_ne!(code, 0, "{value}: stderr:\n{stderr}");
+    let flat = stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("(line 4, `added`)"), "{value}: names the line:\n{stderr}");
+    assert!(flat.contains("The agent wrote this line"), "{value}: names the agent:\n{stderr}");
+    assert_eq!(fs::read_to_string(&md).unwrap(), original, "{value}: rolled back");
+}
+
+macro_rules! malformed_structured_value_tests {
+    ($($test:ident => $value:literal),+ $(,)?) => {
+        const MALFORMED_STRUCTURED_VALUES: &[&str] = &[$($value),+];
+
+        $(
+            #[test]
+            fn $test() {
+                assert_malformed_structured_value(
+                    $value,
+                    include_str!("../../../schemas/inline-compose.yaml"),
+                );
+            }
+        )+
+    };
+}
+
+malformed_structured_value_tests! {
+    malformed_double_quoted_agent_value_is_refused => "\"half\" quoted",
+    malformed_single_quoted_agent_value_is_refused => "'half' quoted",
+    malformed_agent_flow_sequence_is_refused => "[a, b",
+    malformed_agent_flow_mapping_is_refused => "{k: v",
+}
+
+#[test]
+fn malformed_structured_cases_cover_each_scalar_and_collection_opener() {
+    let openers: Vec<_> = MALFORMED_STRUCTURED_VALUES.iter().map(|value| value.chars().next().unwrap()).collect();
+    assert_eq!(openers, ['"', '\'', '[', '{']);
+}
+
+#[test]
+fn plain_agent_text_with_colons_is_still_repaired() {
+    let original = "---\nprompt: write it\ntitle: t\n---\nold body\n";
+    let fixture = CliProcessFixture::named("agent-text-inline-malformed");
+    fixture.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let md = fixture.cwd().join("doc.md");
     fs::write(&md, original).unwrap();
     whole_file_agent(&fixture, &md, "---\nprompt: write it\ntitle: t\nadded: Fix: colons\n---\nnew body\n");

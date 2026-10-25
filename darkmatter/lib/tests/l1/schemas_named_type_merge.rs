@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
+use darkmatter::markdown::schemas::resolve::{ResolvedSchema, expand_named_types, resolve_yaml_schema};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
     SchemaError, SchemaPhase, SchemaSourceId, SchemaSourcePath, SimplifiedSchema,
@@ -508,6 +508,68 @@ fn defaults_must_be_equal_after_number_normalization() {
 }
 
 #[test]
+fn programmatic_defaults_merge_when_their_lowered_numbers_are_equal() {
+    for (inherited, supplied) in [
+        (json!(9_223_372_036_854_775_808_u64), json!(9_223_372_036_854_775_808.0)),
+        (json!(10_000_000_000_000_000_000_u64), json!(1e19)),
+        (json!({"values": [9_223_372_036_854_775_808_u64]}), json!({"values": [9_223_372_036_854_775_808.0]})),
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
+        let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+        let SimplifiedSchema::Single(shape) = &mut schema else {
+            panic!("single schema");
+        };
+        // Programmatic callers can supply floats directly; authored literals have
+        // already passed numeric normalization in the grammar.
+        for (name, default) in [("base", inherited.clone()), ("copy", supplied)] {
+            let PropertyDef::Single(atom) = shape.properties.get_mut(name).unwrap() else {
+                panic!("single property");
+            };
+            atom.constraints.push(Constraint::Default(default));
+        }
+        let expansion = expand_named_types(
+            &schema,
+            dir.path(),
+            None,
+            &[],
+            &FileResolutionContext::new(dir.path()),
+        )
+        .expect("defaults lowering to the same number must merge");
+        let lowered = darkmatter::markdown::schemas::to_json_schema(&expansion.schema).unwrap();
+        assert_eq!(lowered["properties"]["copy"]["default"], inherited);
+    }
+}
+
+#[test]
+fn a_programmatic_float_at_the_signed_boundary_does_not_equal_the_smaller_integer() {
+    let dir = TempDir::new().expect("tempdir");
+    let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
+    let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+    let SimplifiedSchema::Single(shape) = &mut schema else {
+        panic!("single schema");
+    };
+    for (name, default) in [("base", json!(i64::MAX)), ("copy", json!(9_223_372_036_854_775_808.0))] {
+        let PropertyDef::Single(atom) = shape.properties.get_mut(name).unwrap() else {
+            panic!("single property");
+        };
+        atom.constraints.push(Constraint::Default(default));
+    }
+    let error = expand_named_types(
+        &schema,
+        dir.path(),
+        None,
+        &[],
+        &FileResolutionContext::new(dir.path()),
+    )
+    .expect_err("distinct defaults must not merge through a saturating cast");
+    assert!(matches!(
+        error,
+        SchemaError::ConstraintConflict { kind: SchemaConstraintConflictKind::Default, .. }
+    ), "{error:?}");
+}
+
+#[test]
 fn repeated_patterns_and_match_groups_are_all_kept() {
     let dir = TempDir::new().expect("tempdir");
     let resolved = resolve_inline(
@@ -587,7 +649,7 @@ fn bare_and_explicit_local_references_resolve_identically() {
     let resolved = resolve_inline(
         dir.path(),
         "fwd_bare: later\nfwd_this: later@this\n\
-         label: string(min(2))\nchoice: [string, number]\n\
+         label: string(min(2)) -> inherited label\nchoice: [string, number]\n\
          scalar_bare: label\nscalar_this: label@this\n\
          array_bare: label[]\narray_this: label[]@this\n\
          constrained_bare: label(max(9); required)\nconstrained_this: label(max(9); required)@this\n\
@@ -605,6 +667,8 @@ fn bare_and_explicit_local_references_resolve_identically() {
             "`{form}` must resolve identically in both spellings"
         );
     }
+    assert_eq!(props["scalar_bare"]["description"], "inherited label");
+    assert_eq!(props["described_bare"]["description"], "a label");
     let required = required(&resolved);
     assert!(required.contains(&"constrained_bare".to_string()));
     assert!(required.contains(&"constrained_this".to_string()));

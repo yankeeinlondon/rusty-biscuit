@@ -158,6 +158,52 @@ fn exported_schema_and_typed_options_agree() {
 }
 
 #[test]
+fn exported_alphanumeric_patterns_preserve_interacting_restrictions() {
+    use AlphanumericOption::*;
+
+    let allowed = [AllowDashes, AllowUnderscores, AllowSlashes, AllowPeriods, AllowWhitespace];
+    let restrictions = [BlockDoublePeriods, BlockLeadingDash, BlockLeadingSlash, LeadingAlpha];
+    let alphabet = ['a', '1', '-', '/', '.', ' ', '\n', 'é'];
+    let mut samples = vec![String::new()];
+    let mut previous = vec![String::new()];
+    for _ in 0..3 {
+        let next: Vec<String> = previous
+            .iter()
+            .flat_map(|prefix| alphabet.map(|ch| format!("{prefix}{ch}")))
+            .collect();
+        samples.extend(next.iter().cloned());
+        previous = next;
+    }
+
+    for mask in 0..(1 << restrictions.len()) {
+        let mut options: AlphanumericOptions = allowed.into_iter().collect();
+        for (index, restriction) in restrictions.into_iter().enumerate() {
+            if mask & (1 << index) != 0 {
+                options = options.with(restriction);
+            }
+        }
+        let keywords = options.canonical().keywords().collect::<Vec<_>>().join(", ");
+        let exported = json_schema(&format!("p: 'alphanumeric({keywords}; required)'\n"));
+        let validator = jsonschema::validator_for(&exported).expect("exported pattern compiles");
+        for sample in &samples {
+            let expected = sample.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_/ .".contains(ch))
+                && (!options.contains(BlockDoublePeriods) || !sample.contains(".."))
+                && sample.chars().next().is_none_or(|first| {
+                    (!options.contains(LeadingAlpha) || first.is_ascii_alphabetic())
+                        && (!options.contains(BlockLeadingDash) || first != '-')
+                        && (!options.contains(BlockLeadingSlash) || first != '/')
+                });
+            assert_eq!(options.accepts(sample), expected, "typed {keywords}: {sample:?}");
+            assert_eq!(
+                validator.is_valid(&json!({ "p": sample })),
+                expected,
+                "exported {keywords}: {sample:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn alphanumeric_never_coerces_numbers_or_booleans() {
     let schema = json_schema(
         "scalar: alphanumeric\nitems: alphanumeric[]\nflag: alphanumeric\n\

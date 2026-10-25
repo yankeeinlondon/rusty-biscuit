@@ -97,9 +97,35 @@ fn editor_rejects(diagnostics: &[Value]) -> bool {
         .any(|diagnostic| diagnostic["code"] == json!("dm.expression.incompatible_call") && diagnostic["severity"] == json!(1))
 }
 
+macro_rules! agreement_groups {
+    ($($name:ident: $start:literal..$end:literal),+ $(,)?) => {
+        const AGREEMENT_GROUPS: &[(usize, usize)] = &[$(($start, $end)),+];
+
+        $(
+            #[test]
+            fn $name() {
+                agree(FRONTMATTER, &CORPUS[$start..$end]);
+            }
+        )+
+    };
+}
+
+agreement_groups! {
+    composition_and_the_editor_reject_the_same_documents: 0..6,
+    composition_and_the_editor_reject_the_same_documents_second_group: 6..12,
+    composition_and_the_editor_reject_the_same_documents_third_group: 12..18,
+    composition_and_the_editor_reject_the_same_documents_fourth_group: 18..24,
+}
+
 #[test]
-fn composition_and_the_editor_reject_the_same_documents() {
-    agree(FRONTMATTER, CORPUS);
+fn every_agreement_document_is_scheduled_once_in_a_bounded_group() {
+    let mut next = 0;
+    for &(start, end) in AGREEMENT_GROUPS {
+        assert_eq!(start, next, "groups must cover the corpus in order without gaps or overlap");
+        assert!((1..=6).contains(&(end - start)), "each group must contain one to six documents");
+        next = end;
+    }
+    assert_eq!(next, CORPUS.len(), "schedule every corpus row when adding documents");
 }
 
 #[test]

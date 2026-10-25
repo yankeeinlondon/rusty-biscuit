@@ -150,6 +150,47 @@ parity! {
     crossed_union_pairs: "{ a: number, b: boolean } | { a: boolean, b: number }" => [{"a": "1", "b": "1"}];
 }
 
+fn assert_entry_points_outcome(ty: &str, value: &Value, expected: Outcome) {
+    assert_eq!(through_frontmatter(ty, value), expected, "frontmatter: {ty} with {value}");
+    assert_eq!(through_call(ty, value), expected, "binding: {ty} with {value}");
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(through_dispatch(ty, value), expected, "dispatch: {ty} with {value}");
+}
+
+#[test]
+fn variadic_tuple_constraints_agree_through_composition_and_dispatch() {
+    let ty = "tuple([string, ...number(integer; min(1))[]])";
+    for (value, expected) in [
+        (json!(["head"]), Outcome::Kept),
+        (json!(["head", 1, 2]), Outcome::Kept),
+        (json!(["head", "1", "2"]), Outcome::Converted(json!(["head", 1, 2]))),
+        (json!(["head", "1", "2.5"]), Outcome::Rejected),
+        (json!(["head", "1", "0"]), Outcome::Rejected),
+        (json!(["head", "pear"]), Outcome::Rejected),
+        (json!([]), Outcome::Rejected),
+        (json!("head"), Outcome::Rejected),
+    ] {
+        assert_entry_points_outcome(ty, &value, expected);
+    }
+}
+
+#[test]
+fn nested_tuple_spreads_keep_optional_slots_distinct_from_null() {
+    let ty = "tuple([{ id: number(required) }, ...tuple([boolean, number?])[]])";
+    for (value, expected) in [
+        (json!([{"id": 7}]), Outcome::Kept),
+        (
+            json!([{"id": "7"}, ["yes", "3"], ["off"]]),
+            Outcome::Converted(json!([{"id": 7}, [true, 3], [false]])),
+        ),
+        (json!([{"id": "7"}, ["yes", null]]), Outcome::Rejected),
+        (json!([{"id": "7"}, []]), Outcome::Rejected),
+        (json!([{}, [true]]), Outcome::Rejected),
+    ] {
+        assert_entry_points_outcome(ty, &value, expected);
+    }
+}
+
 /// The frontmatter-only rule list (`CoercionTarget`, the regex number test,
 /// the first-arm root-union and exactly-one property-union pickers) is
 /// deleted; frontmatter goes through `markdown::coercion`.

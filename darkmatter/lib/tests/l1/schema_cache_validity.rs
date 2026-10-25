@@ -192,6 +192,38 @@ fn editing_a_transitive_import_changes_the_verdict_and_deleting_it_fails() {
 }
 
 #[test]
+fn editing_and_deleting_either_side_of_a_cached_recursive_import_is_observed() {
+    let repo = Repo::new();
+    let api = repo.schemas();
+    let a = "kind: schema\ntypes:\n  node: \"{ name: literal(original; required), next: leaf(required)@./b.yaml }\"\n";
+    let b = "kind: schema\ntypes:\n  leaf: \"{ back: node[](required)@./a.yaml }\"\n";
+    repo.write("schemas/a.yaml", a);
+    repo.write("schemas/b.yaml", b);
+    let document = repo.document(
+        "doc.md",
+        "---\n$schema:\n  root: node(required)@./schemas/a.yaml\nroot:\n  name: original\n  next:\n    back:\n      - name: original\n        next:\n          back: []\n---\n",
+    );
+    assert!(valid(&api, &document));
+    assert!(valid(&api, &document), "warm the same long-lived cache");
+
+    for (path, original, edited) in [
+        ("schemas/a.yaml", a, a.replace("literal(original;", "literal(edited;")),
+        ("schemas/b.yaml", b, b.replace("back: node[]", "marker: string(required), back: node[]")),
+    ] {
+        repo.write(path, &edited);
+        assert!(!valid(&api, &document), "{path}: its new constraint must replace the cached body");
+        repo.write(path, original);
+        assert!(valid(&api, &document), "{path}: restoring the file restores the verdict");
+        repo.remove(path);
+        let error = api.validate(&document).expect_err("a removed cycle dependency cannot use a cached body");
+        let name = path.rsplit('/').next().expect("fixture file name");
+        assert!(matches!(&error, SchemaError::NoMatch { reference, .. } if reference.ends_with(name)), "{path}: {error:?}");
+        repo.write(path, original);
+        assert!(valid(&api, &document), "{path}: the same cache recovers after recreation");
+    }
+}
+
+#[test]
 fn a_nearer_import_candidate_added_then_removed_is_followed() {
     let repo = Repo::new();
     let api = repo.schemas();

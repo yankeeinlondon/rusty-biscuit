@@ -33,6 +33,21 @@ use common::{InlineAgentStub, launch_recorder, sh_quote};
 /// The cleanup warning the launch cleaner prints when it drops a value.
 const DROPPED: &str = "dropped optional schema property";
 
+macro_rules! launch_verdict_cases {
+    ($schedule:ident, $helper:ident; $($(#[$meta:meta])* $name:ident: $case:literal),+ $(,)?) => {
+        const $schedule: &[bool] = &[$($case),+];
+
+        $(
+            $(#[$meta])*
+            #[test]
+            fn $name() {
+                $helper($case);
+            }
+        )+
+    };
+}
+
+
 /// Collapse whitespace and block gutters so substring assertions survive the
 /// renderer's terminal-width wrapping.
 fn normalize(text: &str) -> String {
@@ -260,28 +275,31 @@ fn every_table_row_generates_its_tests() {
 /// `compose` reports an omitted authored required property as missing, and
 /// once the caller supplies it the payload still judges the Claudine controls
 /// beside it.
-#[test]
-fn compose_reports_an_omitted_authored_property_and_still_applies_the_payload() {
-    let (fixture, marker) = marker_fixture("launch-trigger-schemas-authored");
-    let valid = write_doc(
-        &fixture,
-        "valid.md",
-        "---\n$schema:\n  topic: string(required)\nstart:\n    - info: hi\n---\nPlan {{ topic }}\n",
-    );
-    let missing = run(&fixture, "compose", &valid, &[]);
-    assert_eq!(missing.code, Some(1), "{}", missing.stderr);
-    assert!(missing.stderr.contains("missing properties"), "{}", missing.stderr);
-    assert!(missing.stderr.contains("`topic`"), "{}", missing.stderr);
+launch_verdict_cases! {
+    AUTHORED_PROPERTY_SCHEDULE, authored_property_case;
+    compose_reports_an_omitted_authored_property_and_still_applies_the_payload: false,
+    compose_supplied_authored_property_still_checks_the_trigger_payload: true,
+}
 
-    let invalid = write_doc(
+fn authored_property_case(supplied: bool) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-authored");
+    let control = if supplied { "agent: []\n" } else { "start:\n    - info: hi\n" };
+    let doc = write_doc(
         &fixture,
-        "invalid.md",
-        "---\n$schema:\n  topic: string(required)\nagent: []\n---\nPlan {{ topic }}\n",
+        "prompt.md",
+        &format!("---\n$schema:\n  topic: string(required)\n{control}---\nPlan {{{{ topic }}}}\n"),
     );
-    let supplied = run(&fixture, "compose", &invalid, &["topic=diffs"]);
-    assert_schema_rejection(&supplied, &["/agent"], "the supplied run");
-    assert!(!supplied.stderr.contains("missing properties"), "{}", supplied.stderr);
-    assert!(!marker.exists(), "neither run launches the provider");
+    let setters = if supplied { &["topic=diffs"][..] } else { &[] };
+    let result = run(&fixture, "compose", &doc, setters);
+    if supplied {
+        assert_schema_rejection(&result, &["/agent"], "the supplied run");
+        assert!(!result.stderr.contains("missing properties"), "{}", result.stderr);
+    } else {
+        assert_eq!(result.code, Some(1), "{}", result.stderr);
+        assert!(result.stderr.contains("missing properties"), "{}", result.stderr);
+        assert!(result.stderr.contains("`topic`"), "{}", result.stderr);
+    }
+    assert!(!marker.exists(), "the rejected run launches no provider");
 }
 
 const DEFERRED_DOC: &str = "---\n$schema:\n  topic: string(required)\nprompt: Write about the topic\nstart:\n    - info: hi\n---\nBody\n";
@@ -545,27 +563,34 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
 /// embedded `sequence.yaml` payload, imports included, with no schema on
 /// disk: a malformed task field fails the run before any step launches. The
 /// unedited sequence launches its one step.
+launch_verdict_cases! {
+    SEQUENCE_TRIGGER_SCHEDULE, sequence_trigger_case;
+    #[cfg(unix)]
+    a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step: false,
+    #[cfg(unix)]
+    an_unedited_sequence_passes_the_embedded_trigger_and_launches_its_step: true,
+}
+
 #[cfg(unix)]
-#[test]
-fn a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step() {
+fn sequence_trigger_case(valid: bool) {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence-root");
     let launches = launch_recorder::install(&fixture, "goose", "exit 0");
     write_doc(&fixture, "step.md", "---\ntitle: Step\n---\nSTEP-BODY\n");
-    let valid = write_doc(&fixture, "valid.md", "---\nsequence:\n    - name: one\n      prompt: step.md\n---\nBody.\n");
-    let malformed = write_doc(
+    let extra = if valid { "" } else { "      operation: [review]\n" };
+    let doc = write_doc(
         &fixture,
-        "malformed.md",
-        "---\nsequence:\n    - name: one\n      prompt: step.md\n      operation: [review]\n---\nBody.\n",
+        "sequence.md",
+        &format!("---\nsequence:\n    - name: one\n      prompt: step.md\n{extra}---\nBody.\n"),
     );
-
-    let control = run(&fixture, "sequence", &valid, &[]);
-    assert_eq!(control.code, Some(0), "{}", control.stderr);
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", control.stderr);
-
-    let result = run(&fixture, "sequence", &malformed, &[]);
-    assert_eq!(result.code, Some(1), "{}", result.stderr);
-    assert!(result.stderr.contains("/sequence/0/operation"), "{}", result.stderr);
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "the malformed sequence launches nothing:\n{}", result.stderr);
+    let result = run(&fixture, "sequence", &doc, &[]);
+    if valid {
+        assert_eq!(result.code, Some(0), "{}", result.stderr);
+        assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    } else {
+        assert_eq!(result.code, Some(1), "{}", result.stderr);
+        assert!(result.stderr.contains("/sequence/0/operation"), "{}", result.stderr);
+        assert!(launch_recorder::launches(&launches).is_empty(), "the malformed sequence launches nothing:\n{}", result.stderr);
+    }
 }
 
 /// The first attempt edits the document to carry an invalid control and fails;
@@ -617,25 +642,25 @@ fn assert_completion_names(stderr: &str, property: &str) {
 
 /// The agent's valid `model` passes completion and an invalid one fails it,
 /// so the payload frozen at launch judges what the agent wrote.
-#[cfg(unix)]
-#[test]
-fn inline_completion_rejects_an_invalid_control_the_agent_wrote() {
-    let fixture = CliProcessFixture::named("launch-trigger-schemas-completion");
-    let source = "---\nprompt: Write the body\n---\nBody\n";
-    let doc = write_doc(&fixture, "prompt.md", source);
-    InlineAgentStub::new(&doc)
-        .frontmatter_additions("model: gpt-x\n")
-        .install(fixture.bin_dir(), "goose");
-    let valid = run(&fixture, "inline-compose", &doc, &[]);
-    assert_eq!(valid.code, Some(0), "{}", valid.stderr);
+launch_verdict_cases! {
+    INLINE_COMPLETION_SCHEDULE, inline_completion_case;
+    #[cfg(unix)]
+    inline_completion_rejects_an_invalid_control_the_agent_wrote: false,
+    #[cfg(unix)]
+    inline_completion_accepts_a_valid_control_the_agent_wrote: true,
+}
 
-    fs::write(&doc, source).unwrap();
-    InlineAgentStub::new(&doc)
-        .frontmatter_additions("model: {x: 1}\n")
-        .install(fixture.bin_dir(), "goose");
-    let invalid = run(&fixture, "inline-compose", &doc, &[]);
-    assert_eq!(invalid.code, Some(1), "{}", invalid.stderr);
-    assert_completion_names(&invalid.stderr, "model");
+#[cfg(unix)]
+fn inline_completion_case(valid: bool) {
+    let fixture = CliProcessFixture::named("launch-trigger-schemas-completion");
+    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: Write the body\n---\nBody\n");
+    let addition = if valid { "model: gpt-x\n" } else { "model: {x: 1}\n" };
+    InlineAgentStub::new(&doc).frontmatter_additions(addition).install(fixture.bin_dir(), "goose");
+    let result = run(&fixture, "inline-compose", &doc, &[]);
+    assert_eq!(result.code, Some(if valid { 0 } else { 1 }), "{}", result.stderr);
+    if !valid {
+        assert_completion_names(&result.stderr, "model");
+    }
 }
 
 /// With an authored `$schema`, the completion block keeps its property table
@@ -668,6 +693,23 @@ fn write_git_skeleton(dir: &Path) {
     fs::create_dir_all(git.join("refs/heads")).unwrap();
     fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
     fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
+}
+
+#[test]
+fn a_malformed_disk_trigger_blocks_launch_instead_of_using_the_embedded_copy() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-broken-disk");
+    write_git_skeleton(fixture.cwd());
+    let schemas = fixture.cwd().join("schemas");
+    fs::create_dir_all(&schemas).unwrap();
+    fs::write(schemas.join("claudine.yaml"), "kind: schema-trigger\nmatch: 42\n$schema: {}\n").unwrap();
+    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: review the diff\n---\nBody\n");
+
+    let result = run(&fixture, "inline-compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(1), "{}", result.stderr);
+    assert!(result.stderr.contains("claudine.yaml"), "the failed source is visible:\n{}", result.stderr);
+    assert!(result.stderr.contains("match"), "the trigger grammar failure is visible:\n{}", result.stderr);
+    assert!(!marker.exists(), "the embedded fallback must not permit a launch:\n{}", result.stderr);
 }
 
 /// A disk `claudine.yaml` that replaces the embedded one and loosens
@@ -714,23 +756,38 @@ fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
 
 /// `mode: "{{ m }}"` is not judged as authored: a supplied member launches,
 /// and a frontmatter non-member fails on the composed value.
-#[test]
-fn a_templated_control_is_judged_after_composition() {
-    let (fixture, marker) = marker_fixture("launch-trigger-schemas-templated");
-    let supplied = write_doc(&fixture, "supplied.md", "---\nmode: \"{{ m }}\"\nstart:\n    - info: hi\n---\nBody\n");
-    let launched = run(&fixture, "compose", &supplied, &["--set", r#"{"m":"append"}"#]);
-    assert_eq!(launched.code, Some(0), "{}", launched.stderr);
-    assert!(marker.exists(), "{}", launched.stderr);
-    fs::remove_file(&marker).unwrap();
+launch_verdict_cases! {
+    TEMPLATED_CONTROL_SCHEDULE, templated_control_case;
+    a_templated_control_is_judged_after_composition: true,
+    a_templated_control_rejects_its_composed_non_member: false,
+}
 
-    let composed = write_doc(
+fn templated_control_case(valid: bool) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-templated");
+    let value = if valid { "" } else { "m: bogus\n" };
+    let doc = write_doc(
         &fixture,
-        "composed.md",
-        "---\nmode: \"{{ m }}\"\nm: bogus\nstart:\n    - info: hi\n---\nBody\n",
+        "prompt.md",
+        &format!("---\nmode: \"{{{{ m }}}}\"\n{value}start:\n    - info: hi\n---\nBody\n"),
     );
-    let rejected = run(&fixture, "compose", &composed, &[]);
-    assert_schema_rejection(&rejected, &["/mode", "bogus"], "the composed value");
-    assert!(!marker.exists(), "{}", rejected.stderr);
+    let setters = if valid { &["--set", r#"{"m":"append"}"#][..] } else { &[] };
+    let result = run(&fixture, "compose", &doc, setters);
+    if valid {
+        assert_eq!(result.code, Some(0), "{}", result.stderr);
+        assert!(marker.exists(), "{}", result.stderr);
+    } else {
+        assert_schema_rejection(&result, &["/mode", "bogus"], "the composed value");
+        assert!(!marker.exists(), "{}", result.stderr);
+    }
+}
+
+#[test]
+fn every_split_launch_verdict_has_its_positive_and_negative_case() {
+    for schedule in [AUTHORED_PROPERTY_SCHEDULE, SEQUENCE_TRIGGER_SCHEDULE, INLINE_COMPLETION_SCHEDULE, TEMPLATED_CONTROL_SCHEDULE] {
+        let mut cases = schedule.to_vec();
+        cases.sort();
+        assert_eq!(cases, [false, true], "schedule each verdict case exactly once");
+    }
 }
 
 #[cfg(unix)]

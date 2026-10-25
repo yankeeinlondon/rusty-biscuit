@@ -186,40 +186,59 @@ fn a_run_keeps_its_own_observation_after_it_stages() {
 /// A proxy target is a new run. It observes what its source staged whether or
 /// not the source named the property first, and the launch identity does not
 /// move across the hop.
-#[test]
-fn a_proxy_target_observes_its_sources_staging_regardless_of_first_mention() {
+fn assert_proxy_target_staging(source_mentions: bool) {
     let target = format!(
         "---\nsuccess:\n{}---\ntarget body\n",
         record_identity("target")
     );
-    for (label, source_mentions) in [("mentioned", true), ("unmentioned", false)] {
-        let fixture = repo(&format!("ctx-per-run-proxy-{label}"));
-        doc(&fixture, "target.md", &target);
-        let source_record = match source_mentions {
-            true => record_identity("source"),
-            false => String::new(),
-        };
-        let file = doc(
-            &fixture,
-            "router.md",
-            &format!(
-                "---\nstart:\n{source_record}        - shell: \"git add a.txt\"\n        - proxy: ./target.md\n---\nrouter body\n"
-            ),
-        );
+    let label = if source_mentions { "mentioned" } else { "unmentioned" };
+    let fixture = repo(&format!("ctx-per-run-proxy-{label}"));
+    doc(&fixture, "target.md", &target);
+    let source_record = match source_mentions {
+        true => record_identity("source"),
+        false => String::new(),
+    };
+    let file = doc(
+        &fixture,
+        "router.md",
+        &format!(
+            "---\nstart:\n{source_record}        - shell: \"git add a.txt\"\n        - proxy: ./target.md\n---\nrouter body\n"
+        ),
+    );
 
-        let run = run(&fixture, &["compose", "--claude", &file]);
+    let run = run(&fixture, &["compose", "--claude", &file]);
 
-        assert_eq!(run.code, Some(0), "{label}: {}", run.output);
-        let lines = runs(&fixture);
-        let target_line = lines.last().expect("the target recorded its run");
-        assert_eq!(field(target_line, "staged"), "1", "{label}: {lines:?}");
-        if source_mentions {
-            assert_eq!(field(&lines[0], "staged"), "0", "{lines:?}");
-            for key in ["cwd", "root", "branch"] {
-                assert_eq!(field(&lines[0], key), field(target_line, key), "`{key}`: {lines:?}");
-            }
+    assert_eq!(run.code, Some(0), "{label}: {}", run.output);
+    let lines = runs(&fixture);
+    let target_line = lines.last().expect("the target recorded its run");
+    assert_eq!(field(target_line, "staged"), "1", "{label}: {lines:?}");
+    if source_mentions {
+        assert_eq!(field(&lines[0], "staged"), "0", "{lines:?}");
+        for key in ["cwd", "root", "branch"] {
+            assert_eq!(field(&lines[0], key), field(target_line, key), "`{key}`: {lines:?}");
         }
     }
+}
+
+macro_rules! proxy_staging_tests {
+    ($($test:ident => $mentioned:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_proxy_target_staging($mentioned);
+            }
+        )*
+
+        #[test]
+        fn proxy_staging_cases_cover_both_first_mention_states() {
+            assert_eq!([$($mentioned),*], [true, false]);
+        }
+    };
+}
+
+proxy_staging_tests! {
+    a_proxy_target_observes_its_sources_staging_regardless_of_first_mention => true,
+    an_unmentioned_proxy_target_observes_its_sources_staging => false,
 }
 
 /// A branch created between runs is the next run's `ctx.branch`, while the

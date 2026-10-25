@@ -248,8 +248,8 @@ fn exports_trigger(library: &str, probes: &[ExportProbe]) -> String {
     text
 }
 
-/// Resolves every export of `library` through the embedded seam with no disk
-/// schemas, and judges each export's probes.
+/// Resolves and judges the supplied exports through the embedded seam with no
+/// disk schemas.
 fn assert_exports_resolve_embedded(library: &'static str, probes: &[ExportProbe]) {
     let bare = Bare::new();
     let exports_name: &'static str = Box::leak(format!("exports-{library}").into_boxed_str());
@@ -300,9 +300,36 @@ fn embedded_linking_exports_resolve_without_disk_schemas() {
     assert_exports_resolve_embedded("linking.yaml", LINKING_PROBES);
 }
 
-#[test]
-fn embedded_sequence_types_exports_resolve_without_disk_schemas() {
-    assert_exports_resolve_embedded("sequence-types.yaml", SEQUENCE_TYPES_PROBES);
+macro_rules! sequence_export_tests {
+    ($($test:ident => $export:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                let probe = SEQUENCE_TYPES_PROBES
+                    .iter()
+                    .find(|probe| probe.0 == $export)
+                    .expect("the export has positive and negative probes");
+                assert_exports_resolve_embedded(
+                    "sequence-types.yaml",
+                    std::slice::from_ref(probe),
+                );
+            }
+        )*
+
+        #[test]
+        fn every_sequence_export_probe_has_one_scheduled_test() {
+            let scheduled = [$($export),*];
+            let probes: Vec<_> = SEQUENCE_TYPES_PROBES.iter().map(|probe| probe.0).collect();
+            assert_eq!(scheduled.as_slice(), probes.as_slice());
+        }
+    };
+}
+
+sequence_export_tests! {
+    embedded_sequence_types_exports_resolve_without_disk_schemas => "steps",
+    embedded_sequence_step_export_resolves_without_disk_schemas => "step",
+    embedded_sequence_task_export_resolves_without_disk_schemas => "task",
+    embedded_sequence_group_export_resolves_without_disk_schemas => "group",
 }
 
 /// The resolved size limit for Claudine's embedded trigger payloads: the
@@ -1114,15 +1141,6 @@ passive_parity_tests! {
     passive_parity_start_number => ("start-number", include_str!("../fixtures/claudine-schemas/start-number.md"));
     passive_parity_agent_empty_list => ("agent-empty-list", include_str!("../fixtures/claudine-schemas/agent-empty-list.md"));
     passive_parity_loop_number => ("loop-number", include_str!("../fixtures/claudine-schemas/loop-number.md"));
-    passive_parity_empty_frontmatter =>
-        ("empty-frontmatter", include_str!("../fixtures/claudine-schemas/empty-frontmatter.md"));
-    passive_parity_unrelated_ticket => ("unrelated-ticket", include_str!("../fixtures/claudine-schemas/unrelated-ticket.md"));
-    passive_parity_null_identifiers => ("null-identifiers", include_str!("../fixtures/claudine-schemas/null-identifiers.md"));
-    passive_parity_controls_beside_ticket =>
-        ("controls-beside-ticket", include_str!("../fixtures/claudine-schemas/controls-beside-ticket.md"));
-    passive_parity_prompt_with_malformed_sequence =>
-        ("prompt-with-malformed-sequence", include_str!("../fixtures/claudine-schemas/prompt-with-malformed-sequence.md"));
-    passive_parity_linked_prompt => ("linked-prompt", include_str!("../fixtures/claudine-schemas/linked-prompt.md"));
     passive_parity_generated_verb_typed_value =>
         ("generated-verb-typed-value", include_str!("../fixtures/claudine-schemas/generated-verb-typed-value.md"));
     passive_parity_generated_verb_wrong_type =>
@@ -1163,6 +1181,15 @@ passive_parity_tests! {
         ("long-forms-in-loop-bundle", include_str!("../fixtures/claudine-schemas/long-forms-in-loop-bundle.md"));
     passive_parity_conditional_root_dictionary =>
         ("conditional-root-dictionary", include_str!("../fixtures/claudine-schemas/conditional-root-dictionary.md"));
+    passive_parity_empty_frontmatter =>
+        ("empty-frontmatter", include_str!("../fixtures/claudine-schemas/empty-frontmatter.md"));
+    passive_parity_unrelated_ticket => ("unrelated-ticket", include_str!("../fixtures/claudine-schemas/unrelated-ticket.md"));
+    passive_parity_null_identifiers => ("null-identifiers", include_str!("../fixtures/claudine-schemas/null-identifiers.md"));
+    passive_parity_controls_beside_ticket =>
+        ("controls-beside-ticket", include_str!("../fixtures/claudine-schemas/controls-beside-ticket.md"));
+    passive_parity_prompt_with_malformed_sequence =>
+        ("prompt-with-malformed-sequence", include_str!("../fixtures/claudine-schemas/prompt-with-malformed-sequence.md"));
+    passive_parity_linked_prompt => ("linked-prompt", include_str!("../fixtures/claudine-schemas/linked-prompt.md"));
 }
 
 #[test]

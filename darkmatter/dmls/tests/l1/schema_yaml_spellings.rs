@@ -388,7 +388,35 @@ fn completion_on_continuation_text_and_indentless_items_replaces_the_authored_to
                     position(&text, token_start, encoding),
                     "{encoding} {name}: {item:#?}"
                 );
+                assert_eq!(
+                    item["textEdit"]["range"]["end"],
+                    position(&text, cursor, encoding),
+                    "{encoding} {name}: replacement must stop before arguments or siblings"
+                );
+                let replacement = if label == "max" { "max(number)" } else { label };
+                assert_eq!(item["textEdit"]["newText"], replacement, "{encoding} {name}");
             }
+        }
+        fixture.shutdown();
+    }
+}
+
+#[test]
+fn completion_after_non_bmp_text_on_a_continuation_uses_negotiated_columns() {
+    let body = "kind: schema\ntypes:\n  t: string(min(1);\n    suggest('😀'); ma\n  next: boolean\n";
+    for encoding in ["utf-8", "utf-16"] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = start(&workspace, encoding);
+        for (text, ending) in [(body.to_string(), "lf"), (crlf(body), "crlf")] {
+            let uri = open(&fixture, &workspace, &format!("{ending}-unicode.yaml"), &text);
+            let start = text.find("; ma").expect("partial token") + 2;
+            let item = completion(&mut fixture, &uri, position(&text, start + 2, encoding), "max")
+                .expect("max completion after the non-BMP suggestion");
+            assert_eq!(
+                item["textEdit"]["range"],
+                json!({ "start": position(&text, start, encoding), "end": position(&text, start + 2, encoding) })
+            );
+            assert_eq!(item["textEdit"]["newText"], "max(number)");
         }
         fixture.shutdown();
     }

@@ -424,12 +424,14 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
     }
 }
 
-fn fixtures() -> Fixtures {
+fn fixtures(host_schema: &str) -> Fixtures {
     let plain_cli = CliProcessFixture::named("entry_point_parity");
+    plain_cli.seed_inline_metadata_schema(host_schema);
     let plain = ParityFixture::create(plain_cli.workspace_path());
     std::fs::write(value_document(&plain), Consumer::SchemaFile.document("placeholder"))
         .expect("write the value document");
     let declared_cli = CliProcessFixture::named("entry_point_parity_completion");
+    declared_cli.seed_inline_metadata_schema(host_schema);
     let declared = ParityFixture::create(declared_cli.workspace_path());
     declare_target_schemas(&declared);
     Fixtures { plain: (plain_cli, plain), declared: (declared_cli, declared) }
@@ -443,7 +445,7 @@ fn is_candidate_sweep(row: &Row) -> bool {
 }
 
 /// How many dedicated tests split each candidate-sweep row's candidates.
-const CANDIDATE_PARTS: usize = 3;
+const CANDIDATE_PARTS: usize = 9;
 
 /// The candidates of part `part`: every `CANDIDATE_PARTS`-th one.
 fn candidate_part(candidates: Vec<PathBuf>, part: usize) -> Vec<PathBuf> {
@@ -454,8 +456,8 @@ fn candidate_part(candidates: Vec<PathBuf>, part: usize) -> Vec<PathBuf> {
 /// The expectation narrows to the same candidates, so across the parts every
 /// candidate is checked against its own expected verdict: an admitted
 /// candidate must be expected, and an expected one admitted.
-fn run_candidate_part(sweep: usize, part: usize) {
-    let fixtures = fixtures();
+fn run_candidate_part(sweep: usize, part: usize, host_schema: &str) {
+    let fixtures = fixtures(host_schema);
     let row = rows_for(Owner::ClaudineCli).into_iter().filter(is_candidate_sweep).nth(sweep).expect("a sweep row");
     let (cli, fixture) = fixtures.for_entry(row.entry());
     let Row::GlobValue(cell) = row else { unreachable!("{row:?} is not a candidate sweep") };
@@ -476,25 +478,16 @@ fn run_candidate_part(sweep: usize, part: usize) {
     assert!(verdict.is_ok(), "{row:?} part {part}: {}", verdict.unwrap_err());
 }
 
-/// How many tests the matrix's rows are dealt across.
-const SHARDS: usize = 6;
-
-/// Runs every `SHARDS`-th row of the matrix, starting at `shard`. The rows
-/// are spawn-bound, so nextest runs the shards as separate processes in
-/// parallel. Each shard keeps the check that every owned entry point ran a
-/// cell, which holds because rows are grouped by entry point and each entry
-/// point has far more than `SHARDS` rows.
-fn run_matrix_shard(shard: usize) {
-    let fixtures = fixtures();
+/// Each ordinary row is independently scheduled; Nextest owns parallelism.
+fn run_matrix_row(index: usize, host_schema: &str) {
+    let fixtures = fixtures(host_schema);
     let rows: Vec<Row> = rows_for(Owner::ClaudineCli)
         .into_iter()
         .filter(|row| !is_candidate_sweep(row))
-        .enumerate()
-        .filter_map(|(index, row)| (index % SHARDS == shard).then_some(row))
+        .nth(index)
+        .into_iter()
         .collect();
 
-    // Documents are written before the spawns run concurrently, so two
-    // threads never write one file.
     for row in &rows {
         let (_, fixture) = fixtures.for_entry(row.entry());
         match row {
@@ -517,128 +510,136 @@ fn run_matrix_shard(shard: usize) {
             }
         }
     }
-    const THREADS: usize = 4;
-    let chunk = rows.len().div_ceil(THREADS).max(1);
-    let results: Vec<(Row, Expected, Observed)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = rows
-            .chunks(chunk)
-            .map(|rows| {
-                let fixtures = &fixtures;
-                scope.spawn(move || {
-                    rows.iter()
-                        .map(|row| {
-                            let (expected, observed) = run(fixtures, row);
-                            (*row, expected, observed)
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().unwrap()).collect()
-    });
+    let results: Vec<(Row, Expected, Observed)> = rows
+        .iter()
+        .map(|row| {
+            let (expected, observed) = run(&fixtures, row);
+            (*row, expected, observed)
+        })
+        .collect();
 
     let mut report = ParityReport::new(Owner::ClaudineCli);
     for (row, expected, observed) in &results {
         let (_, fixture) = fixtures.for_entry(row.entry());
         report.record(fixture, row, expected, observed);
     }
-    report.assert_parity();
+    report.assert_cells_agree();
+}
+
+macro_rules! matrix_rows {
+    ($($name:ident: $index:literal),+ $(,)?) => {
+        const SCHEDULED_MATRIX_ROWS: &[usize] = &[$($index),+];
+
+        $(
+            #[test]
+            fn $name() {
+                let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+                run_matrix_row($index, include_str!("../../../schemas/inline-compose.yaml"));
+            }
+        )+
+    };
+}
+
+matrix_rows! {
+    claudine_entry_points_agree_on_every_reference: 0,
+    claudine_entry_points_agree_on_every_reference_shard_1: 1,
+    claudine_entry_points_agree_on_every_reference_shard_2: 2,
+    claudine_entry_points_agree_on_every_reference_shard_3: 3,
+    claudine_entry_points_agree_on_every_reference_shard_4: 4,
+    claudine_entry_points_agree_on_every_reference_shard_5: 5,
+    claudine_entry_points_agree_on_every_reference_shard_6: 6,
+    claudine_entry_points_agree_on_every_reference_shard_7: 7,
+    claudine_entry_points_agree_on_every_reference_shard_8: 8,
+    claudine_entry_points_agree_on_every_reference_shard_9: 9,
+    claudine_entry_points_agree_on_every_reference_shard_10: 10,
+    claudine_entry_points_agree_on_every_reference_shard_11: 11,
+    claudine_entry_points_agree_on_every_reference_shard_12: 12,
+    claudine_entry_points_agree_on_every_reference_shard_13: 13,
+    claudine_entry_points_agree_on_every_reference_shard_14: 14,
+    claudine_entry_points_agree_on_every_reference_shard_15: 15,
+    claudine_entry_points_agree_on_every_reference_shard_16: 16,
+    claudine_entry_points_agree_on_every_reference_shard_17: 17,
+    claudine_entry_points_agree_on_every_reference_shard_18: 18,
+    claudine_entry_points_agree_on_every_reference_shard_19: 19,
+    claudine_entry_points_agree_on_every_reference_shard_20: 20,
+    claudine_entry_points_agree_on_every_reference_shard_21: 21,
+    claudine_entry_points_agree_on_every_reference_shard_22: 22,
+    claudine_entry_points_agree_on_every_reference_shard_23: 23,
+    claudine_entry_points_agree_on_every_reference_shard_24: 24,
+    claudine_entry_points_agree_on_every_reference_shard_25: 25,
+    claudine_entry_points_agree_on_every_reference_shard_26: 26,
+    claudine_entry_points_agree_on_every_reference_shard_27: 27,
+    claudine_entry_points_agree_on_every_reference_shard_28: 28,
+    claudine_entry_points_agree_on_every_reference_shard_29: 29,
+    claudine_entry_points_agree_on_every_reference_shard_30: 30,
+    claudine_entry_points_agree_on_every_reference_shard_31: 31,
+    claudine_entry_points_agree_on_every_reference_shard_32: 32,
+    claudine_entry_points_agree_on_every_reference_shard_33: 33,
+    claudine_entry_points_agree_on_every_reference_shard_34: 34,
+    claudine_entry_points_agree_on_every_reference_shard_35: 35,
+    claudine_entry_points_agree_on_every_reference_shard_36: 36,
+    claudine_entry_points_agree_on_every_reference_shard_37: 37,
+    claudine_entry_points_agree_on_every_reference_shard_38: 38,
+    claudine_entry_points_agree_on_every_reference_shard_39: 39,
+    claudine_entry_points_agree_on_every_reference_shard_40: 40,
+    claudine_entry_points_agree_on_every_reference_shard_41: 41,
+    claudine_entry_points_agree_on_every_reference_shard_42: 42,
+    claudine_entry_points_agree_on_every_reference_shard_43: 43,
+    claudine_entry_points_agree_on_every_reference_shard_44: 44,
+    claudine_entry_points_agree_on_every_reference_shard_45: 45,
+    claudine_entry_points_agree_on_every_reference_shard_46: 46,
+    claudine_entry_points_agree_on_every_reference_shard_47: 47,
+    claudine_entry_points_agree_on_every_reference_shard_48: 48,
+    claudine_entry_points_agree_on_every_reference_shard_49: 49,
+    claudine_entry_points_agree_on_every_reference_shard_50: 50,
+    claudine_entry_points_agree_on_every_reference_shard_51: 51,
+    claudine_entry_points_agree_on_every_reference_shard_52: 52,
+}
+
+macro_rules! candidate_rows {
+    ($($name:ident: ($sweep:literal, $part:literal)),+ $(,)?) => {
+        const SCHEDULED_CANDIDATE_ROWS: &[(usize, usize)] = &[$(($sweep, $part)),+];
+
+        $(
+            #[test]
+            fn $name() {
+                let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+                run_candidate_part($sweep, $part, include_str!("../../../schemas/inline-compose.yaml"));
+            }
+        )+
+    };
+}
+
+candidate_rows! {
+    supplied_match_validation_row_0_candidates_part_0: (0, 0),
+    supplied_match_validation_row_0_candidates_part_1: (0, 1),
+    supplied_match_validation_row_0_candidates_part_2: (0, 2),
+    supplied_match_validation_row_0_candidates_part_3: (0, 3),
+    supplied_match_validation_row_0_candidates_part_4: (0, 4),
+    supplied_match_validation_row_0_candidates_part_5: (0, 5),
+    supplied_match_validation_row_0_candidates_part_6: (0, 6),
+    supplied_match_validation_row_0_candidates_part_7: (0, 7),
+    supplied_match_validation_row_0_candidates_part_8: (0, 8),
+    supplied_match_validation_row_1_candidates_part_0: (1, 0),
+    supplied_match_validation_row_1_candidates_part_1: (1, 1),
+    supplied_match_validation_row_1_candidates_part_2: (1, 2),
+    supplied_match_validation_row_1_candidates_part_3: (1, 3),
+    supplied_match_validation_row_1_candidates_part_4: (1, 4),
+    supplied_match_validation_row_1_candidates_part_5: (1, 5),
+    supplied_match_validation_row_1_candidates_part_6: (1, 6),
+    supplied_match_validation_row_1_candidates_part_7: (1, 7),
+    supplied_match_validation_row_1_candidates_part_8: (1, 8),
 }
 
 #[test]
-fn claudine_entry_points_agree_on_every_reference() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
+fn every_matrix_row_is_scheduled_once_and_every_entry_point_has_rows() {
     let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(0);
-}
-
-#[test]
-fn claudine_entry_points_agree_on_every_reference_shard_1() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(1);
-}
-
-#[test]
-fn claudine_entry_points_agree_on_every_reference_shard_2() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(2);
-}
-
-#[test]
-fn claudine_entry_points_agree_on_every_reference_shard_3() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(3);
-}
-
-#[test]
-fn claudine_entry_points_agree_on_every_reference_shard_4() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(4);
-}
-
-#[test]
-fn claudine_entry_points_agree_on_every_reference_shard_5() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_matrix_shard(5);
-}
-
-#[test]
-fn supplied_match_validation_row_0_candidates_part_0() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(0, 0);
-}
-
-#[test]
-fn supplied_match_validation_row_0_candidates_part_1() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(0, 1);
-}
-
-#[test]
-fn supplied_match_validation_row_0_candidates_part_2() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(0, 2);
-}
-
-#[test]
-fn supplied_match_validation_row_1_candidates_part_0() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(1, 0);
-}
-
-#[test]
-fn supplied_match_validation_row_1_candidates_part_1() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(1, 1);
-}
-
-#[test]
-fn supplied_match_validation_row_1_candidates_part_2() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-    run_candidate_part(1, 2);
+    let rows: Vec<Row> = rows_for(Owner::ClaudineCli).into_iter().filter(|row| !is_candidate_sweep(row)).collect();
+    let expected: Vec<usize> = (0..rows.len()).collect();
+    assert_eq!(SCHEDULED_MATRIX_ROWS, expected, "schedule every ordinary row exactly once");
+    for entry in EntryPoint::ALL.into_iter().filter(|entry| entry.owner() == Owner::ClaudineCli) {
+        assert!(rows.iter().any(|row| row.entry() == entry), "{entry:?} has no ordinary row");
+    }
 }
 
 /// The parts of [`candidate_part`] cover every glob candidate exactly once, and
@@ -654,7 +655,13 @@ fn candidate_parts_cover_every_glob_candidate_once() {
     let mut want = all;
     want.sort();
     assert_eq!(union, want);
-    assert_eq!(rows_for(Owner::ClaudineCli).iter().filter(|row| is_candidate_sweep(row)).count(), 2);
+    let sweeps = rows_for(Owner::ClaudineCli).iter().filter(|row| is_candidate_sweep(row)).count();
+    assert_eq!(sweeps, 2);
+    assert_eq!(CANDIDATE_PARTS, matrix::GLOB_FILES.len(), "each test must execute one candidate");
+    let scheduled: Vec<(usize, usize)> = (0..sweeps)
+        .flat_map(|sweep| (0..CANDIDATE_PARTS).map(move |part| (sweep, part)))
+        .collect();
+    assert_eq!(SCHEDULED_CANDIDATE_ROWS, scheduled, "schedule every candidate of every sweep exactly once");
 }
 
 /// `claudine <args>` launched from the cross-repository fixture's launch

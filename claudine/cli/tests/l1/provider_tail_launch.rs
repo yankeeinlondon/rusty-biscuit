@@ -340,8 +340,7 @@ const FLAG_SEPARATE: &str = "sk-proj-flagseparate0123456789";
 /// sensitive-flag and short-attachment rules cover, on every surface of all
 /// three composition commands and the direct wrapper, while the child gets
 /// the original tokens.
-#[test]
-fn embedded_credentials_reach_the_child_and_no_display_surface() {
+fn assert_embedded_credentials(command: &str) {
     let assignment = format!("api_key={EMBEDDED}");
     let long = format!("--config={LONG_ATTACHED}");
     let short = format!("-c{SHORT_ATTACHED}");
@@ -368,74 +367,96 @@ fn embedded_credentials_reach_the_child_and_no_display_surface() {
     ];
     let secrets = [EMBEDDED, LONG_ATTACHED, SHORT_ATTACHED, FLAG_ATTACHED, FLAG_SEPARATE];
 
-    for command in ["compose", "inline-compose", "sequence", "codex"] {
-        let fixture = CliProcessFixture::named(&format!("tail-embedded-{command}"));
-        let body = fixture.cwd().join("inline.md");
-        let log = stub(
-            &fixture,
-            "codex",
-            &format!("printf '\\nAgent wrote this.\\n' >> '{}'\nexit 0", body.display()),
-        );
-        let target = match command {
-            "compose" => doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n"),
-            "inline-compose" => doc(&fixture, "inline.md", "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n"),
-            "sequence" => {
-                doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n");
-                doc(&fixture, "seq.md", "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n")
-            }
-            _ => "do the thing".to_string(),
-        };
-        let tail: &[&str] = if command == "codex" { &direct_tail } else { &composition_tail };
-        let with = |extra: &[&str]| {
-            let mut args = vec![command];
-            args.extend(extra);
-            if command == "codex" {
-                args.extend(tail);
-                args.push(target.as_str());
-            } else {
-                args.extend([target.as_str(), "--codex"]);
-                args.extend(tail);
-            }
-            args.into_iter().map(str::to_owned).collect::<Vec<_>>()
-        };
-
-        let output = fixture.command().args(with(&["--dry-run"])).output().unwrap();
-        let dry_run = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-        assert!(output.status.success(), "{command} dry run:\n{dry_run}");
-        // The dry-run table wraps cells anywhere and the direct command line
-        // is shell-quoted, so compare without whitespace, borders, or quotes.
-        let compact: String = dry_run
-            .chars()
-            .filter(|ch| !ch.is_whitespace() && !matches!(ch, '│' | '\''))
-            .collect();
-        let shown_masked = if command == "codex" { "--api-key=****" } else { "--api-key****" };
-        for masked in ["-capi_key=****", "--config=****", "-c****", "--token=****", shown_masked] {
-            assert!(compact.contains(masked), "{command} dry run lacks {masked}:\n{dry_run}");
+    let fixture = CliProcessFixture::named(&format!("tail-embedded-{command}"));
+    let body = fixture.cwd().join("inline.md");
+    let log = stub(
+        &fixture,
+        "codex",
+        &format!("printf '\\nAgent wrote this.\\n' >> '{}'\nexit 0", body.display()),
+    );
+    let target = match command {
+        "compose" => doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n"),
+        "inline-compose" => doc(&fixture, "inline.md", "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n"),
+        "sequence" => {
+            doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n");
+            doc(&fixture, "seq.md", "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n")
         }
-
-        let output = fixture
-            .command()
-            .env("RUST_LOG", "claudine=debug")
-            .args(with(&[]))
-            .output()
-            .unwrap();
-        let launched = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-        assert!(output.status.success(), "{command} launch:\n{launched}");
-
-        for (surface, text) in [("dry run", &dry_run), ("notice/debug", &launched)] {
-            for secret in secrets {
-                assert!(!text.contains(secret), "{command}: {secret} leaked on {surface}:\n{text}");
-            }
+        _ => "do the thing".to_string(),
+    };
+    let tail: &[&str] = if command == "codex" { &direct_tail } else { &composition_tail };
+    let with = |extra: &[&str]| {
+        let mut args = vec![command];
+        args.extend(extra);
+        if command == "codex" {
+            args.extend(tail);
+            args.push(target.as_str());
+        } else {
+            args.extend([target.as_str(), "--codex"]);
+            args.extend(tail);
         }
-        let params = fs::read_to_string(log.join("params-0")).unwrap();
-        assert!(params.contains("api_key=****"), "{command} AGENT_PARAMS: {params}");
-        for secret in secrets {
-            assert!(!params.contains(secret), "{command}: {secret} leaked into AGENT_PARAMS: {params}");
-        }
-        let launches = launches(&log);
-        assert_eq!(launches.len(), 1, "{command}: {launches:?}");
-        assert_eq!(occurrences(&launches[0], tail), 1, "{command}: the child gets the tail unchanged: {launches:?}");
+        args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+
+    let output = fixture.command().args(with(&["--dry-run"])).output().unwrap();
+    let dry_run = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{command} dry run:\n{dry_run}");
+    // The dry-run table wraps cells anywhere and the direct command line
+    // is shell-quoted, so compare without whitespace, borders, or quotes.
+    let compact: String = dry_run
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && !matches!(ch, '│' | '\''))
+        .collect();
+    let shown_masked = if command == "codex" { "--api-key=****" } else { "--api-key****" };
+    for masked in ["-capi_key=****", "--config=****", "-c****", "--token=****", shown_masked] {
+        assert!(compact.contains(masked), "{command} dry run lacks {masked}:\n{dry_run}");
     }
+
+    let output = fixture
+        .command()
+        .env("RUST_LOG", "claudine=debug")
+        .args(with(&[]))
+        .output()
+        .unwrap();
+    let launched = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{command} launch:\n{launched}");
+
+    for (surface, text) in [("dry run", &dry_run), ("notice/debug", &launched)] {
+        for secret in secrets {
+            assert!(!text.contains(secret), "{command}: {secret} leaked on {surface}:\n{text}");
+        }
+    }
+    let params = fs::read_to_string(log.join("params-0")).unwrap();
+    assert!(params.contains("api_key=****"), "{command} AGENT_PARAMS: {params}");
+    for secret in secrets {
+        assert!(!params.contains(secret), "{command}: {secret} leaked into AGENT_PARAMS: {params}");
+    }
+    let launches = launches(&log);
+    assert_eq!(launches.len(), 1, "{command}: {launches:?}");
+    assert_eq!(occurrences(&launches[0], tail), 1, "{command}: the child gets the tail unchanged: {launches:?}");
+}
+
+macro_rules! embedded_credential_tests {
+    ($($test:ident => $command:literal),+ $(,)?) => {
+        const EMBEDDED_CREDENTIAL_COMMANDS: &[&str] = &[$($command),+];
+        $(
+            #[test]
+            fn $test() {
+                assert_embedded_credentials($command);
+            }
+        )+
+    };
+}
+
+embedded_credential_tests! {
+    compose_hides_embedded_credentials_on_every_surface => "compose",
+    inline_compose_hides_embedded_credentials_on_every_surface => "inline-compose",
+    sequence_hides_embedded_credentials_on_every_surface => "sequence",
+    direct_codex_hides_embedded_credentials_on_every_surface => "codex",
+}
+
+#[test]
+fn embedded_credential_tests_cover_every_launch_surface_once() {
+    assert_eq!(EMBEDDED_CREDENTIAL_COMMANDS, ["compose", "inline-compose", "sequence", "codex"]);
 }
 
 /// A provider diagnostic that echoes an embedded or attached credential,
@@ -554,31 +575,60 @@ fn an_operand_only_explicit_tail_rejection_is_reported_once() {
 
 /// Failures that are not a rejection of the forwarded tail are never
 /// attributed to it, and the exit code is preserved.
-#[test]
-fn other_failures_are_not_attributed_to_the_tail() {
-    let cases: &[(&str, &str, &[&str])] = &[
-        ("injected", "echo \"error: unexpected argument '--output-last-message' found\" >&2\nexit 2", &[]),
-        ("auth", "echo 'Error: authentication failed' >&2\nexit 2", &[]),
-        ("api", "echo 'API Error: 500 internal' >&2\nexit 2", &[]),
-        ("ambiguous", "echo 'something odd happened' >&2\nexit 2", &[]),
-        ("interrupted", "echo \"error: unexpected argument '-c' found\" >&2\nexit 130", &[]),
-        ("timeout", "sleep 5\nexit 0", &["--timeout", "1s"]),
-    ];
-    for (name, behavior, extra) in cases {
-        let fixture = CliProcessFixture::named(&format!("tail-correlate-{name}"));
-        stub(&fixture, "goose", behavior);
-        let file = doc(&fixture, "plan.md", "---\ntitle: plan\n---\nBody\n");
-        let mut args = vec!["compose", "--goose"];
-        args.extend(*extra);
-        args.extend([file.as_str(), "-c", "x=y"]);
+const OTHER_FAILURE_CASES: &[(&str, &str, &[&str])] = &[
+    ("injected", "echo \"error: unexpected argument '--output-last-message' found\" >&2\nexit 2", &[]),
+    ("auth", "echo 'Error: authentication failed' >&2\nexit 2", &[]),
+    ("api", "echo 'API Error: 500 internal' >&2\nexit 2", &[]),
+    ("ambiguous", "echo 'something odd happened' >&2\nexit 2", &[]),
+    ("interrupted", "echo \"error: unexpected argument '-c' found\" >&2\nexit 130", &[]),
+    ("timeout", "sleep 5\nexit 0", &["--timeout", "1s"]),
+];
 
-        let (code, _, stderr) = run(&fixture, &args);
+fn assert_other_failure(name: &str, behavior: &str, extra: &[&str]) {
+    let fixture = CliProcessFixture::named(&format!("tail-correlate-{name}"));
+    stub(&fixture, "goose", behavior);
+    let file = doc(&fixture, "plan.md", "---\ntitle: plan\n---\nBody\n");
+    let mut args = vec!["compose", "--goose"];
+    args.extend_from_slice(extra);
+    args.extend([file.as_str(), "-c", "x=y"]);
 
-        assert_ne!(code, 0, "{name}: stderr:\n{stderr}");
-        if !matches!(*name, "timeout") {
-            let expected = if *name == "interrupted" { 130 } else { 2 };
-            assert_eq!(code, expected, "{name}: stderr:\n{stderr}");
-        }
-        assert_eq!(count(&stderr, CORRELATED), 0, "{name} was misattributed:\n{stderr}");
+    let (code, _, stderr) = run(&fixture, &args);
+
+    assert_ne!(code, 0, "{name}: stderr:\n{stderr}");
+    if !matches!(name, "timeout") {
+        let expected = if name == "interrupted" { 130 } else { 2 };
+        assert_eq!(code, expected, "{name}: stderr:\n{stderr}");
     }
+    assert_eq!(count(&stderr, CORRELATED), 0, "{name} was misattributed:\n{stderr}");
+}
+
+macro_rules! other_failure_tests {
+    ($($test:ident => $name:literal),+ $(,)?) => {
+        const OTHER_FAILURE_TEST_CASES: &[&str] = &[$($name),+];
+        $(
+            #[test]
+            fn $test() {
+                let (name, behavior, extra) = OTHER_FAILURE_CASES.iter()
+                    .find(|case| case.0 == $name).expect("forwarding failure case");
+                assert_other_failure(name, behavior, extra);
+            }
+        )+
+    };
+}
+
+other_failure_tests! {
+    an_injected_switch_failure_is_not_attributed_to_the_tail => "injected",
+    an_authentication_failure_is_not_attributed_to_the_tail => "auth",
+    an_api_failure_is_not_attributed_to_the_tail => "api",
+    an_ambiguous_failure_is_not_attributed_to_the_tail => "ambiguous",
+    an_interruption_is_not_attributed_to_the_tail => "interrupted",
+    a_timeout_is_not_attributed_to_the_tail => "timeout",
+}
+
+#[test]
+fn other_failure_tests_schedule_every_case_once() {
+    let cases: Vec<_> = OTHER_FAILURE_CASES.iter().map(|case| case.0).collect();
+    assert_eq!(cases, OTHER_FAILURE_TEST_CASES);
+    let unique: std::collections::BTreeSet<_> = OTHER_FAILURE_TEST_CASES.iter().collect();
+    assert_eq!(unique.len(), OTHER_FAILURE_TEST_CASES.len());
 }

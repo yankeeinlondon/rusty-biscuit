@@ -91,6 +91,32 @@ fn the_authoring_example_validates_against_the_embedded_baseline() {
     );
 }
 
+#[test]
+fn explicit_library_configuration_does_not_adopt_the_builtin_policy_rules() {
+    let (_dir, root) = temp_root();
+    let markdown = load(&root, "content_policy: not-a-list\n");
+    let unconfigured = DarkmatterSchemas::new(context_at(&root));
+    assert!(unconfigured.effective_for(&markdown).unwrap().is_none());
+    assert!(unconfigured.validate(&markdown).unwrap().valid);
+
+    let builtin = embedded_api(&root).validate(&markdown).unwrap();
+    assert!(!builtin.valid);
+    assert_eq!(builtin.problems[0].path, "/content_policy");
+
+    let custom = DarkmatterSchemas::new(context_at(&root))
+        .with_baseline_json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {"content_policy": {"type": "string"}},
+            "required": ["content_policy"],
+        }))
+        .unwrap();
+    assert!(custom.validate(&markdown).unwrap().valid);
+    let missing = custom.validate(&load(&root, "title: no policy\n")).unwrap();
+    assert!(!missing.valid, "the explicit baseline still applies");
+    assert_eq!(missing.problems[0].property.as_deref(), Some("content_policy"));
+    assert_eq!(missing.problems[0].kind, ValidationProblemKind::Missing);
+}
+
 /// Every shared declaration, in each presentation, reports exactly its
 /// expected problems at the authored node, against `content_policy` as the
 /// baseline types it.

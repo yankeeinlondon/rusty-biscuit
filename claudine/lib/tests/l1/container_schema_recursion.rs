@@ -16,6 +16,9 @@ use std::path::Path;
 
 use biscuit_file::serde_yaml_ng;
 use claudine::composition::{CompositionError, resolve_composition_source_in_context, resolve_sequence_plan};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
 use serde_json::{Map, Value, json};
 
 use crate::claudine_schemas::{Discovered, SchemaRepo, problems, shipped_bundle};
@@ -381,6 +384,42 @@ container_path_tests! {
 fn the_tests_cover_the_four_container_paths() {
     let names: Vec<&str> = PATHS.iter().map(|path| path.name).collect();
     assert_eq!(names, ["seq-seq", "seq-group", "group-seq", "group-group"]);
+}
+
+#[test]
+fn deep_container_deferral_does_not_hide_literal_or_shape_errors_in_either_phase() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let schemas = DarkmatterSchemas::new(repo.context()).with_trigger_discovery().expect("discovered schemas");
+    for path in PATHS {
+        let source = repo.write_document("deferred.md", &control(*path));
+        let control = Markdown::try_from(source.as_path()).expect("control loads")
+            .with_source(ComposeSource::File(source.clone()));
+        let effective = schemas.effective_for(&control).expect("resolved").expect("sequence schema");
+        for (action, problem_suffix) in [
+            ("{ min: ['{{ fm.later }}', 3] }", None),
+            ("{ min: ['{{ fm.later }}', three] }", Some("/min/1")),
+            ("{ min: ['{{ fm.later }}'] }", Some("/min")),
+            ("{ min: ['{{ fm.later }}', 3, 4] }", Some("/min/2")),
+            ("{ pr_list: { count: '{{ fm.later }}', bogus: 1 } }", Some("/pr_list")),
+        ] {
+            let (stack, below) = in_conditional(4, "else", action);
+            let (text, holder) = with_event(*path, "start", yaml(&stack));
+            let document: Markdown = text.into();
+            let value = crate::claudine_schemas::frontmatter_json(&document);
+            for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+                let report = effective.validate_for_phase(&value, phase).expect("phase projects");
+                let label = format!("{} {phase:?}: {action}", path.name);
+                if let Some(suffix) = problem_suffix {
+                    let expected = format!("{holder}/start{below}{suffix}");
+                    assert!(!report.valid, "{label}");
+                    assert!(report.problems.iter().any(|problem| problem.path == expected),
+                        "{label}: missing {expected}: {:#?}", report.problems);
+                } else {
+                    assert!(report.valid, "{label}: {:#?}", report.problems);
+                }
+            }
+        }
+    }
 }
 
 /// Scalar steps and the file-reference alternatives of `sequence:` and

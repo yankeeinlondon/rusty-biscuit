@@ -190,8 +190,34 @@ fn a_call_or_handoff_back_to_an_active_caller_is_refused() {
 /// A target's `break` cannot reach a loop of the caller's: a target ending
 /// its own loop with code `0` returns normally and the caller's loop goes on,
 /// while a non-zero code fails the call.
+const TARGET_BREAK_CODES: &[u8] = &[0, 5];
+
+macro_rules! target_break_cases {
+    ($($name:ident: $index:literal),+ $(,)?) => {
+        const SCHEDULED_TARGET_BREAK_CODES: &[usize] = &[$($index),+];
+
+        $(
+            #[test]
+            fn $name() {
+                target_break_case($index);
+            }
+        )+
+    };
+}
+
+target_break_cases! {
+    a_targets_break_stays_in_the_target_and_its_code_decides_the_call: 0,
+    a_targets_nonzero_break_code_fails_its_call_without_breaking_the_callers_loop: 1,
+}
+
 #[test]
-fn a_targets_break_stays_in_the_target_and_its_code_decides_the_call() {
+fn every_target_break_code_is_scheduled_once() {
+    let expected: Vec<usize> = (0..TARGET_BREAK_CODES.len()).collect();
+    assert_eq!(SCHEDULED_TARGET_BREAK_CODES, expected);
+}
+
+fn target_break_case(index: usize) {
+    let code = TARGET_BREAK_CODES[index];
     let looping_target = |code: u8| {
         format!("---\nloop:\n  until: \"false\"\n  max: 5\nstart:\n  - break: {{ code: {code} }}\n---\nNever sent\n")
     };
@@ -207,15 +233,16 @@ sequence:
 ---
 "#;
     let caller = "---\nstart:\n  - prep: \"@target.md\"\n---\nCaller {{ loop.count }}\n";
-    let returns = run("sequence", &[("seq.md", seq), ("caller.md", caller), ("target.md", &looping_target(0))], "seq.md");
-    assert_eq!(returns.status.code(), Some(0), "stderr:\n{}", returns.stderr);
-    assert_eq!(returns.trace, ["pass 1", "pass 2"], "the caller's loop ran both passes");
-    assert_eq!(returns.prompts, ["Caller 1", "Caller 2"]);
-
-    let fails = run("sequence", &[("seq.md", seq), ("caller.md", caller), ("target.md", &looping_target(5))], "seq.md");
-    assert_eq!(fails.status.code(), Some(1), "stderr:\n{}", fails.stderr);
-    assert!(fails.prose().contains("it exited with status 5"), "stderr:\n{}", fails.stderr);
-    assert_eq!(fails.trace, ["pass 1"]);
+    let result = run("sequence", &[("seq.md", seq), ("caller.md", caller), ("target.md", &looping_target(code))], "seq.md");
+    if code == 0 {
+        assert_eq!(result.status.code(), Some(0), "stderr:\n{}", result.stderr);
+        assert_eq!(result.trace, ["pass 1", "pass 2"], "the caller's loop ran both passes");
+        assert_eq!(result.prompts, ["Caller 1", "Caller 2"]);
+    } else {
+        assert_eq!(result.status.code(), Some(1), "stderr:\n{}", result.stderr);
+        assert!(result.prose().contains("it exited with status 5"), "stderr:\n{}", result.stderr);
+        assert_eq!(result.trace, ["pass 1"]);
+    }
 }
 
 /// Ctrl-C during a target cancels the run: the call never returns
@@ -296,4 +323,122 @@ sequence:
     assert_eq!(run.status.code(), Some(0), "stderr:\n{}", run.stderr);
     assert_eq!(run.trace, ["helper", "helper", "helper"]);
     assert_eq!(run.prompts, ["Helper", "Caller 1", "Helper", "Caller 2", "Helper", "Caller 3"]);
+}
+
+#[test]
+fn prep_runs_a_yaml_sequence_with_its_own_runtime_and_output_ledger() {
+    let caller = r#"---
+note: caller
+start:
+  - append_line: [trace.log, "caller before"]
+  - prep: { target: "@helper.yaml", with: { stage: prepared } }
+  - append_line: [trace.log, "caller after {{ note }} {{ length(seq.outputs) }}"]
+---
+Caller {{ note }}
+"#;
+    let helper = r#"initialize:
+  - append_line: [trace.log, "helper initialize {{ length(seq.outputs) }}"]
+  - set: { note: helper }
+finalize:
+  - append_line: [trace.log, "helper finalize {{ length(seq.outputs) }}"]
+sequence:
+  - name: work
+    side_effect: { append_line: [trace.log, "helper {{ stage }} {{ note }}"] }
+  - name: inspect
+    side_effect: { append_line: [trace.log, "helper outputs {{ length(seq.outputs) }}"] }
+"#;
+    let run = run("compose", &[("caller.md", caller), ("helper.yaml", helper)], "caller.md");
+    assert_eq!(run.status.code(), Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(
+        run.trace,
+        [
+            "caller before",
+            "helper initialize 0",
+            "helper prepared helper",
+            "helper outputs 1",
+            "helper finalize 2",
+            "caller after caller 0",
+        ],
+        "stderr:\n{}",
+        run.stderr
+    );
+    assert_eq!(run.prompts, ["Caller caller"]);
+}
+
+#[test]
+fn prep_dispatches_an_inline_prompt_before_resuming_its_caller() {
+    let caller = r#"---
+note: caller
+start:
+  - prep: { target: "@inline.md", with: { stage: prepared } }
+  - append_line: [trace.log, "caller after {{ note }}"]
+---
+Caller {{ note }}
+"#;
+    let helper = r#"---
+prompt: "Inline {{ stage }} {{ note }}"
+note: helper
+start:
+  - set: { note: changed }
+finalize:
+  - append_line: [trace.log, "inline finalize {{ note }}"]
+---
+Previous inline result
+"#;
+    let fixture = CliProcessFixture::named("prep-inline");
+    fs::write(fixture.cwd().join("caller.md"), caller).unwrap();
+    fs::write(fixture.cwd().join("inline.md"), helper).unwrap();
+    let recordings = launch_recorder::install(
+        &fixture,
+        "claude",
+        "if [ \"$n\" = 0 ]; then printf '\\nUpdated helper body\\n' >> inline.md; fi\nprintf 'ok\\n'",
+    );
+    let output = fixture
+        .command()
+        .args(["compose", "--claude", "--yolo"])
+        .arg(fixture.cwd().join("caller.md"))
+        .output()
+        .unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    assert_eq!(
+        fs::read_to_string(fixture.cwd().join("trace.log")).unwrap().lines().collect::<Vec<_>>(),
+        ["inline finalize changed", "caller after caller"]
+    );
+    let prompts = launch_recorder::prompts(&recordings);
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert!(prompts[0].contains("Inline prepared helper"), "{}", prompts[0]);
+    assert_eq!(prompts[1].trim(), "Caller caller");
+    assert!(fs::read_to_string(fixture.cwd().join("inline.md")).unwrap().contains("Updated helper body"));
+    assert_eq!(fs::read_to_string(fixture.cwd().join("caller.md")).unwrap(), caller);
+    assert!(!fixture.audio_spool().exists());
+}
+
+#[test]
+fn prep_refuses_a_standalone_group_without_running_its_legs_or_continuing() {
+    let caller = r#"---
+start:
+  - append_line: [trace.log, "caller before"]
+  - prep: "@group.md"
+  - append_line: [trace.log, "caller after"]
+finalize:
+  - append_line: [trace.log, "caller finalize"]
+---
+Caller
+"#;
+    let group = r#"---
+kind: group
+name: helper
+tasks:
+  - name: work
+    side_effect: { append_line: [trace.log, "group leg"] }
+---
+"#;
+    let run = run("compose", &[("caller.md", caller), ("group.md", group)], "caller.md");
+    assert_eq!(run.status.code(), Some(1), "stderr:\n{}", run.stderr);
+    assert_eq!(run.trace, ["caller before", "caller finalize"]);
+    assert!(run.prompts.is_empty(), "{:?}", run.prompts);
+    let prose = run.prose();
+    assert!(prose.contains("`prep` of `@group.md` failed"), "{prose}");
+    assert!(prose.contains("a group executes only as a sequence task"), "{prose}");
 }

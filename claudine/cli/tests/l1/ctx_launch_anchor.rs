@@ -248,57 +248,74 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
     );
 }
 
-/// Finalized-reference AC5 regression (2026-08-26): D3 supersedes
-/// ctx-launch-anchor review-3 Finding 4 for document-authored references while
-/// retaining its caller rule. A caller file parameter is materialized at the
-/// launch boundary and must keep that absolute identity when a repo-root shared
-/// prompt proxies to another document.
-#[test]
-fn caller_file_anchor_survives_direct_and_proxy_success_guards() {
-    let (fixture, root) = staged_fixture("ctx-anchor-caller-file-proxy");
-    let launch_dir = root.join("alpha/lib");
-    let launch_spec = launch_dir.join("spec.md");
-    write(&launch_spec, "# launch spec\n");
-    write(&launch_dir.join("sibling.md"), "# launch sibling\n");
-    write(&root.join("spec.md"), "# repository decoy\n");
+/// A caller file parameter keeps its launch-directory identity in both a
+/// direct document and a proxy target, including the success guard.
+mod caller_file_anchor_survives_direct_and_proxy_success_guards {
+    use super::*;
 
-    let target = root.join("shared-target.md");
-    write(
-        &target,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  spec: 'file(eager; required)'\n",
-            "success:\n",
-            "    - when: \"file_exists(dirname(spec) + '/sibling.md')\"\n",
-            "      then: {append_line: [\"events.log\", \"anchored={{ spec }} cwd={{ ctx.cwd }}\"]}\n",
-            "---\n",
-            "TARGET SPEC={{ spec }}\n",
-        ),
-    );
-    let router = root.join("shared-router.md");
-    write(
-        &router,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  spec: 'file(eager; required)'\n",
-            "initialize:\n",
-            "    - {proxy: \"shared-target.md\"}\n",
-            "---\n",
-            "ROUTER\n",
-        ),
-    );
+    const ROUTES: [bool; 2] = [false, true];
 
-    let bin = fixture.bin_dir();
-    let provider_log = fixture.cwd().join("provider.log");
-    write_command_stub(
-        bin,
-        "claude",
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
-        "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\nexit /b 0\r\n",
-    );
-    for document in [&target, &router] {
+    macro_rules! route_tests {
+        ($($name:ident => $index:literal),* $(,)?) => {
+            $(#[test] fn $name() { assert_route($index); })*
+
+            #[test]
+            fn every_route_has_a_listed_test() {
+                assert_eq!([$($index),*].to_vec(), (0..ROUTES.len()).collect::<Vec<_>>());
+            }
+        };
+    }
+
+    route_tests! {
+        direct => 0,
+        proxy => 1,
+    }
+
+    fn assert_route(index: usize) {
+        let (fixture, root) = staged_fixture("ctx-anchor-caller-file-proxy");
+        let launch_dir = root.join("alpha/lib");
+        let launch_spec = launch_dir.join("spec.md");
+        write(&launch_spec, "# launch spec\n");
+        write(&launch_dir.join("sibling.md"), "# launch sibling\n");
+        write(&root.join("spec.md"), "# repository decoy\n");
+
+        let target = root.join("shared-target.md");
+        write(
+            &target,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  spec: 'file(eager; required)'\n",
+                "success:\n",
+                "    - when: \"file_exists(dirname(spec) + '/sibling.md')\"\n",
+                "      then: {append_line: [\"events.log\", \"anchored={{ spec }} cwd={{ ctx.cwd }}\"]}\n",
+                "---\n",
+                "TARGET SPEC={{ spec }}\n",
+            ),
+        );
+        let router = root.join("shared-router.md");
+        write(
+            &router,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  spec: 'file(eager; required)'\n",
+                "initialize:\n",
+                "    - {proxy: \"shared-target.md\"}\n",
+                "---\n",
+                "ROUTER\n",
+            ),
+        );
+
+        let bin = fixture.bin_dir();
+        let provider_log = fixture.cwd().join("provider.log");
+        write_command_stub(
+            bin,
+            "claude",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
+            "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\nexit /b 0\r\n",
+        );
+        let document = if ROUTES[index] { &router } else { &target };
         // Escape: ambient context — caller file references are anchored here.
         fixture
             .command_builder()
@@ -314,50 +331,50 @@ fn caller_file_anchor_survives_direct_and_proxy_success_guards() {
             ])
             .assert()
             .success();
-    }
 
-    let expected = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
-    let provider = fs::read_to_string(&provider_log).unwrap_or_default();
-    assert_eq!(provider.matches("TARGET SPEC=").count(), 2, "{provider}");
-    assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
-    let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
-    // D8.4: `{{ spec }}` in a lifecycle action carries the eager file()'s
-    // NATIVE identity; only body/Markdown presentation is portable. ctx.cwd
-    // is portable on every surface.
-    let expected_spec_native = launched_spelling(&launch_spec)
-        .components()
-        .collect::<PathBuf>()
-        .display()
-        .to_string();
-    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
-    assert_eq!(
-        events
-            .matches(&format!("anchored={expected_spec_native} cwd={expected_cwd}"))
-            .count(),
-        2,
-        "{events}"
-    );
+        let expected = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
+        let provider = fs::read_to_string(&provider_log).unwrap_or_default();
+        assert_eq!(provider.matches("TARGET SPEC=").count(), 1, "{provider}");
+        assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
+        let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
+        // D8.4: `{{ spec }}` in a lifecycle action carries the eager file()'s
+        // NATIVE identity; only body/Markdown presentation is portable. ctx.cwd
+        // is portable on every surface.
+        let expected_spec_native = launched_spelling(&launch_spec)
+            .components()
+            .collect::<PathBuf>()
+            .display()
+            .to_string();
+        let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+        assert_eq!(
+            events
+                .matches(&format!("anchored={expected_spec_native} cwd={expected_cwd}"))
+                .count(),
+            1,
+            "{events}"
+        );
+    }
 }
 
 /// AC1/AC8: loop documents at the repository root and in the launch package
 /// reuse the launch snapshot through their conditions, bodies, and lifecycle.
-#[test]
-fn loop_route_keeps_launch_area_for_root_and_package_documents() {
+fn assert_loop_route_launch_anchor(label: &str) {
     let (fixture, root) = staged_fixture("ctx-anchor-loop-route");
     let launch_dir = root.join("alpha/lib");
     let launch_spec = launch_dir.join("spec.md");
     write(&launch_spec, "# launch spec\n");
     write(&root.join("spec.md"), "# repository decoy\n");
-    let at_root = root.join("loop-root.md");
-    let in_area = launch_dir.join("loop-area.md");
-    for (path, label) in [(&at_root, "root"), (&in_area, "area")] {
-        write(
-            path,
-            &format!(
-                "---\n$schema:\n  spec: 'file(eager; required)'\nmy_area: '{{{{ ctx.area }}}}'\nmy_cwd: '{{{{ ctx.cwd }}}}'\nloop:\n  while: \"ctx.area == 'alpha' && counter < 1\"\n  actions:\n    - \"increment(counter)\"\nstart:\n    - when: \"ctx.area == 'alpha'\"\n      then: {{append_line: [\"loop-events.log\", \"{label}:ctx={{{{ ctx.area }}}}:cwd={{{{ ctx.cwd }}}}:fm={{{{ my_area }}}}/{{{{ my_cwd }}}}:spec={{{{ spec }}}}\"]}}\n---\n{label}:AREA={{{{ ctx.area }}}}:CWD={{{{ ctx.cwd }}}}:SPEC={{{{ spec }}}}\n"
-            ),
-        );
-    }
+    let doc = match label {
+        "root" => root.join("loop-root.md"),
+        "area" => launch_dir.join("loop-area.md"),
+        _ => panic!("unknown document position: {label}"),
+    };
+    write(
+        &doc,
+        &format!(
+            "---\n$schema:\n  spec: 'file(eager; required)'\nmy_area: '{{{{ ctx.area }}}}'\nmy_cwd: '{{{{ ctx.cwd }}}}'\nloop:\n  while: \"ctx.area == 'alpha' && counter < 1\"\n  actions:\n    - \"increment(counter)\"\nstart:\n    - when: \"ctx.area == 'alpha'\"\n      then: {{append_line: [\"loop-events.log\", \"{label}:ctx={{{{ ctx.area }}}}:cwd={{{{ ctx.cwd }}}}:fm={{{{ my_area }}}}/{{{{ my_cwd }}}}:spec={{{{ spec }}}}\"]}}\n---\n{label}:AREA={{{{ ctx.area }}}}:CWD={{{{ ctx.cwd }}}}:SPEC={{{{ spec }}}}\n"
+        ),
+    );
 
     let bin = fixture.bin_dir();
     let provider_log = fixture.cwd().join("loop-provider.log");
@@ -368,30 +385,27 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
         "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\n>> \"%CTX_PROVIDER_LOG%\" echo --- attempt ---\r\nexit /b 0\r\n",
     );
 
-    for doc in [&at_root, &in_area] {
-        // Escape: ambient context — the launch package area is the subject.
-        fixture
-            .command_builder()
-            .ambient_context(&launch_dir)
-            .build()
-            .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-            .env("CTX_PROVIDER_LOG", &provider_log)
-            .args(["compose", "--claude", &doc.to_string_lossy(), "spec=spec.md"])
-            .assert()
-            .success();
-    }
+    // Escape: ambient context — the launch package area is the subject.
+    fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .env("CTX_PROVIDER_LOG", &provider_log)
+        .args(["compose", "--claude", &doc.to_string_lossy(), "spec=spec.md"])
+        .assert()
+        .success();
 
     let provider = fs::read_to_string(&provider_log).unwrap_or_default();
-    assert!(provider.contains("root:AREA=alpha"));
-    assert!(provider.contains("area:AREA=alpha"));
+    assert!(provider.contains(&format!("{label}:AREA=alpha")));
     let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
     let expected_spec = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
-    assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 4);
-    assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 4);
+    assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 2);
+    assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 2);
     assert_eq!(
         provider.matches("--- attempt ---").count(),
-        4,
-        "each equivalent loop document must run its seed attempt and one iteration: {provider}"
+        2,
+        "the loop document must run its seed attempt and one iteration: {provider}"
     );
     let events = fs::read_to_string(root.join("loop-events.log")).unwrap_or_default();
     // D8.4: the lifecycle `{{ spec }}` surface carries the native identity,
@@ -402,11 +416,29 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
         .display()
         .to_string();
     assert!(events.contains(&format!(
-        "root:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec_native}"
+        "{label}:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec_native}"
     )));
-    assert!(events.contains(&format!(
-        "area:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec_native}"
-    )));
+}
+
+macro_rules! loop_launch_anchor_tests {
+    ($($test:ident => $label:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_loop_route_launch_anchor($label);
+            }
+        )*
+
+        #[test]
+        fn loop_launch_anchor_cases_cover_root_and_package_documents() {
+            assert_eq!([$($label),*], ["root", "area"]);
+        }
+    };
+}
+
+loop_launch_anchor_tests! {
+    loop_route_keeps_launch_area_for_root_and_package_documents => "root",
+    loop_route_keeps_launch_area_for_a_package_document => "area",
 }
 
 /// AC3: a prompt stored in another repository reports the launch repository;

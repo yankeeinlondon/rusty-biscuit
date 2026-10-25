@@ -184,6 +184,43 @@ fn every_descending_position_closes_a_cycle() {
 }
 
 #[test]
+fn dictionary_and_tuple_recursion_reject_bad_values_beyond_the_old_cutoff() {
+    let dir = TempDir::new().expect("tempdir");
+    for (position, schema, valid_leaf, invalid_leaf, wrap) in [
+        (
+            "dictionary value",
+            "item:\n  <string>: item\nroot: item(required)\n",
+            json!({}),
+            json!([42]),
+            (|child| json!({"next": child})) as fn(Value) -> Value,
+        ),
+        (
+            "tuple slot",
+            "item: \"tuple([string, item?])\"\nroot: item(required)\n",
+            json!(["leaf"]),
+            json!([{"not": "text"}]),
+            (|child| json!(["branch", child])) as fn(Value) -> Value,
+        ),
+    ] {
+        let nested = |leaf| (0..8).fold(leaf, |child, _| wrap(child));
+        let document = |leaf| {
+            format!("---\n$schema:\n{}root: {}\n---\nbody\n", schema.lines().map(|line| format!("  {line}\n")).collect::<String>(), nested(leaf))
+        };
+        let good = validate_document(dir.path(), &document(valid_leaf));
+        assert!(good.valid, "{position}: {:#?}", good.problems);
+
+        let bad = validate_document(dir.path(), &document(invalid_leaf));
+        assert!(!bad.valid, "{position}: recursive descendants must retain their type");
+        let expected = match position {
+            "dictionary value" => format!("/root{}", "/next".repeat(8)),
+            "tuple slot" => format!("/root{}/0", "/1".repeat(8)),
+            _ => unreachable!(),
+        };
+        assert!(bad.problems.iter().any(|problem| problem.path == expected), "{position}: {:#?}", bad.problems);
+    }
+}
+
+#[test]
 fn an_alias_cycle_is_rejected_naming_each_reference() {
     let dir = TempDir::new().expect("tempdir");
     let error = resolve_inline(dir.path(), "a: b\nb: a\n").expect_err("alias cycle");

@@ -520,6 +520,73 @@ fn container_defaults_match_plain_arrays_and_arm_defaults_are_rejected() {
     assert_eq!(property(&single, "p")["anyOf"][2], json!({ "type": "number" }));
 }
 
+fn programmatic_array_defaults(
+    root: &Path,
+    inherited: Value,
+    supplied: Value,
+) -> Result<darkmatter::markdown::schemas::resolve::NamedTypeExpansion, SchemaError> {
+    let value = serde_yaml_ng::from_str("choice: [string, number]\np: choice[]\n").unwrap();
+    let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+    let SimplifiedSchema::Single(shape) = &mut schema else {
+        panic!("single shape");
+    };
+    let PropertyDef::Union(arms) = shape.properties.get_mut("choice").unwrap() else {
+        panic!("union definition");
+    };
+    arms[0].constraints.push(Constraint::Default(inherited));
+    let PropertyDef::Single(reference) = shape.properties.get_mut("p").unwrap() else {
+        panic!("single reference");
+    };
+    reference.array_constraints.push(Constraint::Default(supplied));
+    darkmatter::markdown::schemas::resolve::expand_named_types(
+        &schema,
+        root,
+        None,
+        &[],
+        &biscuit_file::FileResolutionContext::new(root),
+    )
+}
+
+#[test]
+fn inherited_array_defaults_lift_once_and_merge_with_equal_container_defaults() {
+    let (_dir, root) = temp_root();
+    let expansion = programmatic_array_defaults(&root, json!(["a", 3]), json!(["a", 3.0]))
+        .expect("equal array defaults merge after numeric normalization");
+    let lowered = darkmatter::markdown::schemas::to_json_schema(&expansion.schema).unwrap();
+    let container = &lowered["properties"]["p"];
+    assert_eq!(container["default"], json!(["a", 3]));
+    let array = unwrap_optional(container);
+    assert_eq!(array["type"], "array");
+    assert_eq!(array["items"]["anyOf"], json!([{"type": "string"}, {"type": "number"}]));
+    let SimplifiedSchema::Single(shape) = &expansion.schema else {
+        panic!("single shape");
+    };
+    let PropertyDef::Single(atom) = &shape.properties["p"] else {
+        panic!("one array atom");
+    };
+    assert_eq!(atom.array_constraints, vec![Constraint::Default(json!(["a", 3]))]);
+    assert!(atom.union_arms().unwrap().iter().all(|arm| {
+        arm.constraints.iter().all(|constraint| !matches!(constraint, Constraint::Default(_)))
+    }));
+}
+
+#[test]
+fn conflicting_inherited_array_defaults_report_the_definition_arm_and_use_site() {
+    let (_dir, root) = temp_root();
+    let error = programmatic_array_defaults(&root, json!(["a", 3]), json!(["a", 4]))
+        .expect_err("distinct array defaults must not be discarded or overwritten");
+    let SchemaError::ConstraintConflict { name, kind, site, constraints } = error else {
+        panic!("expected ConstraintConflict, got {error:?}");
+    };
+    assert_eq!(name, "choice");
+    assert_eq!(kind, SchemaConstraintConflictKind::Default);
+    assert_eq!(site.path, SchemaSourcePath::root().property("p"));
+    assert_eq!(constraints.len(), 2);
+    assert_eq!(constraints[0].path, SchemaSourcePath::root().property("choice").union_arm(0));
+    assert_eq!(constraints[1].path, SchemaSourcePath::root().property("p"));
+    assert!(constraints.iter().all(|origin| origin.keyword == "default"));
+}
+
 // ── AC 2 and AC 7: rejected operations and their provenance ──────────────
 
 #[test]

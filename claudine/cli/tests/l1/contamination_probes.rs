@@ -286,7 +286,15 @@ fn observed_child_model() -> String {
 #[test]
 fn an_uncontaminated_run_matches_the_expectations_every_probe_asserts() {
     assert_uncontaminated("baseline");
+}
+
+#[test]
+fn an_uncontaminated_loop_keeps_the_authored_iteration_cap() {
     assert_eq!(observed_iteration_cap(), AUTHORED_CAP);
+}
+
+#[test]
+fn an_uncontaminated_launch_keeps_the_authored_model() {
     assert_eq!(observed_child_model(), AUTHORED_MODEL);
 }
 

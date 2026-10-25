@@ -295,6 +295,35 @@ fn serialization_writes_canonical_options_and_round_trips_meaning() {
 }
 
 #[test]
+fn serialization_preserves_option_assertions_on_unresolved_references() {
+    let dir = TempDir::new().expect("tempdir");
+    write(dir.path(), "types.yaml", "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n");
+    for restriction in ["block-leading-dash", "block-leading-slash", "block-double-periods"] {
+        for definition in [
+            format!("slug({restriction})"),
+            format!("slug({restriction})[]"),
+            format!("slug({restriction})@./types.yaml"),
+            format!("slug({restriction}; max(10))[]@./types.yaml"),
+            format!("{{ child: slug({restriction})@./types.yaml }}[]"),
+        ] {
+            let original = parse_type_expr("value", &definition).expect("reference parses");
+            let serialized = serialize_property_atom(&original);
+            for expression in [&definition, &serialized] {
+                let error = resolve_inline(
+                    dir.path(),
+                    &format!("slug: alphanumeric(allow-dashes)\nvalue: '{expression}'\n"),
+                )
+                .expect_err("a round trip must preserve the mismatched option assertion");
+                assert!(
+                    matches!(error, SchemaError::ConstraintConflict { kind: SchemaConstraintConflictKind::Options, .. }),
+                    "{definition} -> {serialized}: {error:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn equal_option_sets_at_a_use_site_resolve() {
     let dir = TempDir::new().expect("tempdir");
     write(

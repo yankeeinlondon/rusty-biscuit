@@ -2,7 +2,7 @@
 //!
 //! The first task's commands may use resolved-byte or shape approval; every later
 //! task's commands with a placeholder, and every command reading a late value
-//! (`outputs`, `loop`, `group`), are approved only by their typed shape. An
+//! (`seq`, `loop`, `group`), are approved only by their typed shape. An
 //! approval-time value that is missing fails preflight before step 1; a late
 //! value that is missing fails its own step before any of that step's commands
 //! runs.
@@ -135,6 +135,48 @@ fn a_later_task_is_approved_only_by_its_shape() {
     assert_eq!(
         sequence.runs(),
         vec![argv(&["build", "--out", "dist"]), argv(&["clean", "--out", "dist/build"])]
+    );
+}
+
+#[test]
+fn a_nested_container_terminal_template_uses_the_current_value_as_one_argument() {
+    let sequence = Sequence::new(
+        "nested-container-shell-template",
+        r#"---
+target: initial
+$schema:
+    target: string
+sequence:
+    - name: first
+      shell: argv-recorder first
+    - name: change
+      side_effect: { set: { target: 'two words; $(id) `id`' } }
+    - name: nested
+      sequence:
+        - { name: child, shell: argv-recorder child }
+      success:
+        - shell: 'argv-recorder terminal {{ target }}'
+---
+Body.
+"#,
+    );
+    sequence.whitelist(
+        "exact argv-recorder first\nexact argv-recorder child\nexact argv-recorder terminal initial\n",
+    );
+    let refused = sequence.run(&[]);
+    assert!(!refused.success, "{}", refused.stderr);
+    assert!(refused.stderr.contains("approval"), "{}", refused.stderr);
+    assert!(refused.names("argv-recorder terminal {{ target }}"), "{}", refused.stderr);
+    assert!(sequence.runs().is_empty(), "container approval must precede the first child effect");
+
+    sequence.whitelist(
+        "exact argv-recorder first\nexact argv-recorder child\ntemplate argv-recorder terminal {{ string }}\n",
+    );
+    let approved = sequence.run(&[]);
+    assert!(approved.success, "{}", approved.stderr);
+    assert_eq!(
+        sequence.runs(),
+        vec![argv(&["first"]), argv(&["child"]), argv(&["terminal", "two words; $(id) `id`"])]
     );
 }
 

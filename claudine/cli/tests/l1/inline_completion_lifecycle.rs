@@ -797,6 +797,17 @@ fn a_proxy_out_of_a_failed_verdict_captures_the_targets_own_baseline() {
     );
 }
 
+const PROXY_OVERLAY_TARGET: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  prompt: 'string(required;eager)'\n",
+    "  researched_by: 'string(required)'\n",
+    "prompt: Write the research\n",
+    "agent: goose\n",
+    "---\n",
+    "target body\n",
+);
+
 /// AC14: a `proxy.with` overlay is a transient effective-frontmatter input, so
 /// it satisfies the *target's* completion schema without ever being written to
 /// the target file — the same rule `--set` and sequence state follow.
@@ -813,16 +824,7 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
     );
     let fixture = Fixture::new(source);
     let target = fixture.document.parent().unwrap().join("target.md");
-    let target_source = concat!(
-        "---\n",
-        "$schema:\n",
-        "  prompt: 'string(required;eager)'\n",
-        "  researched_by: 'string(required)'\n",
-        "prompt: Write the research\n",
-        "agent: goose\n",
-        "---\n",
-        "target body\n",
-    );
+    let target_source = PROXY_OVERLAY_TARGET;
     fs::write(&target, target_source).unwrap();
 
     // The agent writes only the body — `researched_by` arrives from the
@@ -852,21 +854,28 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
         !target_after.contains("from-the-router"),
         "a transient overlay must never be persisted to the target:\n{target_after}"
     );
-
-    // Without the overlay the same target fails completion — proving the
-    // overlay, not a missing check, is what made the run succeed.
-    fs::write(&target, target_source).unwrap();
-    let without = fixture
-        .command()
-        .args(["inline-compose", target.to_str().unwrap()])
-        .assert()
-        .failure();
-    assert!(
-        stderr_of(&without).contains("researched_by"),
-        "stderr:\n{}",
-        stderr_of(&without)
-    );
 }
+
+#[test]
+fn a_proxy_overlay_target_without_the_overlay_fails_completion() {
+    let fixture = Fixture::new(PROXY_OVERLAY_TARGET);
+    InlineAgentStub::new(&fixture.document)
+        .body("Agent wrote this.\n")
+        .install(&fixture.bin, "goose");
+    let verdict = fixture.inline_compose().failure();
+    assert!(stderr_of(&verdict).contains("researched_by"), "stderr:\n{}", stderr_of(&verdict));
+}
+
+const SEQUENCE_OVERLAY_MEMBER: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  prompt: 'string(required;eager)'\n",
+    "  researched_by: 'string(required)'\n",
+    "prompt: Write the research\n",
+    "agent: goose\n",
+    "---\n",
+    "research body\n",
+);
 
 /// AC14: sequence state is the third transient channel. A task's `with`
 /// satisfies the referenced document's completion schema for that step only, and
@@ -886,16 +895,7 @@ fn sequence_task_with_satisfies_the_referenced_documents_completion_schema() {
     );
     let fixture = Fixture::new(plan);
     let member = fixture.document.parent().unwrap().join("research.md");
-    let member_source = concat!(
-        "---\n",
-        "$schema:\n",
-        "  prompt: 'string(required;eager)'\n",
-        "  researched_by: 'string(required)'\n",
-        "prompt: Write the research\n",
-        "agent: goose\n",
-        "---\n",
-        "research body\n",
-    );
+    let member_source = SEQUENCE_OVERLAY_MEMBER;
     fs::write(&member, member_source).unwrap();
 
     write_executable(
@@ -927,20 +927,16 @@ fn sequence_task_with_satisfies_the_referenced_documents_completion_schema() {
         !member_after.contains("researched_by: research"),
         "sequence state must never be persisted to the referenced document:\n{member_after}"
     );
+}
 
-    // The same document run on its own fails completion, so the task's `with`
-    // — not a missing check — are what satisfied the schema above.
-    fs::write(&member, member_source).unwrap();
-    let alone = fixture
-        .command()
-        .args(["inline-compose", member.to_str().unwrap()])
-        .assert()
-        .failure();
-    assert!(
-        stderr_of(&alone).contains("researched_by"),
-        "stderr:\n{}",
-        stderr_of(&alone)
-    );
+#[test]
+fn a_sequence_overlay_member_without_the_overlay_fails_completion() {
+    let fixture = Fixture::new(SEQUENCE_OVERLAY_MEMBER);
+    InlineAgentStub::new(&fixture.document)
+        .body("Agent wrote this.\n")
+        .install(&fixture.bin, "goose");
+    let verdict = fixture.inline_compose().failure();
+    assert!(stderr_of(&verdict).contains("researched_by"), "stderr:\n{}", stderr_of(&verdict));
 }
 
 /// AC9a / AC13, inline half: a required-but-not-eager property whose authored
@@ -961,6 +957,7 @@ fn a_conditional_required_property_never_blocks_an_inline_launch() {
         "original body\n",
     );
     let fixture = Fixture::new(source);
+    fixture.workspace.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
     let calls = fixture.path().join("calls.txt");
     write_executable(
         &fixture.bin.join("goose"),

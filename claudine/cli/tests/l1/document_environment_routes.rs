@@ -292,7 +292,7 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
     fixture.write_doc(
         "target.md",
         &format!(
-            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{}success:\n        - when: \"!file_exists('retried.txt')\"\n          then:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
+            "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\n{}success:\n        - when: \"!file_exists('retried.txt')\"\n          then:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
             trail("start", "target start"),
             trail("finalize", "target finalize"),
         ),
@@ -323,9 +323,15 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
             run.output
         );
     }
-    assert!(
-        target.iter().filter(|line| line.starts_with("target start")).count() >= 2,
-        "the retry and the loop re-entered the document: {events:?}"
+    assert_eq!(
+        target.iter().filter(|line| line.starts_with("target start")).count(),
+        3,
+        "one retried attempt and a second loop pass must both start: {events:?}"
+    );
+    assert_eq!(
+        target.iter().filter(|line| line.starts_with("target success")).count(),
+        2,
+        "both loop passes must succeed: {events:?}"
     );
     for line in &target {
         assert!(line.ends_with(&fixture.reads("target")), "{line} read another map: {events:?}");
@@ -338,8 +344,7 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
 /// whose map changes the text is refused before it runs, naming the command.
 /// (A later task's command is approved by its shape instead, and its `>>`
 /// redirection would not be a valid template.)
-#[test]
-fn a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged() {
+fn assert_step_approved_text(map_change: &str) {
     let command = "echo ran-{{ env.DOC_STABLE }}>>events.log";
     let fixture = Fixture::new("doc-env-approval", &["a"]);
     let sequence = fixture.write_doc(
@@ -351,26 +356,46 @@ fn a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged() {
     );
     let args = ["sequence", "--claude", "--yolo", sequence.to_str().unwrap()];
 
-    // Unchanged: the first step's map is the launch map.
-    let unchanged = fixture.run(&args, &[json!({}), fixture.map("a")]);
-    assert_eq!(unchanged.code, Some(0), "{}", unchanged.output);
-    assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
-
-    // Changed elsewhere: another variable moved, the command text did not.
-    fs::remove_file(fixture.cwd().join("events.log")).unwrap();
-    let identical = fixture.run(&args, &[fixture.map("a"), fixture.map("a")]);
-    assert_eq!(identical.code, Some(0), "{}", identical.output);
-    assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
-
-    // Changed text: refused before it runs.
-    fs::remove_file(fixture.cwd().join("events.log")).unwrap();
-    let changed = fixture.run(&args, &[json!({ "DOC_STABLE": "moved" }), fixture.map("a")]);
-    assert_ne!(changed.code, Some(0), "{}", changed.output);
-    assert!(fixture.events().is_empty(), "the changed command never ran: {:?}", fixture.events());
-    let collapsed = changed.collapsed();
-    for expected in ["echo ran-{{ env.DOC_STABLE }}", "was approved at sequence preflight"] {
-        assert!(collapsed.contains(expected), "`{expected}` missing from:\n{}", changed.output);
+    let captured = match map_change {
+        "unchanged" => json!({}),
+        "unrelated" => fixture.map("a"),
+        "command" => json!({ "DOC_STABLE": "moved" }),
+        _ => panic!("unknown environment change: {map_change}"),
+    };
+    let run = fixture.run(&args, &[captured, fixture.map("a")]);
+    if map_change == "command" {
+        assert_ne!(run.code, Some(0), "{}", run.output);
+        assert!(fixture.events().is_empty(), "the changed command never ran: {:?}", fixture.events());
+        let collapsed = run.collapsed();
+        for expected in ["echo ran-{{ env.DOC_STABLE }}", "was approved at sequence preflight"] {
+            assert!(collapsed.contains(expected), "`{expected}` missing from:\n{}", run.output);
+        }
+    } else {
+        assert_eq!(run.code, Some(0), "{}", run.output);
+        assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
     }
+}
+
+macro_rules! step_approval_environment_tests {
+    ($($test:ident => $change:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_step_approved_text($change);
+            }
+        )*
+
+        #[test]
+        fn step_approval_cases_cover_both_unchanged_text_states_and_changed_text() {
+            assert_eq!([$($change),*], ["unchanged", "unrelated", "command"]);
+        }
+    };
+}
+
+step_approval_environment_tests! {
+    a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged => "unchanged",
+    a_step_runs_approved_text_after_an_unrelated_environment_change => "unrelated",
+    a_step_refuses_text_changed_by_its_captured_environment => "command",
 }
 
 /// A prompt task's document, the file it transcludes, and the provider it

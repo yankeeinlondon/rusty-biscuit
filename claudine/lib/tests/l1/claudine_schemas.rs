@@ -1,10 +1,8 @@
 //! Claudine's schema bundle under `claudine/schemas/` (`2026-10-21-claudine-schemas`,
 //! criteria 1–5): the bundle's files load through Darkmatter's loader, the action
 //! types agree with the lifecycle parser's verb inventory and Darkmatter's
-//! catalogs, the bundles copy the category short forms, the ordinary and
-//! `initialize` lifecycle stacks are typed three conditional levels deep and
-//! the `cancelled` stack at every depth the parser accepts, and the fixture
-//! corpus under
+//! catalogs, the bundles copy the category short forms, all three lifecycle
+//! stack families are typed recursively, and the fixture corpus under
 //! `tests/fixtures/claudine-schemas/` gets its decided verdicts through the
 //! same trigger-discovery path DMLS uses.
 //!
@@ -100,13 +98,10 @@ impl SchemaRepo {
 
 /// `files` as an embedded bundle named like Claudine's.
 ///
-/// Darkmatter memoizes a loaded embedded trigger for the process by the
-/// address of its `'static` text, so reusing an address skips resolving the
-/// 2.5 MB `claudine.yaml` payload again. A trigger text is leaked once per
-/// (trigger text, every library text) combination and reused only for that
-/// same combination: a cell that edits a library always gets fresh trigger
-/// addresses, and an unedited trigger beside an edited sibling trigger keeps
-/// its memoized load.
+/// Interns trigger text per (trigger text, every library text) combination
+/// to avoid leaking duplicate fixture strings. Darkmatter's process memo
+/// compares the trigger's content and every imported library's content, so
+/// edited libraries invalidate a load while unrelated trigger edits do not.
 pub(crate) fn embedded_bundle(files: &[BundleFile]) -> EmbeddedSchemaBundle {
     use claudine::composition::schema::bundle::CLAUDINE_TRIGGER_FILES;
     static TRIGGER_TEXTS: std::sync::Mutex<BTreeMap<(String, String), &'static str>> =
@@ -926,17 +921,7 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "long-form-in-bundle",
         "long-form-in-root-dictionary",
     ],
-    &[
-        "start-number",
-        "agent-empty-list",
-        "loop-number",
-        "empty-frontmatter",
-        "unrelated-ticket",
-        "null-identifiers",
-        "controls-beside-ticket",
-        "prompt-with-malformed-sequence",
-        "linked-prompt",
-    ],
+    &["start-number", "agent-empty-list", "loop-number"],
     &[
         "generated-verb-typed-value",
         "generated-verb-wrong-type",
@@ -960,6 +945,14 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "single-action-loop-loose",
         "long-forms-in-loop-bundle",
         "conditional-root-dictionary",
+    ],
+    &[
+        "empty-frontmatter",
+        "unrelated-ticket",
+        "null-identifiers",
+        "controls-beside-ticket",
+        "prompt-with-malformed-sequence",
+        "linked-prompt",
     ],
 ];
 
@@ -1425,10 +1418,7 @@ fn ac5_generated_operands() {
     );
 }
 
-/// Malformed identifying values select `claudine.yaml`, which rejects them;
-/// missing, null, and unrelated values select nothing; a malformed
-/// non-null `sequence` defeats the inline trigger; application data and
-/// every linking key are kept.
+/// Malformed identifying values select `claudine.yaml`, which rejects them.
 #[test]
 fn ac5_trigger_selection() {
     assert_ac5(
@@ -1458,6 +1448,21 @@ fn ac5_trigger_selection() {
                 Invalid(&[("/loop", "42")]),
                 Rejects("loop"),
             ),
+        ],
+    );
+}
+
+/// Missing, null, and unrelated values select nothing; a malformed non-null
+/// `sequence` defeats the inline trigger, while application and linking data
+/// remain accepted.
+#[test]
+fn ac5_trigger_selection_controls() {
+    assert_ac5(
+        6,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
             ("empty-frontmatter", include_str!("../fixtures/claudine-schemas/empty-frontmatter.md"), NEITHER, Valid, NotJudged),
             ("unrelated-ticket", include_str!("../fixtures/claudine-schemas/unrelated-ticket.md"), NEITHER, Valid, NotJudged),
             ("null-identifiers", include_str!("../fixtures/claudine-schemas/null-identifiers.md"), NEITHER, Valid, Accepts),
