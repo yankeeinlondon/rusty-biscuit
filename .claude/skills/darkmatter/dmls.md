@@ -356,6 +356,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   document folder): `warn` when new, `debug` on a repeat, `info` on
   recovery; a cold failure logs `trigger registry unavailable`. Root I/O
   errors (including a non-UTF-8 root file) never serve last-good data.
+  Discovery itself now returns skipped triggers as findings rather than an
+  error; `overlay/registry.rs::fail_closed_on_findings` turns a scan's first
+  finding back into `SchemaError::TriggerLoad`, so DMLS still fails the scope
+  closed with its last-good registry. That bridge is temporary: it goes when
+  DMLS installs a scan's valid subset and publishes findings as warnings.
 - Request timing (`request_timing`): the router starts a `RequestTimings` on
   `ServerState` at each dequeue and emits exactly one `CompletionEvent` per
   request or notification (`slow request`/`slow notification` at `warn` from

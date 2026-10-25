@@ -759,11 +759,37 @@ For grammar or schema changes, cover:
   column-0 `kind: schema-trigger` (or renamed `trigger-schema`) line claims it (`claims_envelope` skips lines
   inside multi-line quoted or block scalars and open flow collections), then
   `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
-  characters, BOM excluded) with a YAML hint, wrapped in `TriggerLoad` by
-  filesystem discovery and `EmbeddedTriggerLoad` for bundles; `TriggerMatch`
-  stays for grammar and shape errors. A malformed flow mapping is therefore unclaimed. BOM and
+  characters, BOM excluded) with a YAML hint; `TriggerMatch` stays for
+  grammar and shape errors. Discovery records either as the cause of an
+  `InvalidTriggerFinding` (below), never an `Err`. A malformed flow mapping is therefore unclaimed. BOM and
   CRLF are normalized before parsing (libyaml rejects BOM + CRLF as two
   documents). Tests: `lib/tests/l1/trigger_envelope_claim.rs`.
+- Discovery **recovers per trigger** (`triggers/finding.rs`,
+  `discovery.rs::scan_with_source`): an invalid envelope, or a payload that
+  fails to resolve, import, merge, or compile, is left out of
+  `TriggerRegistry::triggers` and recorded as an `InvalidTriggerFinding` on
+  `TriggerRegistry::findings` / `DarkmatterSchemas::discovery_findings()`
+  (discovery order; the first cause; `identity()` = normalized path or
+  `(bundle, name)`; code `SCHEMA_INVALID_TRIGGER_CODE` =
+  `dm.schema.invalid_trigger`, warning). A skipped file keeps its name
+  claimed, so shadowing is unchanged. Only infrastructure failures stay
+  `Err`: an unenumerable root, an enumerated file that cannot be read, a
+  case-fold collision, a bundle structure error. The library never prints a
+  finding: `ValidationReport::trigger_findings`, `CleanSchemaContext::
+  discovery_findings`/`SchemaCleanAnalysis::trigger_findings`, and compose
+  (`ComposeWarning::from_invalid_trigger`, added in `prepare_document` before
+  any effect, then `stop_if_blocked`, so `--deny` stops it) carry them.
+  `enforce_compiles` (`assemble.rs`) compiles every payload's structural
+  validator through `SHARED_VALIDATOR_CACHE` (`TriggerPayloadCompile`). A
+  failed payload keeps its observations through `resolve::observed::collect`
+  (files read, locations probed), which `dependencies()` /
+  `searched_locations()` report so a repair or creation refreshes. The
+  passive parsers (`parse_trigger_envelope_from_str`, `resolve_trigger_payload`)
+  stay strict. `file_claims_trigger_envelope` counts a malformed claimed
+  envelope as a trigger file, so an authored `$schema` naming a skipped
+  trigger still fails with `TriggerSchemaReferenced`. Tests:
+  `tests/l1/trigger_discovery_recovery.rs`,
+  `compose/tests/invalid_triggers.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and
@@ -785,9 +811,9 @@ For grammar or schema changes, cover:
   (the registry's private `claimed_names`). Bundle documents are keyed
   `{bundle}/{name}`; `NamespaceSource::Embedded { documents, bundle }`
   confines imports with `embedded::resolve_bundle_path`. Identity is
-  `TriggerSource::{File, Embedded { bundle, name }}`; load failures are
-  `SchemaError::EmbeddedTriggerLoad` (never `TriggerLoad`, whose path DMLS
-  publishes on). `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
+  `TriggerSource::{File, Embedded { bundle, name }}`; an invalid bundle
+  trigger is a finding whose source is `Embedded` (never a file path, link,
+  or watch) and still claims its name from later bundles. `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
   read `file()` (real files only; DMLS links only `ReferencedFile` through
   it) or `trigger_source()`. Embedded triggers add no dependency edges.
   Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
