@@ -48,6 +48,10 @@ message_to_agent: |-
      clean). No OS-specific code changed; CI covers the other environments.
 implemented: true
 pipeline_step: 1
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
 related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-29-recursive-schema-types

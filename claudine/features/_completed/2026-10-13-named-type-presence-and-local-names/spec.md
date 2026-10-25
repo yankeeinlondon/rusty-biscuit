@@ -55,6 +55,14 @@ message_to_agent: |-
     drift, not a spec departure). Lifecycle movement, commit, and push are
     left to the author.
 pipeline_step: 3
+canonical_docs:
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/completions/shell-completions.md
 related:
     - 2026-10-14-union-type-constraints
     - 2026-10-16-core-schema-types

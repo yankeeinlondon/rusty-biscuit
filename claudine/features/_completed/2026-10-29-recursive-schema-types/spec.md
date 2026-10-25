@@ -45,6 +45,15 @@ related:
     - 2026-10-24-sequence-containers
 implemented: true
 implemented_by: "claude/opus"
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
 ---
 
 # Recursive Named Types in SimplifiedSchema

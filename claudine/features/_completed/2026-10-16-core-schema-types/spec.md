@@ -31,6 +31,18 @@ reviewed_on: 2026-10-11
 review_iterations: 1
 human_review: false
 pipeline_step: 6
+canonical_docs:
+    - darkmatter/docs/topics/schemas/schema-types.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/inline/doc-list.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/state-management/side-effects.md
 related:
     - 2026-10-13-named-type-presence-and-local-names
     - 2026-10-21-claudine-schemas

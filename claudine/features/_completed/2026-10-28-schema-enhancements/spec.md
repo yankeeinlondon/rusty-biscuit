@@ -32,6 +32,17 @@ review_iterations: 2
 completed: true
 human_review: false
 pipeline_step: 18
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/numbers.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/lsp/configuration.md
+    - claudine/docs/topics/state-management/expression-engine.md
 formerly: 2026-09-21-schema-enhancements
 depends-on:
     - 2026-10-16-core-schema-types

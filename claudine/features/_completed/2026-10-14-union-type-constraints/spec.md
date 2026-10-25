@@ -1,5 +1,10 @@
 ---
 area: darkmatter
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
 status: finalized-spec
 created: 2026-10-10
 owner: Ken Snyder <ken@ken.net>

@@ -32,6 +32,17 @@ review_iterations: 1
 completed: true
 human_review: false
 pipeline_step: 17
+canonical_docs:
+    - darkmatter/docs/topics/lifecycle/index.md
+    - darkmatter/docs/topics/lifecycle/error-handling.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/dmls/docs/features.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
 formerly: 2026-09-22-lifecycle-events
 depends-on:
     - 2026-10-26-task-inputs-and-providers

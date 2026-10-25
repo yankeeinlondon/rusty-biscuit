@@ -43,6 +43,20 @@ related:
     - 2026-09-15-dasherized-identifiers
 implemented: true
 implemented_by: "claude/opus"
+canonical_docs:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/compose-requests.md
+    - claudine/docs/topics/schemas.md
+    - biscuit-file/docs/topics/file-references.md
 ---
 
 # Type-aware Evaluation, Narrowing, and Diagnostics
