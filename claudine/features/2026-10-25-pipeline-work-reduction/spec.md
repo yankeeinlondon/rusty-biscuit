@@ -252,7 +252,8 @@ The author's decisions on that report fix phase 2's scope:
 | **Re-measure after the sequence fix, then decide** | C6, D3, D8. Any that still meets a clause gets its own dated spec, written immediately |
 | **Write a candidate design** | X2, after its timing is confirmed on a quiet host |
 | **Closed: measured, no change** | C5, C8, D5, D6, D7, D9, D10, D11 |
-| **Still deferred** | X1, X3, X4 |
+| **Still deferred** | X3, X4 |
+| **Delivered by `2026-10-26-dmls-frontmatter-typing-allocation`** | X1 (see Design Decisions) |
 
 This feature is the shared final step after two parallel worktrees. Both
 start from `2026-10-26-dmls-frontmatter-typing-allocation`:
@@ -300,6 +301,27 @@ which items proceed.
 - After all items land, the benches run against the saved baseline
   (`just bench-compare pipeline-work-pre`), and the implementation log records
   each anchor's before/after time and bytes.
+
+## Design Decisions
+
+### X1 was delivered by the frontmatter typing allocation fix
+
+- **Decision:** X1 (cached alternative matchers for editor hover) is no
+  longer deferred: `2026-10-26-dmls-frontmatter-typing-allocation` built it
+  while closing its hover allocation target. DMLS keeps prepared matchers,
+  and synthesized array-item definitions, across edits in
+  `dmls/src/overlay/analysis.rs::CrossSnapshotSchema`, keyed by the
+  library's `alternative_fingerprint`. Phase 2 does not schedule X1, and its
+  A3 re-measurement compares against that fix's recorded hover bytes (verb
+  58,763, expression 105,025).
+- **Alternatives considered:** Keep X1 listed as deferred; that would invite
+  a second matcher cache.
+- **Why:** The spike measured X1 at under 1% of A3 because its hover was
+  dominated by whole-document typing; once that fix removed the typing, the
+  matcher preparation was most of what remained (about 6.8 MB warm, 15 MB
+  cold per verb hover), so the fix had to build it.
+- **Downsides:** None for this feature; the spike report keeps its original
+  verdict as a record of that measurement.
 
 ## Out of scope
 

@@ -152,6 +152,11 @@ The leaks exist only to meet these `'static` interfaces:
   cached profile when that state is observed. Do not scan beyond the discovery
   winner just to prune entries. The candidate remains skipped, as today;
   ordinary catalog diagnostics still report catalog errors.
+- A schema-root file that is not a host catalog keeps its cached
+  classification under the same latest-per-path rule, so an unchanged root
+  file is read and hashed on each request but never YAML-parsed again. (Before
+  `2026-10-26-dmls-frontmatter-typing-allocation`, every file was parsed twice
+  per call to classify it, about 2.7 MB per editor hover on the A3 bench.)
 - Cache lookup and replacement are synchronized. Concurrent readers receive
   results for the bytes they observed, and there is at most one retained
   revision per path. “Latest” means the most recently installed observation,
@@ -518,6 +523,24 @@ check.
   wording, and runtime-only whitelist warnings intentionally disappear.
 - **Downsides:** Error text changes for numeric rejection, and blacklist I/O
   remains per dispatch so edits continue to take effect immediately.
+
+### Keep the non-catalog classification cache from the typing-allocation fix
+
+- **Decision:** `2026-10-26-dmls-frontmatter-typing-allocation` (implemented)
+  changed `host_lifecycle_profiles` to compute its cache key before
+  classifying a file and to cache a file that is not a host catalog as an
+  empty entry, keeping only the latest revision per path. This fix's
+  latest-per-path cache keeps that: a non-catalog revision is one entry per
+  path, and a path that stops being a host catalog drops its cached profile
+  when observed (section 1 already requires this).
+- **Alternatives considered:** Classify every root file on each request
+  again; that restores about 2.7 MB of YAML parsing per editor hover.
+- **Why:** The classification depends only on the file's bytes, which the
+  key already hashes. That fix measured DMLS hovers at 58,763 bytes (verb)
+  and 105,025 bytes (expression) on the A3 bench, and the expression hover's
+  remaining cost is this discovery's reads and hashes.
+- **Downsides:** None beyond one small entry per visited non-catalog path,
+  which latest-per-path already bounds per path.
 
 ### Prove resource behavior directly and keep verification proportional
 
