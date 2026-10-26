@@ -258,8 +258,10 @@ Update alongside code changes:
     - the lifecycle directory records where a spec is in its life, not what it
       is; closing a spec moves it, and every reference that spelled out the old
       location goes stale in the same commit
-    - this applies to `related:`/`depends-on:` frontmatter and to prose
-      cross-references alike
+    - this applies to `related:`/`depends-on:`/`next_spec:` frontmatter and
+      to prose cross-references alike
+- `next_spec:` names the one spec expected to follow this one (for example,
+  the feature a fix unblocks); it is absent at the end of a chain
 
 <!-- gitnexus:start -->
 
