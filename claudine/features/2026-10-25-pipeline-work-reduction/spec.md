@@ -23,6 +23,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+    next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
 human_review: true
 related:
     - 2026-10-25-pipeline-improvements
@@ -237,6 +238,27 @@ Timings come from the macOS development host. Counts and bytes are the same
 on every OS. A claim that depends on OS-specific behavior, such as filesystem
 walks in X2, is marked as such.
 
+## Spike outcome and decided scope (2026-10-26)
+
+The spike ran and its verdicts are in [spike-report.md](spike-report.md).
+The author's decisions on that report fix phase 2's scope:
+
+| Group | Items |
+| ----- | ----- |
+| **Implement** | C1, C2, C3, C4, C7, D1 (option B: the context-aware `ValidatorCache` slot), D2, D4 (with the lazy position provider), plus D12, D13, and P1 by rule |
+| **Re-measure after the sequence fix, then decide** | C6, D3, D8. Any that still meets a clause gets its own dated spec, written immediately |
+| **Write a candidate design** | X2, after its timing is confirmed on a quiet host |
+| **Closed: measured, no change** | C5, C8, D5, D6, D7, D9, D10, D11 |
+| **Still deferred** | X1, X3, X4 |
+
+Phase 2 starts only after:
+1. `2026-10-26-dmls-frontmatter-typing-allocation` and
+   `2026-10-26-sequence-quadratic-frontmatter` have landed. The spike found
+   both defects, and both inflate the totals this feature's shares are
+   measured against;
+2. the counting benches have been re-run and the report updated;
+3. a quiet-host timing pass has been saved as `pipeline-work-pre`.
+
 ## Phase 2: implementation
 
 Phase 2 starts after the author has reviewed the spike report and recorded
@@ -257,8 +279,10 @@ which items proceed.
   - C3: retry clearing and lexical restoration are unchanged.
   - C5, D8: errors are reported at the same time; file functions run on every
     evaluation.
-  - D1: exactly one accepting eligible arm is still required before a rewrite;
-    nothing is reused across values or requests.
+  - D1: exactly one accepting eligible arm is still required before a
+    rewrite. Compiled validators may be shared through `ValidatorCache`'s
+    context-aware slot, but never across resolution contexts. Verdicts are
+    never cached: every value is judged afresh.
 - After all items land, the benches run against the saved baseline
   (`just bench-compare pipeline-work-pre`), and the implementation log records
   each anchor's before/after time and bytes.

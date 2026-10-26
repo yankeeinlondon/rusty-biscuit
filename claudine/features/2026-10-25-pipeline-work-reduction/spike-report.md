@@ -125,15 +125,63 @@ before opening anything further.
 rule), 2 low-priority (C6, D3), 1 pending (D8), 1 design (X2), 9 closed (C5,
 C8, D5, D6, D7, D9, D10, D11, plus finding 3), 3 still deferred (X1, X3, X4).
 
-## Author decisions needed
+## Author decisions (2026-10-26)
 
-1. **Thresholds.** Keep the spec's 5% / 10 ms / 10 MB, or adjust them. C4 (4.7%)
-   and D3 (5.0%, estimated) sit on the line.
-2. **D1 with `ValidatorCache`:** does sharing a compiled validator across
-   documents satisfy "nothing reused across values or requests"?
-3. **Order.** The two defect fixes go first. C1 and D8 wait for the
-   sequence fix, and every A3 share is re-measured after the DMLS fix,
-   because hover and diagnostics dominate A3's totals today.
+1. **Thresholds stay as written.**
+   - **C4 is implemented**, although its 4.7% share is under the line.
+   - **D3 is deferred.** It is re-measured after
+     `2026-10-26-sequence-quadratic-frontmatter` lands. If it still meets a
+     clause, a dated spec for it is written immediately.
+2. **D1 uses option B.** The rewrite takes each union arm's validator from
+   the existing `ValidatorCache`, through its context-aware slot. A validator
+   compiled for one resolution context (document directory, fallback
+   directory, caller origins) is never used for another. Every value is
+   still judged afresh, and no verdict is cached.
+
+   The rule "never reuse a file-validation verdict between values or
+   requests" came from the review's wording of this finding, not from any
+   spec or contract. It is replaced by this decision.
+
+   Context from the author for this decision:
+   - an eager `file` value's contents are never read (the rewrite only
+     replaces the path string with its resolved, document-relative form);
+   - existence on disk is a runtime (composition) concern;
+   - design-time type validation of any `file` should check only that the
+     value could be a valid path.
+
+   The rewrite runs at composition (`compose/schema_validation.rs`), so D1 is
+   consistent with that model. Ordinary schema validation does **not**
+   follow it today: `file(eager)` checks existence "at validation time"
+   (`format.rs`, `docs/topics/schemas/definition.md`). That difference is
+   recorded under "Open question" below, not decided by D1.
+3. **Order as recommended:**
+   1. the two defect fixes first, in parallel;
+   2. re-run the counting benches;
+   3. the quiet-host timing pass;
+   4. Track 5 phase 2.
+
+   Tracks 1–4 are independent and may go at any time. Each spec's
+   `next_spec` frontmatter names the spec expected to follow it.
+
+## Open question: when does `file(eager)` check existence?
+
+The author's model:
+- schema (type) validation of a `file` checks only that the value could be a
+  path;
+- existence is checked at runtime, when the file is composed or launched.
+
+The implementation today has three stages:
+
+| Stage | Checks existence? |
+| ----- | ----------------- |
+| Passive editor validation | No (already matches the model) |
+| Ordinary schema validation (`md schema validate`, composition's validation gate) | **Yes**, for `file(eager)` |
+| Composition's eager rewrite | resolves the path and rewrites it |
+
+Moving the existence check out of ordinary validation changes documented
+behavior. For example, `md schema validate` would stop reporting a missing
+eager file, and composition or launch would report it instead. That needs its
+own spec. It does not block Track 5.
 
 ## Next steps
 
