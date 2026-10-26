@@ -28,7 +28,8 @@ next_spec: 2026-10-25-fix-now
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 0
+review_iterations: 1
+completed: true
 human_review: false
 needs_rulings: false
 related:

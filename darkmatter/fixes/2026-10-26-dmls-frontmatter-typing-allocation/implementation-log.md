@@ -1199,3 +1199,31 @@ Run once after all edits, with no subagents running.
 - `2026-10-26-sequence-quadratic-frontmatter` (starts from this fix):
   checked and unchanged; it concerns Claudine's sequence runtime and
   preflight, which this fix does not touch.
+
+## Review 1
+
+### Design Decisions
+
+- **Decision:** Apply the allocation target to the existing benchmark's measured
+  edit loops, preserving its warm-up, server lifetime, phase order, cold-cache
+  reset, and repetitions. Report first-use preparation separately.
+  - **Alternatives considered:** Require every first-ever hover to allocate
+    under 1 MB; reset the new server-owned store between benchmark loops.
+  - **Why:** Acceptance item 2 says "each measured hover" and explicitly
+    requires the existing benchmark cases. Its original warm-up and persistent
+    server state are unchanged. The cold point-request tests independently
+    prove that cursor typing does not require prior diagnostics.
+  - **Downsides:** Passing this target does not establish a sub-1-MB first
+    hover over previously unseen schema alternatives; the measured preparation
+    cost remains approximately 16.8 MB.
+- **Decision:** Continue the full review without an author decision gate.
+  - **Alternatives considered:** Request confirmation of the cross-snapshot
+    cache or the additional library changes.
+  - **Why:** Two independent decision audits found no deferred requested scope
+    or decision meeting the human-review bar. The implementation records its
+    alternatives, reasons, and costs; these internal choices are settled.
+    The missing-import limitation is explicitly preexisting, while the spec
+    requires following existing dependency invalidation and preserving behavior.
+  - **Downsides:** The review establishes the specified behavior and measured
+    allocation result, rather than extending this fix into missing-file
+    discovery or a stronger universal first-request allocation guarantee.
