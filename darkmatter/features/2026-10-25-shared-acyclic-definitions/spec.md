@@ -98,8 +98,10 @@ A named type is selected for sharing when all three conditions hold:
    pattern-key dictionary), a tuple, an array whose items are structured, or
    a union with at least one structured arm. Classify recursively: an array
    or union arm is structured only through what it contains, so
-   `tags: string[]` and `ids: [string, number][]` are not structured, while
-   `entries: "{ name: string }[]"` is. Follow aliases to classify the shape
+   `tags: string[]` is not structured, and neither is `ids: "id[]"` where
+   `id: [string, number]` is a primitive-only union (a list of a union is
+   always written through a named union and `[]`). `entries: "{ name: string }[]"`
+   is structured. Follow aliases to classify the shape
    without first building a fully copied expansion. Primitive aliases such
    as `slug: alphanumeric(allow-dashes)`, arrays of primitives, and unions of
    only primitive arms stay inlined; narrowing a use such as `slug(min(3))`
