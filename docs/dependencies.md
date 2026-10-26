@@ -19,6 +19,21 @@
   package; `schematic/schema/Cargo.lock` gains `num-bigint` and
   `num-integer`. See
   `schematic/docs/dependencies.md`.
+- `biscuit-terminal` adds `icy_sixel` 0.7 (2026-10-21) as a normal
+  dependency, with no cargo feature, for the Sixel graphics route. It brings
+  `quantette` (with `kmeans`) and `palette` into the lockfile, plus second
+  copies of `rand` (0.10), `rand_core` (0.10), and `syn` (3.0) next to the
+  versions already in the graph.
+- The diagram dependency direction flips (2026-10-21): `biscuit-terminal`
+  drops `biscuit-visualized`, and its `image` feature now gates only `resvg`
+  (SVG images and graphical rules). `biscuit-visualized` gains an optional
+  `terminal` feature that depends on `biscuit-terminal` (with `image`) and
+  `renderable`, and moves to edition 2024. The diagram components'
+  consumers (`biscuit-terminal-cli`, `darkmatter`, `sniff-cli`,
+  `worktree-cli`) depend on `biscuit-visualized` with `terminal` directly;
+  `worktree-cli`'s former `biscuit-visualized` development dependency is now
+  that normal dependency. Packages that depend only on `biscuit-terminal` no
+  longer compile `mermaid-rs-renderer`. No crate enters or leaves the lockfile.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no
@@ -362,10 +377,10 @@
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
   `sniff` already builds the same version. The workspace's own
-  `biscuit-visualized` (development, `image` feature, already built through
-  `biscuit-terminal`) gives the graph tests `MermaidDiagram::gitgraph_geometry`,
-  the laid-out graph the image is drawn from, so they can check merge parents
-  and tag bounds without reading pixels.
+  `biscuit-visualized` (`terminal` feature, a normal dependency for the
+  `GitGraph` component) also gives the graph tests
+  `MermaidDiagram::gitgraph_geometry`, the laid-out graph the image is drawn
+  from, so they can check merge parents and tag bounds without reading pixels.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
@@ -558,7 +573,7 @@ This is a Rust workspace with the following modules:
 
 - [biscuit-terminal](./biscuit-terminal) _v0.1.0_
 
-    _Terminal detection, image rendering (viuer), mermaid diagrams, and capability queries._
+    _Terminal detection, image rendering, mermaid diagrams, and capability queries._
 
     _Tags: workspace, library, terminal_
 
@@ -570,7 +585,7 @@ This is a Rust workspace with the following modules:
 
 - [biscuit-visualized](./biscuit-visualized) _v0.1.0_
 
-    _Shared visualization library for Mermaid diagrams and graph rendering. Pure Rust with no external dependencies._
+    _Diagrams for every target: Mermaid and graph artifacts in pure Rust, plus (with `terminal`) the `MermaidDiagram`, `GraphExpression`, and `GitGraph` components. Depends on `biscuit-terminal`, never the reverse._
 
     _Tags: workspace, library, visualization_
 
@@ -1108,12 +1123,6 @@ This is a Rust workspace with the following modules:
     _Imaging library providing basic image processing and native Rust encoders/decoders for common formats._
 
     _Tags: image, processing, encoding_
-
-- [viuer](https://github.com/atanunq/viuer) _v0.11_ [📄](https://docs.rs/viuer)
-
-    _Display images in the terminal using iTerm, Kitty graphics protocols, or lower half blocks._
-
-    _Tags: terminal, image, rendering_
 
 ### Internationalization
 

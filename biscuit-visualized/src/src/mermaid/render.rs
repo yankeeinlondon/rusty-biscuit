@@ -1,7 +1,7 @@
-use crate::artifact::{OutputFormat, RenderRequest, RenderedArtifact};
+use crate::artifact::{Background, OutputFormat, RenderRequest, RenderedArtifact};
 use crate::cache::file_cache::MERMAID_BACKEND;
 use crate::cache::{FileCache, VisualizationKind};
-use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
+use crate::raster::png::rasterize_svg_for_request;
 
 use super::config::{MermaidConfig, MermaidTheme};
 use super::error::MermaidError;
@@ -186,10 +186,7 @@ impl MermaidDiagram {
                 svg.as_bytes(),
             )?,
             OutputFormat::Png => {
-                let png_data = match request.target_width {
-                    Some(width) => rasterize_svg_to_png(&svg, width)?,
-                    None => rasterize_svg_to_png_bytes(&svg, request.scale)?,
-                };
+                let png_data = rasterize_svg_for_request(&svg, request)?;
                 cache.store(
                     VisualizationKind::Mermaid,
                     &cache_key,
@@ -222,9 +219,7 @@ impl MermaidDiagram {
             "theme": self.theme.as_str(),
             "title": self.title,
             "config": config_value,
-            "scale": request.scale.max(1),
-            "target_width": request.target_width,
-            "transparent_background": request.transparent_background,
+            "request": request.cache_identity(),
         }))
         .unwrap_or_else(|_| "{}".to_string())
     }
@@ -240,7 +235,7 @@ impl MermaidDiagram {
     ///
     /// Returns `MermaidError::RenderFailed` when the instructions do not parse.
     pub fn natural_size(&self) -> Result<NaturalSize, MermaidError> {
-        let laid_out = self.compute_layout(false)?;
+        let laid_out = self.compute_layout(Background::Theme)?;
         let dimensions = mermaid_rs_renderer::measure_svg_dimensions(&laid_out.layout, &laid_out.config, None);
         Ok(NaturalSize {
             width: dimensions.viewbox_width,
@@ -259,18 +254,18 @@ impl MermaidDiagram {
     /// The same as [`natural_size`](Self::natural_size).
     #[doc(hidden)]
     pub fn gitgraph_geometry(&self) -> Result<Option<GitGraphGeometry>, MermaidError> {
-        let laid_out = self.compute_layout(false)?;
+        let laid_out = self.compute_layout(Background::Theme)?;
         Ok(GitGraphGeometry::from_layout(&laid_out.graph, &laid_out.layout, &laid_out.config, &laid_out.theme))
     }
 
     /// The one path from instructions to layout that measurement and rendering
     /// share, gitGraph corrections included (see the `gitgraph` module).
-    fn compute_layout(&self, transparent_background: bool) -> Result<LaidOut, MermaidError> {
+    fn compute_layout(&self, background: Background) -> Result<LaidOut, MermaidError> {
         let mut parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
             .map_err(|err| MermaidError::RenderFailed(err.to_string()))?;
         gitgraph::repair_gitgraph_merges(&mut parsed.graph)?;
 
-        let mut theme = self.build_theme(transparent_background);
+        let mut theme = self.build_theme(background);
 
         // Apply %%{init: {'themeVariables': {'pie1': '#xxx', ...}}}%% overrides
         if let Some(ref init) = parsed.init_config {
@@ -289,13 +284,13 @@ impl MermaidDiagram {
     fn render_svg(&self, request: &RenderRequest) -> Result<String, MermaidError> {
         let LaidOut {
             layout, theme, config, ..
-        } = self.compute_layout(request.transparent_background)?;
+        } = self.compute_layout(request.background)?;
         let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &config);
 
         Ok(self.apply_svg_overrides(svg))
     }
 
-    fn build_theme(&self, transparent_background: bool) -> mermaid_rs_renderer::Theme {
+    fn build_theme(&self, background: Background) -> mermaid_rs_renderer::Theme {
         let mut theme = match self.theme {
             MermaidTheme::Default => mermaid_rs_renderer::Theme::mermaid_default(),
             MermaidTheme::Dark => dark_theme(),
@@ -313,9 +308,15 @@ impl MermaidDiagram {
         // palette so every node on a branch shares one color.
         theme.git_inv_colors = theme.git_colors.clone();
 
-        if transparent_background {
-            theme.background = "none".to_string();
-            theme.edge_label_background = "none".to_string();
+        match background {
+            Background::Theme => {}
+            Background::Transparent => {
+                theme.background = "none".to_string();
+                theme.edge_label_background = "none".to_string();
+            }
+            Background::Solid { .. } => {
+                theme.background = background.solid_hex().unwrap_or_default();
+            }
         }
 
         theme

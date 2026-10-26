@@ -124,16 +124,16 @@ impl GraphExpression {
                             _ => None,
                         };
 
-                        if let Some(kind) = edge_kind {
-                            if let Token::Identifier(to_id) = &tokens[i + 2] {
-                                edges.push(GraphEdge {
-                                    from: id.clone(),
-                                    to: to_id.clone(),
-                                    kind,
-                                });
-                                i += 2; // Skip edge operator and next node
-                                continue;
-                            }
+                        if let Some(kind) = edge_kind
+                            && let Token::Identifier(to_id) = &tokens[i + 2]
+                        {
+                            edges.push(GraphEdge {
+                                from: id.clone(),
+                                to: to_id.clone(),
+                                kind,
+                            });
+                            i += 2; // Skip edge operator and next node
+                            continue;
                         }
                     }
 

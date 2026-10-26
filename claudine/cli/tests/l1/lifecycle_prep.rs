@@ -190,12 +190,14 @@ fn a_call_or_handoff_back_to_an_active_caller_is_refused() {
 /// A target's `break` cannot reach a loop of the caller's: a target ending
 /// its own loop with code `0` returns normally and the caller's loop goes on,
 /// while a non-zero code fails the call.
-#[test]
-fn a_targets_break_stays_in_the_target_and_its_code_decides_the_call() {
-    let looping_target = |code: u8| {
+mod a_targets_break_stays_in_the_target_and_its_code_decides_the_call {
+    use super::*;
+
+    fn looping_target(code: u8) -> String {
         format!("---\nloop:\n  until: \"false\"\n  max: 5\nstart:\n  - break: {{ code: {code} }}\n---\nNever sent\n")
-    };
-    let seq = r#"---
+    }
+
+    const SEQ: &str = r#"---
 loop:
   until: "loop.count >= 2"
   max: 3
@@ -206,16 +208,23 @@ sequence:
     prompt: "@caller.md"
 ---
 "#;
-    let caller = "---\nstart:\n  - prep: \"@target.md\"\n---\nCaller {{ loop.count }}\n";
-    let returns = run("sequence", &[("seq.md", seq), ("caller.md", caller), ("target.md", &looping_target(0))], "seq.md");
-    assert_eq!(returns.status.code(), Some(0), "stderr:\n{}", returns.stderr);
-    assert_eq!(returns.trace, ["pass 1", "pass 2"], "the caller's loop ran both passes");
-    assert_eq!(returns.prompts, ["Caller 1", "Caller 2"]);
+    const CALLER: &str = "---\nstart:\n  - prep: \"@target.md\"\n---\nCaller {{ loop.count }}\n";
 
-    let fails = run("sequence", &[("seq.md", seq), ("caller.md", caller), ("target.md", &looping_target(5))], "seq.md");
-    assert_eq!(fails.status.code(), Some(1), "stderr:\n{}", fails.stderr);
-    assert!(fails.prose().contains("it exited with status 5"), "stderr:\n{}", fails.stderr);
-    assert_eq!(fails.trace, ["pass 1"]);
+    #[test]
+    fn code_zero_returns_and_the_callers_loop_goes_on() {
+        let returns = run("sequence", &[("seq.md", SEQ), ("caller.md", CALLER), ("target.md", &looping_target(0))], "seq.md");
+        assert_eq!(returns.status.code(), Some(0), "stderr:\n{}", returns.stderr);
+        assert_eq!(returns.trace, ["pass 1", "pass 2"], "the caller's loop ran both passes");
+        assert_eq!(returns.prompts, ["Caller 1", "Caller 2"]);
+    }
+
+    #[test]
+    fn a_non_zero_code_fails_the_call() {
+        let fails = run("sequence", &[("seq.md", SEQ), ("caller.md", CALLER), ("target.md", &looping_target(5))], "seq.md");
+        assert_eq!(fails.status.code(), Some(1), "stderr:\n{}", fails.stderr);
+        assert!(fails.prose().contains("it exited with status 5"), "stderr:\n{}", fails.stderr);
+        assert_eq!(fails.trace, ["pass 1"]);
+    }
 }
 
 /// Ctrl-C during a target cancels the run: the call never returns

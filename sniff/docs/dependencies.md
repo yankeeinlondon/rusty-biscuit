@@ -184,3 +184,10 @@ Live Linux watch fixtures use existing `libc::inotify_init1` and
 `inotify_add_watch`; there is no `inotify` crate dependency.
 
 WSL2 exercises the Linux backend and never inventories native Windows processes.
+
+## CLI Dependency Graph (`sniff-cli`)
+
+- `biscuit-visualized` with the `terminal` feature supplies the
+  `GraphExpression` component that draws `sniff repo deps --ui`. It moved out
+  of `biscuit-terminal`, which no longer depends on it; no crate was added to
+  the build.

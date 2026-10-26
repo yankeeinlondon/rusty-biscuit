@@ -61,14 +61,16 @@ CLI uses for HTML output — see `darkmatter/cli/src/artifact.rs`). Both remap
 Darkmatter page browser path is interactive by default. See
 [Rendering to the Browser](#rendering-to-the-browser).
 
-The mermaid module is intentionally thin: the actual terminal-side diagram rendering (pure-Rust pipeline via `biscuit-visualized`, terminal image display, and cached PNG artifacts) lives in `biscuit-terminal`. `darkmatter/lib/src/mermaid/render_terminal.rs` is a wrapper around `biscuit_terminal::components::mermaid::MermaidDiagram` and re-exports its `MermaidRenderError` for API compatibility.
+The mermaid module is intentionally thin: the diagram component (pure-Rust rendering and cached PNG artifacts) lives in `biscuit-visualized`, and terminal image display in `biscuit-terminal`. `darkmatter/lib/src/mermaid/render_terminal.rs` is a wrapper around `biscuit_visualized::components::mermaid::MermaidDiagram` and re-exports its `MermaidRenderError` for API compatibility.
+
+The render-tree terminal path (`markdown/render_tree/entrypoints.rs`) installs `biscuit_visualized::components::TerminalDiagramRenderer` as the render options' diagram hook. biscuit-terminal's tree renderer draws no diagrams itself, so without that hook every `mermaid` fence would stay code even under `MermaidMode::Image`.
 
 ## Rendering to the Terminal
 
 Terminal rendering is driven from `darkmatter/lib/src/markdown/output/terminal.rs`. When the markdown parser emits the end of a code block whose language is `mermaid` (case-insensitive) and `TerminalOptions::mermaid_mode` is not `Off`, the renderer branches on the mode:
 
 - **`MermaidMode::Text`** — Emits a code-block header row (using any `title` from the code-fence info string) followed by the diagram source rendered with syntect highlighting via the shared helpers in `darkmatter/lib/src/markdown/output/code_block.rs`. The output is byte-compatible with a normal `mermaid` code fence.
-- **`MermaidMode::Image`** — Flushes the current line buffer, constructs a `Mermaid` value from the code-block body, and calls `Mermaid::render_for_terminal()`, which delegates to `biscuit_terminal::components::mermaid::MermaidDiagram::try_render`. The image is written directly to stdout. On success, a title-only header row is appended after the image (the language label is suppressed because the rendered diagram already conveys the type). On failure (no graphics support, render error, etc.) the renderer transparently falls back to the `Text` rendering path and logs a warning via `tracing::warn!`.
+- **`MermaidMode::Image`** — Flushes the current line buffer, constructs a `Mermaid` value from the code-block body, and calls `Mermaid::render_for_terminal()`, which delegates to `biscuit_visualized::components::mermaid::MermaidDiagram::try_render`. The image is written directly to stdout. On success, a title-only header row is appended after the image (the language label is suppressed because the rendered diagram already conveys the type). On failure (no graphics support, render error, etc.) the renderer transparently falls back to the `Text` rendering path and logs a warning via `tracing::warn!`.
 
 The `Mermaid` struct also computes accessibility-friendly alt text:
 

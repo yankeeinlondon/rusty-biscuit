@@ -1034,6 +1034,16 @@ fn prepare_inline_on(
     }
     reject_removed_loop_reads_in_source(source)?;
     reject_removed_sequence_reads_in_source(source, &options, None)?;
+    // Before composition (which runs frontmatter `$(…)`) and the guardrail
+    // write: a baseline the closure could never stamp must not reach a launch
+    // or a preview. Passing says nothing about the document after the agent
+    // edits it; the closure still validates and rolls back.
+    super::closure::rehearse_inline_baseline(&source.original_text, chrono::Utc::now()).map_err(
+        |source_error| CompositionError::InlineBaselineUnstampable {
+            path: source.resolved_path.clone(),
+            source: Box::new(source_error),
+        },
+    )?;
 
     let prompt_text = inline_prompt_text(fm, options.set_overrides.as_ref())?;
 

@@ -2,9 +2,8 @@ use crate::args::LayoutArgs;
 use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use crate::output::RenderMeta;
-use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::{
-    TerminalImage, parse_filepath_and_width, parse_width_spec,
+    ImageOutput, TerminalImage, parse_filepath_and_width, parse_width_spec,
 };
 use biscuit_terminal::discovery::cursor_position::cursor_position;
 use clap::Args as ClapArgs;
@@ -127,11 +126,24 @@ pub fn render_image(
     // Debug: query cursor position BEFORE image render
     let pre_cursor = if debug { cursor_position() } else { None };
 
-    // Render the image
-    let output = term_image.render(&terminal);
+    // Load, decode, and encode before anything is printed, so a bad image
+    // fails without partial output.
+    let output = term_image
+        .render_with_half_blocks(&terminal)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
-    // Output the result with vertical margins
-    emit_vertical_margins(layout, || emit_image_output(&output))?;
+    match output {
+        ImageOutput::Pixels(sequence) => {
+            emit_vertical_margins(layout, || emit_image_output(&sequence))?;
+        }
+        ImageOutput::Fallback { text, reason } | ImageOutput::HalfBlocks { text, reason } => {
+            emit_vertical_margins(layout, || {
+                println!("{text}");
+                Ok(())
+            })?;
+            crate::hints::emit_route_hint(&reason);
+        }
+    }
 
     // Debug: query cursor position AFTER image render + output
     if debug {

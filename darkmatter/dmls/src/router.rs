@@ -71,7 +71,7 @@ use crate::request_timing::{
 };
 use crate::workspace::snapshot::SharedSnapshot;
 use crate::graph::Listing;
-use crate::workspace::discover::{DiscoveryReport, ListedKind, listed_kind};
+use crate::workspace::discover::{DiscoveryReport, ListedKind, ListedKinds};
 use crate::workspace::startup::{ProgressReporter, list_files};
 use crate::workspace::watch::{
     WatchMode, changed_manifests, coalesce_changes, is_config_file, is_context_input,
@@ -1236,28 +1236,36 @@ impl ServerState {
         refresh_semantic_tokens
     }
 
-    /// Applies a coalesced on-disk change to the file list and index.
+    /// Applies one notification's coalesced on-disk changes to the file list
+    /// and index, rebuilding the graph at most once for all of them.
     ///
     /// A Markdown file the walk would list joins the list; a parsed closed
     /// copy is marked stale rather than re-read. A deletion drops it. YAML files only update the
     /// list. A path the walk would not list is marked stale when it is a
-    /// parsed dependency, and a created one rebuilds the graph so references
-    /// to it resolve (see [`WorkspaceIndex::unlisted_changed`]).
-    fn apply_disk_change(&self, path: &Path, kind: FileChangeType) {
+    /// parsed dependency, and a created one rebuilds the graph only when a
+    /// reference failed to resolve to it (see
+    /// [`WorkspaceIndex::unlisted_changed`]).
+    fn apply_disk_changes(&self, changes: &[(&Path, FileChangeType)]) {
+        let mut kinds = ListedKinds::new(&self.roots, &self.config.effective().workspace);
         let mut index = self.index.lock().expect("index lock poisoned");
-        let changed = if kind == FileChangeType::DELETED {
-            index.yaml_changed(path, false);
-            index.disk_deleted(path)
-        } else {
-            match listed_kind(&self.roots, &self.config.effective().workspace, path) {
-                Some(ListedKind::Markdown) => index.disk_changed(path),
-                Some(ListedKind::Yaml) => {
-                    index.yaml_changed(path, true);
-                    false
+        index.begin_batch();
+        let mut changed = false;
+        for &(path, kind) in changes {
+            changed |= if kind == FileChangeType::DELETED {
+                index.yaml_changed(path, false);
+                index.disk_deleted(path)
+            } else {
+                match kinds.kind(path) {
+                    Some(ListedKind::Markdown) => index.disk_changed(path),
+                    Some(ListedKind::Yaml) => {
+                        index.yaml_changed(path, true);
+                        false
+                    }
+                    None => index.unlisted_changed(path, kind == FileChangeType::CREATED),
                 }
-                None => index.unlisted_changed(path, kind == FileChangeType::CREATED),
-            }
-        };
+            };
+        }
+        index.end_batch();
         if changed {
             self.snapshot.store(index.snapshot());
         }
@@ -2666,7 +2674,7 @@ impl Router {
     /// `.git` file) does nothing else. A config file or ignore
     /// file change re-lists the workspace (the config file also reloads the
     /// configuration). Any other change updates the file list unless the
-    /// document is open; see [`ServerState::apply_disk_change`].
+    /// document is open; see [`ServerState::apply_disk_changes`].
     fn apply_watched_changes(&mut self, params: DidChangeWatchedFilesParams) {
         let events = params.changes.into_iter().filter_map(|event| {
             uri_to_file_path(&event.uri).map(|path| (path, event.typ))
@@ -2699,7 +2707,8 @@ impl Router {
             .filter(|change| !is_context_input(&change.path) && !is_config_file(&change.path) && !is_ignore_file(&change.path))
             .map(|change| change.path.clone())
             .collect();
-        for change in changes {
+        let mut applied: Vec<(&Path, FileChangeType)> = Vec::with_capacity(changes.len());
+        for change in &changes {
             if is_context_input(&change.path) || is_config_file(&change.path) || is_ignore_file(&change.path) {
                 continue;
             }
@@ -2710,8 +2719,9 @@ impl Router {
                 continue;
             }
             tracing::debug!(path = %change.path.display(), "watched change");
-            self.state.apply_disk_change(&change.path, change.kind);
+            applied.push((&change.path, change.kind));
         }
+        self.state.apply_disk_changes(&applied);
         // After the index, so its parse of the new bytes serves the row. Rows
         // hold disk state, so an open document's disk change reaches the
         // store even though its buffer stays authoritative.

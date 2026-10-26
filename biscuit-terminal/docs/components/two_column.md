@@ -42,6 +42,16 @@ println!("{}", cols.display(&term));
 
 Each column is a block region, so it takes the block [`Prose`](./prose.md): the Prose's paragraphs and fenced code blocks become the column's blocks, with their inline styling intact on the terminal, browser, and MarkdownPlus targets. A plain string or other inline content is wrapped in one paragraph.
 
+### Image Columns
+
+A column can hold a [`TerminalImage`](./terminal_image.md), which is sized to the column's width and drawn beside the other column's text. On a terminal with a graphics route the image is drawn in pixels; with no usable route it becomes [half-block](./terminal_image.md#half-block-fallback) rows on a truecolor, Unicode terminal, and its alt text otherwise.
+
+```rust
+let photo = TerminalImage::new(Path::new("photo.jpg"))?.with_alt_text("A photo");
+let cols = TwoColumn::new(photo, "Caption and details");
+println!("{}", cols.display(&Terminal::new()));
+```
+
 ### Markdown Output
 
 Portable Markdown has no side-by-side layout, so `render_markdown` writes the left column's blocks, a blank line, then the right column's. `render_markdown_plus` writes the same flex container the browser renders, as one raw HTML block. A Markdown reader passes that block through without parsing it, so the column bodies are HTML too, exactly as the browser writes them:

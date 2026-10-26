@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::artifact::OutputFormat;
 use crate::cache::VisualizationKind;
@@ -109,8 +110,10 @@ impl FileCache {
         backend_id: &str,
         format: OutputFormat,
     ) -> String {
+        // The leading schema version invalidates every stored artifact when
+        // what a key covers changes (v2: background, row padding, PNG encoding).
         let key_string = format!(
-            "v1|{}|{}|{}|{}|{}",
+            "v2|{}|{}|{}|{}|{}",
             kind.as_str(),
             source,
             options_json,
@@ -159,7 +162,26 @@ impl FileCache {
         fs::create_dir_all(&cache_dir)?;
 
         let path = cache_dir.join(format!("{}.{}", key, format.extension()));
-        fs::write(&path, data)?;
+        // Write beside the artifact and rename it into place, so a concurrent
+        // render of the same key never reads a half-written file. Every writer
+        // of a key writes the same bytes, so whichever rename wins is fine.
+        // Plain `std::fs`: on Windows its rename replaces a file another render
+        // is reading, where `tempfile`'s persist and keep fail. When a holder
+        // without delete sharing still refuses it, the key's identical bytes
+        // are already in place.
+        static STAGED: AtomicU64 = AtomicU64::new(0);
+        let staged = cache_dir.join(format!(
+            ".{key}.{}.{}.tmp",
+            std::process::id(),
+            STAGED.fetch_add(1, Ordering::Relaxed)
+        ));
+        let stored = fs::write(&staged, data).and_then(|()| fs::rename(&staged, &path));
+        if let Err(error) = stored {
+            let _ = fs::remove_file(&staged);
+            if !path.is_file() {
+                return Err(error);
+            }
+        }
 
         Ok(path)
     }

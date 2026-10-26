@@ -91,16 +91,6 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # waits out the window and fails.
 leak-timeout = { period = "30s", result = "fail" }
 
-# The rate-limit pause policy is a real wall-clock wait: the test asserts that a
-# `429`-shaped provider response pauses for the advertised interval and then
-# *continues*, so the elapsed time is the contract rather than overhead. It sits
-# just under the default 5s slow mark (4.34s measured on a 16-core Mac,
-# 2026-09-08), which is close enough that ordinary contention would otherwise
-# mark a healthy run slow and a loaded runner could reach the 30s kill.
-[[profile.default.overrides]]
-filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
 # The sequence-budget end-to-end fixtures spawn real `claudine` sequence
 # workers whose steps sleep (`sleep:3000`, a ten-minute `hang` that the ledger
 # must stop) and then wait on ledgers, pid files, and shared locks. Isolated
@@ -304,14 +294,6 @@ threads-required = "num-cpus"
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 retries = 0
-
-# See the default-profile note: the pause this test waits out is its contract.
-# The period matches this profile's own default, so the entry buys nothing
-# today; it stays so the contract survives a change to that default rather than
-# silently inheriting a tighter one.
-[[profile.ci.overrides]]
-filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
-slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: this test's cost is two complete runtime
 # captures, which is the comparison it performs. CI uses the same measured WSL

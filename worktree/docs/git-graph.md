@@ -1,6 +1,6 @@
 # The `wt list` Graph
 
-On a terminal that shows inline images, `wt list` draws the branch topology below its table. The `worktree` library gathers the git facts. biscuit-terminal's [`GitGraph`](../../biscuit-terminal/docs/components/git_graph.md) component turns them into a Mermaid `gitGraph`, fits it to the terminal, and renders it. The CLI builds no Mermaid text and picks no width of its own.
+On a terminal that shows inline images, `wt list` draws the branch topology below its table. The `worktree` library gathers the git facts. biscuit-visualized's [`GitGraph`](../../biscuit-visualized/docs/components/git_graph.md) component turns them into a Mermaid `gitGraph`, fits it to the terminal, and renders it. The CLI builds no Mermaid text and picks no width of its own.
 
 In short, the graph:
 

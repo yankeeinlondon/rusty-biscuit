@@ -295,7 +295,9 @@ limited to the frontmatter block; YAML fences in the body are never inspected.
 Without `--save`, the repaired document is printed and the input file remains
 unchanged. With `--save`, accepted repairs are written in place. Report-only
 findings are rendered as suggestions on stderr and still exit `0`; there is no
-`md clean --strict` in v1.
+`md clean --strict` in v1. Frontmatter whose top-level keys are all indented
+is moved to column 0, which `md hash --save` requires; see [Indented Root
+Mappings](../docs/cli/clean.md#indented-root-mappings-yamlroot-indentation).
 
 Schema precedence is baseline → matching repository triggers → document
 `$schema`. `--baseline-schema` replaces the default Darkmatter baseline,

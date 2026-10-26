@@ -124,6 +124,7 @@ pub(super) fn render_tree_terminal_spanned_vector_to_tempfile(
         context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
 
@@ -158,7 +159,7 @@ pub(super) fn write_doc_to_tempfile(
 ) -> (tempfile::TempDir, std::path::PathBuf) {
     let mut term = Terminal::new_optimistic(120);
     if let Some(support) = image_override {
-        term.image_support = support;
+        term.graphics_route = support.into();
     }
     // Wire darkmatter's code renderer so fenced code blocks reproduce the
     // syntax-highlighted code-block path the production entry point uses,
@@ -167,6 +168,7 @@ pub(super) fn write_doc_to_tempfile(
         context: TerminalRenderContext::from_terminal(&term),
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
 

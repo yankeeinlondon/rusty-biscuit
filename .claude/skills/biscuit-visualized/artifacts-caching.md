@@ -15,24 +15,35 @@ Controls how a diagram is rendered:
 
 ```rust
 pub struct RenderRequest {
-    pub format: OutputFormat,
-    pub scale: f32,              // Default: 1.0 (only affects PNG)
-    pub transparent_background: bool,  // Default: false
+    pub format: OutputFormat,        // Default: Png
+    pub scale: u32,                  // Default: 2; ignored when target_width is Some
+    pub target_width: Option<u32>,   // Exact PNG width in pixels
+    pub row_height: Option<u32>,     // Pad PNG height to whole rows; ignored for SVG
+    pub background: Background,      // Default: Background::Theme
+}
+
+pub enum Background {
+    Theme,                     // theme's background color (default)
+    Transparent,               // nothing painted
+    Solid { r: u8, g: u8, b: u8 },
 }
 ```
+
+`Background` applies to SVG and PNG alike, and also paints the `row_height` padding (transparent unless `Solid`). `Background::solid_hex()` returns `Some("#rrggbb")` for `Solid`.
 
 ### Construction
 
 ```rust
-use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
+use biscuit_visualized::artifact::{Background, OutputFormat, RenderRequest};
 
 // SVG with defaults
-let req = RenderRequest::new(OutputFormat::Svg);
+let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
 
-// PNG at 2x scale with transparent background
-let req = RenderRequest::new(OutputFormat::Png)
-    .with_scale(2.0)
-    .with_transparent_background(true);
+// PNG at a terminal's display size, transparent background
+let req = RenderRequest::default()
+    .with_target_width(540)
+    .with_row_height(18)
+    .with_background(Background::Transparent);
 ```
 
 ## RenderedArtifact
@@ -44,7 +55,7 @@ pub struct RenderedArtifact {
     pub path: PathBuf,           // Absolute path to the rendered file
     pub format: OutputFormat,    // Svg or Png
     pub cache_hit: bool,         // true if served from cache
-    pub alt_text: Option<String>, // Description for accessibility
+    pub alt_text: String,        // Description for accessibility
 }
 ```
 
@@ -83,14 +94,14 @@ pub enum VisualizationKind {
 
 The cache key is an xxHash of a composite string containing:
 
-1. **Version prefix** (`v1`) — for cache schema evolution
+1. **Key schema prefix** (`v2`) — bumped when what a key covers changes; `v2` added background, row padding, and PNG encoding, so every artifact stored under `v1|` is a miss
 2. **Visualization kind** (mermaid or graph)
 3. **Source content** (the diagram/graph source text)
-4. **Options JSON** (theme, config, orientation, etc.)
+4. **Options JSON** (theme, config, orientation, etc., plus a `request` entry from `RenderRequest::cache_identity()`: scale, target width, row height, background, and for PNG the encoder settings `png@0.17:compression=default,filter=adaptive`)
 5. **Backend ID** (renderer version identifier)
 6. **Output format** (svg or png)
 
-This ensures that any change to inputs, configuration, or renderer version produces a different cache key.
+This ensures that any change to inputs, configuration, geometry, background, encoder, or renderer version produces a different cache key. The key schema prefix is independent of the `v1` directory name: the directory stays `.../biscuit-visualized/v1/`.
 
 ### FileCache API
 
@@ -124,6 +135,8 @@ cache.clear()?;  // Remove all cached files
 - No automatic eviction or size limits
 - `cache.clear()` removes all entries across all kinds and formats
 - Cache keys include the backend ID, so renderer upgrades automatically invalidate stale entries
+- `store` writes to a temp file in the cache directory and renames it into place, so a concurrent render of the same key never reads a half-written file (every writer of a key writes the same bytes, so the last rename wins harmlessly)
+- `$BISCUIT_VISUALIZED_CACHE_DIR` replaces `$TMPDIR` as the cache root (`$BISCUIT_VISUALIZED_CACHE_DIR/v1/`)
 
 ## Rendering Flow
 
@@ -133,7 +146,7 @@ The typical render flow for both Mermaid and Graph diagrams:
 2. **Check cache** — if hit, return `RenderedArtifact` with `cache_hit: true`
 3. **Render SVG** — via mermaid-rs-renderer or layout-rs
 4. **Post-process SVG** — fix alignment, apply colors, trim padding
-5. **If PNG requested**: rasterize SVG via resvg at the specified scale
+5. **If PNG requested**: rasterize SVG via resvg at the target width (or scale), pad to `row_height`, and encode with the `png` crate
 6. **Store in cache** and return `RenderedArtifact` with `cache_hit: false`
 
 ## Source Files

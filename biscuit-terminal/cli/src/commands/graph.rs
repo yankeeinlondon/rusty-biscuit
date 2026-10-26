@@ -2,7 +2,7 @@ use crate::args::LayoutArgs;
 use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use crate::output::RenderMeta;
-use biscuit_terminal::components::graph_expression::GraphExpression;
+use biscuit_visualized::components::graph_expression::GraphExpression;
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
@@ -30,7 +30,7 @@ impl GraphInputSyntaxArg {
 }
 
 impl From<GraphInputSyntaxArg>
-    for biscuit_terminal::components::graph_expression::GraphInputSyntax
+    for biscuit_visualized::components::graph_expression::GraphInputSyntax
 {
     fn from(arg: GraphInputSyntaxArg) -> Self {
         match arg {
@@ -58,7 +58,7 @@ impl GraphOrientationArg {
 }
 
 impl From<GraphOrientationArg>
-    for biscuit_terminal::components::graph_expression::GraphOrientation
+    for biscuit_visualized::components::graph_expression::GraphOrientation
 {
     fn from(arg: GraphOrientationArg) -> Self {
         match arg {
@@ -183,7 +183,7 @@ pub fn display_graph(
     meta: bool,
     terminal: &Terminal,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::graph_expression::GraphRenderError;
+    use biscuit_visualized::components::graph_expression::GraphRenderError;
     let start_time = Instant::now();
 
     let result = match graph.try_render(terminal) {
@@ -193,6 +193,7 @@ pub fn display_graph(
                 print!("{}", graph.render(terminal));
                 Ok(())
             })?;
+            crate::hints::emit_terminal_route_hint(terminal);
             return Ok(());
         }
         Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source, terminal),
@@ -229,12 +230,12 @@ fn graph_source_prose(source: &str) -> Prose {
 
 /// Handle graph rendering errors with user-friendly output.
 pub fn handle_graph_error(
-    error: biscuit_terminal::components::graph_expression::GraphRenderError,
+    error: biscuit_visualized::components::graph_expression::GraphRenderError,
     fallback: &str,
     source: &str,
     term: &Terminal,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::graph_expression::GraphRenderError;
+    use biscuit_visualized::components::graph_expression::GraphRenderError;
 
     match error {
         GraphRenderError::NoImageSupport => {
@@ -283,7 +284,7 @@ mod tests {
     fn fallback_code_block_body_renders_without_escape_backslashes() {
         let graph = GraphExpression::parse(
             "digraph { A -> B; }",
-            biscuit_terminal::components::graph_expression::GraphInputSyntax::Dot,
+            biscuit_visualized::components::graph_expression::GraphInputSyntax::Dot,
         )
         .unwrap();
 

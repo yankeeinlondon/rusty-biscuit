@@ -70,6 +70,7 @@ environment's cell and how to record an execution ban.
 | A Windows process trace shows `git --exec-path` and a `conhost.exe` once per process that uses `gix`; a test 2–3× slower in the full `build-win-native` run than alone | gix-path asks Git for its install location unless `EXEPATH` is set; Defender takes about a quarter of the CPU in a full run there (CI disables it) | [windows.md](windows.md#environment-and-processes) |
 | A test expecting a refused loopback connect gets a timeout on native Windows only | Windows retries the SYN for about 2 s before refusing a closed port | [windows.md](windows.md#a-refused-loopback-connect-takes-about-2-seconds) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
+| Kitty or Sixel output vanishes only when the Windows program runs over SSH; iTerm2 images and OSC 8 links arrive | the OpenSSH session's system conhost removes APC and DCS and passes OSC | [windows-console.md](windows-console.md#escape-sequences-through-the-windows-openssh-server) |
 | macOS watcher receives events but its target is absent from `lsof` | FSEvents directory watches do not require an open descriptor naming the target | [macos.md](macos.md#finding-filesystem-watchers) |
 | `ErrorKind::NotFound` check misses on Windows only; message shows `os error -2147024894` | a `windows` crate error converted with `io::Error::from` keeps the HRESULT | [windows.md](windows.md#environment-and-processes) |
 | A per-handle file query hangs only on Windows; `CancelSynchronousIo` returns 1168 | the handle's owner has synchronous I/O pending on that file object | [windows.md](windows.md#inspecting-another-processs-handles) |
@@ -131,7 +132,7 @@ environment's cell and how to record an execution ban.
 | [wsl.md](wsl.md) | The archive-mode contract, faithful reproduction on `BUILD_WSL`, provisioning failures (the 403 rate limit, a lost runner), the guest's packages, Level 2 on WSL, the guest's network-share `~/.config`, which red step means what |
 | [windows.md](windows.md) | Environment and processes (handle inheritance, Job Objects, stack size, killing `git`, `python3` alias, batch arguments, Ctrl+C), current-directory locks, the `windows-latest` leg, compile evidence from macOS |
 | [windows-paths.md](windows-paths.md) | Verbatim `\\?\` paths, home and cache known folders, 8.3 short names, separators, `file://` URIs, Markdown escapes, junctions and reparse points |
-| [windows-console.md](windows-console.md) | WezTerm on `build-win`, PowerShell output streams and encoding, a windowless ConPTY console for L2, attaching a console under nextest |
+| [windows-console.md](windows-console.md) | WezTerm on `build-win`, PowerShell output streams and encoding, a windowless ConPTY console for L2, attaching a console under nextest, which escape sequences survive the Windows OpenSSH server's conhost |
 | [macos.md](macos.md) | `/var` symlink, Docker for Linux evidence, L2 capture wedges, terminal-detection forks, perf triage, lldb work counters, shell-init and `cd` traps, the kache `DYLD_*` link failure |
 
 When you learn a new OS-specific fact the hard way, add it to the matching

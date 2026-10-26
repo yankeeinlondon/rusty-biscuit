@@ -81,7 +81,8 @@ pub struct RestoredDocument {
 /// ## Errors
 ///
 /// Returns [`MarkdownError::FrontmatterTextEdit`] when either frontmatter block
-/// is malformed, is not a block mapping, contains duplicate semantic keys, or
+/// is malformed, is not a block mapping, has its root indented rather than at
+/// column 0, contains duplicate semantic keys, or
 /// cannot be edited without ambiguity; or when a restored node's anchors would
 /// make an alias outside `properties` resolve to a different value.
 pub fn restore_properties_text(
@@ -298,12 +299,14 @@ fn semantic_frontmatter_delta(
 /// lines around it are kept. The rewritten frontmatter is parsed before it is returned,
 /// and every property except the managed ones must parse to the value it had
 /// before the edit. A decision that needs no write returns `None` without
-/// parsing anything.
+/// parsing a frontmatter block whose first key line starts at column 0.
 ///
 /// ## Errors
 ///
 /// Returns [`MarkdownError::FrontmatterTextEdit`], and no text, when the YAML
-/// root is not a supported block mapping or does not parse; a managed semantic
+/// root is a block mapping indented rather than starting at column 0, even
+/// for a decision that needs no write; when the root is not a supported block
+/// mapping or does not parse; a managed semantic
 /// key occurs more than once; a managed node cannot be replaced without
 /// ambiguity; a date bump meets a `last_updated` that is a sequence or
 /// mapping, carries an anchor, alias, or tag, or is a block scalar or a scalar
@@ -318,6 +321,11 @@ pub fn apply_hash_save_text(
     today: &str,
 ) -> MarkdownResult<Option<String>> {
     let Some(new_stored) = decision.new_stored.as_ref() else {
+        // A no-op save never reported a near-miss fence, so only a block that
+        // extracts cleanly meets the indentation refusal.
+        if let Ok(Some(extraction)) = extract_frontmatter_block(document_text) {
+            refuse_indented_root(extraction.yaml)?;
+        }
         return Ok(None);
     };
     let hash_value = new_stored.to_frontmatter_value();
@@ -538,7 +546,8 @@ pub enum LeafLocateError {
 /// ## Errors
 ///
 /// [`LeafLocateError::Document`] when the frontmatter cannot be parsed as a
-/// block mapping; [`LeafLocateError::Unlocated`] for the first path that
+/// block mapping or its root is indented rather than at column 0;
+/// [`LeafLocateError::Unlocated`] for the first path that
 /// cannot be located, in request order.
 pub fn locate_frontmatter_leaves(
     document: &str,
@@ -734,18 +743,28 @@ fn line_spans(source: &str) -> Vec<LineSpan> {
     spans
 }
 
+/// The shape gate shared by every text-preserving frontmatter editor.
+///
+/// Accepts empty and comment-only frontmatter and block mappings whose
+/// top-level keys start at column 0. An indented root is valid YAML, and
+/// readers accept it, but the editors locate top-level nodes by column, so it
+/// is refused here, before any key is located or inserted.
 fn validate_block_mapping(yaml: &str) -> MarkdownResult<()> {
-    let first_content = yaml
-        .lines()
-        .map(str::trim_start)
-        .find(|line| !line.is_empty() && !line.starts_with('#'));
-    if first_content.is_some_and(|line| line.starts_with('{') || line.starts_with('[')) {
+    let first_content = first_content_line(yaml);
+    if first_content.is_some_and(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with('{') || trimmed.starts_with('[')
+    }) {
         return Err(text_edit_error(
             "flow-style frontmatter roots are not supported",
         ));
     }
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml) {
-        Ok(serde_yaml_ng::Value::Mapping(_)) | Ok(serde_yaml_ng::Value::Null) => Ok(()),
+        Ok(serde_yaml_ng::Value::Mapping(_)) => match first_content.map_or(0, root_indent) {
+            0 => Ok(()),
+            indent => Err(indented_root_error(indent)),
+        },
+        Ok(serde_yaml_ng::Value::Null) => Ok(()),
         Ok(_) => Err(text_edit_error(
             "frontmatter must be a top-level block mapping",
         )),
@@ -753,6 +772,46 @@ fn validate_block_mapping(yaml: &str) -> MarkdownResult<()> {
             "frontmatter YAML could not be parsed: {error}"
         ))),
     }
+}
+
+/// The indentation half of [`validate_block_mapping`], for a save that needs
+/// no write.
+///
+/// A no-op save does not parse a column-0 source, so its other unsupported
+/// shapes stay unreported; an indented first key line is parsed only to
+/// confirm the root is a mapping before it is refused.
+fn refuse_indented_root(yaml: &str) -> MarkdownResult<()> {
+    let Some(line) = first_content_line(yaml) else {
+        return Ok(());
+    };
+    let indent = root_indent(line);
+    if indent == 0 {
+        return Ok(());
+    }
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml) {
+        Ok(serde_yaml_ng::Value::Mapping(_)) => Err(indented_root_error(indent)),
+        _ => Ok(()),
+    }
+}
+
+/// The first line that is neither blank nor a YAML comment, untrimmed.
+fn first_content_line(yaml: &str) -> Option<&str> {
+    yaml.lines().find(|line| {
+        let trimmed = line.trim_start();
+        !trimmed.is_empty() && !trimmed.starts_with('#')
+    })
+}
+
+fn root_indent(line: &str) -> usize {
+    line.len() - line.trim_start_matches(' ').len()
+}
+
+fn indented_root_error(indent: usize) -> MarkdownError {
+    let unit = if indent == 1 { "space" } else { "spaces" };
+    text_edit_error(format!(
+        "frontmatter root mapping is indented by {indent} {unit}; text-preserving edits \
+         require top-level keys at column 0 (run `md clean --save <file>` to fix)"
+    ))
 }
 
 fn locate_node(yaml: &str, target: &str) -> MarkdownResult<Option<TextNode>> {
@@ -2812,6 +2871,140 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }));
+    }
+
+    const INDENTED_REPRODUCTION: &str =
+        "---\n    prompt: |-\n        Your task is to ...\n---\nBody.\n";
+
+    fn indented_reason(spaces: &str) -> String {
+        format!(
+            "frontmatter root mapping is indented by {spaces}; text-preserving edits \
+             require top-level keys at column 0 (run `md clean --save <file>` to fix)"
+        )
+    }
+
+    fn no_op_decision() -> SaveDecision {
+        SaveDecision {
+            kind: MdHashKind::Simple,
+            new_stored: None,
+            bump_last_updated: false,
+            comparison: None,
+        }
+    }
+
+    fn restore_reason(current: &str, snapshot: &str) -> String {
+        match restore_properties_text(current, snapshot, &["prompt", "hash", "last_updated"]) {
+            Err(MarkdownError::FrontmatterTextEdit { reason }) => reason,
+            other => panic!("expected FrontmatterTextEdit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hash_save_refuses_the_indented_reproduction_with_the_indentation_reason() {
+        for bump in [false, true] {
+            assert_eq!(
+                assert_refused_canonical(INDENTED_REPRODUCTION, bump),
+                indented_reason("4 spaces")
+            );
+        }
+        assert_eq!(
+            assert_refused_canonical("---\r\n  title: x\r\n---\r\n", false),
+            indented_reason("2 spaces")
+        );
+        assert_eq!(
+            assert_refused_canonical("---\n title: x\n---\n", false),
+            indented_reason("1 space")
+        );
+    }
+
+    #[test]
+    fn hash_save_refuses_an_indented_root_even_when_no_write_is_needed() {
+        assert_eq!(
+            assert_refused(INDENTED_REPRODUCTION, &no_op_decision()),
+            indented_reason("4 spaces")
+        );
+        assert_eq!(
+            apply_hash_save_text(
+                "---\nprompt: x\n---\nBody.\n",
+                &no_op_decision(),
+                &MdHashOptions::default(),
+                TODAY,
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn comments_and_nested_values_do_not_count_as_the_root_key() {
+        let commented = "---\n# note\n    # an indented comment\n\ntitle: x\nouter:\n    inner: 1\n---\n";
+        assert!(saved_canonical(commented, false).contains("\nhash: "));
+        assert_eq!(
+            assert_refused_canonical("---\n# note\n\n    title: x\n---\n", false),
+            indented_reason("4 spaces")
+        );
+    }
+
+    #[test]
+    fn empty_and_comment_only_frontmatter_stay_editable() {
+        for source in ["---\n---\nBody.\n", "---\n# only a comment\n---\nBody.\n"] {
+            let saved = saved_canonical(source, false);
+            assert!(saved.contains("hash: "), "{source:?} -> {saved:?}");
+            assert!(saved.ends_with("---\nBody.\n"), "{saved:?}");
+            let restored = restore_properties_text(source, source, &["hash"]).unwrap();
+            assert_eq!(restored.text, source);
+        }
+    }
+
+    #[test]
+    fn indented_unsupported_roots_keep_their_existing_reasons() {
+        assert_eq!(
+            assert_refused_canonical("---\n    {a: 1}\n---\n", false),
+            "flow-style frontmatter roots are not supported"
+        );
+        assert_eq!(
+            assert_refused_canonical("---\n    - a\n---\n", false),
+            "frontmatter must be a top-level block mapping"
+        );
+        assert!(
+            assert_refused_canonical("---\n    a: 1\n  b: 2\n---\n", false)
+                .starts_with("frontmatter YAML could not be parsed: ")
+        );
+    }
+
+    #[test]
+    fn restore_refuses_indentation_in_either_input() {
+        let column_zero = "---\nprompt: |-\n    Your task is to ...\n---\nBody.\n";
+        assert_eq!(
+            restore_reason(INDENTED_REPRODUCTION, column_zero),
+            indented_reason("4 spaces")
+        );
+        assert_eq!(
+            restore_reason(column_zero, INDENTED_REPRODUCTION),
+            indented_reason("4 spaces")
+        );
+        assert_eq!(
+            restore_reason(INDENTED_REPRODUCTION, INDENTED_REPRODUCTION),
+            indented_reason("4 spaces")
+        );
+        let restored = restore_properties_text(column_zero, column_zero, &["prompt"]).unwrap();
+        assert_eq!(restored.text, column_zero);
+    }
+
+    #[test]
+    fn leaf_location_refuses_an_indented_root_with_the_same_cause() {
+        let path = vec![FrontmatterPathSegment::Key("prompt".to_string())];
+        match locate_frontmatter_leaves(INDENTED_REPRODUCTION, std::slice::from_ref(&path)) {
+            Err(LeafLocateError::Document(MarkdownError::FrontmatterTextEdit { reason })) => {
+                assert_eq!(reason, indented_reason("4 spaces"));
+            }
+            other => panic!("expected a document refusal, got {other:?}"),
+        }
+        let column_zero = "---\nprompt: |-\n    Your task is to ...\n---\nBody.\n";
+        assert_eq!(
+            locate_frontmatter_leaves(column_zero, &[path]).unwrap().len(),
+            1
+        );
     }
 
     #[test]

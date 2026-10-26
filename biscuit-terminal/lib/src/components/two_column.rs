@@ -11,6 +11,7 @@ use renderable::tree::{
     ColumnWidthKind, ColumnsHints, NodeKind, RenderNode, RenderStrictness, TreeRenderable,
 };
 
+use crate::components::terminal_image::InlineImage;
 use crate::discovery::detection::TerminalApp;
 use crate::prelude::*;
 use crate::render_tree::projection::TreeProjectionContext;
@@ -428,16 +429,25 @@ impl TwoColumn {
                 {
                     let mut column_term = Terminal::from(t);
                     column_term.fixed_width = Some(width);
-                    if let Ok((sequence, height)) = image.render_inline(&column_term) {
-                        let mut lines = Vec::with_capacity(height as usize);
-                        lines.push(sequence);
-                        for _ in 1..height {
-                            lines.push(String::new());
+                    match image.render_inline(&column_term) {
+                        Ok(InlineImage::Overlay { sequence, rows }) => {
+                            let mut lines = Vec::with_capacity(rows as usize);
+                            lines.push(sequence);
+                            for _ in 1..rows {
+                                lines.push(String::new());
+                            }
+                            return RenderedColumn {
+                                lines,
+                                uses_cursor_padding: true,
+                            };
                         }
-                        return RenderedColumn {
-                            lines,
-                            uses_cursor_padding: true,
-                        };
+                        Ok(InlineImage::Lines(lines)) => {
+                            return RenderedColumn {
+                                lines,
+                                uses_cursor_padding: false,
+                            };
+                        }
+                        Err(_) => {}
                     }
 
                     let fallback = image.generate_alt_text();

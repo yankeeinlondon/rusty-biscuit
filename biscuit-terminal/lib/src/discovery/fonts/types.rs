@@ -265,8 +265,9 @@ pub struct CellSize {
 }
 
 impl CellSize {
-    /// The cell size assumed when the terminal cannot report one (native
-    /// Windows, CI, or every standard stream redirected).
+    /// The cell size assumed when the terminal reports none (CI, every
+    /// standard stream redirected, a terminal that leaves its pixel size
+    /// unanswered, such as one reached through the Windows SSH server).
     pub const FALLBACK: CellSize = CellSize {
         width: 8,
         height: 16,

@@ -158,7 +158,7 @@ let out = Emoji::Happy.icon().render(&term);
 
 | Feature | Default | Effect |
 |---------|---------|--------|
-| `image` | off | Enables the image-protocol rung of the terminal ladder (rasterize SVG via `biscuit-visualized`/`resvg`). When off, the ladder stops at the text-identifier fallback for glyph-less icons. |
+| `image` | off | Enables the image-protocol rung of the terminal ladder (rasterize SVG via `resvg`). When off, the ladder stops at the text-identifier fallback for glyph-less icons. |
 
 ```toml
 [dependencies]

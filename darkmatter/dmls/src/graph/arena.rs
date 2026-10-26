@@ -9,7 +9,7 @@
 //! the multi-edge-kind graph outright rather than overlaying a second index on
 //! a two-edge-kind model.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -98,6 +98,8 @@ pub struct WorkspaceGraph {
     wiki: WikiSlots,
     listing: Listing,
     generation: u64,
+    /// Every planned target of a path reference that resolved to nothing.
+    awaited: HashSet<PathBuf>,
 }
 
 /// The wiki universe a snapshot resolved against, and how its slots map to
@@ -134,6 +136,9 @@ pub(crate) struct GraphAssembly {
     wiki: WikiSlots,
     listing: Listing,
     generation: u64,
+    /// Every planned target of a path reference that resolved to nothing
+    /// (see [`WorkspaceGraph::awaits`]).
+    awaited: HashSet<PathBuf>,
 }
 
 impl WorkspaceGraph {
@@ -542,6 +547,7 @@ impl WorkspaceGraph {
         }
 
         GraphAssembly {
+            awaited: std::mem::take(&mut resolver.awaited),
             documents,
             by_path,
             nodes,
@@ -567,6 +573,7 @@ impl WorkspaceGraph {
             wiki,
             listing,
             generation,
+            awaited,
         } = assembly;
         let reverse = ReverseIndex::build(&edges);
         let keys = KeyIndex::build(
@@ -589,12 +596,20 @@ impl WorkspaceGraph {
             wiki,
             listing,
             generation,
+            awaited,
         }
     }
 
     /// The snapshot generation.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Whether a path reference in this snapshot resolved to nothing and
+    /// would resolve to `path` once it exists: the one case in which a file
+    /// the index does not hold changes the graph by appearing.
+    pub fn awaits(&self, path: &Path) -> bool {
+        self.awaited.contains(path)
     }
 
     /// The state of the file list behind this snapshot.
@@ -1045,6 +1060,8 @@ struct ReferenceResolver<'a> {
     by_path: &'a HashMap<PathBuf, DocumentId>,
     by_folder: HashMap<PathBuf, Result<FileResolutionContext, ContextFailure>>,
     located: HashMap<(PathBuf, String), Option<Located>>,
+    /// The planned candidates of every reference that located nothing.
+    awaited: HashSet<PathBuf>,
 }
 
 impl<'a> ReferenceResolver<'a> {
@@ -1059,6 +1076,7 @@ impl<'a> ReferenceResolver<'a> {
             by_path,
             by_folder: HashMap::new(),
             located: HashMap::new(),
+            awaited: HashSet::new(),
         }
     }
 
@@ -1072,13 +1090,16 @@ impl<'a> ReferenceResolver<'a> {
             return located.clone();
         }
         let contexts = self.contexts;
-        let located = self
-            .by_folder
-            .entry(folder)
-            .or_insert_with(|| contexts.context_for(path))
-            .as_ref()
-            .ok()
-            .map(|context| locate(context, raw, self.by_path));
+        let context = self.by_folder.entry(folder).or_insert_with(|| contexts.context_for(path)).as_ref().ok();
+        let located = context.map(|context| {
+            let located = locate(context, raw, self.by_path);
+            if matches!(located, Located::Missing(_))
+                && let Ok(candidates) = plan_reference(context, raw)
+            {
+                self.awaited.extend(candidates);
+            }
+            located
+        });
         self.located.insert(key, located.clone());
         located
     }

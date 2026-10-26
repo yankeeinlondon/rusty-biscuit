@@ -97,7 +97,7 @@ where
     let mut current_h = resolve_height_spec(spec)?;
 
     'recreate: loop {
-        let backend = CrosstermBackend::new(io::stdout());
+        let backend = CursorFallbackBackend::new(CrosstermBackend::new(io::stdout()));
         let options = TerminalOptions {
             viewport: Viewport::Inline(current_h),
         };

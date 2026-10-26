@@ -41,7 +41,7 @@
 
 - [tempfile](https://github.com/Stebalien/tempfile) _v3_
 
-    _Secure cross-platform temporary file/directory creation for mermaid rendering._
+    _Secure cross-platform temporary file/directory creation._
 
     _Tags: filesystem, temporary_
 
@@ -64,11 +64,15 @@
 
     _Tags: image, graphics_
 
-- [viuer](https://github.com/atanunq/viuer) _v0.11_
+- [icy_sixel](https://github.com/mkrueger/icy_sixel) _v0.7_
 
-    _Terminal image viewer supporting Kitty and iTerm2 graphics protocols._
+    _Sixel encoder for the Sixel graphics route. Its own quantizer
+    (`quantette`, Wu's method) builds the bounded 256-color palette;
+    `TerminalImage` turns dithering off so the output is deterministic. No
+    cargo feature: Sixel is one of the route's formats, like Kitty and
+    iTerm2. About 82 KB of a stripped release binary._
 
-    _Tags: terminal, images, graphics_
+    _Tags: image, graphics, sixel_
 
 ### Logging & Tracing
 
@@ -161,9 +165,11 @@
 
     _Tags: workspace, config, parsing_
 
-- [biscuit-visualized](../../biscuit-visualized) _v0.1.0_
+- [biscuit-visualized](../../biscuit-visualized) _v0.1.0_ (CLI only; features: `clap`, `terminal`)
 
-    _Shared visualization library for Mermaid diagrams and graph rendering. Delegates to mermaid-rs-renderer and layout-rs._
+    _The diagram components behind the `bt` diagram commands (`mermaid`,
+    `flowchart`, `graph-expression`, `git-graph`, ...). The library does not
+    depend on it: `biscuit-visualized` depends on the library._
 
     _Tags: workspace, visualization_
 
@@ -241,6 +247,18 @@
 
 Both are disabled for ordinary local L1 and enabled by their explicit tier
 recipes and CI feature policy.
+
+### Image Rasterization
+
+- [resvg](https://github.com/linebender/resvg) _v0.45_ (feature: `image`)
+
+    _Rasterizes SVG images for `TerminalImage` and the graphical horizontal
+    rules. It is the whole of the `image` feature: diagram rendering
+    (`mermaid-rs-renderer`, the diagram components) lives in
+    `biscuit-visualized`, which depends on this library and is never one of
+    its dependencies._
+
+    _Tags: image, svg, optional_
 
 ### CLI Support
 
