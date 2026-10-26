@@ -507,6 +507,47 @@ where
     Some(table)
 }
 
+/// A content fingerprint of `atom` and of every definition it reaches through
+/// `definitions`, taken in the order [`reachable_definitions`] collects them,
+/// which is also the order a lowering allocates their `$defs` keys in. Equal
+/// fingerprints therefore lower to the same schema. `None` when a reached
+/// reference has no definition, exactly when [`reachable_definitions`] is.
+///
+/// The derived `Debug` text of each value is streamed into the hasher, never
+/// built, so fingerprinting a large recursive alternative allocates only its
+/// reference keys. The hash is stable within one process only.
+pub(crate) fn reachable_fingerprint<L>(atom: &PropertyAtom, definitions: &L) -> Option<u64>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    use std::fmt::Write as _;
+    use std::hash::Hasher as _;
+
+    struct DebugHasher(std::collections::hash_map::DefaultHasher);
+    impl std::fmt::Write for DebugHasher {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0.write(text.as_bytes());
+            Ok(())
+        }
+    }
+
+    let mut hasher = DebugHasher(std::collections::hash_map::DefaultHasher::new());
+    write!(hasher, "{atom:?}").ok()?;
+    let mut pending: Vec<DefKey> = Vec::new();
+    collect_atom_refs(atom, &mut pending);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(key) = pending.pop() {
+        if seen.contains(&key) {
+            continue;
+        }
+        let definition = definitions.lookup_definition(&key)?;
+        write!(hasher, "\u{0}{key:?}\u{0}{:?}\u{0}{:?}", definition.body, definition.origin).ok()?;
+        collect_def_refs(&definition.body, &mut pending);
+        seen.insert(key);
+    }
+    Some(hasher.0.finish())
+}
+
 fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
     match def {
         PropertyDef::Single(atom) => collect_atom_refs(atom, out),

@@ -10,13 +10,14 @@ use std::cell::RefCell;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::completion::{
-    AlternativeCompletion, AlternativeSite, DefinitionLookup, PathStep, alternative_accepts,
-    alternative_accepts_in, def_at_path, for_list_item, for_path, for_path_in, for_property_value,
+    AlternativeCompletion, AlternativeMatcher, AlternativeSite, DefinitionLookup, PathStep, alternative_accepts,
+    alternative_accepts_in, alternative_fingerprint, def_at_path, for_list_item, for_path, for_path_in,
+    for_property_value,
 };
 use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PropertyDef, SimplifiedSchema,
-    TypeExpr,
+    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
+    SimplifiedSchema, TypeExpr,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -257,4 +258,52 @@ fn a_recursive_discriminated_union_narrows_at_every_level() {
     assert!(alternative_accepts_in(branch, &good, &effective));
     assert!(!alternative_accepts_in(branch, &bad, &effective), "the depth-3 element has no arm");
     assert!(!alternative_accepts(branch, &good), "without the table the reference is unresolved");
+}
+
+/// The `index`th alternative `root` opens to in `effective`.
+fn root_alternative(effective: &EffectiveSchema, index: usize) -> &PropertyAtom {
+    let SimplifiedSchema::Single(shape) = simplified(effective) else { panic!("a single shape") };
+    resolved_alternatives(&shape.properties["root"], effective)[index].atom
+}
+
+/// A prepared matcher judges every value as `alternative_accepts_in` does.
+/// Its fingerprint identifies the alternative's content: equal across two
+/// assemblies of one schema, different for another alternative, and
+/// different when a definition reached only through recursion changes, so a
+/// matcher keyed on it is never reused for a schema that judges differently.
+/// A missing definition has no fingerprint, and its matcher accepts nothing.
+#[test]
+fn a_prepared_matcher_and_its_fingerprint_follow_the_alternative_s_content() {
+    let dir = TempDir::new().expect("tempdir");
+    let effective = effective(&dir, NODE_SCHEMA);
+    let again = self::effective(&dir, NODE_SCHEMA);
+    let retyped = self::effective(&dir, &NODE_SCHEMA.replace("text: string", "text: number"));
+    let branch = root_alternative(&effective, 1);
+
+    let numeric_leaf = json!({ "kind": "branch", "kids": [ { "kind": "leaf", "text": 1 } ] });
+    let values = [
+        json!({ "kind": "branch", "kids": [ { "kind": "branch", "kids": [ { "kind": "leaf", "text": "a" } ] } ] }),
+        json!({ "kind": "branch", "kids": [ { "kind": "branch", "kids": [ { "kind": "bogus" } ] } ] }),
+        json!({ "kind": "leaf" }),
+        numeric_leaf.clone(),
+        Value::Null,
+        json!("branch"),
+    ];
+    let matcher = AlternativeMatcher::prepare(branch, &effective);
+    let verdicts: Vec<bool> = values.iter().map(|value| matcher.accepts(value)).collect();
+    assert_eq!(verdicts, [true, false, false, false, false, false]);
+    for value in &values {
+        assert_eq!(matcher.accepts(value), alternative_accepts_in(branch, value, &effective), "{value}");
+    }
+
+    let fingerprint = alternative_fingerprint(branch, &effective).expect("every definition is in scope");
+    assert_eq!(alternative_fingerprint(root_alternative(&again, 1), &again), Some(fingerprint));
+    assert_ne!(alternative_fingerprint(root_alternative(&effective, 0), &effective), Some(fingerprint));
+    let retyped_branch = root_alternative(&retyped, 1);
+    assert_ne!(alternative_fingerprint(retyped_branch, &retyped), Some(fingerprint), "the leaf arm is reached by recursion");
+    assert!(AlternativeMatcher::prepare(retyped_branch, &retyped).accepts(&numeric_leaf));
+
+    let empty = DefinitionTable::default();
+    assert_eq!(alternative_fingerprint(branch, &empty), None);
+    assert!(!AlternativeMatcher::prepare(branch, &empty).accepts(&values[0]));
 }

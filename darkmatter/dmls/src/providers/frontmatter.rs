@@ -14,7 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::completion::{
-    AlternativeKey, AlternativeSite, DefinitionLookup, alternative_accepts_in, alternatives_for_def_in,
+    AlternativeKey, AlternativeSite, DefinitionLookup, alternatives_for_def_in,
 };
 use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
@@ -1583,7 +1583,7 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         );
     }
 
-    let parsed = AuthoredDeclaration::frontmatter(ctx.text, overlay.ast.as_deref()?)?;
+    let parsed = AuthoredDeclaration::frontmatter_at(ctx.text, overlay.ast.as_deref()?, offset)?;
     let SchemaDeclaration::Schema(schema) = parsed.declaration else {
         return None;
     };
@@ -1822,7 +1822,10 @@ fn union_item<'c, 'p>(
         let accepting: Vec<usize> = alternatives
             .iter()
             .enumerate()
-            .filter(|(_, alternative)| alternative_accepts_in(alternative, &value, definitions(ctx)))
+            .filter(|(_, alternative)| {
+                ctx.overlay
+                    .is_some_and(|overlay| overlay.analysis.shared().accepts(alternative, definitions(ctx), &value))
+            })
             .map(|(index, _)| index)
             .collect();
         match accepting.as_slice() {
@@ -2481,8 +2484,9 @@ impl<'c, 'p> ShapeMemo<'c, 'p> {
     /// selected arm key completion narrows to. A leaf key present in more than
     /// one merged arm with divergent types resolves to the union of every
     /// arm's atoms. A trailing index (an addressed sequence item) resolves to
-    /// the array arms' item definition, synthesized once per snapshot. The
-    /// result is borrowed from the snapshot; nothing is cloned to return it.
+    /// the array arms' item definition, synthesized once per distinct content
+    /// and shared across snapshots. The result is borrowed from the snapshot;
+    /// nothing is cloned to return it.
     pub(crate) fn def_at(&mut self, path: &[FmPathSegment<'p>]) -> Option<&'c PropertyDef> {
         let leaf_at = path.iter().rposition(|segment| matches!(segment, FmPathSegment::Key(_)))?;
         let FmPathSegment::Key(leaf) = path[leaf_at] else {
@@ -2493,7 +2497,7 @@ impl<'c, 'p> ShapeMemo<'c, 'p> {
             [] => Some(def),
             [FmPathSegment::Index(_)] if self.crossing == ArrayCrossing::Explicit => self
                 .analysis?
-                .item_definition(def, || array_item_def(def, self.definitions)),
+                .item_definition(def, || array_item_atoms(def, self.definitions), array_item_def),
             _ => None,
         }
     }
@@ -2583,19 +2587,29 @@ pub(crate) fn def_at_path<'a>(
     nested_shape(root, ancestors, definitions)?.properties.get(*leaf)
 }
 
-/// The definition of one item of `def`'s array arms, or `None` when no arm is
-/// an array. The item of an array of a union (`U[]`) is a property-level union
-/// of its flattened alternatives, and the item of a recursive `item[]` its
-/// definition's alternatives; the container's markers, array constraints, and
-/// description describe the array and are not carried onto the item.
-fn array_item_def(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<PropertyDef> {
-    let mut items: Vec<PropertyAtom> = resolved_alternatives(def, definitions)
+/// The atoms of `def`'s array arms, which one item's definition is built
+/// from ([`array_item_def`]). The item of an array of a union (`U[]`) has its
+/// flattened alternatives, and the item of a recursive `item[]` its
+/// definition's alternatives.
+fn array_item_atoms<'a>(def: &'a PropertyDef, definitions: &'a dyn DefinitionLookup) -> Vec<&'a PropertyAtom> {
+    resolved_alternatives(def, definitions)
         .into_iter()
         .filter(|alternative| alternative.is_array)
-        .map(|alternative| PropertyAtom {
+        .map(|alternative| alternative.atom)
+        .collect()
+}
+
+/// The definition of one item built from its array arms' `atoms`, or `None`
+/// when there is none: a property-level union of several. The container's
+/// markers, array constraints, and description describe the array and are
+/// not carried onto the item.
+fn array_item_def(atoms: &[&PropertyAtom]) -> Option<PropertyDef> {
+    let mut items: Vec<PropertyAtom> = atoms
+        .iter()
+        .map(|atom| PropertyAtom {
             is_array: false,
             array_constraints: Vec::new(),
-            ..alternative.atom.clone()
+            ..(*atom).clone()
         })
         .collect();
     match items.len() {
@@ -3029,6 +3043,9 @@ mod named_references;
 
 #[cfg(test)]
 mod sequence_tests;
+
+#[cfg(test)]
+mod snapshot_tests;
 
 #[cfg(test)]
 mod tests {

@@ -14,8 +14,9 @@
 //! request finishes, but the old one never becomes current again.
 //!
 //! Every schema node a walk reaches lives in an owner this snapshot keeps
-//! alive and never mutates: the effective root, the bundle's definitions, or a
-//! shape this snapshot built. A node's address is therefore a stable identity
+//! alive and never mutates: the effective root, the bundle's definitions, a
+//! shape this snapshot built, or an item definition it holds from the
+//! cross-snapshot store (below). A node's address is therefore a stable identity
 //! for the life of the snapshot, and the caches key on it. A merged view
 //! copies the properties of its arms; a copy contributed by a single arm keeps
 //! its source's identity, so a recursive definition reached again below a
@@ -43,12 +44,30 @@
 //!
 //! Building a snapshot does no I/O, evaluates nothing, and mutates no
 //! document; it only reuses the inputs overlay preparation already produced.
+//!
+//! Two kinds of schema work outlive a snapshot ([`CrossSnapshotSchema`]):
+//! synthesized array-item definitions, and the prepared union-alternative
+//! matchers that tell which alternative a sequence item matches. Both copy or
+//! lower whole alternatives, which for a recursive lifecycle type is megabytes
+//! of work, and an edit re-assembles the schema even when it is unchanged. So
+//! both are shared by every snapshot of one
+//! [`OverlayState`](super::OverlayState) and keyed by the content they are
+//! built from, never by a node of one snapshot. An item definition's key
+//! covers only the atoms it is copied from, so taking one opens no definition
+//! beyond those its synthesis opens.
+//! A snapshot that uses a shared item definition holds its own `Arc` to it, so
+//! the definition's address is still a stable identity for that snapshot.
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
-use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, effective_property_shape};
+use darkmatter::markdown::schemas::completion::{
+    AlternativeMatcher, DefinitionLookup, alternative_fingerprint,
+};
+use darkmatter::markdown::schemas::{PropertyAtom, PropertyDef, SchemaShape, effective_property_shape};
+use std::fmt::Write as _;
+use std::hash::Hasher as _;
 use serde_json::Value;
 
 use super::expressions::ScalarProjection;
@@ -145,6 +164,85 @@ impl ScalarTyping {
     pub(crate) const UNRESOLVED: Self = Self { file: false, expression: ExpressionTyping::No };
 }
 
+/// Schema work shared by every snapshot of one overlay state and keyed by
+/// content: prepared union-alternative matchers and synthesized array-item
+/// definitions. Equal keys build equal values, whichever assembly the source
+/// came from.
+///
+/// Each kind is bounded: when [`CROSS_SNAPSHOT_LIMIT`] distinct values are
+/// held, the next new one empties that kind first, so a schema that keeps
+/// changing cannot grow it without limit. A snapshot keeps the item
+/// definitions it took, so emptying never invalidates one in use.
+#[derive(Default)]
+pub(crate) struct CrossSnapshotSchema {
+    matchers: Mutex<HashMap<u64, AlternativeMatcher>>,
+    items: Mutex<HashMap<u64, Arc<Option<PropertyDef>>>>,
+}
+
+/// The most values of each kind one [`CrossSnapshotSchema`] holds.
+const CROSS_SNAPSHOT_LIMIT: usize = 256;
+
+impl CrossSnapshotSchema {
+    /// Whether `value` is a valid instance of `atom`, with references
+    /// resolved through `definitions`
+    /// ([`alternative_accepts_in`](darkmatter::markdown::schemas::completion::alternative_accepts_in)),
+    /// preparing the alternative only the first time its content is seen.
+    pub(crate) fn accepts(&self, atom: &PropertyAtom, definitions: &dyn DefinitionLookup, value: &Value) -> bool {
+        let Some(fingerprint) = alternative_fingerprint(atom, definitions) else {
+            return false;
+        };
+        // Prepared outside the lock: compiling a validator takes
+        // milliseconds, and two requests preparing the same alternative
+        // build equal matchers.
+        shared(&self.matchers, fingerprint, || AlternativeMatcher::prepare(atom, definitions)).accepts(value)
+    }
+
+    /// The item definition `build` synthesizes from an array's item `atoms`,
+    /// shared with every earlier synthesis from equal atoms.
+    fn item_definition(
+        &self,
+        atoms: &[&PropertyAtom],
+        build: impl FnOnce(&[&PropertyAtom]) -> Option<PropertyDef>,
+    ) -> Arc<Option<PropertyDef>> {
+        let mut hasher = DebugHasher(std::collections::hash_map::DefaultHasher::new());
+        for atom in atoms {
+            // Infallible: the sink never fails.
+            let _ = write!(hasher, "\u{0}{atom:?}");
+        }
+        shared(&self.items, hasher.0.finish(), || {
+            work_counters::record_item_synthesis();
+            Arc::new(build(atoms))
+        })
+    }
+}
+
+/// The value `map` holds under `key`, built by `build` (without the lock) and
+/// stored when there is none.
+fn shared<V: Clone>(map: &Mutex<HashMap<u64, V>>, key: u64, build: impl FnOnce() -> V) -> V {
+    let lock = || map.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(held) = lock().get(&key) {
+        return held.clone();
+    }
+    let value = build();
+    let mut held = lock();
+    if held.len() >= CROSS_SNAPSHOT_LIMIT {
+        held.clear();
+    }
+    held.insert(key, value.clone());
+    value
+}
+
+/// Streams derived `Debug` text into a hasher, so a large schema value is
+/// fingerprinted without building its text. Stable within one process only.
+struct DebugHasher(std::collections::hash_map::DefaultHasher);
+
+impl std::fmt::Write for DebugHasher {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        self.0.write(text.as_bytes());
+        Ok(())
+    }
+}
+
 /// The shared analysis of one document snapshot.
 pub struct FrontmatterAnalysis {
     identity: Option<AnalysisIdentity>,
@@ -158,18 +256,26 @@ pub struct FrontmatterAnalysis {
     /// Merged views of several admissible arms, per property and admission;
     /// `None` when no arm is admissible.
     merged: SharedStore<(NodeId, ArmAdmission), Option<SchemaShape>>,
-    /// Array-item definitions, per array property.
-    items: SharedStore<NodeId, Option<PropertyDef>>,
+    /// Array-item definitions, per array property, each shared with the
+    /// overlay state's other snapshots.
+    items: SharedStore<NodeId, Arc<Option<PropertyDef>>>,
     /// The typing of each scalar entry classified so far, by entry index.
     scalars: SharedStore<usize, ScalarTyping>,
     /// Every scalar entry's index and slot in `scalars`, in document order,
     /// once a whole-document request has classified them all.
     inventory: OnceLock<Box<[(usize, usize)]>>,
+    /// The overlay state's schema work that outlives this snapshot.
+    shared: Arc<CrossSnapshotSchema>,
 }
 
 impl FrontmatterAnalysis {
-    /// A snapshot for `identity` over `ast`.
-    pub(crate) fn new(identity: AnalysisIdentity, ast: Option<Arc<FrontmatterAst>>) -> Self {
+    /// A snapshot for `identity` over `ast`, sharing the overlay state's
+    /// cross-snapshot schema work.
+    pub(crate) fn new(
+        identity: AnalysisIdentity,
+        ast: Option<Arc<FrontmatterAst>>,
+        shared: Arc<CrossSnapshotSchema>,
+    ) -> Self {
         Self {
             identity: Some(identity),
             ast,
@@ -180,6 +286,7 @@ impl FrontmatterAnalysis {
             items: SharedStore::default(),
             scalars: SharedStore::default(),
             inventory: OnceLock::new(),
+            shared,
         }
     }
 
@@ -196,12 +303,18 @@ impl FrontmatterAnalysis {
             items: SharedStore::default(),
             scalars: SharedStore::default(),
             inventory: OnceLock::new(),
+            shared: Arc::default(),
         }
     }
 
     /// Whether this snapshot was built from exactly `identity`'s inputs.
     pub(crate) fn matches(&self, identity: &AnalysisIdentity) -> bool {
         self.identity.as_ref().is_some_and(|own| own.matches(identity))
+    }
+
+    /// The cross-snapshot schema work this snapshot shares.
+    pub(crate) fn shared(&self) -> &CrossSnapshotSchema {
+        &self.shared
     }
 
     /// The frontmatter tree this snapshot describes.
@@ -284,19 +397,20 @@ impl FrontmatterAnalysis {
         self.sources.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(copies);
     }
 
-    /// The item definition of the array property `def`, synthesized once per
-    /// snapshot.
-    pub(crate) fn item_definition(
+    /// The item definition of the array property `def`, taken once per
+    /// snapshot from the cross-snapshot store: `atoms` lists the item atoms of
+    /// `def`'s array arms, and `build` synthesizes the definition from them
+    /// only for atoms the store has not seen.
+    pub(crate) fn item_definition<'a>(
         &self,
         def: &PropertyDef,
-        build: impl FnOnce() -> Option<PropertyDef>,
+        atoms: impl FnOnce() -> Vec<&'a PropertyAtom>,
+        build: impl FnOnce(&[&PropertyAtom]) -> Option<PropertyDef>,
     ) -> Option<&PropertyDef> {
         self.items
-            .get_or_insert_with(self.node(def), || {
-                work_counters::record_item_synthesis();
-                build()
-            })
+            .get_or_insert_with(self.node(def), || self.shared.item_definition(&atoms(), build))
             .0
+            .as_ref()
             .as_ref()
     }
 

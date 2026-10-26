@@ -287,6 +287,97 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
 
+## Frontmatter typing and its reuse
+
+Many frontmatter answers need to know what the schema says about a value:
+whether it is an `expression`, a `file`, which union arm a list item
+selected. DMLS works that out lazily and keeps it for as long as the buffer
+and its schema inputs stay the same, so an editor's stream of hovers costs
+the same on a large document as on a small one.
+
+**A cursor request types only its own path.** Hover, completion, and
+go-to-definition resolve the schema along the path of the entry under the
+cursor (`initialize[3].then[0].warn`) and nothing else. On a hover inside a
+lifecycle stack, only that scalar's `{{ … }}` spans and `when` guard are
+read. A request never types the other entries to find its own, so a hover
+on a 200-item lifecycle stack does the same work as on a one-item stack.
+
+**Diagnostics types the whole frontmatter once.** Diagnostics and document
+links need every scalar. The first of them classifies each scalar entry
+(expression, file, or neither, with its decoded text) and keeps the list.
+Every later request on the same buffer and schema reads that list instead
+of walking again, including the next diagnostics pass. A cursor request
+reads an entry from the list when it is already there, but never starts the
+walk.
+
+**Items share schema storage, not results.** Each list item still selects
+its own union arm from its own authored values, exactly as before. What is
+shared is the stored schema for an arm: every item that selects it reads the
+same stored shape instead of a copy.
+
+```yaml
+$schema:
+  step:
+    - "{ kind: literal(say; required), text: string(required) }"
+    - "{ kind: literal(shell; required), run: string(required) }"
+  steps: step[]
+steps:
+  - kind: say      # selects the `say` arm
+    text: hello
+  - kind: shell    # selects the `shell` arm
+    run: ls
+  - kind: say      # selects `say` again: the same stored shape as item 0
+    text: again
+```
+
+A hover on `text` in the third item describes the `say` arm; a hover on
+`run` describes the `shell` arm. Items 0 and 2 share one stored `say` shape,
+and item 1 has the `shell` one. An item whose `kind` is missing, unknown, or
+not one of the literals sees the merged view of every arm, built once and
+shared the same way. A recursive type (`item: "{ children: item[] }"`)
+returns to the same stored shapes at every depth.
+
+**When the stored analysis is replaced.** It belongs to one snapshot of the
+document, and any change to what it was built from starts a new one:
+
+| Change | Replaces the analysis |
+| ------ | --------------------- |
+| An edit, or a new buffer version with the same text | yes |
+| A schema file the document's schema was built from changes on disk, even with no edit | yes, on the next request |
+| A schema that failed to assemble because an imported file was malformed, when that file is fixed | yes, on the next request |
+| A schema that failed because an imported file is missing, when the file is created | on the next watched-file event, rescan, or edit |
+| The `.dmls.toml` or editor configuration, the trigger files, or the document's repository context | yes |
+| Malformed YAML (the last good tree is kept) | yes: answers use the last good tree, never another buffer's text or ranges |
+| Closing the document | dropped |
+
+A request that is still running when the analysis is replaced finishes on
+the one it started with; the replaced analysis is then dropped, and it never
+becomes current again.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Snapshot: first request after open, edit, or input change
+    Snapshot --> Snapshot: hover, completion, definition (cursor path only)
+    Snapshot --> Inventoried: first diagnostics or document links (every scalar, once)
+    Inventoried --> Inventoried: any later request reads the stored list
+    Snapshot --> Replaced: edit or input change
+    Inventoried --> Replaced: edit or input change
+    Replaced --> [*]: last running request finishes
+    Snapshot --> [*]: document closed
+    Inventoried --> [*]: document closed
+```
+
+**Work kept across edits.** Two kinds of schema work are expensive enough
+on large recursive types that DMLS keeps them across edits, keyed by the
+schema content they came from rather than by a snapshot: the array-item
+definition of a list (the union `- ` items are checked against), and, for
+each union alternative, the prepared check that says whether an item matches
+it (the `matches alternative … of …` line above). An edit that leaves the
+schema as it was reuses both; a changed alternative is prepared again, and
+an unchanged one beside it is not. The server keeps at most 256 of each and
+starts over when that fills. The first hover over alternatives the server
+has not seen pays for preparing them once.
+
 ## Passivity
 
 Hover is read-only like every DMLS request: it resolves local files and reads the in-memory graph (parsing a link's unopened target the first time a hover needs it), but never executes a shell command (`$(...)`, `::shell`), fetches a remote URL, or mutates anything. A `$()` or `::shell` hover *explains* what compose would do and whether policy allows it — it never does it.

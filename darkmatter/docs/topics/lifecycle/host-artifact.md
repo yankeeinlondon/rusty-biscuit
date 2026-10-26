@@ -104,7 +104,10 @@ registration the artifact cannot carry fails exactly as it would in the host.
 `profile.registry()` its `EventRegistry`; pass both to
 `parse_lifecycle_config_with` and `lifecycle_call_checks`.
 `schemas::catalog::host_lifecycle_profiles(context)` does the discovery for a
-document. Reading is passive: nothing in a profile runs.
+document. Reading is passive: nothing in a profile runs. Each call reads the
+schema roots' files and looks each one up by its path, content hash, and
+artifact; a file seen before with the same bytes, catalog or not, is not
+parsed again.
 
 The reader is strict. Each of these makes the whole profile unusable, with a
 reason naming the file:

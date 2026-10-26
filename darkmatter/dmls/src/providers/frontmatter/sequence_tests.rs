@@ -17,7 +17,7 @@ use biscuit_file::FileResolutionContext;
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
 use crate::graph::WorkspaceGraph;
 use crate::overlay::{OverlayState, format_dotted};
-use crate::work_counters::work_counts;
+use crate::work_counters::{WorkCounts, work_counts};
 use crate::source_map::{PositionEncoding, SourceMap};
 
 use FmPathSegment::{Index, Key};
@@ -306,6 +306,102 @@ fn sibling_items_share_their_selected_arm_and_nothing_else() {
         assert_eq!(item(5).0, merged);
         assert_ne!(merged, shell);
         assert_eq!(work_counts().since(before).merged_shapes, 1);
+    });
+}
+
+#[test]
+fn every_discriminant_shape_selects_per_item_within_one_snapshot() {
+    // `kind` and `mode` are shared literal discriminants; `kind: shell` is a
+    // duplicate literal (two arms declare it), so only `mode` selects those.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("types.yaml"),
+        concat!(
+            "$schema:\n",
+            "  shell-step:\n",
+            "    kind: literal(shell)\n",
+            "    mode: literal(a)\n",
+            "    run: expression\n",
+            "  alias-step:\n",
+            "    kind: literal(shell)\n",
+            "    mode: literal(d)\n",
+            "    alias: string\n",
+            "  count-step:\n",
+            "    kind: literal(2)\n",
+            "    mode: literal(b)\n",
+            "    count: number\n",
+            "  flag-step:\n",
+            "    kind: literal(true)\n",
+            "    mode: literal(c)\n",
+            "    on: string\n",
+        ),
+    )
+    .unwrap();
+    let cases: [(&str, Option<&str>); 12] = [
+        ("mode: a", Some("run")),
+        ("kind: 2", Some("count")),
+        ("kind: 2, mode: b", Some("count")),
+        ("kind: true", Some("on")),
+        ("mode: d", Some("alias")),
+        ("kind: 'true'", None),
+        ("kind: '2'", None),
+        ("kind: null", None),
+        ("run: ctx.none", None),
+        ("kind: other", None),
+        ("kind: shell", None),
+        ("kind: 2, mode: c", None),
+    ];
+    let mut text = String::from("---\n$schema:\n  steps:\n");
+    for arm in ["shell", "alias", "count", "flag"] {
+        text.push_str(&format!("    - \"{arm}-step[]@./types.yaml\"\n"));
+    }
+    text.push_str("steps:\n");
+    for (mapping, _) in cases {
+        text.push_str(&format!("  - {{ {mapping} }}\n"));
+    }
+    text.push_str("  - kind: true\n    \n");
+    text.push_str("  - kind: '2'\n    \n");
+    text.push_str("---\n\nbody\n");
+    let doc = dir.path().join("doc.md");
+    let uri: Uri = url::Url::from_file_path(&doc).unwrap().as_str().parse().unwrap();
+    with_ctx_at(&doc, uri, dir.path(), &text, false, |ctx| {
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let before = work_counts();
+        let mut merged: Option<*const SchemaShape> = None;
+        let mut selected: BTreeMap<&str, *const SchemaShape> = BTreeMap::new();
+        for (index, (mapping, own_key)) in cases.iter().enumerate() {
+            let shape = memo.shape(&[Key("steps"), Index(index)]).expect("item shape");
+            let keys: Vec<&str> = shape.properties.keys().map(String::as_str).collect();
+            match own_key {
+                Some(own) => {
+                    assert_eq!(keys.len(), 3, "{mapping} selects one arm: {keys:?}");
+                    assert!(keys.contains(own), "{mapping} selects the `{own}` arm: {keys:?}");
+                    let first = *selected.entry(own).or_insert(std::ptr::from_ref(shape));
+                    assert_eq!(first, std::ptr::from_ref(shape), "{mapping} shares its arm's shape");
+                }
+                None => {
+                    // Every arm's keys, in arm then property order.
+                    assert_eq!(keys, ["kind", "mode", "run", "alias", "count", "on"], "{mapping}");
+                    let view = *merged.get_or_insert(std::ptr::from_ref(shape));
+                    assert_eq!(view, std::ptr::from_ref(shape), "{mapping} shares the merged view");
+                }
+            }
+        }
+        assert_eq!(selected.len(), 4, "four distinct selected arms: {selected:?}");
+        assert_eq!(work_counts().since(before).merged_shapes, 1, "one merged view for every unselected item");
+
+        // Completion on the same snapshot offers each item its own arm.
+        let labels = |line: &str| -> Vec<String> {
+            let offset = text.find(line).unwrap() + line.len();
+            completion(ctx, offset).into_iter().map(|item| item.label).collect()
+        };
+        let flag = labels("  - kind: true\n    ");
+        assert!(flag.iter().any(|label| label == "on"), "{flag:?}");
+        assert!(!flag.iter().any(|label| label == "count" || label == "run"), "{flag:?}");
+        let unselected = labels("  - kind: '2'\n    ");
+        for key in ["run", "alias", "count", "on"] {
+            assert!(unselected.iter().any(|label| label == key), "merged-arm completion offers {key}: {unselected:?}");
+        }
     });
 }
 
@@ -832,5 +928,269 @@ fn expression_diagnostics_newly_reach_list_items() {
             diagnostics.iter().all(|d| d.source.as_deref() != Some(crate::diagnostics::codes::source::SCHEMA)),
             "{diagnostics:#?}"
         );
+    });
+}
+
+#[test]
+fn every_scalar_representation_types_alike_through_point_and_inventory() {
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  plain: expression\n",
+        "  single: expression\n",
+        "  double: expression\n",
+        "  block: expression\n",
+        "  tagged: expression\n",
+        "  mixed:\n    - number\n    - expression\n",
+        "plain: a == 1\n",
+        "single: 'b == 2'\n",
+        "double: \"c == 3\"\n",
+        "block: |\n",
+        "  d == 4\n",
+        "tagged: !!str \"e == 5\"\n",
+        "mixed: f > 0\n",
+        "---\n\nbody\n",
+    );
+    let expected = [
+        ("/plain", "a == 1", true),
+        ("/single", "b == 2", true),
+        ("/double", "c == 3", true),
+        ("/block", "d == 4\n", false),
+        ("/tagged", "e == 5", false),
+        ("/mixed", "f > 0", true),
+    ];
+    with_ctx(text, false, |ctx| {
+        let ast = overlay_ast(ctx).unwrap();
+        // Point typing first, before any inventory exists.
+        let pointed: Vec<(String, String)> = expected
+            .iter()
+            .map(|(pointer, _, _)| {
+                let index = index_at(ast, pointer);
+                let ExpressionTyping::Decoded { text, .. } = &scalar_typing(ctx, index).expect("scalar").expression else {
+                    panic!("{pointer} is expression-typed");
+                };
+                (pointer.to_string(), text.clone())
+            })
+            .collect();
+        let wanted: Vec<(String, String)> =
+            expected.iter().map(|(pointer, decoded, _)| (pointer.to_string(), decoded.to_string())).collect();
+        assert_eq!(pointed, wanted);
+
+        // The inventory on the same snapshot holds the same values, and an
+        // exactly projected value maps back to its own authored bytes.
+        let before = work_counts();
+        let values = expression_values(ctx);
+        let scalars = ast.entries().iter().filter(|entry| entry.kind == FmValueKind::Scalar).count();
+        assert_eq!(
+            work_counts().since(before).scalar_classifications,
+            scalars - expected.len(),
+            "the inventory types only the scalars no point request did"
+        );
+        let inventoried: Vec<(String, String)> =
+            values.iter().map(|value| (value.entry.pointer.clone(), value.expression().to_string())).collect();
+        assert_eq!(inventoried, wanted);
+        for (value, (pointer, decoded, exact)) in values.iter().zip(expected) {
+            assert_eq!(value.is_exact(), exact, "{pointer}");
+            if exact {
+                assert_eq!(&text[value.expression_span()], decoded, "{pointer}");
+            } else {
+                assert!(value.entry.value_span.contains(&value.expression_span().start), "{pointer}");
+            }
+        }
+    });
+}
+
+// ── Bounded work on a large lifecycle document ──────────────────────────────
+
+/// A lifecycle document with `items` identical failure handlers, each a guard
+/// expression, a `{{ … }}` span, a file verb, and a plain verb, beside as many
+/// file references and one key no schema declares.
+fn lifecycle_document(items: usize) -> String {
+    let mut text = String::from("---\n$schema:\n  refs: file[]\nmystery: x\nrefs:\n");
+    for index in 0..items {
+        text.push_str(&format!("  - ./ref-{index}.md\n"));
+    }
+    text.push_str("failure:\n");
+    for index in 0..items {
+        text.push_str(&format!(
+            "  - when: file_exists('plan-{index}.md')\n    then:\n      - say: \"{{{{ err.message }}}}\"\n      - ensure_file: ./out-{index}.md\n      - warn: careful\n"
+        ));
+    }
+    text.push_str("---\n\nbody\n");
+    text
+}
+
+/// The byte offsets of each cold point request inside item `item` of a
+/// [`lifecycle_document`].
+struct PointRequests {
+    expression: usize,
+    verb: usize,
+    outside: usize,
+    completion: usize,
+    definition: usize,
+}
+
+impl PointRequests {
+    fn at(text: &str, item: usize) -> Self {
+        let start = text.find(&format!("file_exists('plan-{item}.md')")).expect("item");
+        let local = |needle: &str| start + text[start..].find(needle).unwrap_or_else(|| panic!("{needle}"));
+        Self {
+            expression: start + 2,
+            verb: local("ensure_file") + 2,
+            outside: local("then:") + 1,
+            completion: local("warn:") + 2,
+            definition: text.find(&format!("./ref-{item}.md")).expect("reference") + 2,
+        }
+    }
+}
+
+/// The work one cold point request on item `item` of an `items`-long
+/// [`lifecycle_document`] does on a fresh snapshot, after checking that it
+/// answers.
+fn cold_point_work(items: usize, item: usize, request: fn(&PointRequests, &DocumentContext) -> bool) -> WorkCounts {
+    let text = lifecycle_document(items);
+    let at = PointRequests::at(&text, item);
+    with_ctx(&text, true, |ctx| {
+        let before = work_counts();
+        assert!(request(&at, ctx), "the request answers");
+        work_counts().since(before)
+    })
+}
+
+/// Asserts that a cold point request on a 200-item document types only its
+/// cursor's scalar and builds only the shapes on its path, the same work it
+/// does on a 20-item document.
+fn assert_cold_point_request_is_bounded(request: fn(&PointRequests, &DocumentContext) -> bool) {
+    // The deepest cursor path: failure → [item] → then → [verb] → leaf, so at
+    // most these many distinct schema positions can be built for it.
+    const PATH_POSITIONS: usize = 5;
+    let large = cold_point_work(200, 100, request);
+    assert_eq!((large.typing_walks, large.stack_walks), (0, 0), "{large:?}");
+    assert!(large.scalar_classifications <= 1, "only the cursor scalar is typed: {large:?}");
+    assert!(large.root_assemblies <= 1, "{large:?}");
+    assert!(large.merged_shapes + large.item_syntheses <= PATH_POSITIONS, "{large:?}");
+    let small = cold_point_work(20, 10, request);
+    let typing = |work: WorkCounts| {
+        (work.root_assemblies, work.merged_shapes, work.item_syntheses, work.scalar_classifications)
+    };
+    assert_eq!(typing(small), typing(large), "independent of the item count");
+}
+
+/// One test per cold point request, so nextest spreads them across cores.
+macro_rules! cold_point_request_tests {
+    ($($name:ident: $request:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            assert_cold_point_request_is_bounded($request);
+        }
+    )*};
+}
+
+cold_point_request_tests! {
+    cold_expression_hover_types_only_the_cursor: |at, ctx| {
+        crate::providers::ProviderRegistry::with_substrate().hover(ctx, at.expression).is_some()
+    };
+    cold_verb_hover_types_only_the_cursor: |at, ctx| {
+        crate::providers::ProviderRegistry::with_substrate().hover(ctx, at.verb).is_some()
+    };
+    cold_key_hover_types_no_scalar_walk: |at, ctx| {
+        crate::providers::ProviderRegistry::with_substrate().hover(ctx, at.outside).is_some()
+    };
+    cold_completion_types_only_the_cursor: |at, ctx| {
+        !crate::providers::ProviderRegistry::with_substrate().completion(ctx, at.completion).is_empty()
+    };
+    cold_definition_types_only_the_cursor: |at, ctx| {
+        !crate::providers::ProviderRegistry::with_substrate().definition(ctx, at.definition).is_empty()
+    };
+}
+
+/// Diagnostics through every provider over a fresh snapshot of an
+/// `items`-long [`lifecycle_document`], with the work it did.
+fn diagnostics_work(items: usize) -> (usize, WorkCounts) {
+    let text = lifecycle_document(items);
+    with_ctx(&text, true, |ctx| {
+        let registry = crate::providers::ProviderRegistry::with_substrate();
+        let before = work_counts();
+        let diagnostics = registry.diagnostics(ctx);
+        (diagnostics.len(), work_counts().since(before))
+    })
+}
+
+#[test]
+fn diagnostics_constructions_do_not_scale_with_identical_items() {
+    let (small_found, small) = diagnostics_work(100);
+    let (large_found, large) = diagnostics_work(200);
+    assert_eq!(small_found, large_found, "identical items add no diagnostic");
+    assert_eq!((small.typing_walks, small.stack_walks), (1, 1), "{small:?}");
+    assert_eq!((large.typing_walks, large.stack_walks), (1, 1), "{large:?}");
+    assert_eq!(
+        (small.root_assemblies, small.merged_shapes, small.item_syntheses),
+        (large.root_assemblies, large.merged_shapes, large.item_syntheses),
+        "doubling identical items builds nothing more"
+    );
+    // Each item adds five scalars (four in its handler, one reference), each
+    // classified once.
+    assert_eq!(large.scalar_classifications - small.scalar_classifications, 100 * 5, "{small:?} {large:?}");
+}
+
+#[test]
+fn diagnostics_then_point_requests_reuse_one_snapshot() {
+    let text = lifecycle_document(200);
+    let at = PointRequests::at(&text, 100);
+    let registry = crate::providers::ProviderRegistry::with_substrate();
+    let answers = |ctx: &DocumentContext| {
+        format!(
+            "{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+            registry.hover(ctx, at.expression),
+            registry.hover(ctx, at.verb),
+            registry.hover(ctx, at.outside),
+            registry.completion(ctx, at.completion),
+            registry.definition(ctx, at.definition),
+        )
+    };
+    let cold = with_ctx(&text, true, |ctx| answers(ctx));
+    with_ctx(&text, true, |ctx| {
+        let ast = overlay_ast(ctx).unwrap();
+        // A guard expression, a plain verb value, and an undeclared key.
+        let probes = [
+            index_at(ast, "/failure/100/when"),
+            index_at(ast, "/failure/100/then/2/warn"),
+            index_at(ast, "/mystery"),
+        ];
+        let typed = |ctx: &DocumentContext| -> Vec<String> {
+            probes.iter().map(|&index| format!("{:?}", scalar_typing(ctx, index).expect("scalar"))).collect()
+        };
+        let before_diagnostics = typed(ctx);
+        assert!(before_diagnostics[0].contains("Decoded"), "{before_diagnostics:?}");
+        assert!(before_diagnostics[1].contains("No") && before_diagnostics[2].contains("No"), "{before_diagnostics:?}");
+
+        let before = work_counts();
+        let first = registry.diagnostics(ctx);
+        let work = work_counts().since(before);
+        assert_eq!(work.typing_walks, 1, "{work:?}");
+
+        // A repeated publication reuses the inventory.
+        let before = work_counts();
+        assert_eq!(registry.diagnostics(ctx), first);
+        let again = work_counts().since(before);
+        assert_eq!(
+            (again.typing_walks, again.scalar_classifications, again.root_assemblies, again.merged_shapes, again.item_syntheses),
+            (0, 0, 0, 0, 0),
+            "{again:?}"
+        );
+
+        // Point requests after diagnostics walk nothing and answer as the
+        // cold requests did.
+        let before = work_counts();
+        assert_eq!(answers(ctx), cold);
+        let after = work_counts().since(before);
+        assert_eq!((after.typing_walks, after.stack_walks, after.scalar_classifications), (0, 0, 0), "{after:?}");
+
+        // Point typings taken before the inventory existed are what it holds.
+        assert_eq!(typed(ctx), before_diagnostics);
+        let inventory: BTreeMap<usize, String> =
+            scalar_inventory(ctx).map(|(index, typing)| (index, format!("{typing:?}"))).collect();
+        let held: Vec<String> = probes.iter().map(|index| inventory[index].clone()).collect();
+        assert_eq!(held, before_diagnostics);
     });
 }

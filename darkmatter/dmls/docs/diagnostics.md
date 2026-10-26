@@ -42,6 +42,21 @@ build. It never executes a shell command (`$(...)`, `::shell`),
 fetches a remote URL, or mutates a file. Shell and remote content is *explained*
 statically (see the `darkmatter.security` source), never run.
 
+## Frontmatter typing is shared with later requests
+
+Diagnostics needs to know what the schema says about every frontmatter
+scalar (is it an `expression`, a `file`?). The first diagnostics pass on a
+buffer classifies every scalar entry once and keeps the result with the
+document's current analysis; a second pass on the same buffer and schema,
+and every hover or document-links request after it, reads the stored result
+instead of walking the frontmatter again. Hover and completion before any
+diagnostics type only the cursor's path and never start the walk.
+
+The stored result is replaced on an edit, a new buffer version, a changed
+schema file, a configuration, trigger, or context change, and dropped on
+close. See [Frontmatter typing and its reuse](./hover.md#frontmatter-typing-and-its-reuse)
+for the full list, an example, and the lifecycle.
+
 ## Pipeline
 
 ```

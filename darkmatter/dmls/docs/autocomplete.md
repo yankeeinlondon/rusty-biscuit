@@ -103,6 +103,15 @@ or not, the object's keys are offered (marked `(required)` where they are),
 as they are for an object that has no keys yet. See
 [Recursive types](../../docs/topics/schemas/dmls-schema-support.md#recursive-types).
 
+### Only the cursor's path is typed
+
+Completion resolves the schema along the cursor's own path and reads the
+document's stored schema shapes, so completing in one item of a long list
+costs the same as in a short one. It never classifies the other entries;
+that happens once, on the first diagnostics pass, and completion may read
+its result when it exists. See
+[Frontmatter typing and its reuse](./hover.md#frontmatter-typing-and-its-reuse).
+
 ### Lifecycle stacks
 
 The items of md's lifecycle events (`initialize`, `composed`, `failed`,

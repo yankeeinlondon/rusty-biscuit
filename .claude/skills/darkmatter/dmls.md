@@ -530,6 +530,33 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   per scalar to the same extractor). Never call `expression_values`,
   `nav_targets`, or `stack_expressions` from a cursor request.
   `ExpressionValue` borrows its text and projection from the snapshot.
+  Prove reuse and invalidation through fresh overlays from one long-lived
+  `OverlayState` and compare each answer with a fresh state's
+  (`providers/frontmatter/snapshot_tests.rs`); bounded cold work and
+  diagnostics scaling are in `sequence_tests.rs`. A cached schema failure
+  refreshes only through the files `overlay/mod.rs::error_dependencies`
+  names, so a new `SchemaError` variant that carries an imported file's path
+  must be listed there, or repairing that file leaves the failure cached
+  until the buffer changes.
+- **Work kept across snapshots.** Every edit re-assembles the schema, so
+  anything keyed by a snapshot's node addresses is rebuilt per edit. The two
+  costs that are megabytes on recursive lifecycle types live instead in
+  `analysis::CrossSnapshotSchema` (one per `OverlayState`, reached through
+  `FrontmatterAnalysis::shared()`), keyed by content: union-item matchers
+  (`shared().accepts(atom, definitions, value)`, keyed by the library's
+  `alternative_fingerprint`; never call `alternative_accepts_in` per request,
+  which lowers and validator-hashes the whole alternative each time) and
+  synthesized array-item definitions (keyed by a `Debug`-stream fingerprint
+  of the item atoms; the snapshot holds an `Arc`, so its address identity
+  stays valid). Bounded at 256 per kind. A fingerprint must cover exactly the
+  inputs the build reads: the item-definition key deliberately covers only
+  the atoms, because walking every reachable definition would open types the
+  cursor path never reaches (`recursive_schema_editor` laziness test).
+  Other per-request costs to avoid in hover: parsing the frontmatter
+  `$schema` declaration (`AuthoredDeclaration::frontmatter_at` parses only
+  for an offset inside it). The A3 bench (`benches/pipeline_work_a3.rs`,
+  `A3_PROVIDER_BREAKDOWN=1` per provider) is the allocation evidence; hovers
+  measured about 59 KB (verb) and 105 KB (expression) after this work.
   Trigger payload
   shapes are retained at registry-scan time (`ResolvedPayload::shape`);
   `EffectiveSchema::simplified` stays the authored `$schema` alone, which is

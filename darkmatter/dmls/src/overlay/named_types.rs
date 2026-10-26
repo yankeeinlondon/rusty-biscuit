@@ -37,6 +37,17 @@ pub struct AuthoredDeclaration {
     pub source_map: SchemaSourceMap,
 }
 
+/// The authored bytes of the frontmatter `$schema` value.
+fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
+    let mut span = ast.schema_entry()?.value_span.clone();
+    // A flow collection's recorded value span stops before its closing
+    // bracket.
+    if let Some(end) = flow_collection_end(text, span.start) {
+        span.end = end + 1;
+    }
+    Some(span)
+}
+
 impl AuthoredDeclaration {
     /// The declaration a standalone schema document authors.
     pub fn standalone(model: &StandaloneSchemaDocument) -> Self {
@@ -53,12 +64,7 @@ impl AuthoredDeclaration {
     /// line is replaced with spaces, so every column and byte offset matches
     /// the document and continuation lines keep their indentation.
     pub fn frontmatter(text: &str, ast: &FrontmatterAst) -> Option<Self> {
-        let mut span = ast.schema_entry()?.value_span.clone();
-        // A flow collection's recorded value span stops before its closing
-        // bracket.
-        if let Some(end) = flow_collection_end(text, span.start) {
-            span.end = end + 1;
-        }
+        let span = frontmatter_value_span(text, ast)?;
         let line_start = text[..span.start].rfind('\n').map_or(0, |index| index + 1);
         let mut source = " ".repeat(span.start - line_start);
         source.push_str(text.get(span)?);
@@ -68,6 +74,18 @@ impl AuthoredDeclaration {
             declaration: parsed.value,
             source_map: parsed.source_map,
         })
+    }
+
+    /// [`Self::frontmatter`] for a request at `offset`: `None`, without
+    /// parsing, unless `offset` lies within the `$schema` value (end
+    /// inclusive, like [`Self::reference_at`]), since no span of the
+    /// declaration lies elsewhere.
+    pub fn frontmatter_at(text: &str, ast: &FrontmatterAst, offset: usize) -> Option<Self> {
+        let span = frontmatter_value_span(text, ast)?;
+        if offset < span.start || offset > span.end {
+            return None;
+        }
+        Self::frontmatter(text, ast)
     }
 
     /// The named-type reference whose name contains `offset` (end inclusive,
@@ -368,5 +386,31 @@ mod tests {
         assert_eq!(reference.target.as_deref(), Some("./types.yaml"));
         let u = text.find("U@").unwrap();
         assert_eq!(declaration.reference_at(text, u).unwrap().target, None, "`@this` is local");
+    }
+
+    /// A request outside the `$schema` value never parses the declaration,
+    /// and one at either end of it (the end inclusive, as a reference's is)
+    /// gets the same declaration [`AuthoredDeclaration::frontmatter`] does.
+    #[test]
+    fn a_request_parses_the_declaration_only_inside_the_schema_value() {
+        let text = "---\ntitle: x\n$schema:\n  base: string\n  alias: base\nafter: 1\n---\n";
+        let ast = FrontmatterAst::parse(text).and_then(|parse| parse.ast).expect("frontmatter");
+        let value = ast.schema_entry().expect("a `$schema` entry").value_span.clone();
+        let at = |offset| AuthoredDeclaration::frontmatter_at(text, &ast, offset);
+        assert!(at(text.find("title").unwrap()).is_none(), "a key before the declaration");
+        assert!(at(text.find("$schema").unwrap()).is_none(), "the `$schema` key itself");
+        assert!(at(text.find("after").unwrap() + 1).is_none(), "a key after the declaration");
+        assert!(at(value.start).is_some());
+        assert!(at(value.end).is_some(), "the end is inclusive");
+        let alias_end = text.find("alias: base").unwrap() + "alias: base".len();
+        let declaration = at(alias_end).expect("a cursor just after the last reference");
+        assert_eq!(declaration.reference_at(text, alias_end).expect("the reference").name, "base");
+
+        // A flow value's span runs through its closing bracket.
+        let text = "---\n$schema: { a: 'T@./types.yaml' }\nafter: 1\n---\n";
+        let ast = FrontmatterAst::parse(text).and_then(|parse| parse.ast).expect("frontmatter");
+        let close = text.find('}').unwrap();
+        assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 1).is_some());
+        assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 2).is_none(), "the next line");
     }
 }

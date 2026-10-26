@@ -42,8 +42,9 @@ pub(super) fn reference_spelling(name: &str, reference: &str, is_array: bool) ->
 }
 
 /// The declaration this document authors, with spans in document offsets, or
-/// `None` when it has none or the current buffer did not parse.
-fn authored_declaration(ctx: &DocumentContext) -> Option<AuthoredDeclaration> {
+/// `None` when it has none, the current buffer did not parse, or `offset`
+/// lies outside a frontmatter declaration.
+fn authored_declaration(ctx: &DocumentContext, offset: usize) -> Option<AuthoredDeclaration> {
     let overlay = ctx.overlay?;
     match &overlay.schema_authoring {
         SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } => {
@@ -51,7 +52,7 @@ fn authored_declaration(ctx: &DocumentContext) -> Option<AuthoredDeclaration> {
         }
         SchemaAuthoringState::Standalone { .. } => None,
         _ if overlay.stale => None,
-        _ => AuthoredDeclaration::frontmatter(ctx.text, overlay.ast.as_deref()?),
+        _ => AuthoredDeclaration::frontmatter_at(ctx.text, overlay.ast.as_deref()?, offset),
     }
 }
 
@@ -72,7 +73,7 @@ fn reference_definition<'a>(
     ctx: &'a DocumentContext,
     offset: usize,
 ) -> Option<(NamedReference, Definition<'a>)> {
-    let declaration = authored_declaration(ctx)?;
+    let declaration = authored_declaration(ctx, offset)?;
     let reference = declaration.reference_at(ctx.text, offset)?;
     let definition = match &reference.target {
         None => {
@@ -122,7 +123,7 @@ pub(super) fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 /// is malformed: the parse error, which would otherwise read as a file that
 /// exports nothing.
 fn unusable_target_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
-    let declaration = authored_declaration(ctx)?;
+    let declaration = authored_declaration(ctx, offset)?;
     let reference = declaration.reference_at(ctx.text, offset)?;
     let external = ctx.overlay?.named_types.get(reference.target.as_deref()?)?;
     let error = external.error.as_ref()?;

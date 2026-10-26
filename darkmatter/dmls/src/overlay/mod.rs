@@ -187,6 +187,9 @@ struct OverlayCache {
     /// The current frontmatter analysis per document URI, replaced whenever
     /// any input it was built from changes.
     analysis: HashMap<String, Arc<FrontmatterAnalysis>>,
+    /// Schema work shared by every document's analysis and kept across
+    /// edits (see [`analysis::CrossSnapshotSchema`]).
+    shared_schema: Arc<analysis::CrossSnapshotSchema>,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -376,7 +379,7 @@ impl OverlayState {
             let analysis = match cache.analysis.get(&uri_key) {
                 Some(current) if current.matches(&identity) => Arc::clone(current),
                 _ => {
-                    let fresh = Arc::new(FrontmatterAnalysis::new(identity, ast));
+                    let fresh = Arc::new(FrontmatterAnalysis::new(identity, ast, Arc::clone(&cache.shared_schema)));
                     cache.analysis.insert(uri_key.clone(), Arc::clone(&fresh));
                     fresh
                 }
@@ -1172,7 +1175,8 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
 }
 
 /// The schema files a resolution error names: the referenced schema that
-/// failed, the namespace searched for an unknown name, the file defining a
+/// failed, an imported file that is malformed or unreadable, the namespace
+/// searched for an unknown name, the file defining a
 /// union a reference misuses, every file that authored a reference or a
 /// conflicting constraint, and every file holding a reference of a cycle
 /// that never descends or the type it names.
@@ -1189,6 +1193,7 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
                 out.push(path.clone());
                 walk(source, out);
             }
+            SchemaError::SchemaDocument { path, .. } | SchemaError::Io { path, .. } => out.push(path.clone()),
             SchemaError::UnknownNamedType { namespace, site, .. } => {
                 file(namespace, out);
                 file(&site.source, out);
@@ -2382,6 +2387,33 @@ mod tests {
             panic!("sibling-only bare reference must fail schema preparation");
         };
         assert!(error.to_string().contains("./local.yaml"));
+    }
+
+    #[test]
+    fn repairing_a_malformed_imported_schema_reassembles_an_unchanged_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let shape = root.join("shape.yaml");
+        std::fs::write(&shape, "$schema:\n  title: [\n").unwrap();
+        let path = root.join("doc.md");
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let text = "---\n$schema: ./shape.yaml\ntitle: one\n---\n\nbody\n";
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let build = || {
+            state
+                .for_document_timed(&doc, Some(1), text, &path, &DmlsConfig::default(), std::slice::from_ref(&root), &resolution, &RequestTimings::untimed())
+                .expect("frontmatter overlay")
+        };
+        let failed = build();
+        assert!(matches!(&failed.schema, SchemaOutcome::Failed(error) if matches!(**error, SchemaError::SchemaDocument { .. })));
+        assert!(matches!(build().schema, SchemaOutcome::Failed(_)), "an unchanged failure stays cached");
+
+        std::fs::write(&shape, "$schema:\n  title: string\n").unwrap();
+        let repaired = build();
+        assert!(ready_bundle(&repaired).effective.validate(&ready_bundle(&repaired).frontmatter_json).valid);
+        assert!(!Arc::ptr_eq(&failed.analysis, &repaired.analysis), "the repair starts a new analysis");
+        assert!(repaired.analysis.root().properties.contains_key("title"));
     }
 
     #[test]

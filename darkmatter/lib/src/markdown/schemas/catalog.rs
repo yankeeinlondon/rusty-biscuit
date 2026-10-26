@@ -567,11 +567,14 @@ pub struct HostLifecycleDiscovery {
 ///
 /// Results are cached per catalog path, catalog bytes, and artifact bytes:
 /// a profile's registry holds its catalog for the rest of the process, so
-/// the catalog is leaked once per distinct key.
+/// the catalog is leaked once per distinct key. A file that is not a host
+/// catalog is cached under the same key, latest revision only, so an
+/// unchanged root is read and hashed on each call but never parsed again.
 pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) -> Vec<HostLifecycleDiscovery> {
     use crate::lifecycle::host_profile::{HostLifecycleProfile, lifecycle_artifact_path};
     type Key = (std::path::PathBuf, String, ArtifactKey);
-    static CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<Key, HostLifecycleDiscovery>>> =
+    /// `None` for a file that is not a host catalog.
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<Key, Option<HostLifecycleDiscovery>>>> =
         std::sync::LazyLock::new(Default::default);
 
     let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
@@ -593,13 +596,17 @@ pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) ->
                 continue;
             }
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            if !is_global_catalog(&text) || declares_fm(&text) {
-                continue;
-            }
             let key = (path.clone(), biscuit_hash::blake3_hash(&text), ArtifactKey::read(&lifecycle_artifact_path(&path)));
             let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(discovery) = cache.get(&key) {
-                found.push(discovery.clone());
+            if let Some(cached) = cache.get(&key) {
+                found.extend(cached.iter().cloned());
+                continue;
+            }
+            if !is_global_catalog(&text) || declares_fm(&text) {
+                // Only the latest revision of a file that is not a host
+                // catalog is kept, so editing one never grows the cache.
+                cache.retain(|(cached, ..), _| cached != &path);
+                cache.insert(key, None);
                 continue;
             }
             let Ok(catalog) = GlobalCatalog::from_host_file(&path, context) else { continue };
@@ -609,7 +616,7 @@ pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) ->
                 profile: HostLifecycleProfile::from_artifact(catalog, &path, &text, key.2.artifact())
                     .map(std::sync::Arc::new),
             };
-            cache.insert(key, discovery.clone());
+            cache.insert(key, Some(discovery.clone()));
             found.push(discovery);
         }
     }
@@ -790,5 +797,39 @@ mod tests {
         assert!(is_global_catalog(include_str!("../../../../schemas/darkmatter.yaml")));
         assert!(!is_global_catalog(include_str!("../../../../schemas/partials/fm.yaml")));
         assert!(!is_global_catalog("$schema:\n  title: string\n"));
+    }
+
+    /// A schema-root file is classified by its current bytes: a file that
+    /// becomes a host catalog is discovered, one that stops being a catalog
+    /// is dropped, and an unchanged catalog is served from the cache (the
+    /// same profile) rather than parsed again.
+    #[test]
+    fn lifecycle_profiles_follow_each_root_file_s_current_content() {
+        let catalog = include_str!("../../../benches/fixtures/claudine-schemas/globals.yaml");
+        let artifact = include_str!("../../../benches/fixtures/pipeline-work/globals.lifecycle.json");
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
+        std::fs::create_dir_all(root.join(".git")).expect("repository marker");
+        std::fs::create_dir_all(root.join("schemas")).expect("schema root");
+        let globals = root.join("schemas/globals.yaml");
+        std::fs::write(root.join("schemas/globals.lifecycle.json"), artifact).expect("artifact");
+        let context =
+            biscuit_file::FileResolutionContext::from_snapshot(&root, None, Default::default()).with_repository_root(&root);
+        let profile = |found: &[HostLifecycleDiscovery]| match found {
+            [only] => only.profile.clone().expect("the frozen artifact is fresh for the frozen catalog"),
+            other => panic!("one host catalog: {other:?}"),
+        };
+
+        std::fs::write(&globals, "title: not a catalog\n").expect("plain YAML");
+        assert!(host_lifecycle_profiles(&context).is_empty(), "plain YAML is not a host catalog");
+        assert!(host_lifecycle_profiles(&context).is_empty(), "nor is it on a cached call");
+
+        std::fs::write(&globals, catalog).expect("catalog");
+        let first = profile(&host_lifecycle_profiles(&context));
+        let again = profile(&host_lifecycle_profiles(&context));
+        assert!(std::sync::Arc::ptr_eq(&first, &again), "an unchanged catalog is served from the cache");
+
+        std::fs::write(&globals, "title: no longer a catalog\n").expect("plain YAML again");
+        assert!(host_lifecycle_profiles(&context).is_empty(), "a file that stops being a catalog is dropped");
     }
 }

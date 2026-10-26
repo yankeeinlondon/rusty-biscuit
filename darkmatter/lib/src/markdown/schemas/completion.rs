@@ -48,7 +48,7 @@
 //! ```
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
@@ -624,22 +624,59 @@ pub fn alternative_accepts_in<L>(atom: &PropertyAtom, value: &Value, definitions
 where
     L: DefinitionLookup + ?Sized,
 {
-    crate::note_work!(AlternativeMatcherPrepare);
-    let Some(table) = reachable_definitions(atom, definitions) else {
-        return false;
-    };
-    let mut present = atom.clone();
-    present.constraints.push(Constraint::Required);
-    let mut shape = SchemaShape::default();
-    shape
-        .properties
-        .insert("value".to_string(), PropertyDef::Single(present));
-    let Ok(schema) = to_json_schema_with_definitions(&SimplifiedSchema::Single(shape), &table) else {
-        return false;
-    };
-    ALTERNATIVE_VALIDATOR_CACHE
-        .structural_validator_for(&schema)
-        .is_ok_and(|validator| validator.is_valid(&serde_json::json!({ "value": value })))
+    AlternativeMatcher::prepare(atom, definitions).accepts(value)
+}
+
+/// [`alternative_accepts_in`] for one alternative, lowered and compiled once
+/// so it can judge many values. Cloning shares the compiled validator.
+#[derive(Clone)]
+pub struct AlternativeMatcher {
+    /// `None` when the alternative reaches a missing definition or does not
+    /// lower to a valid schema: it accepts nothing.
+    validator: Option<Arc<jsonschema::Validator>>,
+}
+
+impl AlternativeMatcher {
+    /// Lowers `atom` as a present value, with every definition it reaches
+    /// through `definitions`, and fetches or compiles its structural
+    /// validator.
+    pub fn prepare<L>(atom: &PropertyAtom, definitions: &L) -> Self
+    where
+        L: DefinitionLookup + ?Sized,
+    {
+        crate::note_work!(AlternativeMatcherPrepare);
+        let validator = reachable_definitions(atom, definitions).and_then(|table| {
+            let mut present = atom.clone();
+            present.constraints.push(Constraint::Required);
+            let mut shape = SchemaShape::default();
+            shape
+                .properties
+                .insert("value".to_string(), PropertyDef::Single(present));
+            let schema = to_json_schema_with_definitions(&SimplifiedSchema::Single(shape), &table).ok()?;
+            ALTERNATIVE_VALIDATOR_CACHE.structural_validator_for(&schema).ok()
+        });
+        Self { validator }
+    }
+
+    /// Whether `value` is a valid instance of the prepared alternative.
+    pub fn accepts(&self, value: &Value) -> bool {
+        self.validator
+            .as_ref()
+            .is_some_and(|validator| validator.is_valid(&serde_json::json!({ "value": value })))
+    }
+}
+
+/// A content fingerprint of `atom` together with every definition it reaches
+/// through `definitions`: two alternatives with equal fingerprints prepare
+/// the same [`AlternativeMatcher`], so a caller can key prepared matchers on
+/// it across schema assemblies. Taking one builds no schema and allocates
+/// only the traversal's reference keys. `None` when a reached definition is
+/// missing (the alternative accepts nothing). Stable within one process only.
+pub fn alternative_fingerprint<L>(atom: &PropertyAtom, definitions: &L) -> Option<u64>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    super::simplified::query::reachable_fingerprint(atom, definitions)
 }
 
 /// [`alternatives_for_def_in`] with no definition in scope: a recursive
