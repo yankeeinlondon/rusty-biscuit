@@ -23,6 +23,7 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - dmls
+    - darkmatter
 human_review: false
 source_files_during_phase_2:
     - darkmatter/dmls/src/overlay/analysis.rs
@@ -52,30 +53,85 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
-message_to_agent: |-
-    Phase 3 split point and document typing. FrontmatterAnalysis now stores
-    a ScalarTyping per scalar entry index (file arm; ExpressionTyping
-    No/Undecodable/Decoded{text, projection}); providers/frontmatter.rs has
-    the one classifier (classify_scalar), the point lookup
-    scalar_typing(ctx, index) (never initializes the inventory), the
-    document lookup scalar_inventory(ctx) (one typing_walks per snapshot),
-    and cursor_scalar(ast, offset). hover and definition are cursor-local;
-    event_views::scalar_stack_expressions extracts one scalar's lifecycle
-    expressions and stack_expressions (diagnostics only) delegates to it.
-    expression_values(ctx) and nav_targets(ctx) lost their ast parameter.
-    Counters: scalar_classifications is counted only when a record is built,
-    typing_walks only when the inventory is built, stack_walks only by
-    stack_expressions. Phase 3 tests already cover cold hover/definition
-    zero-walk and reuse on one fixture (sequence_tests
-    point_typing_never_starts_the_inventory_and_the_inventory_reuses_it,
-    definition_types_only_the_cursor_scalar, and event_views parity); Phase 4
-    should extend rather than duplicate them. Interim A3
-    (phase3-a3.tsv): hovers are now size-independent with zero walks, but
-    expression hover is 3.79 MB and verb hover 9.5 MB warm / 17.9 MB cold,
-    still above the 1 MB target; the remaining cost is outside typing
-    (LifecycleHost::for_document, dsl::with_site_scope, dsl::host_catalogs,
-    hover markdown) and Phase 5 must remove it. Phase 2 is still
-    uncommitted in this worktree.
+source_files_during_phase_4:
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+docs_updated_during_phase_5:
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_diagnostics.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_interpolation_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_item_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_shape_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_faults.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_loop_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_navigation.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_plain_and_silent_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_property_hovers.json
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/benches/pipeline_work_a3.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+documentation:
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 5
+implemented: true
+decisions_for_author: []
+pipeline_refreshed:
+    - 2026-10-25-fix-now
+    - 2026-10-25-shared-acyclic-definitions
+    - 2026-10-25-pipeline-work-reduction
 ---
 
 # Implementation Log for 2026-10-26-dmls-frontmatter-typing-allocation (5 phases)
@@ -638,3 +694,508 @@ and the cold verb hover adds about 8.3 MB over warm. Phase 5 owns the target.
 - Cross-OS check: not run. The change adds no path, process, or OS-specific
   code (index-keyed stores and in-memory typing only); CI's Windows and WSL2
   cells cover it.
+
+## Phase 4
+
+Built on `6a23ecbe7` (Phases 1–3 committed). Done in this session,
+sequentially, without subagents: both Wave 5 tasks were test-only and the
+existing helpers lived in the files being extended. One production defect
+the new invalidation test exposed was fixed (below).
+
+### What changed
+
+- **`providers/frontmatter/sequence_tests.rs` (extended).**
+  - `lifecycle_document(n)`: `n` failure handlers (a guard, a `{{ … }}`
+    span, `ensure_file`, `warn`) beside `n` `file[]` references and one
+    undeclared key, using Claudine's shipped lifecycle schema.
+  - Five cold point-request tests, one per request through
+    `ProviderRegistry::with_substrate()` (the bench's path), generated by
+    `cold_point_request_tests!` so nextest spreads them: expression hover,
+    verb hover, key hover (a cursor outside every typed scalar value),
+    completion, definition. Each runs on a fresh snapshot of a 200-item
+    document and asserts no typing or stack walk, at most one
+    classification, at most one root assembly, and constructions bounded
+    by the five schema positions on the deepest cursor path. It also
+    asserts the same counts on a 20-item document. Observed: at most
+    1 merged shape plus 1 synthesis (verb hover: 2 merged + 1), and
+    0–1 classifications.
+  - `diagnostics_constructions_do_not_scale_with_identical_items`: full
+    registry diagnostics at 100 and 200 items. Same diagnostics, one typing
+    walk and one stack walk each, identical root, merged, and synthesis
+    counts, and classifications differing by exactly 100 × 5 scalars.
+  - `diagnostics_then_point_requests_reuse_one_snapshot` (200 items):
+    point-types a guard, a plain verb value (non-expression), and an
+    undeclared key (unresolved) before diagnostics. Then diagnostics (one
+    walk); repeated diagnostics (identical result, zero classifications,
+    walks, or constructions); and hover, verb hover, key hover, completion,
+    and definition after diagnostics, with zero walks or classifications and
+    answers identical to the same requests on a cold snapshot. The point
+    typings taken before the inventory existed equal what the inventory
+    holds.
+  - `every_discriminant_shape_selects_per_item_within_one_snapshot`: four
+    arms with two shared discriminants (`kind`, `mode`) and twelve sibling
+    items on one snapshot. Selected: string, number, agreeing pair, boolean
+    `true`, and a key that resolves past a duplicate literal. Unselected:
+    string `'true'`, string `'2'`, `null`, absent, unknown, duplicate
+    literal, and conflicting keys. Each selected item shares its arm's
+    shape; every unselected item shares one merged view (built once) in
+    arm-then-property order; completion on the same snapshot offers a
+    boolean-selected item only its arm's keys and an unselected item every
+    arm's keys.
+  - `every_scalar_representation_types_alike_through_point_and_inventory`:
+    plain, single-quoted, double-quoted, block, and tagged expression values
+    plus a mixed `[number, expression]` union. Point typing (before any
+    inventory) and the inventory decode the same text. The inventory
+    classifies only the scalars no point request did. Exact values project
+    back to their own authored bytes, and block or tagged values stay
+    inside their value span.
+- **`providers/frontmatter/snapshot_tests.rs` (new; declared in
+  `providers/frontmatter.rs`).**
+  `every_input_change_starts_a_snapshot_that_answers_from_its_own_inputs`
+  drives one long-lived `OverlayState` the way the router does
+  (`prepare_for_document`, then a fresh `DocumentOverlay` from
+  `for_document_timed` with a revision per request). Each request publishes
+  diagnostics, then hovers on `guard`, then completes a key. Its answers are
+  compared with an oracle: a fresh `OverlayState` that saw only the inputs
+  that step needs (the last-good text plus the malformed one, for malformed
+  steps). The cases are:
+  - reuse by a fresh overlay wrapper (zero work)
+  - same text at a new revision
+  - an edit
+  - an imported-schema change, then restoring it (a new snapshot, never the
+    old one)
+  - a configuration change
+  - a trigger-registry change (writing a trigger plus
+    `invalidate_trigger_inputs`, which brings in the trigger's required
+    `model` in diagnostics and completion)
+  - a context change
+  - schema-assembly failure, then repair
+  - malformed YAML over the last-good tree, then a second malformed buffer
+    with shifted offsets, then the repaired buffer
+  - a request finishing on a retained replaced overlay (it answers for its
+    own buffer, and the current snapshot is reused unchanged afterward)
+  - no replaced snapshot kept by the cache (`Arc::strong_count == 1` for
+    each)
+  - close dropping the cache's owner, and reopening starting over
+
+  Passivity: around every request it asserts zero DMLS reads, hashes,
+  parses, enumerations, or registry scans, no context build, no Darkmatter
+  `TriggerDiscovery` or `EffectivePreparation`, and (under
+  `effects-instrumentation`, which `just test` enables) no effect engine
+  and no network attempt. The document on disk is unchanged at the end.
+  Preparation (`prepare_for_document` / `for_document_timed`) is measured
+  outside the requests, since it is the existing dependency-check stage.
+- **Fix: `overlay/mod.rs::error_dependencies`** now records the file of
+  `SchemaError::SchemaDocument` (a malformed imported schema file) and
+  `SchemaError::Io`. Before, a document whose `$schema` file failed to parse
+  cached the failure with no dependency, so repairing that file without
+  editing the buffer left the failure (and its snapshot) cached until the
+  text, configuration, registry, or context changed. Regression test
+  `overlay::tests::repairing_a_malformed_imported_schema_reassembles_an_unchanged_buffer`
+  (and the snapshot test's failure-then-repair step) fails without the
+  fix, which was checked by reverting it, and passes with it. The function's
+  doc comment now lists the new cases.
+- **Skill:** `.claude/skills/darkmatter/dmls.md` names where reuse and
+  invalidation are proven and the rule that a path-bearing `SchemaError`
+  variant must be listed in `error_dependencies`.
+
+### Design Decisions
+
+- **Decision:** prove invalidation with one end-to-end sequence over a
+  long-lived `OverlayState`, comparing each step's public answers with a
+  fresh state's answers, instead of one test per input.
+  - **Alternatives considered:** one test per input change; extending the
+    overlay-level `frontmatter_analysis_is_shared_until_an_input_changes`,
+    which checks only `Arc` identity.
+  - **Why:** the contamination risk is history, meaning a snapshot built
+    from earlier inputs answering for later ones, which only a sequence
+    exposes. Comparing with a fresh state is an exact oracle for every
+    answer (ranges, codes, messages, hover text, completion order) without
+    hand-written expectations. The whole sequence runs in 0.8 s.
+  - **Downsides:** a failure names a step, not a test. Each step's label is
+    in its assertion message.
+- **Decision:** cold point-request tests go through
+  `ProviderRegistry::with_substrate()`, one generated test per request.
+  - **Alternatives considered:** the frontmatter provider alone; one test
+    looping over all five requests (2.7 s).
+  - **Why:** the A3 bench and the editor go through the registry, so a
+    second provider walking the document would be caught. Splitting keeps
+    each test under 1 s and lets nextest spread them across cores.
+  - **Downsides:** five tests share one helper. The macro list is the only
+    list of requests, so no guard test is needed.
+- **Decision:** the "conflicting" and "duplicate" discriminant cases use
+  the shared selector's own definitions: two discriminant keys selecting
+  different arms, and one literal declared by two arms.
+  - **Alternatives considered:** a YAML duplicate key in one item mapping.
+  - **Why:** a duplicate YAML key makes the frontmatter unparseable (the
+    malformed-buffer path, covered by the snapshot test), so it never reaches
+    selection. `discriminant.rs` names these exact cases.
+  - **Downsides:** none.
+- **Decision:** fix the failed-assembly dependency gap in this phase rather
+  than weakening the failure-then-repair case.
+  - **Alternatives considered:** test only failures that wrap
+    `ReferencedSchema` (already tracked); file a follow-up.
+  - **Why:** the plan requires a failure followed by repair, and says to
+    fix failures in the implementation before proceeding. A malformed import
+    is the common mid-edit failure. The fix is one match arm on the existing
+    dependency mechanism.
+  - **Downsides:** a missing import still fails as `NoMatch`, which names
+    no path, so creating the missing file does not refresh an unchanged
+    buffer until a watched or rescanned change. That is the existing
+    behavior and is out of this phase's scope.
+
+### Requirement → test mapping (this phase)
+
+| Acceptance item | Test |
+| --- | --- |
+| 1a: cold hover on one entry of a 200-item lifecycle document (expression, verb, outside typed values) builds at most the path's positions plus one root, independent of item count, with no walk; completion and definition likewise | `sequence_tests::cold_expression_hover_types_only_the_cursor`, `cold_verb_hover_types_only_the_cursor`, `cold_key_hover_types_no_scalar_walk`, `cold_completion_types_only_the_cursor`, `cold_definition_types_only_the_cursor` |
+| 1b: diagnostics builds each position or merged view once; doubling identical items doubles no construction; classification per scalar | `sequence_tests::diagnostics_constructions_do_not_scale_with_identical_items` (plus the existing `identical_items_do_not_multiply_shared_constructions` and `recursive_depths_and_same_arm_items_share_one_view`) |
+| 1c: hover after diagnostics walks nothing; repeated diagnostics reuses the inventory; point results before diagnostics equal the inventory's (expression, non-expression, unresolved) | `sequence_tests::diagnostics_then_point_requests_reuse_one_snapshot`, `every_scalar_representation_types_alike_through_point_and_inventory` |
+| 1d: edit, identical-text revision, imported-schema change, configuration, trigger-registry, and context changes, close/reopen, schema failure → repair, malformed YAML → repair; old handle usable, never current again; no history | `snapshot_tests::every_input_change_starts_a_snapshot_that_answers_from_its_own_inputs`, `overlay::tests::repairing_a_malformed_imported_schema_reassembles_an_unchanged_buffer`, existing `overlay::tests::frontmatter_analysis_is_shared_until_an_input_changes` |
+| Passivity (no reads, network or shell effects, mutation, or context discovery from analysis) | `snapshot_tests::…` (asserted around every request) |
+| 3: sibling arms; absent, unknown, duplicate, conflicting discriminants; strings, numbers, booleans, null; merged-arm completion | `sequence_tests::every_discriminant_shape_selects_per_item_within_one_snapshot`, existing `sibling_items_share_their_selected_arm_and_nothing_else`, and the `sibling_completion_*` unit tests |
+| 3: recursive references; both crossing modes | existing `recursive_depths_and_same_arm_items_share_one_view`, `transparent_crossing_serves_key_only_authoring_ancestry`, `union_arms_are_chosen_by_array_crossing` |
+| 3: mixed expression unions; plain, quoted, block, and tagged values | `sequence_tests::every_scalar_representation_types_alike_through_point_and_inventory`, existing `diagnostics::frontmatter` mixed-union tests and `event_views::one_scalar_yields_exactly_its_share_of_the_document_walk` |
+| 3: responses unchanged | Phase 1's `frontmatter_response_contracts` goldens, untouched and passing |
+
+Fidelity F1, L1, in-process at the provider-registry and overlay APIs that
+own the behavior (the boundary the server calls). The Input Robustness Matrix
+does not apply: no file-format or configuration reader changed (the fix
+widens which existing error paths are recorded as dependencies).
+
+### Notes
+
+- The shared discriminant selector treats `kind: 2.0` as not matching
+  `literal(2)` (`serde_json` number identity). That is existing library
+  behavior outside this fix, so the case was left out of the new test
+  rather than pinned.
+- An inline `$schema` union written as the quoted flow string
+  `"[number, expression]"` does not assemble; the YAML-list form does. The
+  test uses the list form.
+- Slowest new tests: `diagnostics_then_point_requests_reuse_one_snapshot`
+  about 2.0 s, `diagnostics_constructions_do_not_scale_with_identical_items`
+  about 1.5 s, each cold point test 0.7–0.9 s, the snapshot sequence 0.8 s.
+  All are well under 5 s.
+
+### Gates
+
+- `just lint` (darkmatter/): pass. `cargo clippy -p dmls --all-targets
+  --features effects-instrumentation -- -D warnings`: pass.
+- `just test` (darkmatter/): **12,567 passed, 10 skipped, 0 failed** in
+  79.1 s.
+- `just check-tier-coverage darkmatter`: 0 stranded. No new test name
+  carries a tier marker.
+- Dependent packages: none (no workspace package depends on `dmls`).
+- Cross-OS check: not run. The new tests build paths with
+  `canonicalize_simplified` and `Url::from_file_path` under temp dirs, like
+  their neighbors. The fix is one match arm, with no path comparison or OS
+  code. CI's Windows and WSL2 cells cover it.
+- Scope check, run from the repository root after all edits:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [dmls, test-toolkit, darkmatter]`, `change_class: package`,
+  so both gates were required and both ran.
+
+## Phase 5
+
+Built on the Phase 4 working tree (uncommitted Phase 4 changes present).
+Done in this session without subagents: the allocation work was a chain of
+measure → fix → re-measure on the same files, and the documentation depends
+on the final design.
+
+### Where the hover bytes went
+
+Phase 4 left expression hover at 3.79 MB and verb hover at 9.5 MB warm /
+17.9 MB cold. A temporary allocation probe (a `bytes_allocated` reading at
+each stage boundary of `FrontmatterProvider::hover`, removed before the final
+run) attributed them:
+
+| Stage | Hover | Bytes per hover |
+| ----- | ----- | --------------: |
+| `named_references::hover`: parses the `$schema` declaration twice (`unusable_target_hover`, `reference_definition`) | both | 671,029 |
+| `meta_schema_hover`: parses it a third time | both | 335,515 |
+| `LifecycleHost::for_document` → `host_lifecycle_profiles`: reads and **YAML-parses every schema-root file** (`is_global_catalog`, `declares_fm`) before its cache lookup | expression | 2,777,017 |
+| `union_item` → `alternative_accepts_in` × 6: each alternative's reachable definitions cloned, lowered to JSON Schema, serialized to hash for the validator cache (cold: also compiled) | verb | ≈ 6.8 MB warm / 15.1 MB cold |
+| `union_item` → `ShapeMemo::def_at(item)`: the array-item definition synthesized for the new snapshot (every edit makes one) | verb | 1,671,753 |
+
+None of it was frontmatter typing: after Phase 3 both hovers did zero
+classifications and walks. The bench's "expression hover" lands on a
+top-level `{{ … }}` scalar that is not in a lifecycle stack, so after the
+lifecycle-host lookup it falls through to the schema hover of `phase`.
+
+### What changed
+
+- **`AuthoredDeclaration::frontmatter_at`** (`overlay/named_types.rs`): a
+  request parses the frontmatter `$schema` declaration only when its offset
+  lies inside the value (end inclusive). `named_references::{hover,
+  definition}` and `meta_schema_hover` use it. No declaration span lies
+  outside the value, so no answer changes.
+- **`host_lifecycle_profiles`** (`darkmatter/lib/.../catalog.rs`): the cache
+  key (path, content hash, artifact) is computed first, and a file that is
+  not a host catalog is cached as `None`, so an unchanged schema root is read
+  and hashed but never YAML-parsed again. A file is still re-classified when
+  its bytes change.
+- **`AlternativeMatcher` and `alternative_fingerprint`**
+  (`darkmatter/lib/.../completion.rs`, `simplified/query.rs`): the lowering
+  and validator lookup of `alternative_accepts_in` is a preparable value
+  (`alternative_accepts_in` is now `prepare(..).accepts(..)`), and an
+  alternative has a content fingerprint: its derived `Debug` text and that of
+  every definition it reaches, in the order the lowering allocates `$defs`
+  keys, streamed into a hasher without building the text.
+- **`CrossSnapshotSchema`** (`overlay/analysis.rs`): one per `OverlayState`,
+  shared by every snapshot through `FrontmatterAnalysis::shared()`. It holds
+  prepared alternative matchers keyed by `alternative_fingerprint`, and
+  synthesized array-item definitions keyed by a fingerprint of the item atoms
+  they are copied from. Each kind is bounded at 256 entries (cleared when
+  full). A snapshot keeps an `Arc` to each item definition it took, so the
+  node-address identities of Phase 2 still hold for its life.
+  `union_item` judges through it; `ShapeMemo::def_at` takes item definitions
+  through it (`array_item_def` split into `array_item_atoms` + synthesis).
+
+### Allocation result
+
+Same command, host, build settings, frozen inputs, sizes, cold/warm cases,
+and repetitions as the Phase 1 baseline (see Phase 1). Raw TSV:
+`phase5-a3.tsv` beside this log. The benchmark's order is unchanged:
+**overlay → diagnostics → completion → verb hover → expression hover**, so
+diagnostics runs before both hovers.
+
+| Case | Expression hover before → after | Verb hover before → after | Diagnostics before → after |
+| ---- | ------------------------------: | ------------------------: | -------------------------: |
+| a3x1-warm  | 144,793,776 → **105,025** | 154,998,355 → **58,763** |   525,453,337 → 437,251,200 |
+| a3x1-cold  | 144,793,776 → **105,025** | 163,339,067 → **58,763** |   928,335,132 → 840,132,995 |
+| a3x10-warm | 966,693,644 → **105,025** | 976,898,223 → **58,763** |   970,158,217 → 472,521,047 |
+| a3x10-cold | 966,693,644 → **105,025** | 985,238,935 → **58,763** | 1,373,040,012 → 875,402,842 |
+
+Every measured hover allocates under 1,000,000 bytes at both sizes, warm
+and cold, and both are independent of document size. Supporting values:
+verb hover 946 allocations, 14,016 peak live bytes, median 1.6 ms; expression
+hover 184 allocations, 44,518 peak live bytes, median 0.25–0.35 ms (a3x10
+hover peak live was 417,936,523 bytes at baseline).
+
+**What the byte target does and does not depend on.**
+
+- It does not depend on diagnostics having typed the document: neither hover
+  classifies or walks anything (`dmls_work` all zero in the rows), and the
+  cold point-request tests (`sequence_tests::cold_*`, unchanged and passing)
+  prove a hover before any diagnostics types only its own scalar with no
+  walk.
+- Cold equals warm for the hovers because the matchers and item definitions
+  are server state (`OverlayState`), which the bench keeps across loops as a
+  running server does; its cold mode empties the library's process caches
+  only. The first hover a server ever serves over alternatives it has not
+  seen still prepares them: the probe measured that at about 16.8 MB for the
+  A3 verb hover (6 matcher lowerings and compilations plus one item
+  synthesis), paid once per distinct alternative content, not per edit.
+- The expression hover's remaining 105 KB is mostly reading and hashing the
+  schema-root files for the lifecycle host (≈104 KB), which is existing
+  per-request file reading, not new work.
+
+**Diagnostics growth.** For the fixed schema, typing work in diagnostics is
+linear in entries and constant in schema constructions: scalar
+classifications 66 → 453, one typing walk, one stack walk, one root
+assembly, 8 merged shapes and 0 item syntheses at both sizes. Bytes grow
+437.3 MB → 472.5 MB (warm) for ten times the lifecycle stacks: ≈ 35 MB for
+387 more classified scalars, ≈ 91 KB each. That residual is required
+per-entry output outside frontmatter typing: expression parses (587 →
+4,412) and the lifecycle call checks, whose operand-site comparisons grow
+faster than linearly (1,107 → 97,506) and are the subject of
+`2026-10-26-sequence-quadratic-frontmatter`. Two sizes of one schema do not
+establish scaling for arbitrary schemas; the work-count tests are the
+evidence for the typing mechanism.
+
+For `2026-10-25-shared-acyclic-definitions`: compare its re-run of this
+bench against the "after" columns above.
+
+### Design Decisions
+
+1. **Close the hover target outside frontmatter typing.**
+   - **Decision:** The remaining hover bytes were in the `$schema`
+     declaration parse, lifecycle-host discovery, union-item matching, and
+     item synthesis, so this phase fixed those paths, including two library
+     functions in `darkmatter` (`host_lifecycle_profiles`,
+     `alternative_accepts_in`).
+   - **Alternatives considered:** Report the target unmet as outside this
+     fix's typing scope; reorder the bench so diagnostics warms the hover.
+   - **Why:** The plan requires correcting remaining allocations in the
+     affected paths and forbids weakening the threshold or reordering the
+     benchmark. Each fix is behavior-preserving and local.
+   - **Downsides:** The change now touches the `darkmatter` library as well
+     as `dmls`.
+
+2. **Keep union-item matchers and item definitions across snapshots, keyed
+   by content.**
+   - **Decision:** `CrossSnapshotSchema`, one per `OverlayState`, holds
+     prepared `AlternativeMatcher`s keyed by `alternative_fingerprint` and
+     synthesized item definitions keyed by a fingerprint of their atoms, each
+     bounded at 256 entries (cleared when full).
+   - **Alternatives considered:** Per-snapshot caches only (every edit is a
+     new snapshot, so each post-edit hover still paid ≈ 8.4 MB, and cold
+     ≈ 16.8 MB); a process-global cache in the library (the spec rules out a
+     process-global schema-shape cache, and the bench's cold mode would
+     rightly reset it, leaving cold hover at ≈ 8 MB of validator compilation);
+     an exact-match prefilter by JSON kind and required keys (duplicates
+     validator semantics, still leaves several alternatives to compile).
+   - **Why:** An edit rarely changes the schema, so content is the right
+     key; the overlay state is where DMLS already keeps cross-request schema
+     caches, and it is bounded and owned, not process-global.
+   - **Downsides:** The first hover a server serves over unseen alternatives
+     still pays their preparation (≈ 16.8 MB on A3), once per distinct
+     content. The bench's cold mode no longer shows that cost on hover,
+     because the cache is server state; this log reports it instead. Up to
+     256 compiled validators and item definitions stay resident per server.
+
+3. **Fingerprint by streaming derived `Debug` text into `DefaultHasher`.**
+   - **Decision:** Fingerprints hash the derived `Debug` output of the schema
+     values without building it, using `std`'s `DefaultHasher`.
+   - **Alternatives considered:** Hash the lowered JSON (that is the
+     allocation being removed); derive `Hash` across the schema types (a wide
+     API change to a shared library type family, including `f64`-bearing
+     values); `PartialEq`-verified keys (would retain a clone of every
+     alternative).
+   - **Why:** The types already derive `Debug` deterministically (`IndexMap`
+     properties, no hash-ordered fields), the hash is only an in-process cache
+     key (like the existing 64-bit validator-cache key), and `biscuit-hash`
+     has no streaming hasher; `DefaultHasher` is already used for in-process
+     keys in the library (`body_origin.rs`, `render/link.rs`).
+   - **Downsides:** A future non-deterministic `Debug` field would turn
+     reuse into silent misses (answers stay correct; bytes rise). Recorded
+     for `2026-10-25-shared-acyclic-definitions` in its plan.
+
+4. **An item definition's key covers only the atoms it is copied from.**
+   - **Decision:** The item-definition fingerprint hashes the array arms'
+     item atoms (from the one `resolved_alternatives` call synthesis already
+     makes), not every definition they reach.
+   - **Alternatives considered:** Reuse `alternative_fingerprint` per atom
+     (first attempt); it walks every reachable definition and broke
+     `recursive_schema_editor::completion_and_hover_open_only_the_definitions_on_the_cursor_path`
+     by opening `meta` and `tag`.
+   - **Why:** Synthesis copies only those atoms; references inside them are
+     resolved later against the requesting snapshot's own definitions, so
+     equal atoms give an equal definition regardless of what they reach.
+   - **Downsides:** None found.
+
+5. **Cache non-catalog classification in `host_lifecycle_profiles`, latest
+   revision per path.**
+   - **Decision:** Compute the existing cache key before classifying, cache a
+     non-catalog file as `None`, and drop older entries for that path when
+     one is inserted.
+   - **Alternatives considered:** Cache the `LifecycleHost` per snapshot
+     (a regenerated `.lifecycle.json` would be missed until the next edit,
+     a behavior change); key by modification time (rejected by
+     `2026-10-25-fix-now` for content identity).
+   - **Why:** Classification depends only on the bytes the key already
+     hashes, so freshness is unchanged: every request still reads the roots.
+   - **Downsides:** Requests still read and hash each root file (≈ 104 KB on
+     the A3 expression hover). `2026-10-25-fix-now` rewrites this cache as
+     latest-per-path for catalogs too; its spec and plan now keep this.
+
+6. **Gate the `$schema` declaration parse by offset.**
+   - **Decision:** `AuthoredDeclaration::frontmatter_at` parses only when the
+     offset lies in the `$schema` value, end inclusive.
+   - **Alternatives considered:** Parse once per request and share between
+     the three callers (still 335 KB per hover anywhere in the frontmatter).
+   - **Why:** Every span those callers match lies inside the value.
+   - **Downsides:** None; the inclusive end admits one offset at the next
+     line's start, where the parse finds nothing.
+
+### Requirement → test mapping (this phase)
+
+| Requirement | Evidence |
+| ----------- | -------- |
+| Each measured hover < 1,000,000 bytes at a3x1/a3x10, warm and cold | A3 bench, table above; raw `phase5-a3.tsv` |
+| Hover bytes do not depend on prior diagnostics typing | `sequence_tests::cold_*` (unchanged, passing: zero walks, ≤ 1 classification); hover rows show zero `dmls_work` |
+| Diagnostics linear for a fixed schema | A3 rows: classifications 66 → 453, constructions constant; explanation above |
+| Prepared matcher answers exactly as `alternative_accepts_in`; fingerprint is content identity (equal across assemblies, differs for another arm and for a change reached only by recursion; `None` when a definition is missing) | `darkmatter` `recursive_schema_completion::a_prepared_matcher_and_its_fingerprint_follow_the_alternative_s_content` |
+| Cross-snapshot reuse: a post-edit hover synthesizes and prepares nothing yet equals a fresh state's; a changed alternative is rebuilt (and only it), and the hover follows the new schema | `dmls` `snapshot_tests::item_definitions_and_matchers_are_shared_only_between_equal_schemas` |
+| Item-definition key opens no definition off the cursor path | `recursive_schema_editor::completion_and_hover_open_only_the_definitions_on_the_cursor_path` (existing; failed on the first attempt, passes now) |
+| Lifecycle discovery follows each root file's bytes (non-catalog → catalog → non-catalog), and an unchanged catalog is a cache hit | `darkmatter` `catalog::tests::lifecycle_profiles_follow_each_root_file_s_current_content` |
+| `$schema` declaration parsed only inside its value; ends inclusive; flow value through its bracket | `dmls` `named_types::tests::a_request_parses_the_declaration_only_inside_the_schema_value` |
+| Hover and every response unchanged | Phase 1 `frontmatter_response_contracts` goldens (12, untouched), `union_item_editor`, `named_type_references`, `lifecycle_host_profile`, and the full suites |
+
+Fidelity F1/L1, in-process at the public library API and the provider and
+overlay APIs DMLS's server calls. The Input Robustness Matrix does not apply:
+no file-format or configuration reader's accepted shapes changed (the
+catalog change reorders a cache lookup ahead of classification; the
+classifier is unchanged).
+
+### Notes
+
+- The bench's "expression hover" offset (`file_exists(` + 2) is in the
+  top-level `phase` value, not an Expression-typed value or a lifecycle
+  stack; it answers with the schema hover. The protocol is unchanged, so the
+  numbers are reported as measured. A hover on a real Expression-typed value
+  also calls `dsl::host_catalogs`, which loads every host catalog uncached on
+  each call; `2026-10-25-fix-now` owns that site.
+- `darkmatter-cli` `compose_shell_template::every_suggested_rule_approves_the_command`
+  took 4.9 s inside the full suite (1123% CPU) and 3.0 s alone; it spawns
+  `md` processes and is load-sensitive. No L1 test reached 5 s.
+
+### Completion audit
+
+- Point paths: `expression_values`, `stack_expressions`, and `nav_targets`
+  are called only from diagnostics (`diagnostics/frontmatter.rs`) and
+  document links; hover and definition use `scalar_typing`,
+  `cursor_scalar`, and `scalar_stack_expressions` only.
+- No nested-shape clone remains on the walk (`selected.clone()` and
+  leaf-`PropertyDef` clones are gone; the remaining `into_owned` calls are
+  link-path strings). Item definitions are shared `Arc`s.
+- No path-index-keyed shared view: `FrontmatterAnalysis` keys by node
+  address and admission; `CrossSnapshotSchema` by content fingerprint.
+- No request-local cache posing as reuse: the analysis lives in
+  `OverlayCache` per URI, and `CrossSnapshotSchema` in `OverlayCache`
+  itself, both reached from every fresh `DocumentOverlay`.
+- Departures from the spec, recorded above as decisions: library changes in
+  `darkmatter` (Decision 1), and content-keyed reuse across snapshots for
+  matchers and item definitions (Decision 2), which goes beyond the spec's
+  per-snapshot item cache; the spec is left as decided.
+
+### Gates
+
+Run once after all edits, with no subagents running.
+
+- Scope check from the repository root after every edit (code, docs, plan,
+  log, spec, frontmatter):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, dmls, test-toolkit, darkmatter-cli]`,
+  `change_class: package`, so every gate ran.
+- `just lint` (darkmatter/): pass. `cargo clippy -p dmls -p darkmatter
+  --all-targets -- -D warnings`: pass.
+- `just test` (darkmatter/): **12,571 passed, 10 skipped, 0 failed** in
+  80.8 s (final run, after the last code change; an earlier full run before
+  the catalog's latest-revision pruning also passed). Slowest 3.9 s
+  (`darkmatter-cli` `compose_shell_template::every_suggested_rule_approves_the_command`,
+  existing, process-spawning); none at 5 s.
+- `just test-l2` (darkmatter/): passed for `darkmatter`, `darkmatter-cli`,
+  `dmls`; no window activation (existing harnesses unchanged).
+- `just check-tier-coverage darkmatter`: 0 stranded. No new test name
+  carries a tier marker; the new tests sit in modules and binaries the L1
+  recipes already compile (`catalog::tests`, `tests/l1/recursive_schema_completion.rs`,
+  `overlay::named_types::tests`, `providers::frontmatter::snapshot_tests`).
+- Dependent packages: no workspace package depends on `dmls`. For the
+  `darkmatter` library changes, the only consumer outside the area that
+  reaches them is Claudine (shell-template typing through
+  `alternative_accepts_in`; host catalogs and lifecycle artifacts):
+  `cargo nextest run -p claudine -E 'test(host_catalog) | test(shell_template) | test(lifecycle_artifact) | test(template)'`
+  → 302 passed.
+- Cross-OS check: not run. The changes add no path comparison, process, or
+  OS-specific code: in-memory caches, a fingerprint hasher, and a test that
+  builds its root with `canonicalize_simplified` under a temp dir. CI's
+  Windows and WSL2 cells cover it.
+
+## Pipeline Refresh
+
+- `2026-10-25-fix-now` (depends on this fix): **changed.** Spec section 1
+  and a new design decision keep the non-catalog classification cache under
+  its latest-per-path rewrite of `host_lifecycle_profiles`; plan gains
+  Decision 12 (predecessor delivered, interfaces and bench figures to
+  preserve) and P2.1 names the existing entries. Plan not started.
+- `2026-10-25-shared-acyclic-definitions` (re-runs this fix's bench):
+  **changed.** Spec decision and plan Decision 10 record the after-numbers to
+  compare against and require deterministic `Debug` text on the definition
+  types the content fingerprints read. Plan not started.
+- `2026-10-25-pipeline-work-reduction` (starts from this fix): **changed.**
+  X1, cached alternative matchers for editor hover, moved from "still
+  deferred" to delivered by this fix, with a design decision. No plan yet.
+- `2026-10-26-sequence-quadratic-frontmatter` (starts from this fix):
+  checked and unchanged; it concerns Claudine's sequence runtime and
+  preflight, which this fix does not touch.

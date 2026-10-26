@@ -35,6 +35,8 @@ related:
     - 2026-10-25-pipeline-work-reduction
     - 2026-10-25-pipeline-improvements
     - 2026-10-25-shared-acyclic-definitions
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # DMLS frontmatter typing clones schema shapes for every entry
