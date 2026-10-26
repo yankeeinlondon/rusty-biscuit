@@ -97,6 +97,15 @@ remaining schema as "valid by default", never as passing the baseline.
 - **`all`**: every reported warning and error blocks, except a recovery named
   by `--allow`.
 
+`dm.schema.invalid_trigger`, the warning for a
+[schema trigger skipped because it failed to load](../topics/schemas/schema-triggers.md#invalid-discovered-triggers),
+is one of those codes. Denied by name or through `--deny all`, it stops
+composition once the document's schemas are prepared, before any of its
+expressions, shell commands, or transcluded children run. The warning keeps
+its `warning` severity and names the trigger, never the document.
+`md schema validate` and `md clean` report the same warning but take no
+`--deny`, so there it never blocks.
+
 `--allow` never takes a diagnostic code, and some problems cannot be allowed
 at all: a call proven wrong, a parse error, or an unavailable global always
 fails.

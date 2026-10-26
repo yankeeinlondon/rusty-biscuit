@@ -790,7 +790,9 @@ For grammar or schema changes, cover:
   envelope as a trigger file, so an authored `$schema` naming a skipped
   trigger still fails with `TriggerSchemaReferenced`. Tests:
   `tests/l1/trigger_discovery_recovery.rs`,
-  `compose/tests/invalid_triggers.rs`.
+  `compose/tests/invalid_triggers.rs`. User docs:
+  `darkmatter/docs/topics/schemas/schema-triggers.md` (Invalid discovered
+  triggers; per-command delivery, `--deny`, repair refresh).
 - The `md` commands other than compose deliver findings through
   `cli/src/commands/trigger_findings.rs`: `emit_warnings` (stderr `Status`
   warning rows, as compose prints them), `FindingRow` (`{source, code, path,
@@ -805,6 +807,20 @@ For grammar or schema changes, cover:
   `md compose` prints a failed run's trigger warnings before its error
   (`report_failure_trigger_warnings`), except the ones a `--deny` block
   already shows. Tests: `cli/tests/l1/invalid_trigger_warnings.rs`.
+- Claudine carries findings in an invocation-scoped
+  `composition::TriggerFindings` record (`InvocationContext::trigger_findings`;
+  one entry per `identity()`, first cause, discovery order, a delivery
+  cursor). `load_effective_schema` records discovery's findings before the
+  authored `$schema` resolves, so every preliminary check (`pre_validate_*`,
+  `drop_invalid_optionals`, status reports, the launch schema, retry legs)
+  takes the record and never turns a finding into a `CompositionError`;
+  preparation records compose-report warnings through
+  `ComposeWarning::invalid_trigger_source()`. The CLI shows each once:
+  `emit_compose_warnings` drains the record (loops and retries rediscover
+  silently), and `TriggerWarningDrain` drains the rest when the invocation
+  returns, ahead of the error `main` renders. A `prep` target is its own
+  invocation. Tests: Claudine `lib/tests/l1/invalid_trigger_findings.rs`,
+  `cli/tests/l1/invalid_trigger_warnings.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and

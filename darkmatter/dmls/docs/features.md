@@ -89,9 +89,10 @@ Darkmatter's **SimplifiedSchema**:
 - **Effective schema** — the Darkmatter base schema, plus any configured
   extension schemas whose globs match the file, plus repository-scoped
   **trigger schemas** (content-triggered envelopes discovered under `schemas/`
-  roots within the workspace boundary — cached until a watched change, with
-  last-good retention and a diagnostic on a malformed envelope, placed at the
-  YAML error when the envelope is not valid YAML), plus the document's own
+  roots within the workspace boundary — cached until a watched change; an
+  envelope that fails to load is skipped with a warning on its file, placed
+  at the YAML error when the envelope is not valid YAML, while the valid
+  triggers still apply), plus the document's own
   `$schema`, merged with compose precedence.
 - **Completion** — schema keys (required keys marked), enum values, boolish
   scaffolds, `file(...)` paths, `style.*` keys, and advisory `suggest(...)`

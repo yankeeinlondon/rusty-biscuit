@@ -194,6 +194,22 @@ classified by what failed:
 
 A warning whose producer declares no code reports `dm.compose.warning`.
 
+A [schema trigger skipped because it failed to load](../topics/schemas/schema-triggers.md#invalid-discovered-triggers)
+is a `dm.schema.invalid_trigger` warning. It belongs to the trigger, not to
+the composed document, so its `source` is `null`, and its `message` names the
+trigger file (or `embedded:{bundle}/{file name}`) and the reason. The report
+lists each trigger once, even when transcluded documents discover it again:
+
+```json
+{ "code": "dm.schema.invalid_trigger", "severity": "warning",
+  "message": "ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: …",
+  "source": null, "expected_type": null, "actual_type": null }
+```
+
+`md schema validate --format json`, which reports several files, puts a
+trigger warning that files share in the `warnings` of the first file that
+discovers it, once per invocation, and not in the later files' records.
+
 ## Privacy
 
 A diagnostic never contains an evaluated argument value, an environment

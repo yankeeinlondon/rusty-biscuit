@@ -74,9 +74,11 @@ executes an expression or shell command, fetches a URL, or writes a document.
 
 The document's schema roots are searched in order. A trigger filename in an
 earlier root shadows the same filename in later roots. A malformed file that
-claims the trigger kind fails discovery rather than silently falling back to a
-later file. The retired trigger-kind spelling is rejected with guidance naming
-`schema-trigger`.
+claims the trigger kind is skipped with a warning, and it still shadows that
+filename rather than silently falling back to a later file; the other valid
+triggers keep applying. The retired trigger-kind spelling is rejected the same
+way, with guidance naming `schema-trigger`. See
+[Invalid discovered triggers](./schema-triggers.md#invalid-discovered-triggers).
 
 Matching trigger payloads override the baseline; the document's own `$schema`
 overrides matching triggers. A trigger can put its payload directly under

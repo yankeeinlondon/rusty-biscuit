@@ -194,8 +194,8 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   use either as a barrier, and its response lists a `File` symbol per
   document beside each heading. `work_counters::registry_scan_threads`
   names every thread a registry scan ran on.
-  Startup's registry preparation publishes a failing trigger file's
-  (unversioned) diagnostic before any open; wait for the versioned one.
+  Startup's registry preparation publishes a skipped trigger file's
+  (unversioned) warning before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is a graph
   document (listed or open; no probe), else asks

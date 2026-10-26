@@ -180,6 +180,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.frontmatter.yaml_parse` | The frontmatter YAML could not be parsed. |
 | `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. In a standalone schema document this also covers a rejected **outer** declaration — an empty root union, an illegal union arm, or an invalid whole-file reference — ranged at that value or arm. |
 | `dm.schema.prepare` | The schema could not be resolved, merged, or compiled. |
+| `dm.schema.invalid_trigger` | **Warning**, on a schema-trigger file. Discovery skipped the trigger because its envelope or payload failed to load; the other triggers still apply. See below. |
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
 | `dm.schema.constraint` | A non-type constraint failed (range, length, pattern, enum, …). |
 | `dm.schema.missing_required` | A required key is absent. **Strict mode only** — see [Severity](#severity). |
@@ -233,19 +234,43 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
   is itself open, its `invalid_suggestion` warnings and `document_malformed`
   error are published on that document — they are never duplicated onto the
   Markdown documents whose `$schema` consumes it.
-- **Trigger-schema load failures are published on the envelope.** When a
-  repository-scoped trigger-registry scan fails for an envelope that cannot
-  be loaded (invalid YAML, a malformed match, or a payload that does not
-  resolve), DMLS publishes a `dm.schema.prepare` diagnostic on that envelope
-  file (even when it is not open) instead of failing silently. A closed
-  envelope's diagnostic sits at the start of the file. Once it is open, an
-  envelope that is not valid YAML is diagnosed from the reported line and
-  column to the end of that line, and other failures cover the whole file. Registries are
-  first prepared at startup, so a broken envelope in a workspace folder's
-  schema roots is reported before any document opens. The last-good registry keeps serving consumers meanwhile,
-  and a recovered scan clears the diagnostic. A YAML file that does not
+- **Skipped trigger schemas are published on the envelope.** When trigger
+  discovery skips an envelope that cannot be loaded (invalid YAML, a
+  malformed match, or a payload that does not resolve, merge, or compile),
+  DMLS still installs every other valid trigger and publishes a
+  `dm.schema.invalid_trigger` **warning** on that envelope file (even when it
+  is not open or lies outside the workspace). The message names the trigger,
+  the reason, and that it was ignored, the same text `md` prints:
+
+  ```text
+  ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: schema-trigger envelope supports only `kind`, `match`, and `$schema`; found unknown keys: name, description
+  ```
+
+  A closed envelope's warning sits at the start of the file, or at the start
+  of the line a YAML error reports. When the failure lies in a payload or
+  import file, that file is attached as related information; a cause that
+  names no file (an unresolved import name) has none. Registries are first
+  prepared at startup, so a broken envelope in a workspace folder's schema
+  roots is reported before any document opens. Each envelope's warning is
+  published once, however many scopes skip it, and cleared when the file is
+  repaired, deleted, or no longer skipped by any prepared scope; an unchanged
+  refresh publishes nothing. The skipped trigger contributes nothing to the
+  documents it would match: no validation, completion, or hover. A YAML file
+  that does not
   [claim the envelope](../../docs/topics/schemas/definition.md#which-files-claim-the-envelope)
-  is never diagnosed this way.
+  is never diagnosed this way. See
+  [Failures](../../docs/lsp/indexing.md#failures).
+- **An open envelope keeps its strict authoring check.** While a trigger file
+  is open, its buffer is checked directly. A buffer whose envelope does not
+  load (invalid YAML, an unsupported key, a bad `match`) gets a
+  `dm.schema.prepare` **error** instead of the warning: an envelope that is
+  not valid YAML is diagnosed from the reported line and column to the end of
+  that line, and other failures cover the whole file. A buffer whose envelope
+  loads, but whose saved file discovery skipped (for example, its payload is
+  missing), shows the warning over the YAML error's span or the whole
+  file. Closing the file publishes the closed-file warning again if the
+  trigger is still skipped. The strict check never turns the skip into a
+  failure of the documents the trigger would match.
 
 ### Layer 3 — Darkmatter DSL (`source: darkmatter.compose` / `darkmatter.security`)
 

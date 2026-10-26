@@ -3971,7 +3971,7 @@ The envelope and payload are separate files. A bare filename such as
 `./prompt.yaml` when the intended file is beside the referencing document or
 schema. A trigger filename in an earlier root shadows the same filename in
 every later root: the shadowed file is reported by `md schema triggers` and
-never evaluated.
+never evaluated. This holds even when the earlier file fails to load.
 
 #### Schema roots
 
@@ -4107,10 +4107,16 @@ payloads must be merge-compatible object schemas. A payload may declare
 root `$defs`; its definitions join the effective schema's root `$defs` under
 the rules in [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions)
 and [Merge Semantics](#merge-semantics-baseline--document), and a broken
-reference is reported as `SchemaError::TriggerPayloadNotMergeable`. Discovery is transactional:
-an invalid opted-in envelope rejects the scan, while YAML files that do not
-[claim the envelope](#which-files-claim-the-envelope) are ignored, even when
-they are not valid YAML. Library hosts opt in explicitly with
+reference is reported as `SchemaError::TriggerPayloadNotMergeable`. Discovery
+recovers per trigger: an opted-in envelope that fails to load, or whose
+payload fails to resolve, merge, or compile, is skipped with a
+`dm.schema.invalid_trigger` warning, and every valid trigger still applies
+(see [Invalid discovered triggers](./schema-triggers.md#invalid-discovered-triggers)).
+YAML files that do not [claim the envelope](#which-files-claim-the-envelope)
+are ignored without a warning, even when they are not valid YAML. Only
+failures that are not about one trigger still fail discovery: a root or a
+file in it that cannot be read, a case-fold file-name collision, and an
+invalid embedded bundle. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
 `--disable schema-triggers`. Use `md schema triggers <file>` to inspect the five
@@ -4130,9 +4136,10 @@ Schema roots (search order):
 #### Which files claim the envelope
 
 A schema root also holds ordinary YAML: payloads, named-type libraries, and
-files unrelated to Darkmatter. Only a file that **claims** the envelope can
-break trigger discovery, so a scratch file with a syntax error never disables
-the triggers beside it.
+files unrelated to Darkmatter. Only a file that **claims** the envelope is
+reported when it fails to load, so a scratch file with a syntax error stays
+silent. Even a claimed file that fails is only skipped, with a warning; it
+never disables the triggers beside it.
 
 - **Valid YAML** claims the envelope when its top-level mapping has
   `kind: schema-trigger`, however the mapping is written (quoted keys and
@@ -4167,10 +4174,10 @@ spelling is ignored when it does not parse. The limit affects only how a
 broken file is recovered from; valid YAML is classified from its parsed
 mapping as above.
 
-A claimed file that is not valid YAML fails with an error that names the YAML
-problem and its position (`SchemaError::TriggerEnvelopeYaml`, inside
-`TriggerLoad` for a schema-root file and `EmbeddedTriggerLoad` for a bundle
-file), not the match grammar. With this `schemas/note-trigger.yaml`:
+A claimed file that is not valid YAML is skipped with a warning whose reason
+names the YAML problem and its position (`SchemaError::TriggerEnvelopeYaml`,
+the cause of the discovery's `InvalidTriggerFinding`), not the match grammar.
+With this `schemas/note-trigger.yaml`:
 
 ```yaml
 kind: schema-trigger
@@ -4181,17 +4188,19 @@ $schema: note.yaml
 ```
 
 ```text
-schema-trigger file `…/schemas/note-trigger.yaml` is not valid YAML at line 4, column 18:
+ignoring invalid schema trigger …/schemas/note-trigger.yaml: not valid YAML at line 4, column 18:
 mapping values are not allowed in this context
 ```
 
 The line and column are one-based, and the column counts characters. The
-hint that `md compose` and `md schema validate` print points at YAML syntax:
-a plain value that contains `: ` or ` #`, or starts with an indicator such
-as `@` or `*`, must be quoted (`description: "Note: a colon here is fine"`).
-DMLS publishes the same error on the trigger file; while the file is open,
-the diagnostic starts at the reported position. Errors in a file that parses (a bad `match`, or none at all)
-are still reported as schema-trigger match or envelope errors.
+usual cause is a plain value that contains `: ` or ` #`, or starts with an
+indicator such as `@` or `*`; quote it
+(`description: "Note: a colon here is fine"`). DMLS publishes the warning on
+the trigger file at the start of the reported line. While the file is open,
+the editor's own authoring check reports the YAML problem as an error
+starting at the reported position instead. Problems in a file that parses (a
+bad `match`, or none at all) are reported with the schema-trigger match or
+envelope reason.
 
 #### Embedded trigger bundles
 
@@ -4232,17 +4241,18 @@ flowchart LR
 - A file of the same name in any schema root replaces the bundle's file,
   whatever that disk file holds: a matching trigger, a trigger that does not
   match the document, a plain schema, or a broken trigger. A broken disk
-  trigger stays an error; the bundle never stands in for it.
+  trigger is skipped with a warning; the bundle never stands in for it.
 - An embedded trigger's `$schema` and every import in it
   (`steps: step[]@./steps.yaml`, imports inside the imported library, and
   `@this`) resolve among the bundle's own files, by name, without touching
   the disk. `../` cannot leave the bundle, and a name the bundle lacks is an
   error. A disk trigger never imports a bundle file: its `./steps.yaml` must
   exist on disk.
-- A malformed embedded trigger, or one whose payload does not resolve, fails
-  trigger discovery with an error naming `{bundle}/{file name}`. A bundle
-  whose name is not one plain folder name, or whose file names are not
-  distinct plain `.yaml`/`.yml` names, is rejected when registered.
+- A malformed embedded trigger, or one whose payload does not resolve, is
+  skipped with a warning naming `embedded:{bundle}/{file name}`, never a file
+  path; its name stays claimed from later bundles. A bundle whose name is not
+  one plain folder name, or whose file names are not distinct plain
+  `.yaml`/`.yml` names, is rejected when registered.
 - Embedded triggers add no dependency edges: they cannot change while the
   program runs.
 - The trigger trace (`trace_registry`, which `md schema triggers` prints for
