@@ -24,6 +24,11 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 human_review: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-26
+review_iterations: 0
+needs_rulings: false
 related:
     - 2026-10-25-pipeline-improvements
     - 2026-10-29-recursive-schema-types
@@ -33,212 +38,507 @@ related:
 
 # Share repeated structured named types as definitions
 
-Claudine's combined effective schema payload resolves to about **1.83 MB**,
-against the **2 MB** ceiling enforced by
-`claudine/lib/tests/l1/claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_two_megabytes`.
-Most of that size is not the recursive lifecycle families, which are already
-stored once. It is the large *acyclic* helpers around them, such as `entry`,
-the action categories, the short-form bundle, and the loop verbs, which are
-copied in full at every reference.
+The draft's measurement of Claudine's combined effective schema is about
+**1.83 MB**, against the **2 MB** ceiling in
+[Claudine's embedded-schema budget test](../../../claudine/lib/tests/l1/claudine_schemas_embedded.rs).
+The test measures compact UTF-8 JSON, including the built-in baseline and all
+shared definitions. MB here means 1,000,000 bytes. The plan records fresh
+before-change figures rather than treating this estimate as its baseline.
 
-One more ordinary helper reference could push the payload over the ceiling.
-This feature lets the shared resolver store a repeated structured named type
-once, the same way it already stores recursive ones. It also removes a small,
-hand-maintained duplication between two Claudine trigger files.
+Most of that size is not the recursive lifecycle families, which are already
+stored once. It comes from helpers such as `entry`, the action categories,
+the short-form bundle, and the loop verbs, copied at every reference.
+
+This feature stores repeated structured named types once in Darkmatter's
+shared schema resolver. It also removes the hand-maintained duplication of
+three metadata declarations between Claudine's trigger files. Success means
+smaller effective schemas, a lower enforced byte budget, and unchanged
+validation, composition, and editor behavior.
 
 ## Today
 
-`resolve.rs::ImportEngine::expand_import` treats a named-type reference in one
-of two ways:
+A named type is **acyclic** when following its references never leads back to
+itself. A **use site** is an authored reference to a named type. **Inlining**
+copies the type's body into that use; a **definition** stores the body once
+and lets uses point to it.
 
-| Target | Result |
-| ------ | ------ |
-| member of `self.cyclic` | a `TypeExpr::Ref` use site; the body is expanded once into the definition table, and the reference postfix is applied by `recursive.rs::apply_reference_postfix` using the definition's `UseSummary` |
-| anything else | its cached expansion (`expanded_cache`) is **cloned** and the use-site postfix is applied to the copy |
+In generated JSON Schema, `$defs` holds reusable bodies and `$ref` points to
+one of them. A **union** accepts any one of several types. A **trigger**
+applies schema rules when a document's metadata matches its conditions; the
+**baseline** supplies default rules before trigger and document rules merge.
+
+Darkmatter's [named-type import resolver](../../lib/src/markdown/schemas/resolve.rs)
+handles references in two ways:
+
+| Target | Current result |
+| ------ | -------------- |
+| Member of a reference cycle | Store its body once; build a reference use with the inherited and locally authored constraints and annotations. |
+| Anything else | Clone its cached expansion, then apply the use's constraints and annotations to that copy. |
 
 The cache saves expansion work but not output size. In
-`claudine/schemas/lifecycle.yaml`, every `stack` and `item` references
-`entry`, which references every action category and the short-form bundle.
-The initialization and cancellation profiles have parallel helpers, and
-`loop-single` and `loop-bundle` repeat the same generated verb references.
-Each copy lands in the effective JSON Schema in full.
+[Claudine's lifecycle library](../../../claudine/schemas/lifecycle.yaml),
+`stack` and `item` both reach `entry`, which reaches the action categories
+and short-form bundle. Initialization and cancellation have parallel helpers,
+and the loop forms repeat generated verb references.
 
-The canonical docs state the current rule: "Acyclic named types continue to
-be inlined, so recursion removes repeated copies of cyclic bodies without
-promising compact output for every possible schema"
-(`darkmatter/docs/topics/schemas/definition.md`).
+The [current type-definition documentation](../../docs/topics/schemas/definition.md#recursive-named-types)
+promises that acyclic types are inlined. This feature intentionally changes
+the output representation, while preserving what schemas accept and how
+consumers interpret them.
 
 ## A. The resolver shares repeated structured definitions
 
 ### Which types are shared
 
-A named type is **shared** when all three hold:
+A named type is selected for sharing when all three conditions hold:
 
-1. its expanded body is **structured**: an object, a dictionary, a tuple, or a
-   union with at least one structured arm. Primitive aliases such as
-   `slug: alphanumeric(allow-dashes)` stay inlined. Their use sites commonly
-   narrow them (`slug(min(3))`), and inlining keeps their lowered JSON Schema
-   flat and readable;
-2. it is referenced from **two or more use sites** in the schema being
-   resolved, counted over the whole reachable reference graph, the way
-   `discover` already walks it for cycle admission;
-3. it is not already cyclic. Cyclic types keep their current path unchanged.
+1. Its resolved value shape is **structured**: an object (including a
+   pattern-key dictionary), an array, a tuple, or a union with at least one
+   structured arm. Arrays of primitives qualify because the array itself is
+   a container. Follow aliases to classify the shape without first building
+   a fully copied expansion. Primitive aliases such as
+   `slug: alphanumeric(allow-dashes)` and unions of only primitive arms stay
+   inlined; narrowing a use such as `slug(min(3))` remains flat and readable.
+2. It has **two or more distinct authored use sites**, counted as below.
+3. It is not already cyclic. Cyclic types keep their existing admission and
+   reference rules.
 
-This rule is deterministic and needs no authoring choice. **Rejected:** a
-per-type sharing declaration in schema syntax. It would add a choice every
-author must make, and the decision belongs to the resolver.
+The choice is automatic and adds no schema syntax. Callable signatures are
+not candidates for sharing.
 
-**Rejected:** sharing every named type. That would turn every primitive
-alias into a `$ref`, change most lowered schemas in the repository, and make
-simple constraint narrowing harder to read, with no payload benefit.
+### Counting references
+
+Count within one import-resolution operation, before expansion. Walk the
+root's value declarations and each reachable named definition's body once.
+Identify a site by its authoring namespace, full source path (including
+union-arm or tuple-slot position), and target definition. If the root walk
+and a named-body walk encounter the same authored reference, count it once.
+A declaration is not itself a reference.
+
+Two fields pointing at one type count as two sites. Two aliases pointing at
+it also count as two. Two uses of a parent do not multiply the single
+reference written inside that parent's body. Unreachable library declarations
+and references inside callable signatures do not contribute to sharing
+counts. Existing cycle admission still examines signatures under its current
+rules, including cycles through callable types.
+
+The counted target is Darkmatter's
+[namespace-and-name definition key](../../lib/src/markdown/schemas/simplified/definitions.rs)
+(`DefKey`), not a name alone or the spelling of an import path. Separate
+files with the same type name remain distinct; two paths resolving to the
+same namespace do not split a target. Root-union arms retain separate
+namespaces. Independently resolved baseline, trigger, and document layers do
+not pool counts or run another sharing pass when merged.
 
 ### How a shared type is resolved
 
-- A shared type goes through the same machinery as a cyclic one: its body is
-  expanded once into the definition table under its `DefKey`, use-site
-  markers are stripped from the body (`strip_use_site_markers`), and each use
-  becomes a `TypeExpr::Ref` built from the definition's `UseSummary`. The
-  engine's "cyclic" set generalizes to "stored as definitions", with cycle
-  admission (`NonDescendingCycle`) still computed from cyclic members only.
-- The fast path that skips the two-pass expansion when `cyclic` is empty now
-  runs only when **no** type is stored as a definition.
-- Use-site rules are exactly those of recursive definitions, as the canonical
-  doc already lists. Presence, nullability, descriptions, defaults, and extra
-  bounds belong to the use site. Markers written on the definition are
-  inherited by every use. A contradiction is a `ConstraintConflict` naming the
-  definition first. **A constrained use never changes the shared body.**
-- If a use site's postfix cannot be expressed beside a `$ref` under those
-  rules, that one use is inlined as today. Sharing is a size optimization and
-  never changes what a schema accepts.
-- Existing properties are preserved:
-  - lexical imports and namespaces;
-  - rehoming of `example(...)` paths for definitions authored in another file;
-  - baseline and trigger-payload `$defs` merging and rekeying, which already
-    handles cyclic definitions;
-  - phase projection (`map_bodies`);
-  - DMLS traversal, which already follows `Ref`.
+- Reuse Darkmatter's [definition expansion and use summaries](../../lib/src/markdown/schemas/resolve/recursive.rs).
+  Expand each selected body once per expansion pass under its definition key.
+  Move property-level markers and annotations to uses under the existing
+  rules; keep value constraints and child declarations in the body.
+- Track selected definitions separately from cycle membership. Cycle
+  admission remains unchanged: after removing every edge that enters a child
+  value, any remaining cycle is rejected. Selecting an acyclic type for
+  storage must not affect this check.
+- The single-pass fast path applies only when no type needs definition
+  storage. Otherwise the existing two-pass approach first learns each
+  definition's inherited use information and then builds final uses.
+- Preserve today's inlined acyclic semantics. Presence, nullability,
+  descriptions, defaults, and added bounds belong to each use. Definition
+  markers are inherited. A constrained use never changes the shared body.
+  Conflicting constraints retain their typed error and inherited-first
+  declaration origins, even through aliases.
+- Determine explicitly whether a use can preserve those semantics beside a
+  reference. If it cannot, inline that one use. Do not catch arbitrary
+  resolution or conversion errors and retry them as inlining. Invalid
+  schemas must retain their errors rather than becoming valid.
+- Selection is fixed for the resolution operation. Fallback does not
+  recalculate counts or demote other uses. Lower only definitions reachable
+  through surviving references, including references inside other bodies;
+  emit no unused JSON definition if every use falls back.
+- Preserve the existing 32-level non-repeating import-chain limit even when
+  storage removes calls from the inlining stack. Sharing must not make a
+  previously rejected deep chain valid.
+- Keep lexical imports, namespaces, imported example-file origins, captured
+  file-resolution contexts, import dependencies, searched locations, and cache
+  invalidation unchanged. Disk, embedded, and reserved shipped imports use
+  the same selection rules without adding disk reads to embedded resolution.
+
+### When a use needs inlining
+
+In a type library:
+
+```yaml
+kind: schema
+types:
+    entry: "{ value: string, note: string }(max-keys(1))"
+```
+
+Two document properties import it:
+
+```yaml
+$schema:
+    ordinary: entry@./types.yaml
+    annotated: entry(uncounted-keys(note))@./types.yaml
+```
+
+The ordinary property counts every key. The annotated property may contain
+both `value` and `note`, because `note` does not count toward the inherited
+one-key bound. A reference with a sibling constraint cannot undo the bound
+already stored inside the definition. Inline `annotated`, merge its exclusion
+with the inherited bound, and keep `ordinary` shared. This is a valid schema,
+not an error to suppress. If the exclusion set is unchanged, preserve sharing
+where the inherited and added bounds can be represented correctly.
+
+Compatibility includes context as well as constraints written after a type. In particular,
+preserve union-arm marker inheritance, default conflicts, the limit of one
+suggestion declaration per property, and the empty-string sentinel for an
+optional file. A reference must not hide an error that flattening the union
+would have found, or lose behavior supplied by the union's use context.
+Inline such a use when the unchanged body cannot represent it.
 
 ```mermaid
 flowchart TD
-    R[reference to named type T] --> C{T cyclic?}
-    C -- yes --> D[definition + $ref use site]
-    C -- no --> S{T structured and<br/>referenced ≥ 2 times?}
-    S -- yes --> P{use-site postfix<br/>expressible on a $ref?}
-    P -- yes --> D
-    P -- no --> I[inline this use]
-    S -- no --> I
+    R[Reference to named type] --> C{Type cyclic?}
+    C -- yes --> D[Existing definition and reference rules]
+    C -- no --> S{Structured shape and at least<br/>two authored use sites?}
+    S -- no --> I[Inline this use]
+    S -- yes --> P{Same behavior with an unchanged<br/>body and a reference?}
+    P -- yes --> A[Shared definition and reference use]
+    P -- no --> I
 ```
 
-### What changes for readers of the output
+### What changes for readers and consumers
 
-- Lowered JSON Schema contains more `$defs` entries and `$ref`s. `md schema`
-  output, `ResolvedSchema` serialization, and any test that snapshots a
-  lowered schema with a repeated structured type change accordingly. These are
-  intentional updates, not regressions. Each one is reviewed to confirm the
-  accepted/rejected behavior is the same.
-- Validation results, error paths, and source positions for instance errors
-  are unchanged. A `$ref` changes where JSON Schema reports a keyword
-  internally, so diagnostics that map keyword locations back to properties are
-  checked explicitly (acceptance 3).
+Lowered JSON Schema intentionally contains more `$defs` entries and `$ref`s.
+Schema CLI output, the JSON returned by resolved-schema APIs, and output
+snapshots change accordingly. No new opt-in flag or legacy lowering mode is
+introduced.
+
+Definition allocation and JSON key order follow the existing deterministic
+traversal, never hash-map iteration. Generated keys remain opaque and contain
+no machine paths. Existing merge behavior remains authoritative: reuse equal
+bodies where the merge already does so, and rename collisions with different
+bodies together with that incoming layer's references. Do not add global
+structural deduplication or merge types by name alone. Every reference must
+still point to its intended body after baseline, trigger, and root-union
+merging, including references between definitions.
+
+All consumers must treat a new acyclic reference like the value it replaces:
+
+- Validation preserves verdicts, problem codes, instance paths, instance
+  source positions, and schema-declaration origins. Internal JSON Schema
+  keyword paths may move into `$defs`; they must still identify the correct
+  declaration rather than a definition's unrelated use.
+- Schema rules for launch and completion, required/null behavior, defaults,
+  coercion, eager file handling, deferred lifecycle operands, and operand
+  validation retain their current results. Property and array-item contexts
+  remain distinct; an optional property does not make its list items nullable.
+- DMLS, Darkmatter's language server, retains diagnostics, completion, hover,
+  and definition navigation at both uses. Traversal follows only references
+  needed for the current value or cursor path, without rebuilding fully
+  copied trees.
+- A document-reachable callable still fails conversion at the use's property
+  path; sharing must not conceal it in a definition.
 
 ## B. Claudine's document metadata types are declared once
 
-### Today
+[Claudine's inline-compose trigger](../../../claudine/schemas/inline-compose.yaml)
+repeats the `prompt`, `hash`, and `last_updated` declarations and descriptions
+from [the main trigger](../../../claudine/schemas/claudine.yaml).
+The [metadata parity test](../../../claudine/lib/tests/l1/claudine_schemas.rs)
+already compares lowered property fragments, then additionally requires the
+inline payload's lines to be a subset of the main payload's lines.
 
-`claudine/schemas/inline-compose.yaml` repeats the complete `prompt`, `hash`
-(shorthand string plus longhand `kind`/`value`/`ignored` object), and
-`last_updated` declarations from `claudine/schemas/claudine.yaml`, including
-descriptions. A test in `claudine/lib/tests/l1/claudine_schemas.rs` checks
-that the inline payload's *lines* are a subset of the main payload's lines,
-which is a textual guard rather than a type guard.
+- Add `claudine/schemas/document.yaml`, a `kind: schema` library with `types`
+  named `prompt`, `hash`, and `last_updated`, preserving the current
+  descriptions, defaults, and shorthand/longhand hash forms. Keep it separate
+  from `linking.yaml`, whose types serve linked skills, commands, and agents.
+- Both trigger payloads import these declarations, for example
+  `hash: hash@./document.yaml`. Preserve optional presence, open document
+  behavior, trigger matching, ordering, and independent shadowing of the
+  inline trigger. The library itself is not a trigger.
+- Add the library to
+  [Claudine's embedded bundle inventory](../../../claudine/lib/src/composition/schema/bundle.rs),
+  disk test bundles, byte-for-byte inventory checks, and export probes. There
+  are now eight trigger/library bundle files and still three trigger files;
+  separately embedded host catalogs are unaffected. Complete disk-bundle
+  instructions must include the new library, including bundles that shadow
+  embedded triggers.
+- Replace the textual line-subset assertion with resolved-type parity for
+  each of the three properties, retaining the existing behavioral parity
+  check. Compare the property and every definition it reaches, independent
+  of generated JSON key spelling; comparing two bare reference strings is
+  insufficient. Prove the declarations through each trigger independently,
+  and through normal effective-schema merging.
 
-### Decided
-
-- A new schema type library, `claudine/schemas/document.yaml`, declares
-  `prompt`, `hash`, and `last_updated` once, with their current descriptions.
-  It is not added to `linking.yaml`, which has a different purpose.
-- Both trigger payloads reference them (`hash: hash@./document.yaml`).
-  Presence, the open document behavior, and each trigger's independent
-  matching rules are unchanged. The inline trigger stays shadowable on its own.
-- The embedded bundle inventory and `claudine/schemas/README.md` list the new
-  file. A disk bundle that shadows the embedded one must include it, and the
-  complete-disk-bundle documentation says so.
-- The line-subset test is replaced by a **resolved-type parity** test: the
-  effective `prompt`, `hash`, and `last_updated` types are equal whether
-  reached through `claudine.yaml` or `inline-compose.yaml`.
-- `hash` is structured and now referenced twice, so it becomes a shared
-  definition under part A. This is a useful small fixture for part A's
-  behavior.
+**Reader's note:** the triggers resolve independently, so one `hash` import
+in each does not qualify it for sharing. The common library removes authored
+duplication regardless of output storage. Exercise sharing separately with a
+small fixture that imports `hash` into two properties of the same schema;
+it must produce one shared definition while accepting both stored hash forms.
 
 ## Measurement
 
-The goal is headroom, so the result is measured, not assumed.
+Measure headroom without creating a benchmark project.
 
-- Before implementing, the plan records the current resolved byte size of each
-  label in the budget test (`claudine.yaml`, `sequence.yaml`, `both`) and
-  attributes it to the largest repeated helpers.
-- After implementing, the same test reports the new sizes, and
-  `PAYLOAD_LIMIT_BYTES` is **lowered** to the new largest size plus 25%
-  headroom, rounded up to the next 100 KB. A future helper that duplicates
-  output then fails the budget test early, instead of only near 2 MB.
-- Cold resolution and validator compilation time for the Claudine payload are
-  recorded before and after, so a time regression is visible. No speed claim
-  is made.
+- Before implementation, record the compact JSON byte sizes for the budget
+  test's existing `claudine.yaml`, `sequence.yaml`, and `both` cases, including
+  baseline and `$defs`, and identify the largest repeated helpers from their
+  output. Use the same inputs and serialization after implementation.
+- Let `M` be the new largest size in bytes. Set the checked-in budget to
+  `100_000 * ceil((1.25 * M) / 100_000)`. This is a fixed integer constant,
+  not a threshold recomputed from the current result during each test. It
+  must be lower than the existing 2,000,000-byte budget, and all three cases
+  must pass it. If they do not, finish the resolver work within this feature
+  until the requirement holds; do not relax the formula or widen profiles.
+  Rename the test and comments so they describe the new budget.
+- Record cold resolution and validator-compilation time before and after on
+  one host, using one quick matched sample for each existing case. Use a
+  fresh process for each sample so parsed-schema, baseline, and validator
+  caches are cold. Exclude build and process startup time from the recorded
+  stages, keep build mode and inputs the same, and name the host OS and build
+  mode in the log. These observations reveal a regression; they impose no
+  speed claim, timing threshold, extra hosts, or repeated statistical trial.
+
+Record the results in the implementation log. Keep measurement scaffolding
+out of routine correctness tests unless it already serves those tests.
 
 ## Out of scope
 
-- Hand-written JSON Schema, or any Claudine-specific lowering path.
-- Changing which lifecycle profiles (ordinary, initialization, cancellation)
-  exist, or what each one permits. Sharing must not widen any profile.
-- Merging the three profile families into one parameterized type.
+- Hand-written JSON Schema or a Claudine-specific lowering path.
+- Changing lifecycle profiles (ordinary, initialization, cancellation), the
+  actions each permits, or the parser's execution rules.
+- Merging the three profile families into a parameterized type.
+- Sharing primitive-only aliases or adding author-controlled sharing syntax.
+
+## Design Decisions
+
+### Automatic sharing of structured values
+
+- **Decision:** Share repeated acyclic objects, dictionaries, arrays, tuples,
+  and unions containing a structured arm. Keep primitive-only aliases and
+  callable signatures outside automatic sharing.
+- **Alternatives considered:**
+
+  - Share every named type.
+  - Require a per-type declaration.
+  - Exclude arrays.
+- **Why:** Containers cause repeated output, while primitive aliases commonly
+  carry local narrowing. Arrays are structured values already supported by
+  the definition machinery, so excluding them would leave an arbitrary gap.
+- **Downsides:** A tiny structured body can cost more bytes as a definition;
+  primitive-only repetition is not reduced. No size heuristic is added.
+
+### Authored counts within one resolution
+
+- **Decision:** Count distinct authored references to each namespace-and-name
+  target, including root sites, and walk each reachable body once. Do not
+  multiply sites by parent uses or pool independently resolved layers.
+- **Alternatives considered:**
+
+  - Count fully expanded occurrences.
+  - Count only incoming definition-to-definition edges.
+  - Share across all merged layers.
+- **Why:** The existing graph walks bodies once but does not record root
+  references as edges. Explicit counts include two root fields without
+  expansion growth or a new coupling between trigger caches.
+- **Downsides:** A descendant duplicated only by copying its parent may stay
+  inlined. Two separate triggers importing a type once each do not share it.
+
+### Reuse storage without changing cycle or depth rules
+
+- **Decision:** Generalize the existing two-pass definition machinery, while
+  retaining separate cycle membership, cycle admission, and the existing
+  import-depth protection.
+- **Alternatives considered:**
+
+  - Add another lowering path.
+  - Use one set for both sharing and cycle admission.
+  - Let worklist storage bypass depth checks.
+- **Why:** Definition identity, marker summaries, phase projection, and merge
+  handling already exist. Sharing is not a reason to change grammar safety.
+- **Downsides:** The no-cycle case can now need two passes, and depth checks
+  must work independently of which bodies are inlined.
+
+### Preserve semantics with an explicit per-use fallback
+
+- **Decision:** Use a reference only where the unchanged body plus use
+  metadata preserves today's inlining behavior; otherwise inline that use.
+  Keep selection fixed and omit unreachable JSON definitions.
+- **Alternatives considered:**
+
+  - Reject unsupported uses.
+  - Catch all conversion errors and retry.
+  - Mutate or specialize the stored body per use.
+- **Why:** Key exclusions can change inherited count semantics, and unions
+  carry context-dependent rules. A sibling constraint cannot undo a stored
+  bound. Explicit compatibility keeps invalid schemas invalid.
+- **Downsides:** Some repetition remains, and compatibility needs focused
+  coverage beyond checking that the JSON Schema compiles.
+
+### Preserve consumer behavior and deterministic output
+
+- **Decision:** Preserve instance diagnostics, declaration origins, phase,
+  coercion, lifecycle, and editor behavior. Permit JSON representation and
+  internal keyword-path changes, with deterministic keys and existing merge
+  collision rules.
+- **Alternatives considered:**
+
+  - Promise byte-identical output.
+  - Require identical internal keyword paths.
+  - Merge definitions globally by shape.
+- **Why:** References intentionally change representation, while callers
+  depend on the value's behavior and its authored location. Existing merge
+  rules already protect layer ownership.
+- **Downsides:** Representation-sensitive callers and snapshots must adapt;
+  equal shapes in unrelated namespaces can remain separate.
+
+### A common metadata library with independent triggers
+
+- **Decision:** Put the three unchanged metadata declarations in
+  `document.yaml`, import them from both triggers, and ship the complete
+  eight-file bundle. Test type parity through each trigger and sharing with
+  a separate two-use fixture.
+- **Alternatives considered:**
+
+  - Put metadata in `linking.yaml`.
+  - Merge the triggers.
+  - Assume their independent imports count as two shared uses.
+- **Why:** Linking has a different purpose, trigger shadowing is independent,
+  and counts are local to resolution. Type parity is stronger than matching
+  authored lines or reference spellings.
+- **Downsides:** Disk bundles gain a required library file; the metadata
+  extraction alone does not promise a smaller lowered `hash` fragment.
+
+### Update output snapshots while retaining behavior evidence
+
+- **Decision:** Keep frozen corpus inputs unchanged. Before changing the
+  resolver, capture passing/failing instance expectations; update only
+  affected output snapshots after those expectations still pass. Retain byte
+  equality for entries whose representation is unaffected.
+- **Alternatives considered:**
+
+  - Keep the old no-change promise for all acyclic schemas.
+  - Regenerate every snapshot without checking behavior.
+  - Replace frozen inputs with the current shipped files.
+- **Why:** Darkmatter's existing acyclic golden corpus explicitly guards old
+  output bytes. This feature intentionally supersedes that representation
+  promise, not the frozen inputs or their semantics.
+- **Downsides:** The output changes require review entry by entry, including
+  digest-backed entries; semantic probes must precede regeneration.
+
+### A fixed lower byte budget
+
+- **Decision:** Adopt the new maximum plus 25% headroom, rounded up to a
+  100,000-byte multiple, as a checked-in constant below 2,000,000 bytes.
+- **Alternatives considered:**
+
+  - Retain the old ceiling.
+  - Compute a fresh limit from every test result.
+  - Pick an estimated lower ceiling before measuring.
+- **Why:** The existing cases measure the actual effective schemas, and a
+  fixed lower limit catches renewed output duplication early.
+- **Downsides:** A legitimate future schema addition may require an explicit
+  budget update. The present change must save enough to lower the constant.
+
+### Proportional measurement and verification
+
+- **Decision:** Use one quick cold before/after timing sample per existing
+  budget case on one host, with no timing gate. Put new correctness coverage
+  at the passive library boundary and retain both areas' existing unit,
+  terminal, and lint checks plus focused CLI and language-server coverage.
+- **Alternatives considered:**
+
+  - A multi-host performance study.
+  - Statistical timing thresholds.
+  - Terminal tests for passive resolver behavior.
+- **Why:** The known risk is output growth shared by all platforms. Stable
+  representation assertions prove sharing; existing consumer paths prove
+  integration without giving a timing sample more authority than it has.
+- **Downsides:** Timings are observations rather than a performance guarantee.
+  Existing terminal suites remain part of final verification.
 
 ## Implementation surfaces
 
-| Part | Files |
-| ---- | ----- |
-| A | `darkmatter/lib/src/markdown/schemas/resolve.rs` (`ImportEngine`, `expand_import`, `discover`), `resolve/recursive.rs`, `schemas/simplified/definitions.rs`, lowering of `$defs`, and any merge/rekey code that assumes definitions are cyclic |
-| B | `claudine/schemas/document.yaml` (new), `claudine/schemas/claudine.yaml`, `claudine/schemas/inline-compose.yaml`, the embedded bundle inventory in `claudine/lib`, `claudine/schemas/README.md`, `claudine/lib/tests/l1/claudine_schemas.rs` |
-| Budget | `claudine/lib/tests/l1/claudine_schemas_embedded.rs` |
+Paths name the package area and then the file within it.
+
+| Part | Surfaces |
+| ---- | -------- |
+| Selection and expansion | Darkmatter: `lib/src/markdown/schemas/resolve.rs`, `resolve/graph.rs`, and `resolve/recursive.rs`: root-site counts, shape classification, storage selection, depth protection, use compatibility, and summaries. |
+| Definitions and consumers | Darkmatter: `lib/src/markdown/schemas/simplified/definitions.rs`, `simplified/convert.rs`, and existing merge/rekey, phase, coercion, diagnostic, and DMLS consumers. Audit assumptions that definitions imply recursion; change only those affected by sharing. |
+| Metadata | Claudine: `schemas/document.yaml` (new), both metadata triggers, `lib/src/composition/schema/bundle.rs`, and bundle/parity tests in `lib/tests/l1/claudine_schemas*.rs`. |
+| Budget and representation guards | Claudine: `lib/tests/l1/claudine_schemas_embedded.rs`. Darkmatter: `lib/tests/l1/recursive_schema_golden.rs`, and its `lib/tests/fixtures/recursive_schema_golden/` expected outputs and README. |
 
 ## Documentation
 
-- `darkmatter/docs/topics/schemas/definition.md`: replace "Acyclic named
-  types continue to be inlined" with the sharing rule, update the cycle
-  flowchart's "no cycle at all" branch, and add a short example of a shared
-  structured type beside a narrowed primitive alias that stays inlined.
-- `darkmatter/docs/topics/schemas/schema-triggers.md` or the merge section of
-  `definition.md`: shared acyclic definitions merge and rekey like recursive
-  ones.
-- `claudine/docs` page for the embedded schema bundle, and
-  `claudine/schemas/README.md`: the new `document.yaml` library.
-- The `darkmatter` and `claudine` skills, where they describe schema lowering
-  or the bundle inventory.
+- Update every acyclic-inlining promise in
+  `darkmatter/docs/topics/schemas/definition.md`, including named imports,
+  cycle flow, and limitations. Explain automatic sharing and fallback with a
+  compact two-property object example beside a narrowed primitive alias.
+- Update `darkmatter/docs/topics/schemas/local-type-references.md` and
+  `schema-triggers.md` wherever they describe substitution or definition
+  merging. Describe how shared acyclic definitions merge like recursive ones.
+- Update `claudine/docs/topics/schemas.md` and
+  `claudine/schemas/README.md` for the eight-file bundle and metadata library.
+  Keep the README an overview; full disk-bundle instructions belong in docs.
+- Update affected source comments and the snapshot-corpus README that promise
+  definitions are cyclic only or that every acyclic output stays unchanged.
+- Update the `darkmatter` and `claudine` skills where they describe lowering
+  or the bundle inventory. User docs state behavior directly and never link
+  to this feature's specification.
 
 ## Acceptance and verification
 
-1. **Sharing rule.** L1 tests in `darkmatter`:
-   - a structured type referenced twice is one `$defs` entry with two `$ref`s;
-   - a structured type referenced once is inlined;
-   - a primitive alias referenced many times is inlined;
-   - one of two uses carrying `min-keys(1)` gets the bound beside its `$ref`,
-     and the other use and the body are unchanged;
-   - a use whose postfix is not expressible on a reference is inlined, while
-     the type's other uses stay shared.
-2. **Acceptance unchanged.** For every repository schema with a newly shared
-   type (Claudine's bundle, Darkmatter's shipped schemas, test fixtures), a
-   corpus of passing and failing instances gives the same verdicts before and
-   after. The existing deep lifecycle-profile diagnostic corpus is part of
-   this.
-3. **Diagnostics unchanged.** Error paths and source positions for instance
-   errors inside a shared definition, reached from two different use sites,
-   point at each instance's own location.
-4. **Merging.** A trigger payload and a document schema that both use the
-   same shared type merge to one definition. Different bodies under one name
-   are rekeyed, as cyclic definitions are today.
-5. **Claudine parity.** The resolved-type parity test replaces the line-subset
-   test. Shadowing tests for `inline-compose.yaml` still pass.
-6. **Budget.** The budget test passes with the lowered `PAYLOAD_LIMIT_BYTES`,
-   and the before/after sizes and timings are recorded in the implementation
-   log.
-7. `just test`, `just test-l2`, and `just lint` pass in `darkmatter/` and
-   `claudine/`. No test exceeds five seconds.
+1. **Selection and counting.** Darkmatter unit tests prove one definition and
+   two references for a repeated structured type, inlining for a single use,
+   and inlining for repeated primitives and primitive-only unions. Cover
+   objects, pattern dictionaries, arrays, tuples, structured unions, aliases,
+   two root sites, and two sites in one body. Prove that a repeated parent,
+   a root/body revisit, an unused library declaration, and a callable-only
+   reference do not inflate counts. Same-named types in separate namespaces
+   remain distinct.
+2. **Constraints and fallback.** One of two object uses can add
+   `min-keys(1)` beside its reference without changing the other use or body.
+   The key-exclusion example above accepts the two-key annotated instance
+   and rejects it at the ordinary use; only the annotated use is inlined.
+   Test all-fallback output for no unused JSON definition. Retain typed
+   conflicts and inherited-first origins, array/item constraints, nullable
+   unions, default conflicts, suggestion limits, optional-file empty-string
+   behavior, invalid callable rejection, and the import-depth/cycle guards.
+3. **Acceptance and diagnostics unchanged.** Before implementation, inventory
+   affected shipped schemas and frozen fixtures and record expected passing
+   and failing instances. Include Claudine's deep lifecycle/profile corpus.
+   Reuse those expectations after sharing; output regeneration alone is not
+   evidence. For an invalid value reached through each of two uses, preserve
+   the problem code, full instance path, line/column, and declaration origin,
+   including a nested list item and a missing required field. Internal
+   keyword paths may change as described above.
+4. **Consumer and merge parity.** Cover schema rules for launch and completion,
+   coercion, defaults, eager files, deferred operands, and editor lookup using
+   new acyclic definitions. A trigger and document schema using the same
+   shared type reuse its equal body under existing merge rules; same-named
+   different bodies are rekeyed. Include baseline and root-union merging,
+   references between definitions, deterministic output on repeated
+   resolution, and unchanged dependency invalidation for an imported type.
+5. **Claudine metadata.** The three properties have resolved-type parity
+   through either trigger and their effective merge. Cover absent/null
+   metadata, both hash forms, and invalid metadata through passive validation
+   and Claudine's normal launch-verdict path. The inline trigger's shadowing
+   tests still pass; embedded resolution works without disk schemas; a
+   complete disk bundle and its inventory/export tests include the new file.
+   A two-property fixture importing `hash` produces one shared definition.
+6. **Representation and headroom.** Review and update only affected snapshots,
+   retain their frozen inputs, and preserve byte equality for unaffected
+   entries. The three budget cases pass the fixed lower constant. The
+   implementation log records before/after sizes, the chosen constant and
+   calculation, and the one-host timing observations.
+7. **Final checks.** In both `darkmatter/` and `claudine/`, run `just test`,
+   `just test-l2`, and `just lint`. Extend existing passive shipped-artifact
+   coverage and add focused checks through the normal schema CLI and DMLS
+   request path for diagnostics and editor information at both uses. New
+   resolver cases are unit tests; they do not require a terminal or browser.
+   Unit tests stay below five seconds. Terminal checks use the repository
+   harness without bringing windows to the foreground. All changes preserve
+   support for macOS, Linux, native Windows, and WSL2; timing observations do
+   not replace correctness checks or introduce new CI environments.
