@@ -278,7 +278,7 @@ fn committed_artifacts_declare_no_duplicate_reserved_or_credential_header_parame
         ("samsung_smart_tv", include_str!("../../../openapi/samsung_smart_tv.json")),
         ("unfolded_circle_core_rest", include_str!("../../../openapi/unfolded_circle_core_rest.json")),
     ];
-    let artifact_count = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../openapi"))
+    let artifact_count = std::fs::read_dir(biscuit_test_harness::manifest_dir!().join("../openapi"))
         .unwrap()
         .filter(|entry| entry.as_ref().unwrap().path().extension().is_some_and(|ext| ext == "json"))
         .count();
