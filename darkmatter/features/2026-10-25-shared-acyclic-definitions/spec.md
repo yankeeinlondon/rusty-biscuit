@@ -335,6 +335,22 @@ out of routine correctness tests unless it already serves those tests.
 
 ## Design Decisions
 
+### Keep DMLS's content-keyed reuse deterministic
+
+- **Decision:** `2026-10-26-dmls-frontmatter-typing-allocation` (implemented)
+  keeps union-item matchers and array-item definitions across edits, keyed by
+  a fingerprint of the derived `Debug` text of the schema atoms and the
+  definitions they reach. The definitions this feature adds keep that text
+  deterministic for equal content (no hash-ordered fields, no per-assembly
+  counters), and the bench comparison uses that fix's recorded after-numbers
+  (verb hover 58,763 bytes, expression hover 105,025 bytes).
+- **Alternatives considered:** Leave the fingerprint unmentioned; a miss
+  changes no answer and would surface only as an allocation rise.
+- **Why:** This feature is the next change to the structures the fingerprint
+  reads.
+- **Downsides:** A new field on a definition type must be considered for its
+  effect on the fingerprint.
+
 ### Automatic sharing of structured values
 
 - **Decision:** Share repeated acyclic objects, dictionaries, tuples, arrays

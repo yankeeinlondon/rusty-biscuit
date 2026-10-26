@@ -175,6 +175,30 @@ to `_completed`.
    - **Downsides:** This plan supplies no new loader contract; an implementation
      must not introduce a new loader as an incidental shortcut.
 
+10. **DMLS reuse keys on schema content (pipeline refresh)**
+   - **Decision:** `2026-10-26-dmls-frontmatter-typing-allocation` is implemented.
+     Its after-numbers on this host are the comparison point for this
+     feature's `pipeline_work_a3` runs: verb hover 58,763 bytes, expression
+     hover 105,025 bytes, diagnostics 437,251,200 (a3x1 warm) and 472,521,047
+     (a3x10 warm) bytes. DMLS keeps union-item matchers and array-item
+     definitions across edits keyed by a fingerprint of the derived `Debug`
+     text of the atoms and, for matchers, of every definition they reach
+     (`darkmatter::markdown::schemas::completion::alternative_fingerprint`).
+     Definitions this feature adds must keep that text deterministic: no
+     `HashMap`-ordered fields and no per-assembly counters in `Definition`,
+     `DefKey`, `SchemaReferenceSite`, or `PropertyAtom`. The `$defs` key
+     order a lowering allocates must still follow `reachable_definitions`'
+     traversal order, which the fingerprint mirrors.
+   - **Alternatives considered:** Key the reuse by assembly identity; that
+     rebuilds megabytes per edit on lifecycle schemas.
+   - **Why:** A nondeterministic fingerprint fails silently: every edit would
+     miss the cache and the verb hover would return to about 16.8 MB, which
+     only the bench shows. `recursive_schema_completion::a_prepared_matcher_and_its_fingerprint_follow_the_alternative_s_content`
+     and DMLS `snapshot_tests::item_definitions_and_matchers_are_shared_only_between_equal_schemas`
+     catch it.
+   - **Downsides:** A rise in hover bytes after this feature is investigated
+     as a fingerprint miss before anything else.
+
 ### Wave 1 — Capture the baseline
 
 Run these tasks sequentially under one owner. Both must finish before any resolver,
@@ -211,7 +235,8 @@ work; this planning pass does not invent baseline values.
     Phase 4 can reproduce the sample. No benchmark project or extra hosts.
   - `2026-10-26-dmls-frontmatter-typing-allocation` lands before this feature.
     Capture pre-change hover and diagnostics allocation bytes with
-    `cargo bench -p dmls --bench pipeline_work_a3` now; Phase 4 supplies the
+    `cargo bench -p dmls --bench pipeline_work_a3` now (compare them with
+    Decision 10's figures from that fix); Phase 4 supplies the
     matched post-change run. If that fix is unexpectedly absent, stop: this
     feature's branch was cut from the wrong base.
 
