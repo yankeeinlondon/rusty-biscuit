@@ -58,11 +58,25 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Voices"
@@ -77,6 +91,11 @@
     {
       "description": "API key value",
       "key": "apiKey",
+      "value": ""
+    },
+    {
+      "description": "Value of the `voice_id` path parameter",
+      "key": "path_voice_id",
       "value": ""
     }
   ]

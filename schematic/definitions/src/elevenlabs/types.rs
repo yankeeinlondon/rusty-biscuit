@@ -120,10 +120,40 @@ mod tests {
         };
 
         let json = serde_json::to_string(&alignment).unwrap();
-        assert!(json.contains("characterStartTimesSeconds"));
+        assert!(json.contains("character_start_times_seconds"));
 
         let parsed: HttpAlignment = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.characters, alignment.characters);
+    }
+
+    #[test]
+    fn speech_with_timestamps_decodes_snake_case_line() {
+        let line = r#"{"audio_base64":"SUQzBAAAAAAA","alignment":{"characters":["H","i"],"character_start_times_seconds":[0.0,0.1],"character_end_times_seconds":[0.1,0.2]},"normalized_alignment":{"characters":["H","i"],"character_start_times_seconds":[0.0,0.1],"character_end_times_seconds":[0.1,0.2]}}"#;
+
+        let parsed: SpeechWithTimestampsResponse = serde_json::from_str(line).unwrap();
+
+        assert_eq!(parsed.audio_base64, "SUQzBAAAAAAA");
+        let alignment = parsed.alignment.expect("alignment");
+        assert_eq!(alignment.characters, ["H", "i"]);
+        assert_eq!(alignment.character_start_times_seconds, [0.0, 0.1]);
+        assert_eq!(alignment.character_end_times_seconds, [0.1, 0.2]);
+        assert!(parsed.normalized_alignment.is_some());
+    }
+
+    #[test]
+    fn speech_with_timestamps_rejects_camel_case_spelling() {
+        // `audio_base64` is required, so the old camelCase spelling fails loudly.
+        let line = r#"{"audioBase64":"SUQzBAAAAAAA"}"#;
+        assert!(serde_json::from_str::<SpeechWithTimestampsResponse>(line).is_err());
+
+        // Unknown fields are ignored, so camelCase alignment keys leave the
+        // optional alignments unset rather than failing.
+        let line = r#"{"audio_base64":"SUQz","normalizedAlignment":{"characters":[]}}"#;
+        let parsed: SpeechWithTimestampsResponse = serde_json::from_str(line).unwrap();
+        assert!(parsed.normalized_alignment.is_none());
+
+        let alignment = r#"{"characters":["H"],"characterStartTimesSeconds":[0.0],"characterEndTimesSeconds":[0.1]}"#;
+        assert!(serde_json::from_str::<HttpAlignment>(alignment).is_err());
     }
 
     #[test]

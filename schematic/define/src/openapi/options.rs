@@ -72,6 +72,12 @@ impl ExportOptions {
 
 /// Serializes an OpenAPI document to the specified format.
 ///
+/// A schema whose numeric keyword carries a
+/// [`crate::constraints::EXACT_EXTENSION`] entry is written with that exact
+/// decimal text in place of the keyword's `i64`/`f64` stand-in, and without
+/// the extension, so no constraint is narrowed on the way out. A document
+/// without the extension serializes unchanged.
+///
 /// ## Returns
 ///
 /// The serialized document as a string.
@@ -80,16 +86,62 @@ impl ExportOptions {
 ///
 /// Returns `OpenApiError::Parse` if serialization fails.
 pub fn serialize(doc: &openapiv3::OpenAPI, format: ExportFormat) -> Result<String, OpenApiError> {
-    match format {
-        ExportFormat::Json => serde_json::to_string_pretty(doc).map_err(|e| OpenApiError::Parse {
-            message: format!("JSON serialization failed: {}", e),
-            location: None,
-        }),
-        ExportFormat::Yaml => serde_yaml_ng::to_string(doc).map_err(|e| OpenApiError::Parse {
-            message: format!("YAML serialization failed: {}", e),
-            location: None,
-        }),
+    let direct = render(doc, format)?;
+    if !direct.contains(crate::constraints::EXACT_EXTENSION) {
+        return Ok(direct);
     }
+    // `serde_yaml_ng::Value` keeps member order, so the document is otherwise
+    // written exactly as above.
+    let mut value = serde_yaml_ng::to_value(doc).map_err(|e| failed("YAML", &e))?;
+    write_exact_marks(&mut value);
+    let marked = render(&value, format)?;
+    Ok(EXACT_PLACEHOLDER.replace_all(&marked, "$text").into_owned())
+}
+
+/// Prefixes the exact text that replaces a stand-in number while the
+/// document is rendered; it never survives [`serialize`].
+const EXACT_PREFIX: &str = "__schematic_exact_number__";
+
+/// A rendered placeholder, quoted or plain, and its decimal text.
+static EXACT_PLACEHOLDER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(&format!(r#"(["']?){EXACT_PREFIX}(?<text>[-+.0-9eE]+)(["']?)"#)).expect("valid pattern")
+});
+
+/// Replaces each extension-backed number in `value` with a placeholder string
+/// holding its exact text, and removes the extension.
+fn write_exact_marks(value: &mut serde_yaml_ng::Value) {
+    use serde_yaml_ng::Value;
+    match value {
+        Value::Mapping(mapping) => {
+            if let Some(Value::Mapping(entries)) = mapping.remove(crate::constraints::EXACT_EXTENSION) {
+                for (keyword, text) in entries {
+                    if let (Some(keyword), Some(text)) = (keyword.as_str(), text.as_str())
+                        && mapping.get(keyword).is_some_and(Value::is_number)
+                        && crate::constraints::ConstraintNumber::from(text).exact().is_ok()
+                    {
+                        mapping.insert(Value::from(keyword), Value::from(format!("{EXACT_PREFIX}{text}")));
+                    }
+                }
+            }
+            for (_, child) in mapping.iter_mut() {
+                write_exact_marks(child);
+            }
+        }
+        Value::Sequence(items) => items.iter_mut().for_each(write_exact_marks),
+        Value::Tagged(tagged) => write_exact_marks(&mut tagged.value),
+        _ => {}
+    }
+}
+
+fn render(value: &impl serde::Serialize, format: ExportFormat) -> Result<String, OpenApiError> {
+    match format {
+        ExportFormat::Json => serde_json::to_string_pretty(value).map_err(|e| failed("JSON", &e)),
+        ExportFormat::Yaml => serde_yaml_ng::to_string(value).map_err(|e| failed("YAML", &e)),
+    }
+}
+
+fn failed(format: &str, error: &dyn std::fmt::Display) -> OpenApiError {
+    OpenApiError::Parse { message: format!("{format} serialization failed: {error}"), location: None }
 }
 
 #[cfg(test)]

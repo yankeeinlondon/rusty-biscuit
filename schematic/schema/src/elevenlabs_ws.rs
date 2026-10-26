@@ -30,6 +30,109 @@ pub use schematic_definitions::elevenlabs::*;
 pub fn define_api() -> schematic_define::websocket::WebSocketApi {
     schematic_definitions::define_elevenlabs_websocket_api()
 }
+///Messages the TextToSpeech endpoint's server sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum TextToSpeechServerMessage {
+    ///Audio data with alignment
+    AudioChunk(TtsAudioResponse),
+}
+impl TextToSpeechServerMessage {
+    /// The name of the message `frame` selects, without decoding
+    /// its payload; `None` when it matches no message and the
+    /// direction has no fallback.
+    #[must_use]
+    pub fn selected_message(
+        frame: &super::ws_shared::WsInboundFrame,
+    ) -> Option<&'static str> {
+        let _ = frame;
+        Some("AudioChunk")
+    }
+    /// Decodes an inbound frame as the message its declared selectors
+    /// name, or the fallback when none matches.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Decode`], carrying the frame as
+    /// received, when no message is selected or the selected
+    /// message's payload does not decode.
+    pub fn decode(
+        frame: super::ws_shared::WsInboundFrame,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        match Self::selected_message(&frame) {
+            Some("AudioChunk") => {
+                frame.decode_payload("AudioChunk").map(Self::AudioChunk)
+            }
+            _ => Err(frame.unmatched()),
+        }
+    }
+}
+///Messages the TextToSpeech endpoint's client sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum TextToSpeechClientMessage {
+    ///Text to synthesize
+    TextChunk(TtsTextMessage),
+}
+impl serde::Serialize for TextToSpeechClientMessage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::TextChunk(payload) => serde::Serialize::serialize(payload, serializer),
+        }
+    }
+}
+///Messages the MultiContextTextToSpeech endpoint's server sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum MultiContextTextToSpeechServerMessage {
+    ///Audio data for a context
+    AudioChunk(MultiContextAudioResponse),
+}
+impl MultiContextTextToSpeechServerMessage {
+    /// The name of the message `frame` selects, without decoding
+    /// its payload; `None` when it matches no message and the
+    /// direction has no fallback.
+    #[must_use]
+    pub fn selected_message(
+        frame: &super::ws_shared::WsInboundFrame,
+    ) -> Option<&'static str> {
+        let _ = frame;
+        Some("AudioChunk")
+    }
+    /// Decodes an inbound frame as the message its declared selectors
+    /// name, or the fallback when none matches.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Decode`], carrying the frame as
+    /// received, when no message is selected or the selected
+    /// message's payload does not decode.
+    pub fn decode(
+        frame: super::ws_shared::WsInboundFrame,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        match Self::selected_message(&frame) {
+            Some("AudioChunk") => {
+                frame.decode_payload("AudioChunk").map(Self::AudioChunk)
+            }
+            _ => Err(frame.unmatched()),
+        }
+    }
+}
+///Messages the MultiContextTextToSpeech endpoint's client sends. A value serializes as its payload alone.
+#[derive(Debug)]
+pub enum MultiContextTextToSpeechClientMessage {
+    ///Text to synthesize for a context
+    TextChunk(MultiContextTextMessage),
+    ///Close a specific context
+    CloseContext(MultiContextCloseMessage),
+}
+impl serde::Serialize for MultiContextTextToSpeechClientMessage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::TextChunk(payload) => serde::Serialize::serialize(payload, serializer),
+            Self::CloseContext(payload) => {
+                serde::Serialize::serialize(payload, serializer)
+            }
+        }
+    }
+}
 ///Typed query parameters for the TextToSpeech websocket endpoint.
 #[derive(Debug, Clone, Default)]
 pub struct TextToSpeechConnectionParams {
@@ -63,121 +166,104 @@ pub struct MultiContextTextToSpeechConnectionParams {
     pub output_format: Option<String>,
 }
 ///ElevenLabs Text-to-Speech WebSocket API for real-time streaming
+///
+/// Each `connect_*` selects one handshake credential, in this order:
+/// the options' `credential`, the client's [`Self::credentials`], the
+/// first non-empty variable of the definition's environment mapping,
+/// none. Reconnects reuse that selection.
 pub struct ElevenLabsTTSWs {
     base_url: String,
-    /// Headers builder with environment variable support for credentials.
-    pub headers: schematic_define::Headers,
+    headers: Vec<(String, String)>,
+    credential: Option<schematic_runtime::Credential>,
 }
 impl ElevenLabsTTSWs {
     /// Create a new client with the default base URL.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            base_url: "wss://api.elevenlabs.io".to_string(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
-                                .to_string()
-                            ],
-                        ),
-                        header: "xi-api-key".to_string(),
-                    }),
-                    ..Default::default()
-                }),
-        }
+        Self::with_base_url("wss://api.elevenlabs.io")
     }
     /// Create a new client with a custom base URL.
     #[must_use]
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
-                                .to_string()
-                            ],
-                        ),
-                        header: "xi-api-key".to_string(),
-                    }),
-                    ..Default::default()
-                }),
+            headers: vec![],
+            credential: None,
         }
+    }
+    /// How the handshake accepts credentials, translated from the
+    /// definition's authentication policy as for a REST client.
+    #[must_use]
+    pub fn auth_config() -> schematic_runtime::AuthConfig {
+        schematic_runtime::AuthConfig::none()
+            .accept(schematic_runtime::CredentialPlacement::ApiKeyHeader {
+                header: "xi-api-key".to_string(),
+                prefix: None,
+            })
+            .env_fallback(
+                schematic_runtime::EnvFallback::new(
+                    schematic_runtime::CredentialPlacement::ApiKeyHeader {
+                        header: "xi-api-key".to_string(),
+                        prefix: None,
+                    },
+                    ["ELEVEN_LABS_API_KEY", "ELEVENLABS_API_KEY"],
+                ),
+            )
     }
     /// Returns the configured base URL.
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
-    ///Connect to the TextToSpeech endpoint.
+    /// Sets the client-level credential, used by every connect whose
+    /// options carry none.
+    #[must_use]
+    pub fn credentials(mut self, credential: schematic_runtime::Credential) -> Self {
+        self.credential = Some(credential);
+        self
+    }
+    /// Sets the client-level credential to `key`, of the kind the API's
+    /// first single-secret method takes.
+    #[must_use]
+    pub fn api_key(self, key: impl Into<String>) -> Self {
+        self.credentials(schematic_runtime::Credential::api_key(key))
+    }
+    /// Sends `name: value` with every handshake, replacing a constant
+    /// header of the definition with the same name.
+    ///
+    /// A header the WebSocket upgrade manages, or one that carries
+    /// the API's credential, is refused when connecting.
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+    /**Connect to the TextToSpeech endpoint. It is ready once the upgrade and the opening message, if any, are done.
+
+`opening` is the `BOS` message. It is serialized once and written first on this connection and on every reconnect, before the client is ready. Its `xi-api-key` field is filled from the selected credential when left empty; a different value is refused.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_text_to_speech(
         &self,
         voice_id: impl Into<String>,
         params: TextToSpeechConnectionParams,
+        opening: TtsInitMessage,
+        options: super::ws_shared::WsClientOptions,
+    ) -> Result<TextToSpeechClient, super::ws_shared::WsError> {
+        self.open_text_to_speech(voice_id, params, opening, options).await
+    }
+    async fn open_text_to_speech(
+        &self,
+        voice_id: impl Into<String>,
+        params: TextToSpeechConnectionParams,
+        opening: TtsInitMessage,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<TextToSpeechClient, super::ws_shared::WsError> {
         let mut path = "/v1/text-to-speech/{voice_id}/stream-input".to_string();
         let voice_id_value = voice_id.into();
         path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
-        if let Some(value) = params.model_id.as_ref() {
-            query_pairs.push(("model_id".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.language_code.as_ref() {
-            query_pairs.push(("language_code".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.enable_logging.as_ref() {
-            query_pairs.push(("enable_logging".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.enable_ssml_parsing.as_ref() {
-            query_pairs.push(("enable_ssml_parsing".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.output_format.as_ref() {
-            query_pairs.push(("output_format".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.inactivity_timeout.as_ref() {
-            query_pairs.push(("inactivity_timeout".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.sync_alignment.as_ref() {
-            query_pairs.push(("sync_alignment".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.auto_mode.as_ref() {
-            query_pairs.push(("auto_mode".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.apply_text_normalization.as_ref() {
-            query_pairs
-                .push(("apply_text_normalization".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.seed.as_ref() {
-            query_pairs.push(("seed".to_string(), value.to_string()));
-        }
-        if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-            let query = query_pairs
-                .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
-            path.push_str(&query);
-        }
         if path.contains('{') {
             return Err(
                 super::ws_shared::WsError::Protocol(
@@ -185,47 +271,139 @@ impl ElevenLabsTTSWs {
                 ),
             );
         }
-        let url = format!("{}{}", self.base_url, path);
-        let header_pairs = self
-            .headers
-            .clone()
-            .build()
-            .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
-        TextToSpeechClient::connect(url, options, header_pairs).await
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(value) = params.model_id.as_ref() {
+            query_pairs
+                .push((
+                    "model_id",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.language_code.as_ref() {
+            query_pairs
+                .push((
+                    "language_code",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.enable_logging.as_ref() {
+            query_pairs
+                .push((
+                    "enable_logging",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.enable_ssml_parsing.as_ref() {
+            query_pairs
+                .push((
+                    "enable_ssml_parsing",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.output_format.as_ref() {
+            query_pairs
+                .push((
+                    "output_format",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.inactivity_timeout.as_ref() {
+            query_pairs
+                .push((
+                    "inactivity_timeout",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.sync_alignment.as_ref() {
+            query_pairs
+                .push((
+                    "sync_alignment",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.auto_mode.as_ref() {
+            query_pairs
+                .push((
+                    "auto_mode",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.apply_text_normalization.as_ref() {
+            query_pairs
+                .push((
+                    "apply_text_normalization",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.seed.as_ref() {
+            query_pairs
+                .push(("seed", urlencoding::encode(&value.to_string()).into_owned()));
+        }
+        if !query_pairs.is_empty() {
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
+            let query = query_pairs
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
+                .collect::<Vec<_>>()
+                .join("&");
+            path.push('?');
+            path.push_str(&query);
+        }
+        let auth = Self::auth_config();
+        let credential = auth
+            .select_handshake(options.credential.as_ref(), self.credential.as_ref())
+            .map_err(|error| super::ws_shared::WsError::InvalidCredential(
+                error.to_string(),
+            ))?;
+        let handshake = super::ws_shared::WsHandshake::new(
+            &format!("{}{}", self.base_url, path),
+            &self.headers,
+            &["xi-api-key"],
+            &credential,
+            auth.secret_names(),
+        )?;
+        let session = super::ws_shared::WsSession {
+            opening: Some(
+                super::ws_shared::opening_message(
+                    &opening,
+                    Some("xi-api-key"),
+                    &credential,
+                    false,
+                )?,
+            ),
+            handshake,
+            setup: None,
+            correlation: None,
+            binary: false,
+        };
+        TextToSpeechClient::connect(session, options).await
     }
-    ///Connect to the MultiContextTextToSpeech endpoint.
+    /**Connect to the MultiContextTextToSpeech endpoint. It is ready once the upgrade and the opening message, if any, are done.
+
+`opening` is the `InitContext` message. It is serialized once and written first on this connection and on every reconnect, before the client is ready.
+
+## Errors
+
+[`super::ws_shared::WsError::InvalidCredential`] when the selected credential is of a kind the API does not accept or a header, query value, cookie, or opening field already carries another value; [`super::ws_shared::WsError::InvalidHeader`] for a header the upgrade manages; [`super::ws_shared::WsError::HandshakeRejected`] when the server answers the upgrade with another status, including a redirect, which is never followed; [`super::ws_shared::WsError::OpeningWrite`]; and [`super::ws_shared::WsError::HandshakeTimeout`] when the attempt outlasts `handshake_timeout`.*/
     pub async fn connect_multi_context_text_to_speech(
         &self,
         voice_id: impl Into<String>,
         params: MultiContextTextToSpeechConnectionParams,
+        opening: MultiContextInitMessage,
+        options: super::ws_shared::WsClientOptions,
+    ) -> Result<MultiContextTextToSpeechClient, super::ws_shared::WsError> {
+        self.open_multi_context_text_to_speech(voice_id, params, opening, options).await
+    }
+    async fn open_multi_context_text_to_speech(
+        &self,
+        voice_id: impl Into<String>,
+        params: MultiContextTextToSpeechConnectionParams,
+        opening: MultiContextInitMessage,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<MultiContextTextToSpeechClient, super::ws_shared::WsError> {
         let mut path = "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string();
         let voice_id_value = voice_id.into();
         path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
-        let mut query_pairs: Vec<(String, String)> = Vec::new();
-        if let Some(value) = params.model_id.as_ref() {
-            query_pairs.push(("model_id".to_string(), value.to_string()));
-        }
-        if let Some(value) = params.output_format.as_ref() {
-            query_pairs.push(("output_format".to_string(), value.to_string()));
-        }
-        if !query_pairs.is_empty() {
-            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-            let query = query_pairs
-                .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            if path.contains('?') {
-                path.push('&');
-            } else {
-                path.push('?');
-            }
-            path.push_str(&query);
-        }
         if path.contains('{') {
             return Err(
                 super::ws_shared::WsError::Protocol(
@@ -233,13 +411,54 @@ impl ElevenLabsTTSWs {
                 ),
             );
         }
-        let url = format!("{}{}", self.base_url, path);
-        let header_pairs = self
-            .headers
-            .clone()
-            .build()
-            .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
-        MultiContextTextToSpeechClient::connect(url, options, header_pairs).await
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(value) = params.model_id.as_ref() {
+            query_pairs
+                .push((
+                    "model_id",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if let Some(value) = params.output_format.as_ref() {
+            query_pairs
+                .push((
+                    "output_format",
+                    urlencoding::encode(&value.to_string()).into_owned(),
+                ));
+        }
+        if !query_pairs.is_empty() {
+            query_pairs.sort_by(|a, b| a.0.cmp(b.0));
+            let query = query_pairs
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), v))
+                .collect::<Vec<_>>()
+                .join("&");
+            path.push('?');
+            path.push_str(&query);
+        }
+        let auth = Self::auth_config();
+        let credential = auth
+            .select_handshake(options.credential.as_ref(), self.credential.as_ref())
+            .map_err(|error| super::ws_shared::WsError::InvalidCredential(
+                error.to_string(),
+            ))?;
+        let handshake = super::ws_shared::WsHandshake::new(
+            &format!("{}{}", self.base_url, path),
+            &self.headers,
+            &["xi-api-key"],
+            &credential,
+            auth.secret_names(),
+        )?;
+        let session = super::ws_shared::WsSession {
+            opening: Some(
+                super::ws_shared::opening_message(&opening, None, &credential, false)?,
+            ),
+            handshake,
+            setup: None,
+            correlation: None,
+            binary: false,
+        };
+        MultiContextTextToSpeechClient::connect(session, options).await
     }
 }
 impl Default for ElevenLabsTTSWs {
@@ -247,468 +466,242 @@ impl Default for ElevenLabsTTSWs {
         Self::new()
     }
 }
-///Client for the TextToSpeech endpoint.
+/// Client for the TextToSpeech endpoint.
 pub struct TextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
+        Result<super::ws_shared::WsInboundFrame, super::ws_shared::WsError>,
     >,
+    auth_method: schematic_runtime::AuthMethod,
 }
 impl TextToSpeechClient {
-    async fn dial(
-        url: &str,
-        options: &super::ws_shared::WsClientOptions,
-        header_pairs: &[(String, String)],
-    ) -> Result<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        super::ws_shared::WsError,
-    > {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.to_string().into_client_request()?;
-        for (name, value) in header_pairs {
-            let hdr_name = name
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            let hdr_value = value
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            request.headers_mut().insert(hdr_name, hdr_value);
-        }
-        let connect = tokio_tungstenite::connect_async_with_config(
-            request,
-            options.websocket_config.clone(),
-            options.disable_nagle,
-        );
-        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
-            .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
-        Ok(ws_stream)
-    }
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
+        session: super::ws_shared::WsSession,
+        options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
-        let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
-            >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
-        let url_for_supervisor = url.clone();
-        let header_pairs_for_supervisor = header_pairs.clone();
-        let options_for_supervisor = _options.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match TextToSpeechClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
-                    {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let _ = event_tx.send(Err(err)).await;
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { match serde_json::from_str:: < serde_json::Value > (text
-                        .as_ref()) { Ok(value) => { let _ = event_tx.send(Ok(value)).
-                        await; } Err(e) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Binary(data))) => { match
-                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
-                        Ok(value) => { let _ = event_tx.send(Ok(value)). await; } Err(e)
-                        => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
-                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                        Some(Err(e)) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
-                        break; } None => break, } }
-                    }
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
-        Ok(Self { transport, event_rx })
+        let auth_method = session.handshake.auth_method().clone();
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
+        Ok(Self {
+            transport,
+            event_rx,
+            auth_method,
+        })
     }
-    /// Send a fire-and-forget message.
+    /// Where the handshake credential came from. It names the source
+    /// selected when connecting, not proof that the server accepted it.
+    pub fn auth_method(&self) -> &schematic_runtime::AuthMethod {
+        &self.auth_method
+    }
+    /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
+        &self,
+        message: TextToSpeechClientMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_payload(&message).await
+    }
+    /// Sends an arbitrary JSON value, bypassing the declared messages.
+    pub async fn send_value(
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        self.send_payload(&message).await
     }
-    /// Send a strongly-typed message payload.
-    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+    async fn send_payload<M: serde::Serialize + ?Sized>(
         &self,
         message: &M,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = super::ws_shared::WsEncode::ws_encode(message)?;
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::SendText(text))
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
-    }
-    ///Send the `BOS` open lifecycle message.
-    pub async fn send_bos(
-        &self,
-        message: TtsInitMessage,
-    ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        let command = super::ws_shared::WriterCommand::SendText(
+            serde_json::to_string(message)?,
+        );
+        self.transport.send(command).await
     }
     ///Send the `EOS` close lifecycle message.
     pub async fn send_eos(
         &self,
         message: TtsCloseMessage,
     ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        self.send_payload(&message).await
     }
-    /// Receive the next inbound event.
+    /// Receives the next inbound message, decoded as the message its
+    /// selectors name.
+    ///
+    /// A frame that is not JSON, matches no message, or does not
+    /// decode yields [`super::ws_shared::WsError::Decode`] carrying
+    /// the frame; the connection stays open. Shares one queue with
+    /// [`Self::next_value_event`]: each message is delivered once.
     pub async fn next_event(
         &mut self,
-    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
-        self.event_rx.recv().await
-    }
-    /// Returns a stream of inbound events.
-    pub fn events(
-        self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
-        tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
-    }
-    /// Initiate a graceful close.
-    pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
+    ) -> Option<Result<TextToSpeechServerMessage, super::ws_shared::WsError>> {
+        self.event_rx
+            .recv()
             .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+            .map(|event| event.and_then(TextToSpeechServerMessage::decode))
+    }
+    /// Receives the next inbound message as a JSON value, without
+    /// selecting a declared message.
+    pub async fn next_value_event(
+        &mut self,
+    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
+        self.event_rx
+            .recv()
+            .await
+            .map(|event| event.map(super::ws_shared::WsInboundFrame::into_value))
+    }
+    /// A stream of the messages [`Self::next_event`] would return. It
+    /// keeps the connection open until it is dropped.
+    pub fn events(self) -> super::ws_shared::WsEventStream<TextToSpeechServerMessage> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            TextToSpeechServerMessage::decode,
+            self.transport,
+        )
+    }
+    /// A stream of the values [`Self::next_value_event`] would return.
+    pub fn value_events(self) -> super::ws_shared::WsEventStream<serde_json::Value> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            |frame| Ok(frame.into_value()),
+            self.transport,
+        )
+    }
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
+    pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {
         self.transport.state()
     }
 }
-///Client for the MultiContextTextToSpeech endpoint.
+/// Client for the MultiContextTextToSpeech endpoint.
 pub struct MultiContextTextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
     event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
+        Result<super::ws_shared::WsInboundFrame, super::ws_shared::WsError>,
     >,
+    auth_method: schematic_runtime::AuthMethod,
 }
 impl MultiContextTextToSpeechClient {
-    async fn dial(
-        url: &str,
-        options: &super::ws_shared::WsClientOptions,
-        header_pairs: &[(String, String)],
-    ) -> Result<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        super::ws_shared::WsError,
-    > {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.to_string().into_client_request()?;
-        for (name, value) in header_pairs {
-            let hdr_name = name
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            let hdr_value = value
-                .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>()
-                .map_err(|e| super::ws_shared::WsError::InvalidHeader {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            request.headers_mut().insert(hdr_name, hdr_value);
-        }
-        let connect = tokio_tungstenite::connect_async_with_config(
-            request,
-            options.websocket_config.clone(),
-            options.disable_nagle,
-        );
-        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
-            .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
-        Ok(ws_stream)
-    }
-    /// Connect to the endpoint.
+    /// Makes the explicit connect's attempt and starts the supervisor.
     pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
+        session: super::ws_shared::WsSession,
+        options: super::ws_shared::WsClientOptions,
     ) -> Result<Self, super::ws_shared::WsError> {
-        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
-        let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
-        );
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
-        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let pending: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
-            >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
-        let url_for_supervisor = url.clone();
-        let header_pairs_for_supervisor = header_pairs.clone();
-        let options_for_supervisor = _options.clone();
-        let supervisor_handle = tokio::spawn(async move {
-            use futures_util::{SinkExt, StreamExt};
-            use tokio_tungstenite::tungstenite::Message;
-            let mut active_stream = Some(ws_stream);
-            let reconnect_policy = options_for_supervisor.reconnect.clone();
-            let mut reconnect_attempt: u32 = 0;
-            let mut manual_close = false;
-            loop {
-                let stream = if let Some(stream) = active_stream.take() {
-                    reconnect_attempt = 0;
-                    stream
-                } else {
-                    let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    };
-                    if let Some(max_attempts) = policy.max_attempts
-                        && reconnect_attempt >= max_attempts
-                    {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
-                        break;
-                    }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
-                    tokio::time::sleep(delay).await;
-                    match MultiContextTextToSpeechClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
-                    {
-                        Ok(stream) => {
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            stream
-                        }
-                        Err(err) => {
-                            let _ = event_tx.send(Err(err)).await;
-                            reconnect_attempt = reconnect_attempt.saturating_add(1);
-                            continue;
-                        }
-                    }
-                };
-                let (mut write, mut read) = stream.split();
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
-                loop {
-                    tokio::select! {
-                        cmd = writer_rx.recv() => { match cmd {
-                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
-                        write.send(Message::Text(text.into())). await .is_err() { break;
-                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
-                        if write.send(Message::Binary(data.into())). await .is_err() {
-                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
-                        manual_close = true; let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
-                        write.close(). await; break; } None => { manual_close = true; let
-                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
-                        let _ = write.close(). await; break; } } } msg_result = read
-                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
-                        { match serde_json::from_str:: < serde_json::Value > (text
-                        .as_ref()) { Ok(value) => { let _ = event_tx.send(Ok(value)).
-                        await; } Err(e) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Binary(data))) => { match
-                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
-                        Ok(value) => { let _ = event_tx.send(Ok(value)). await; } Err(e)
-                        => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
-                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
-                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                        Some(Err(e)) => { let _ = event_tx
-                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
-                        break; } None => break, } }
-                    }
-                }
-                if manual_close {
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
-                    break;
-                }
-                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                active_stream = None;
-            }
-        });
-        let transport = super::ws_shared::WsTransportHandle {
-            writer_tx,
-            state_rx,
-            supervisor_handle,
-            next_id,
-            pending,
-        };
-        Ok(Self { transport, event_rx })
+        let auth_method = session.handshake.auth_method().clone();
+        let (transport, event_rx) = super::ws_shared::connect_session(session, options)
+            .await?;
+        Ok(Self {
+            transport,
+            event_rx,
+            auth_method,
+        })
     }
-    /// Send a fire-and-forget message.
+    /// Where the handshake credential came from. It names the source
+    /// selected when connecting, not proof that the server accepted it.
+    pub fn auth_method(&self) -> &schematic_runtime::AuthMethod {
+        &self.auth_method
+    }
+    /// Sends one message; it is written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`super::ws_shared::WsError::Disconnected`] at once while the
+    /// connection is not ready; nothing is queued for a later
+    /// connection.
     pub async fn send(
+        &self,
+        message: MultiContextTextToSpeechClientMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_payload(&message).await
+    }
+    /// Sends an arbitrary JSON value, bypassing the declared messages.
+    pub async fn send_value(
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        self.send_payload(&message).await
     }
-    /// Send a strongly-typed message payload.
-    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+    async fn send_payload<M: serde::Serialize + ?Sized>(
         &self,
         message: &M,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = super::ws_shared::WsEncode::ws_encode(message)?;
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::SendText(text))
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
-    }
-    ///Send the `InitContext` open lifecycle message.
-    pub async fn send_init_context(
-        &self,
-        message: MultiContextInitMessage,
-    ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        let command = super::ws_shared::WriterCommand::SendText(
+            serde_json::to_string(message)?,
+        );
+        self.transport.send(command).await
     }
     ///Send the `CloseSocket` close lifecycle message.
     pub async fn send_close_socket(
         &self,
         message: MultiContextCloseSocketMessage,
     ) -> Result<(), super::ws_shared::WsError> {
-        self.send_typed(&message).await
+        self.send_payload(&message).await
     }
-    /// Receive the next inbound event.
+    /// Receives the next inbound message, decoded as the message its
+    /// selectors name.
+    ///
+    /// A frame that is not JSON, matches no message, or does not
+    /// decode yields [`super::ws_shared::WsError::Decode`] carrying
+    /// the frame; the connection stays open. Shares one queue with
+    /// [`Self::next_value_event`]: each message is delivered once.
     pub async fn next_event(
         &mut self,
-    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
-        self.event_rx.recv().await
+    ) -> Option<
+        Result<MultiContextTextToSpeechServerMessage, super::ws_shared::WsError>,
+    > {
+        self.event_rx
+            .recv()
+            .await
+            .map(|event| event.and_then(MultiContextTextToSpeechServerMessage::decode))
     }
-    /// Returns a stream of inbound events.
+    /// Receives the next inbound message as a JSON value, without
+    /// selecting a declared message.
+    pub async fn next_value_event(
+        &mut self,
+    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
+        self.event_rx
+            .recv()
+            .await
+            .map(|event| event.map(super::ws_shared::WsInboundFrame::into_value))
+    }
+    /// A stream of the messages [`Self::next_event`] would return. It
+    /// keeps the connection open until it is dropped.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
-        tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
+    ) -> super::ws_shared::WsEventStream<MultiContextTextToSpeechServerMessage> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            MultiContextTextToSpeechServerMessage::decode,
+            self.transport,
+        )
     }
-    /// Initiate a graceful close.
+    /// A stream of the values [`Self::next_value_event`] would return.
+    pub fn value_events(self) -> super::ws_shared::WsEventStream<serde_json::Value> {
+        super::ws_shared::WsEventStream::new(
+            self.event_rx,
+            |frame| Ok(frame.into_value()),
+            self.transport,
+        )
+    }
+    /// Closes the client and waits until it is `Closed`. A ready
+    /// connection gets a Close frame; a reconnect in progress
+    /// (backoff, upgrade, or setup) is abandoned. Nothing redials
+    /// afterwards, and pending requests fail with `Disconnected`.
     pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
-        self.transport
-            .writer_tx
-            .send(super::ws_shared::WriterCommand::Close)
-            .await
-            .map_err(|_| super::ws_shared::WsError::Disconnected)
+        self.transport.close().await;
+        Ok(())
     }
     /// Returns the current connection state.
     pub fn state(&self) -> super::ws_shared::WsConnectionState {

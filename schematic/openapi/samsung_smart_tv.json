@@ -32,8 +32,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "SamsungDeviceInfoResponse"
+              "Named": "SamsungDeviceInfoResponse"
             }
           }
         }
@@ -81,8 +80,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "SamsungAppStatusResponse"
+              "Named": "SamsungAppStatusResponse"
             }
           }
         }
@@ -173,17 +171,32 @@
         "type": "object",
         "properties": {
           "device": {
-            "description": "Nested device details block."
+            "description": "Nested device details block.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SamsungDeviceInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
           "id": {
+            "nullable": true,
             "description": "Device UUID assigned by the TV.",
             "type": "string"
           },
           "name": {
+            "nullable": true,
             "description": "Human-readable device name (often the TV's network hostname).",
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": true
       },
       "SamsungDeviceInfo": {
         "title": "SamsungDeviceInfo",
@@ -191,58 +204,72 @@
         "type": "object",
         "properties": {
           "FrameTVSupport": {
+            "nullable": true,
             "description": "Whether the TV supports Frame/Art Mode (`\"true\"` or `\"false\"`).",
             "type": "string"
           },
           "TokenAuthSupport": {
+            "nullable": true,
             "description": "Whether the TV supports token-based remote auth.",
             "type": "string"
           },
           "countryCode": {
+            "nullable": true,
             "description": "Country/region code.",
             "type": "string"
           },
           "duid": {
+            "nullable": true,
             "description": "Unique device identifier.",
             "type": "string"
           },
           "firmwareVersion": {
+            "nullable": true,
             "description": "Firmware version string.",
             "type": "string"
           },
           "ip": {
+            "nullable": true,
             "description": "TV's own IP address on the local network.",
             "type": "string"
           },
           "manufacturer": {
+            "nullable": true,
             "description": "Device manufacturer name.",
             "type": "string"
           },
           "model": {
+            "nullable": true,
             "description": "Hardware model identifier (e.g., `\"QN65S95CAFXZA\"`).",
             "type": "string"
           },
           "modelName": {
+            "nullable": true,
             "description": "Marketing model name (e.g., `\"S95C\"`).",
             "type": "string"
           },
           "networkType": {
+            "nullable": true,
             "description": "Network connection type (e.g., `\"wireless\"`, `\"wired\"`).",
             "type": "string"
           },
           "os": {
+            "nullable": true,
             "description": "Tizen OS version string.",
             "type": "string"
           },
           "resolution": {
+            "nullable": true,
             "description": "Display resolution string.",
             "type": "string"
           },
           "wifiMac": {
+            "nullable": true,
             "description": "Wi-Fi MAC address (useful for Wake-on-LAN).",
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": true
       },
       "SamsungAppStatusResponse": {
         "title": "SamsungAppStatusResponse",
@@ -250,26 +277,32 @@
         "type": "object",
         "properties": {
           "id": {
+            "nullable": true,
             "description": "App package ID.",
             "type": "string"
           },
           "name": {
+            "nullable": true,
             "description": "App display name.",
             "type": "string"
           },
           "running": {
+            "nullable": true,
             "description": "Whether the app is currently running.",
             "type": "boolean"
           },
           "version": {
+            "nullable": true,
             "description": "App version string.",
             "type": "string"
           },
           "visible": {
+            "nullable": true,
             "description": "Whether the app is currently visible on screen.",
             "type": "boolean"
           }
-        }
+        },
+        "additionalProperties": true
       }
     }
   },
@@ -284,7 +317,8 @@
       "basic_user": null,
       "bearer_token": null
     },
-    "module_path": "samsung_smart_tv"
+    "module_path": "samsung_smart_tv",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "SamsungSmartTv"

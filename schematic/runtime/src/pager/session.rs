@@ -22,7 +22,7 @@ use http::HeaderMap;
 use serde_json::Value;
 
 use super::engine::Engine;
-use super::error::{PagerError, PagerErrorKind, SessionError};
+use super::error::{PagerError, SessionError};
 use super::json::{self, Read};
 use super::pages::{CollectResult, PageResult, Pager, Pages, collect, fetch_first, partition_count};
 use super::request::{StepDocument, StepRequest, fill_path, write_input};
@@ -168,7 +168,7 @@ pub struct SessionScope<'a, A: Api, R: EndpointSpec> {
     options: CallOptions,
     engine: Engine,
     page_limit: u32,
-    shared: SessionShared,
+    shared: SessionShared<R::Failure>,
     endpoint: PhantomData<fn() -> R>,
 }
 
@@ -252,7 +252,7 @@ impl<A: Api, R: EndpointSpec> std::fmt::Debug for SessionScope<'_, A, R> {
 }
 
 /// What every traversal of one scope shares.
-pub(crate) struct SessionShared {
+pub(crate) struct SessionShared<E> {
     /// `None` only for a `Paginated` impl whose `Session` type disagrees
     /// with its strategy; the scope then neither opens nor closes.
     spec: Option<&'static Session>,
@@ -263,17 +263,17 @@ pub(crate) struct SessionShared {
     handle: Mutex<Option<String>>,
     /// Held while the open request is in flight, so concurrent partitions
     /// send it once.
-    open: tokio::sync::Mutex<OpenState>,
+    open: tokio::sync::Mutex<OpenState<E>>,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum OpenState {
+#[derive(Debug)]
+enum OpenState<E> {
     Pending,
     Open,
-    Failed(PagerErrorKind),
+    Failed(PagerError<E>),
 }
 
-impl SessionShared {
+impl<E> SessionShared<E> {
     fn new(spec: Option<&'static Session>, keep_alive: Option<String>) -> Self {
         let keep_alive = spec
             .and_then(|spec| spec.keep_alive)
@@ -343,28 +343,28 @@ impl SessionShared {
         Ok(())
     }
 
-    /// Sends the open request of a session opened by a separate request,
-    /// once for every traversal of the scope; a later caller waits for it.
+    /// Opens the shared session once; concurrent traversals wait for it.
     ///
     /// ## Errors
     ///
     /// Returns the open request's failure, [`PagerError::MissingSessionHandle`]
-    /// when its reply holds no handle, and [`PagerError::AlreadyFailed`] to
-    /// every later caller after either.
-    pub(crate) async fn ensure_open<A: Api, R: Paginated<Api = A>>(
+    /// when its reply holds no handle. Later callers retain the complete
+    /// failure unless explicitly retrying.
+    pub(crate) async fn ensure_open<A: Api, R: Paginated<Api = A, Failure = E>>(
         &self,
         client: &Client<A>,
         base: &Result<RequestParts, InvalidArgument>,
         options: &CallOptions,
+        retry: bool,
     ) -> Result<(), PagerError<R::Failure>> {
         let Some(SessionOpen::Request { step, handle }) = self.spec.map(|spec| &spec.open) else {
             return Ok(());
         };
         let mut state = self.open.lock().await;
-        match *state {
+        match &*state {
             OpenState::Open => return Ok(()),
-            OpenState::Failed(first) => return Err(PagerError::AlreadyFailed { first }),
-            OpenState::Pending => {}
+            OpenState::Failed(error) if !retry => return Err(error.clone()),
+            OpenState::Failed(_) | OpenState::Pending => {}
         }
         let keep_alive = self
             .spec
@@ -384,13 +384,13 @@ impl SessionShared {
         };
         *state = match &result {
             Ok(()) => OpenState::Open,
-            Err(error) => OpenState::Failed(error.kind()),
+            Err(error) => OpenState::Failed(error.clone()),
         };
         result
     }
 
     /// Sends the renew request with the latest handle; `false` without one.
-    pub(crate) async fn renew<A: Api, R: Paginated<Api = A>>(
+    pub(crate) async fn renew<A: Api, R: Paginated<Api = A, Failure = E>>(
         &self,
         client: &Client<A>,
         base: &Result<RequestParts, InvalidArgument>,
@@ -406,7 +406,7 @@ impl SessionShared {
     /// Sends the close request with the latest handle, bounded by `grace`
     /// and the client's per-request timeout instead of the pages' deadline;
     /// nothing when no handle was observed or no close is authored.
-    async fn close<A: Api, R: Paginated<Api = A>>(
+    async fn close<A: Api, R: Paginated<Api = A, Failure = E>>(
         &self,
         client: &Client<A>,
         base: &Result<RequestParts, InvalidArgument>,
@@ -479,7 +479,7 @@ async fn send_step<A: Api, R: Paginated<Api = A>>(
     match outcome {
         Outcome::Success(document) => Ok((meta, document)),
         Outcome::Failure(error) => Err(PagerError::Api {
-            error,
+            error: error.into(),
             meta: Box::new(meta),
         }),
     }

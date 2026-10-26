@@ -5,13 +5,21 @@ use super::responses::*;
 use super::{GitHub, GitHubApi};
 /// Request for `GetRepository` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("owner_value", "repo_value")
-///;
+/// let request = GetRepositoryRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -31,9 +39,11 @@ impl GetRepositoryRequest {
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
     type Api = GitHubApi;
-    type Success = RepositoryInfo;
+    type Success = ::schematic_definitions::github::RepositoryInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RepositoryInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::RepositoryInfo,
+    >;
     const ENDPOINT_ID: &'static str = "GetRepository";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -43,7 +53,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
             "/repos/{}/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -56,14 +66,22 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
 }
 /// Request for `GetGitTree` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetGitTreeRequest;
 ///
 /// let request = GetGitTreeRequest::new("owner_value", "repo_value", "tree_sha_value")
-///     .with_recursive(/* value */)
-///;
+///     .with_recursive(true);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetGitTreeRequest {
@@ -98,9 +116,11 @@ impl GetGitTreeRequest {
 }
 impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
     type Api = GitHubApi;
-    type Success = GitTreeResponse;
+    type Success = ::schematic_definitions::github::GitTreeResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitTreeResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::GitTreeResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetGitTree";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -111,9 +131,9 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .tree_sha.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.recursive {
-            query.push(("recursive".to_string(), value.to_string()));
+            query.push(("recursive".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -127,13 +147,21 @@ impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
 }
 /// Request for `GetRepositoryContentRaw` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetRepositoryContentRawRequest;
 ///
-/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "path_value")
-///;
+/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "path_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryContentRawRequest {
@@ -172,7 +200,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
             "/repos/{}/{}/contents/{}", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string()), self.path
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![
             ("Accept".to_string(), "application/vnd.github.raw+json".to_string())
         ];
@@ -185,18 +213,113 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
         })
     }
 }
+/// Values of the `state` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListPullRequestsRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `popularity`
+    #[serde(rename = "popularity")]
+    Popularity,
+    /// `long-running`
+    #[serde(rename = "long-running")]
+    LongRunning,
+}
+impl ListPullRequestsRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Popularity => "popularity",
+            Self::LongRunning => "long-running",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListPullRequestsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListPullRequestsRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListPullRequestsRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListPullRequestsRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListPullRequests` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListPullRequestsRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListPullRequestsRequest, ListPullRequestsRequestState, ListPullRequestsRequestSort, ListPullRequestsRequestDirection};
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_state(ListPullRequestsRequestState::Open)
+///     .with_sort(ListPullRequestsRequestSort::Created)
+///     .with_direction(ListPullRequestsRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -205,11 +328,11 @@ pub struct ListPullRequestsRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by PR state
-    pub state: Option<String>,
+    pub state: Option<ListPullRequestsRequestState>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListPullRequestsRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListPullRequestsRequestDirection>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -223,26 +346,28 @@ impl ListPullRequestsRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListPullRequestsRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListPullRequestsRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListPullRequestsRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
     type Api = GitHubApi;
-    type Success = Vec<PullRequestSummary>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::PullRequestSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<PullRequestSummary>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::PullRequestSummary>,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequests";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -252,15 +377,15 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             "/repos/{}/{}/pulls", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -274,13 +399,21 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 }
 /// Request for `ListPullRequestFiles` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListPullRequestFilesRequest;
 ///
-/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value")
-///;
+/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestFilesRequest {
@@ -307,9 +440,11 @@ impl ListPullRequestFilesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
     type Api = GitHubApi;
-    type Success = Vec<PullRequestFile>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::PullRequestFile>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<PullRequestFile>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::PullRequestFile>,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequestFiles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -320,7 +455,7 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .pull_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -331,18 +466,109 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
         })
     }
 }
+/// Values of the `state` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestState {
+    /// `open`
+    #[serde(rename = "open")]
+    Open,
+    /// `closed`
+    #[serde(rename = "closed")]
+    Closed,
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+}
+impl ListIssuesRequestState {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `comments`
+    #[serde(rename = "comments")]
+    Comments,
+}
+impl ListIssuesRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Comments => "comments",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListIssuesRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListIssuesRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListIssuesRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListIssuesRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListIssues` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListIssuesRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListIssuesRequest, ListIssuesRequestState, ListIssuesRequestSort, ListIssuesRequestDirection};
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
-///     .with_state(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_state(ListIssuesRequestState::Open)
+///     .with_sort(ListIssuesRequestSort::Created)
+///     .with_direction(ListIssuesRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -351,11 +577,11 @@ pub struct ListIssuesRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by issue state
-    pub state: Option<String>,
+    pub state: Option<ListIssuesRequestState>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListIssuesRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListIssuesRequestDirection>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -369,26 +595,28 @@ impl ListIssuesRequest {
         }
     }
     /// Sets the `state` query parameter.
-    pub fn with_state(mut self, value: String) -> Self {
+    pub fn with_state(mut self, value: ListIssuesRequestState) -> Self {
         self.state = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListIssuesRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListIssuesRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
     type Api = GitHubApi;
-    type Success = Vec<IssueSummary>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::IssueSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<IssueSummary>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::IssueSummary>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssues";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -398,15 +626,15 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/repos/{}/{}/issues", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -420,13 +648,21 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 }
 /// Request for `GetIssue` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = GetIssueRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -453,9 +689,11 @@ impl GetIssueRequest {
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
     type Api = GitHubApi;
-    type Success = IssueSummary;
+    type Success = ::schematic_definitions::github::IssueSummary;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<IssueSummary>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::IssueSummary,
+    >;
     const ENDPOINT_ID: &'static str = "GetIssue";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -466,7 +704,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -479,13 +717,21 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 }
 /// Request for `ListIssueComments` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListIssueCommentsRequest;
 ///
-/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -512,9 +758,11 @@ impl ListIssueCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
     type Api = GitHubApi;
-    type Success = Vec<IssueComment>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::IssueComment>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<IssueComment>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::IssueComment>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -525,7 +773,7 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -538,13 +786,21 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 }
 /// Request for `ListIssueTimeline` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListIssueTimelineRequest;
 ///
-/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value")
-///;
+/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueTimelineRequest {
@@ -571,9 +827,11 @@ impl ListIssueTimelineRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
     type Api = GitHubApi;
-    type Success = Vec<TimelineEvent>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::TimelineEvent>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<TimelineEvent>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::TimelineEvent>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueTimeline";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -584,7 +842,7 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.issue_number.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -597,13 +855,21 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
 }
 /// Request for `ListTags` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("owner_value", "repo_value")
-///;
+/// let request = ListTagsRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -623,9 +889,11 @@ impl ListTagsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
     type Api = GitHubApi;
-    type Success = Vec<RepoTag>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::RepoTag>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<RepoTag>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::RepoTag>,
+    >;
     const ENDPOINT_ID: &'static str = "ListTags";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -635,7 +903,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repos/{}/{}/tags", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -648,13 +916,21 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 }
 /// Request for `ListReleases` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::ListReleasesRequest;
 ///
-/// let request = ListReleasesRequest::new("owner_value", "repo_value")
-///;
+/// let request = ListReleasesRequest::new("owner_value", "repo_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -674,9 +950,11 @@ impl ListReleasesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
     type Api = GitHubApi;
-    type Success = Vec<Release>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::Release>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<Release>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::Release>,
+    >;
     const ENDPOINT_ID: &'static str = "ListReleases";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -686,7 +964,7 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
             "/repos/{}/{}/releases", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -699,13 +977,21 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
 }
 /// Request for `GetTagReference` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetTagReferenceRequest;
 ///
-/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "tag_value")
-///;
+/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "tag_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagReferenceRequest {
@@ -732,9 +1018,9 @@ impl GetTagReferenceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
     type Api = GitHubApi;
-    type Success = GitRef;
+    type Success = ::schematic_definitions::github::GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitRef>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::github::GitRef>;
     const ENDPOINT_ID: &'static str = "GetTagReference";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -745,7 +1031,7 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.tag.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -758,13 +1044,21 @@ impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
 }
 /// Request for `GetBranchReference` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetBranchReferenceRequest;
 ///
-/// let request = GetBranchReferenceRequest::new("owner_value", "repo_value", "branch_value")
-///;
+/// let request = GetBranchReferenceRequest::new("owner_value", "repo_value", "branch_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchReferenceRequest {
@@ -791,9 +1085,9 @@ impl GetBranchReferenceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
     type Api = GitHubApi;
-    type Success = GitRef;
+    type Success = ::schematic_definitions::github::GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitRef>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::github::GitRef>;
     const ENDPOINT_ID: &'static str = "GetBranchReference";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -804,7 +1098,7 @@ impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.branch.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -817,13 +1111,21 @@ impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
 }
 /// Request for `GetAnnotatedTag` endpoint.
 ///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
+///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::github::GetAnnotatedTagRequest;
 ///
-/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "tag_sha_value")
-///;
+/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "tag_sha_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAnnotatedTagRequest {
@@ -850,9 +1152,11 @@ impl GetAnnotatedTagRequest {
 }
 impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
     type Api = GitHubApi;
-    type Success = AnnotatedTagObject;
+    type Success = ::schematic_definitions::github::AnnotatedTagObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AnnotatedTagObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::AnnotatedTagObject,
+    >;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -863,7 +1167,7 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .tag_sha.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -874,18 +1178,99 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
         })
     }
 }
+/// Values of the `status` query parameter of [`ListWorkflowRunsRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListWorkflowRunsRequestStatus {
+    /// `completed`
+    #[serde(rename = "completed")]
+    Completed,
+    /// `action_required`
+    #[serde(rename = "action_required")]
+    ActionRequired,
+    /// `cancelled`
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    /// `failure`
+    #[serde(rename = "failure")]
+    Failure,
+    /// `neutral`
+    #[serde(rename = "neutral")]
+    Neutral,
+    /// `skipped`
+    #[serde(rename = "skipped")]
+    Skipped,
+    /// `stale`
+    #[serde(rename = "stale")]
+    Stale,
+    /// `success`
+    #[serde(rename = "success")]
+    Success,
+    /// `timed_out`
+    #[serde(rename = "timed_out")]
+    TimedOut,
+    /// `in_progress`
+    #[serde(rename = "in_progress")]
+    InProgress,
+    /// `queued`
+    #[serde(rename = "queued")]
+    Queued,
+    /// `requested`
+    #[serde(rename = "requested")]
+    Requested,
+    /// `waiting`
+    #[serde(rename = "waiting")]
+    Waiting,
+    /// `pending`
+    #[serde(rename = "pending")]
+    Pending,
+}
+impl ListWorkflowRunsRequestStatus {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::ActionRequired => "action_required",
+            Self::Cancelled => "cancelled",
+            Self::Failure => "failure",
+            Self::Neutral => "neutral",
+            Self::Skipped => "skipped",
+            Self::Stale => "stale",
+            Self::Success => "success",
+            Self::TimedOut => "timed_out",
+            Self::InProgress => "in_progress",
+            Self::Queued => "queued",
+            Self::Requested => "requested",
+            Self::Waiting => "waiting",
+            Self::Pending => "pending",
+        }
+    }
+}
+impl ::core::fmt::Display for ListWorkflowRunsRequestStatus {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListWorkflowRuns` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListWorkflowRunsRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListWorkflowRunsRequest, ListWorkflowRunsRequestStatus};
 ///
 /// let request = ListWorkflowRunsRequest::new("owner_value", "repo_value")
-///     .with_status(/* value */)
-///     .with_branch(/* value */)
-///     .with_event(/* value */)
-///;
+///     .with_status(ListWorkflowRunsRequestStatus::Completed)
+///     .with_branch("branch_value".to_string())
+///     .with_event("event_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWorkflowRunsRequest {
@@ -894,7 +1279,7 @@ pub struct ListWorkflowRunsRequest {
     /// Path parameter: repo
     pub repo: String,
     /// Query parameter: Filter by workflow run status
-    pub status: Option<String>,
+    pub status: Option<ListWorkflowRunsRequestStatus>,
     /// Query parameter: Filter by branch name
     pub branch: Option<String>,
     /// Query parameter: Filter by event type (e.g., push, pull_request)
@@ -912,7 +1297,7 @@ impl ListWorkflowRunsRequest {
         }
     }
     /// Sets the `status` query parameter.
-    pub fn with_status(mut self, value: String) -> Self {
+    pub fn with_status(mut self, value: ListWorkflowRunsRequestStatus) -> Self {
         self.status = Some(value);
         self
     }
@@ -929,9 +1314,11 @@ impl ListWorkflowRunsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
     type Api = GitHubApi;
-    type Success = WorkflowRunsResponse;
+    type Success = ::schematic_definitions::github::WorkflowRunsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<WorkflowRunsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::WorkflowRunsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListWorkflowRuns";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -941,15 +1328,15 @@ impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
             "/repos/{}/{}/actions/runs", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.status {
-            query.push(("status".to_string(), value.to_string()));
+            query.push(("status".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.branch {
-            query.push(("branch".to_string(), value.to_string()));
+            query.push(("branch".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.event {
-            query.push(("event".to_string(), value.to_string()));
+            query.push(("event".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -961,29 +1348,136 @@ impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
         })
     }
 }
+/// Values of the `repo_type` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestRepoType {
+    /// `all`
+    #[serde(rename = "all")]
+    All,
+    /// `public`
+    #[serde(rename = "public")]
+    Public,
+    /// `private`
+    #[serde(rename = "private")]
+    Private,
+    /// `forks`
+    #[serde(rename = "forks")]
+    Forks,
+    /// `sources`
+    #[serde(rename = "sources")]
+    Sources,
+    /// `member`
+    #[serde(rename = "member")]
+    Member,
+}
+impl ListOrgReposRequestRepoType {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Public => "public",
+            Self::Private => "private",
+            Self::Forks => "forks",
+            Self::Sources => "sources",
+            Self::Member => "member",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestRepoType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `sort` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestSort {
+    /// `created`
+    #[serde(rename = "created")]
+    Created,
+    /// `updated`
+    #[serde(rename = "updated")]
+    Updated,
+    /// `pushed`
+    #[serde(rename = "pushed")]
+    Pushed,
+    /// `full_name`
+    #[serde(rename = "full_name")]
+    FullName,
+}
+impl ListOrgReposRequestSort {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Pushed => "pushed",
+            Self::FullName => "full_name",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestSort {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+/// Values of the `direction` query parameter of [`ListOrgReposRequest`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ListOrgReposRequestDirection {
+    /// `asc`
+    #[serde(rename = "asc")]
+    Asc,
+    /// `desc`
+    #[serde(rename = "desc")]
+    Desc,
+}
+impl ListOrgReposRequestDirection {
+    /// The value as it is sent on the wire.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+impl ::core::fmt::Display for ListOrgReposRequestDirection {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 /// Request for `ListOrgRepos` endpoint.
+///
+/// ## Rate limit
+///
+/// Response headers reporting the rate limit (documentation only; the client does not act on them):
+///
+/// - limit: `x-ratelimit-limit`
+/// - remaining: `x-ratelimit-remaining`
+/// - reset: `x-ratelimit-reset`, as Unix time in seconds
+/// - retry after: `retry-after`
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::github::ListOrgReposRequest;
+/// ```no_run
+/// use schematic_schema::github::{ListOrgReposRequest, ListOrgReposRequestRepoType, ListOrgReposRequestSort, ListOrgReposRequestDirection};
 ///
 /// let request = ListOrgReposRequest::new("org_value")
-///     .with_repo_type(/* value */)
-///     .with_sort(/* value */)
-///     .with_direction(/* value */)
-///;
+///     .with_repo_type(ListOrgReposRequestRepoType::All)
+///     .with_sort(ListOrgReposRequestSort::Created)
+///     .with_direction(ListOrgReposRequestDirection::Asc);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrgReposRequest {
     /// Path parameter: org
     pub org: String,
     /// Query parameter: Filter by repository type (API param: type)
-    pub repo_type: Option<String>,
+    pub repo_type: Option<ListOrgReposRequestRepoType>,
     /// Query parameter: Sort field
-    pub sort: Option<String>,
+    pub sort: Option<ListOrgReposRequestSort>,
     /// Query parameter: Sort direction
-    pub direction: Option<String>,
+    pub direction: Option<ListOrgReposRequestDirection>,
 }
 impl ListOrgReposRequest {
     /// Creates a new request with the required path parameters.
@@ -996,17 +1490,17 @@ impl ListOrgReposRequest {
         }
     }
     /// Sets the `repo_type` query parameter.
-    pub fn with_repo_type(mut self, value: String) -> Self {
+    pub fn with_repo_type(mut self, value: ListOrgReposRequestRepoType) -> Self {
         self.repo_type = Some(value);
         self
     }
     /// Sets the `sort` query parameter.
-    pub fn with_sort(mut self, value: String) -> Self {
+    pub fn with_sort(mut self, value: ListOrgReposRequestSort) -> Self {
         self.sort = Some(value);
         self
     }
     /// Sets the `direction` query parameter.
-    pub fn with_direction(mut self, value: String) -> Self {
+    pub fn with_direction(mut self, value: ListOrgReposRequestDirection) -> Self {
         self.direction = Some(value);
         self
     }
@@ -1033,9 +1527,11 @@ impl From<String> for ListOrgReposRequest {
 }
 impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
     type Api = GitHubApi;
-    type Success = Vec<RepositoryInfo>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::RepositoryInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<RepositoryInfo>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::RepositoryInfo>,
+    >;
     const ENDPOINT_ID: &'static str = "ListOrgRepos";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1044,15 +1540,15 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
         let path = format!(
             "/orgs/{}/repos", urlencoding::encode(& self.org.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.repo_type {
-            query.push(("repo_type".to_string(), value.to_string()));
+            query.push(("repo_type".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.sort {
-            query.push(("sort".to_string(), value.to_string()));
+            query.push(("sort".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.direction {
-            query.push(("direction".to_string(), value.to_string()));
+            query.push(("direction".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1065,7 +1561,7 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
     }
 }
 impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
-    type Item = PullRequestSummary;
+    type Item = ::schematic_definitions::github::PullRequestSummary;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1099,7 +1595,7 @@ impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListPullRequestsRequest {}
 impl schematic_runtime::pager::Paginated for ListPullRequestFilesRequest {
-    type Item = PullRequestFile;
+    type Item = ::schematic_definitions::github::PullRequestFile;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1133,7 +1629,7 @@ impl schematic_runtime::pager::Paginated for ListPullRequestFilesRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListPullRequestFilesRequest {}
 impl schematic_runtime::pager::Paginated for ListIssuesRequest {
-    type Item = IssueSummary;
+    type Item = ::schematic_definitions::github::IssueSummary;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1167,7 +1663,7 @@ impl schematic_runtime::pager::Paginated for ListIssuesRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssuesRequest {}
 impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
-    type Item = IssueComment;
+    type Item = ::schematic_definitions::github::IssueComment;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1201,7 +1697,7 @@ impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssueCommentsRequest {}
 impl schematic_runtime::pager::Paginated for ListIssueTimelineRequest {
-    type Item = TimelineEvent;
+    type Item = ::schematic_definitions::github::TimelineEvent;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1235,7 +1731,7 @@ impl schematic_runtime::pager::Paginated for ListIssueTimelineRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssueTimelineRequest {}
 impl schematic_runtime::pager::Paginated for ListTagsRequest {
-    type Item = RepoTag;
+    type Item = ::schematic_definitions::github::RepoTag;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1269,7 +1765,7 @@ impl schematic_runtime::pager::Paginated for ListTagsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListTagsRequest {}
 impl schematic_runtime::pager::Paginated for ListReleasesRequest {
-    type Item = Release;
+    type Item = ::schematic_definitions::github::Release;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1341,7 +1837,7 @@ impl schematic_runtime::pager::Paginated for ListWorkflowRunsRequest {
 impl schematic_runtime::pager::PageSizeKnob for ListWorkflowRunsRequest {}
 impl schematic_runtime::pager::HasTotal for ListWorkflowRunsRequest {}
 impl schematic_runtime::pager::Paginated for ListOrgReposRequest {
-    type Item = RepositoryInfo;
+    type Item = ::schematic_definitions::github::RepositoryInfo;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1538,16 +2034,16 @@ pub struct ListPullRequestsCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListPullRequestsRequest>,
 );
 impl<'a> ListPullRequestsCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by PR state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    pub fn state(self, value: ListPullRequestsRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListPullRequestsRequestSort`). Sort field
+    pub fn sort(self, value: ListPullRequestsRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListPullRequestsRequestDirection`). Sort direction
+    pub fn direction(self, value: ListPullRequestsRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -1754,16 +2250,16 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestFilesCall<'a> {
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `state` query parameter (`String`). Filter by issue state
-    pub fn state(self, value: String) -> Self {
+    /// Sets the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    pub fn state(self, value: ListIssuesRequestState) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListIssuesRequestSort`). Sort field
+    pub fn sort(self, value: ListIssuesRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListIssuesRequestDirection`). Sort direction
+    pub fn direction(self, value: ListIssuesRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2475,8 +2971,8 @@ pub struct ListWorkflowRunsCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListWorkflowRunsRequest>,
 );
 impl<'a> ListWorkflowRunsCall<'a> {
-    /// Sets the `status` query parameter (`String`). Filter by workflow run status
-    pub fn status(self, value: String) -> Self {
+    /// Sets the `status` query parameter (`ListWorkflowRunsRequestStatus`). Filter by workflow run status
+    pub fn status(self, value: ListWorkflowRunsRequestStatus) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
     }
     /// Sets the `branch` query parameter (`String`). Filter by branch name
@@ -2590,16 +3086,16 @@ pub struct ListOrgReposCall<'a>(
     schematic_runtime::Call<'a, GitHubApi, ListOrgReposRequest>,
 );
 impl<'a> ListOrgReposCall<'a> {
-    /// Sets the `repo_type` query parameter (`String`). Filter by repository type (API param: type)
-    pub fn repo_type(self, value: String) -> Self {
+    /// Sets the `repo_type` query parameter (`ListOrgReposRequestRepoType`). Filter by repository type (API param: type)
+    pub fn repo_type(self, value: ListOrgReposRequestRepoType) -> Self {
         Self(self.0.map_request(|request| request.with_repo_type(value)))
     }
-    /// Sets the `sort` query parameter (`String`). Sort field
-    pub fn sort(self, value: String) -> Self {
+    /// Sets the `sort` query parameter (`ListOrgReposRequestSort`). Sort field
+    pub fn sort(self, value: ListOrgReposRequestSort) -> Self {
         Self(self.0.map_request(|request| request.with_sort(value)))
     }
-    /// Sets the `direction` query parameter (`String`). Sort direction
-    pub fn direction(self, value: String) -> Self {
+    /// Sets the `direction` query parameter (`ListOrgReposRequestDirection`). Sort direction
+    pub fn direction(self, value: ListOrgReposRequestDirection) -> Self {
         Self(self.0.map_request(|request| request.with_direction(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
@@ -2769,9 +3265,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`String`). Filter by PR state
-    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListPullRequestsCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`ListPullRequestsRequestState`). Filter by PR state
+    /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`ListPullRequestsRequestSort`). Sort field
+    /// - [`direction`](ListPullRequestsCall::direction): the `direction` query parameter (`ListPullRequestsRequestDirection`). Sort direction
     pub fn list_pull_requests(
         &self,
         owner: impl Into<String>,
@@ -2813,9 +3309,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
-    /// - [`sort`](ListIssuesCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListIssuesCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`state`](ListIssuesCall::state): the `state` query parameter (`ListIssuesRequestState`). Filter by issue state
+    /// - [`sort`](ListIssuesCall::sort): the `sort` query parameter (`ListIssuesRequestSort`). Sort field
+    /// - [`direction`](ListIssuesCall::direction): the `direction` query parameter (`ListIssuesRequestDirection`). Sort direction
     pub fn list_issues(
         &self,
         owner: impl Into<String>,
@@ -2992,7 +3488,7 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`status`](ListWorkflowRunsCall::status): the `status` query parameter (`String`). Filter by workflow run status
+    /// - [`status`](ListWorkflowRunsCall::status): the `status` query parameter (`ListWorkflowRunsRequestStatus`). Filter by workflow run status
     /// - [`branch`](ListWorkflowRunsCall::branch): the `branch` query parameter (`String`). Filter by branch name
     /// - [`event`](ListWorkflowRunsCall::event): the `event` query parameter (`String`). Filter by event type (e.g., push, pull_request)
     pub fn list_workflow_runs(
@@ -3014,9 +3510,9 @@ impl GitHub {
     ///
     /// ## Optional values
     ///
-    /// - [`repo_type`](ListOrgReposCall::repo_type): the `repo_type` query parameter (`String`). Filter by repository type (API param: type)
-    /// - [`sort`](ListOrgReposCall::sort): the `sort` query parameter (`String`). Sort field
-    /// - [`direction`](ListOrgReposCall::direction): the `direction` query parameter (`String`). Sort direction
+    /// - [`repo_type`](ListOrgReposCall::repo_type): the `repo_type` query parameter (`ListOrgReposRequestRepoType`). Filter by repository type (API param: type)
+    /// - [`sort`](ListOrgReposCall::sort): the `sort` query parameter (`ListOrgReposRequestSort`). Sort field
+    /// - [`direction`](ListOrgReposCall::direction): the `direction` query parameter (`ListOrgReposRequestDirection`). Sort direction
     pub fn list_org_repos(&self, org: impl Into<String>) -> ListOrgReposCall<'_> {
         ListOrgReposCall(self.0.send(ListOrgReposRequest::new(org)))
     }

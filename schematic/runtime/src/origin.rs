@@ -26,7 +26,8 @@
 //! A target whose scheme is not `http` or `https`, or that carries user
 //! information, is refused under every policy.
 //!
-//! A caller may only tighten the API's policy: `deny` over anything,
+//! An endpoint's authored policy replaces the API default. A caller may only
+//! tighten each effective policy: `deny` over anything,
 //! `same_origin` over anything but `deny`, and an `allow_origins` list that is
 //! a subset of the API's own `allow_origins` list. Any other request is
 //! [`BuildError::OriginPolicyNotPermitted`].
@@ -35,7 +36,7 @@ use url::{Origin, Url};
 
 use crate::error::BuildError;
 
-/// Runtime form of an API's cross-origin policy.
+/// Runtime form of an API's or endpoint's cross-origin policy.
 ///
 /// Generated code translates the definition's policy into this value; a
 /// caller may pass a tighter one to the client builder.

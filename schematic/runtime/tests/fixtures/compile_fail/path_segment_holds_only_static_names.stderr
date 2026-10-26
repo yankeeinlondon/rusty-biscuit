@@ -1,0 +1,12 @@
+error[E0597]: `submitted` does not live long enough
+ --> tests/fixtures/compile_fail/path_segment_holds_only_static_names.rs
+  |
+  |     let submitted = String::from("a value from the request");
+  |         --------- binding `submitted` declared here
+  |     let _segment = PathSegment::Name(&submitted);
+  |                                      ^^^^^^^^^^
+  |                                      |
+  |                                      borrowed value does not live long enough
+  |                                      this usage requires that `submitted` is borrowed for `'static`
+  | }
+  | - `submitted` dropped here while still borrowed

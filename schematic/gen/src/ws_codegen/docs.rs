@@ -91,7 +91,7 @@ fn auth_strategy_label(strategy: &schematic_define::AuthStrategy) -> &'static st
         schematic_define::AuthStrategy::None => "none",
         schematic_define::AuthStrategy::BearerToken { .. } => "bearer token header",
         schematic_define::AuthStrategy::ApiKey { .. } => "API key header",
-        schematic_define::AuthStrategy::Basic => "basic auth header",
+        schematic_define::AuthStrategy::Basic { .. } => "basic auth header",
         schematic_define::AuthStrategy::ApiKeyParam { .. } => "API key parameter",
         _ => "custom auth strategy",
     }

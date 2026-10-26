@@ -1,0 +1,224 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "DockRoot": {
+      "address": "/",
+      "description": "Dock command and telemetry channel. This endpoint uses `type` as the envelope discriminant (not `kind`) and requires post-connect authentication for most operations.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/DockRoot.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/DockRoot.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/DockRoot.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/DockRoot.EventEnvelope"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/DockRoot.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/DockRoot.ResponseEnvelope"
+        }
+      },
+      "x-schematic-role": "client"
+    }
+  },
+  "components": {
+    "messages": {
+      "DockRoot.Auth": {
+        "description": "Post-connect auth request (`type=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "type",
+            "value": "auth"
+          }
+        ]
+      },
+      "DockRoot.AuthRequired": {
+        "description": "Post-connect auth challenge (`type=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "type",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "DockRoot.Authentication": {
+        "description": "Auth outcome (`type=auth`, `msg=authentication`); `code` is the result.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "type",
+            "value": "auth"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "DockRoot.EventEnvelope": {
+        "description": "Asynchronous dock event (`type=event`); `msg` names it and its fields are top-level.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "type",
+            "value": "event"
+          }
+        ]
+      },
+      "DockRoot.RequestEnvelope": {
+        "description": "Command request (`type=dock`) with `id`, `command`, and top-level parameters.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "type",
+            "value": "dock"
+          }
+        ]
+      },
+      "DockRoot.ResponseEnvelope": {
+        "description": "Command reply (`type=dock`) with `req_id`, `msg`, status `code`, and top-level result fields.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/DockWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      }
+    },
+    "schemas": {
+      "DockWsAuthMessage": {
+        "description": "Payload type `DockWsAuthMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "DockWsAuthRequired": {
+        "description": "Payload type `DockWsAuthRequired`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "DockWsAuthenticationMessage": {
+        "description": "Payload type `DockWsAuthenticationMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "DockWsEventEnvelope": {
+        "description": "Payload type `DockWsEventEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "DockWsRequestEnvelope": {
+        "description": "Payload type `DockWsRequestEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "DockWsResponseEnvelope": {
+        "description": "Payload type `DockWsResponseEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "Unfolded Circle Dock WebSocket API",
+    "externalDocs": {
+      "url": "https://unfoldedcircle.github.io/core-api/dock/"
+    },
+    "title": "UnfoldedCircleDockWs",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "DockRoot.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/AuthRequired"
+        }
+      ]
+    },
+    "DockRoot.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/Authentication"
+        }
+      ]
+    },
+    "DockRoot.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/EventEnvelope"
+        }
+      ]
+    },
+    "DockRoot.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "DockRoot.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/Auth"
+        }
+      ]
+    },
+    "DockRoot.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/DockRoot"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/DockRoot/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/DockRoot"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/DockRoot/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    }
+  },
+  "servers": {
+    "default": {
+      "host": "dock.local",
+      "protocol": "ws"
+    }
+  }
+}

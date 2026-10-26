@@ -6,7 +6,7 @@
 //!
 //! ## Core Types
 //!
-//! - [`EndpointParams`] - Collection of parameters for an endpoint (query, header, cookie)
+//! - [`EndpointParams`] - Collection of parameters for an endpoint (query, header, cookie, typed path)
 //! - [`ParamDef`] - Definition of a single parameter
 //! - [`QueryParamType`] - Type of a parameter value
 //! - [`ParamStyle`] - Serialization style for parameter values
@@ -19,14 +19,11 @@
 //!
 //! ```
 //! use schematic_define::params::{EndpointParams, QueryParamType};
-//! use schematic_define::pagination::PaginationStyle;
 //!
 //! let params = EndpointParams::default()
-//!     .with_pagination(PaginationStyle::github())
 //!     .with_query_param("state", QueryParamType::String, false, Some("Filter by state"));
 //!
-//! assert_eq!(params.query.len(), 3); // page, per_page, state
-//! assert!(params.has_pagination());
+//! assert_eq!(params.query.len(), 1);
 //! ```
 //!
 //! Or construct directly with all fields:
@@ -36,7 +33,7 @@
 //!
 //! let params = EndpointParams {
 //!     query: vec![
-//!         ParamDef {
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 //!             name: "page".to_string(),
 //!             required: false,
 //!             description: Some("Page number".to_string()),
@@ -44,7 +41,7 @@
 //!             explode: false,
 //!             style: ParamStyle::Form,
 //!         },
-//!         ParamDef {
+//!         ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 //!             name: "limit".to_string(),
 //!             required: false,
 //!             description: Some("Items per page".to_string()),
@@ -55,8 +52,8 @@
 //!     ],
 //!     header: vec![],
 //!     cookie: vec![],
-//!     pagination: None,
-//!     response_pagination: None,
+//!     path: vec![],
+//!
 //! };
 //!
 //! assert_eq!(params.query.len(), 2);
@@ -64,12 +61,12 @@
 
 mod param_def;
 
-pub use crate::pagination::{PaginationResponse, PaginationStyle};
 pub use param_def::{ParamDef, ParamStyle, QueryParamType};
 
 /// Collection of parameters for an endpoint.
 ///
-/// Groups parameters by their location: query string, headers, or cookies.
+/// Groups parameters by their location: query string, headers, cookies, or
+/// typed path placeholders.
 /// Implements `Default` to provide empty parameter collections.
 ///
 /// ## Examples
@@ -83,7 +80,7 @@ pub use param_def::{ParamDef, ParamStyle, QueryParamType};
 /// assert!(params.header.is_empty());
 /// assert!(params.cookie.is_empty());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EndpointParams {
     /// Query string parameters.
     pub query: Vec<ParamDef>,
@@ -91,42 +88,17 @@ pub struct EndpointParams {
     pub header: Vec<ParamDef>,
     /// Cookie parameters.
     pub cookie: Vec<ParamDef>,
-    /// Superseded legacy pagination style, recorded by
-    /// [`Self::with_pagination`]. Nothing reads it; pagination is authored on
-    /// the API ([`RestApi::default_pagination`](crate::RestApi::default_pagination)).
-    pub pagination: Option<PaginationStyle>,
-    /// Superseded legacy response signal. Nothing reads it.
-    pub response_pagination: Option<PaginationResponse>,
+    /// Typed path parameters. Empty keeps every `{placeholder}` an untyped
+    /// string; otherwise the names must equal the path's placeholders, each
+    /// required with the `Simple` style (checked at build).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<ParamDef>,
+
 }
 
 impl EndpointParams {
-    /// Appends a superseded [`PaginationStyle`]'s query parameters and records
-    /// the style.
-    ///
-    /// The appended parameters are ordinary query parameters, which an
-    /// API-level [`Strategy`](crate::pagination::Strategy) may adopt; the
-    /// recorded style drives nothing.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::params::EndpointParams;
-    /// use schematic_define::pagination::PaginationStyle;
-    ///
-    /// // Add Bitbucket-style pagination
-    /// let params = EndpointParams::default()
-    ///     .with_pagination(PaginationStyle::bitbucket());
-    ///
-    /// assert_eq!(params.query.len(), 2);
-    /// assert!(params.query.iter().any(|p| p.name == "page"));
-    /// assert!(params.query.iter().any(|p| p.name == "pagelen"));
-    /// assert!(params.pagination.is_some());
-    /// ```
-    pub fn with_pagination(mut self, style: PaginationStyle) -> Self {
-        self.query.extend(style.to_query_params());
-        self.pagination = Some(style);
-        self
-    }
+    /// An endpoint with no declared parameters.
+    pub fn new() -> Self { Self::default() }
 
     /// Adds a single query parameter.
     ///
@@ -152,7 +124,7 @@ impl EndpointParams {
         required: bool,
         description: Option<&str>,
     ) -> Self {
-        self.query.push(ParamDef {
+        self.query.push(ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: name.to_string(),
             required,
             description: description.map(|s| s.to_string()),
@@ -188,54 +160,11 @@ impl EndpointParams {
         self
     }
 
-    /// Checks if a superseded [`PaginationStyle`] was recorded via
-    /// [`Self::with_pagination`].
-    ///
-    /// ## Note
-    ///
-    /// This does not say whether the endpoint is paginated; that is decided by
-    /// [`resolve`](crate::pagination::resolve). Nor does it look at whether
-    /// query parameters happen to have pagination-like names.
-    pub fn has_pagination(&self) -> bool {
-        self.pagination.is_some()
-    }
-
-    /// Records a superseded [`PaginationResponse`] signal.
-    ///
-    /// Nothing reads the recorded value; a pager's continuation is described by
-    /// an API-level [`Strategy`](crate::pagination::Strategy).
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::params::EndpointParams;
-    /// use schematic_define::pagination::{PaginationStyle, PaginationResponse};
-    ///
-    /// // GitHub-style: page params + Link header responses
-    /// let params = EndpointParams::default()
-    ///     .with_pagination(PaginationStyle::github())
-    ///     .with_response_pagination(PaginationResponse::LinkHeader);
-    ///
-    /// assert!(params.has_pagination());
-    /// assert!(params.has_response_pagination());
-    /// ```
-    pub fn with_response_pagination(mut self, response: PaginationResponse) -> Self {
-        self.response_pagination = Some(response);
-        self
-    }
-
-    /// Checks if this endpoint has response pagination information.
-    ///
-    /// Returns `true` if response pagination was set via [`Self::with_response_pagination`].
-    pub fn has_response_pagination(&self) -> bool {
-        self.response_pagination.is_some()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pagination::{PaginationResponse, PaginationStyle};
 
     #[test]
     fn endpoint_params_default_empty() {
@@ -251,8 +180,9 @@ mod tests {
             query: vec![],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+            path: vec![],
+
+
         };
         let cloned = params.clone();
         assert_eq!(params, cloned);
@@ -262,7 +192,7 @@ mod tests {
     #[test]
     fn endpoint_params_with_query() {
         let params = EndpointParams {
-            query: vec![ParamDef {
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "page".to_string(),
                 required: false,
                 description: None,
@@ -272,8 +202,9 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+            path: vec![],
+
+
         };
         assert_eq!(params.query.len(), 1);
         assert!(params.header.is_empty());
@@ -281,8 +212,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_with_all_locations() {
-        let params = EndpointParams {
-            query: vec![ParamDef {
+        let params = EndpointParams { path: vec![],
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "q".to_string(),
                 required: true,
                 description: Some("Search query".to_string()),
@@ -290,7 +221,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Form,
             }],
-            header: vec![ParamDef {
+            header: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "X-Request-Id".to_string(),
                 required: false,
                 description: None,
@@ -298,7 +229,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Simple,
             }],
-            cookie: vec![ParamDef {
+            cookie: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "session".to_string(),
                 required: true,
                 description: None,
@@ -306,8 +237,7 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Form,
             }],
-            pagination: None,
-            response_pagination: None,
+
         };
         assert_eq!(params.query.len(), 1);
         assert_eq!(params.header.len(), 1);
@@ -318,7 +248,7 @@ mod tests {
     fn endpoint_params_pagination_example() {
         let params = EndpointParams {
             query: vec![
-                ParamDef {
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "page".to_string(),
                     required: false,
                     description: Some("Page number (1-indexed)".to_string()),
@@ -326,7 +256,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef {
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "per_page".to_string(),
                     required: false,
                     description: Some("Items per page (default: 20)".to_string()),
@@ -334,7 +264,7 @@ mod tests {
                     explode: false,
                     style: ParamStyle::Form,
                 },
-                ParamDef {
+                ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                     name: "sort".to_string(),
                     required: false,
                     description: Some("Sort order".to_string()),
@@ -345,8 +275,9 @@ mod tests {
             ],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+            path: vec![],
+
+
         };
 
         assert_eq!(params.query.len(), 3);
@@ -356,7 +287,7 @@ mod tests {
     #[test]
     fn endpoint_params_filter_with_arrays() {
         let params = EndpointParams {
-            query: vec![ParamDef {
+            query: vec![ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
                 name: "status".to_string(),
                 required: false,
                 description: Some("Filter by status (multiple allowed)".to_string()),
@@ -370,8 +301,9 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+            path: vec![],
+
+
         };
 
         let status_param = &params.query[0];
@@ -387,58 +319,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn endpoint_params_with_pagination_bitbucket() {
-        let params = EndpointParams::default().with_pagination(PaginationStyle::bitbucket());
 
-        assert_eq!(params.query.len(), 2);
-        assert!(params.has_pagination());
-        assert!(params.pagination.is_some());
-        assert!(matches!(
-            params.pagination,
-            Some(PaginationStyle::PageNumber { .. })
-        ));
-    }
 
-    #[test]
-    fn endpoint_params_with_pagination_github() {
-        let params = EndpointParams::default().with_pagination(PaginationStyle::github());
 
-        assert_eq!(params.query.len(), 2);
-        assert!(params.has_pagination());
-        assert!(params.pagination.is_some());
-    }
 
-    #[test]
-    fn endpoint_params_with_pagination_gitea() {
-        let params = EndpointParams::default().with_pagination(PaginationStyle::gitea());
 
-        assert_eq!(params.query.len(), 2);
-        assert!(params.has_pagination());
-        assert!(params.query.iter().any(|p| p.name == "limit"));
-        assert!(!params.query.iter().any(|p| p.name == "per_page"));
-    }
 
-    #[test]
-    fn endpoint_params_pagination_field_stores_style() {
-        let params = EndpointParams::default()
-            .with_pagination(PaginationStyle::offset_limit("skip", "take", 25, 200));
 
-        match &params.pagination {
-            Some(PaginationStyle::OffsetLimit {
-                offset_param,
-                limit_param,
-                default_limit,
-                max_limit,
-            }) => {
-                assert_eq!(offset_param, "skip");
-                assert_eq!(limit_param, "take");
-                assert_eq!(*default_limit, 25);
-                assert_eq!(*max_limit, 200);
-            }
-            _ => panic!("Expected OffsetLimit pagination style"),
-        }
-    }
 
     #[test]
     fn endpoint_params_with_query_param() {
@@ -469,147 +356,23 @@ mod tests {
         assert_eq!(params.query.len(), 2);
     }
 
-    #[test]
-    fn endpoint_params_has_pagination_requires_explicit_style() {
-        let params = EndpointParams {
-            query: vec![ParamDef {
-                name: "page".to_string(),
-                required: false,
-                description: None,
-                param_type: QueryParamType::Integer,
-                explode: false,
-                style: ParamStyle::Form,
-            }],
-            header: vec![],
-            cookie: vec![],
-            pagination: None,
-            response_pagination: None,
-        };
 
-        assert!(!params.has_pagination());
-    }
 
-    #[test]
-    fn endpoint_params_has_pagination_with_explicit_style() {
-        let params =
-            EndpointParams::default().with_pagination(PaginationStyle::cursor("after", None, 20));
 
-        assert!(params.has_pagination());
-        assert!(params.pagination.is_some());
-        assert!(params.query.iter().any(|p| p.name == "after"));
-    }
 
-    #[test]
-    fn endpoint_params_has_pagination_returns_false_without_pagination() {
-        let params = EndpointParams {
-            query: vec![ParamDef {
-                name: "state".to_string(),
-                required: false,
-                description: None,
-                param_type: QueryParamType::String,
-                explode: false,
-                style: ParamStyle::Form,
-            }],
-            header: vec![],
-            cookie: vec![],
-            pagination: None,
-            response_pagination: None,
-        };
 
-        assert!(!params.has_pagination());
-    }
 
-    #[test]
-    fn endpoint_params_chained_builders() {
-        let params = EndpointParams::default()
-            .with_query_param("state", QueryParamType::String, false, Some("Filter state"))
-            .with_pagination(PaginationStyle::github());
 
-        assert_eq!(params.query.len(), 3);
-        assert!(params.has_pagination());
-    }
 
-    #[test]
-    fn endpoint_params_with_response_pagination_link_header() {
-        let params =
-            EndpointParams::default().with_response_pagination(PaginationResponse::LinkHeader);
 
-        assert!(params.has_response_pagination());
-        assert!(matches!(
-            params.response_pagination,
-            Some(PaginationResponse::LinkHeader)
-        ));
-    }
 
-    #[test]
-    fn endpoint_params_with_response_pagination_body_field() {
-        let params =
-            EndpointParams::default().with_response_pagination(PaginationResponse::BodyField {
-                next_field: "next".to_string(),
-            });
 
-        assert!(params.has_response_pagination());
-        match &params.response_pagination {
-            Some(PaginationResponse::BodyField { next_field }) => {
-                assert_eq!(next_field, "next");
-            }
-            _ => panic!("Expected BodyField"),
-        }
-    }
 
-    #[test]
-    fn endpoint_params_with_response_pagination_total_count() {
-        let params =
-            EndpointParams::default().with_response_pagination(PaginationResponse::TotalCount {
-                total_field: "total_items".to_string(),
-                page_field: Some("page_number".to_string()),
-            });
 
-        assert!(params.has_response_pagination());
-        match &params.response_pagination {
-            Some(PaginationResponse::TotalCount {
-                total_field,
-                page_field,
-            }) => {
-                assert_eq!(total_field, "total_items");
-                assert_eq!(page_field.as_deref(), Some("page_number"));
-            }
-            _ => panic!("Expected TotalCount"),
-        }
-    }
 
-    #[test]
-    fn endpoint_params_has_response_pagination_returns_false_by_default() {
-        let params = EndpointParams::default();
-        assert!(!params.has_response_pagination());
-    }
 
-    #[test]
-    fn endpoint_params_chained_both_pagination_styles() {
-        let params = EndpointParams::default()
-            .with_pagination(PaginationStyle::github())
-            .with_response_pagination(PaginationResponse::LinkHeader);
 
-        assert!(params.has_pagination());
-        assert!(params.has_response_pagination());
-        assert_eq!(params.query.len(), 2);
-        assert!(matches!(
-            params.response_pagination,
-            Some(PaginationResponse::LinkHeader)
-        ));
-    }
 
-    #[test]
-    fn endpoint_params_chained_with_query_params_and_response_pagination() {
-        let params = EndpointParams::default()
-            .with_query_param("state", QueryParamType::String, false, Some("Filter state"))
-            .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20))
-            .with_response_pagination(PaginationResponse::BodyField {
-                next_field: "next_cursor".to_string(),
-            });
 
-        assert_eq!(params.query.len(), 3);
-        assert!(params.has_pagination());
-        assert!(params.has_response_pagination());
-    }
+
 }

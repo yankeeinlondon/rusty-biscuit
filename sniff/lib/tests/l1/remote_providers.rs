@@ -2204,6 +2204,57 @@ mod bitbucket_tests {
     }
 
     #[tokio::test]
+    async fn a_committed_json_file_is_read_as_its_raw_text() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        // Bitbucket serves `package.json` as `application/json`, the media type
+        // that selects the typed directory listing; the file must still arrive
+        // whole rather than as an empty listing.
+        let file = "{\"name\": \"demo\", \"values\": 3}\n";
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo/src/main/package.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(file.as_bytes().to_vec(), "application/json"))
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-workspace", "test-repo", "package.json")
+            .await
+            .unwrap();
+
+        assert_eq!(content, file);
+    }
+
+    #[tokio::test]
+    async fn a_json_reply_that_is_not_a_listing_leaves_the_tree_unavailable() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repositories/test-workspace/test-repo/src/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(["not", "a", "listing"])))
+            .mount(&server)
+            .await;
+
+        let snapshot = provider
+            .snapshot("test-workspace", "test-repo")
+            .await
+            .expect("metadata succeeded, so the snapshot must not fail");
+
+        assert!(!snapshot.tree.available);
+        assert!(snapshot.tree.files.is_empty());
+    }
+
+    #[tokio::test]
     async fn list_pull_requests_success() {
         let (server, provider) = setup_bitbucket_mock().await;
 

@@ -1,6 +1,6 @@
 //! `CrossOrigin` constructors and the API-level-only policy surface.
 
-use schematic_define::{ApiResponse, CrossOrigin, Endpoint, RestMethod};
+use schematic_define::{SuccessShape, CrossOrigin, Endpoint, RestMethod};
 
 #[test]
 fn default_is_same_origin() {
@@ -58,26 +58,11 @@ fn allow_origins_keeps_order_and_exact_strings() {
     );
 }
 
-/// Frozen to today's surface: `Endpoint` has no cross-origin field or setter,
-/// and the crate exports no GraphQL primitive.
-///
-/// A later spec that adds a per-endpoint override (spec 4a) or a GraphQL
-/// primitive (spec 5) retires or updates this test.
 #[test]
-fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
-    let endpoint = Endpoint {
-        id: "Ping".to_string(),
-        method: RestMethod::Get,
-        path: "/ping".to_string(),
-        description: "Ping".to_string(),
-        request: None,
-        response: ApiResponse::Empty,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    };
+fn endpoints_support_cross_origin_override() {
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Ping".to_string(); fixture.method = RestMethod::Get; fixture.path = "/ping".to_string(); fixture.description = "Ping".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::empty()]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
-    // Exhaustive, without `..`: a new `Endpoint` field fails to compile here.
+    // The public transfer fields remain readable after construction.
     let Endpoint {
         id,
         method,
@@ -87,33 +72,19 @@ fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
         response,
         headers,
         params,
-        oauth_scopes,
+        cross_origin,
+        pagination,
+        ..
     } = endpoint;
     assert_eq!(id, "Ping");
     assert_eq!(method, RestMethod::Get);
     assert_eq!(path, "/ping");
     assert_eq!(description, "Ping");
     assert!(request.is_none());
-    assert_eq!(response, ApiResponse::Empty);
+    assert_eq!(response, vec![SuccessShape::empty()]);
     assert!(headers.is_empty());
     assert!(params.is_none());
-    assert!(oauth_scopes.is_none());
-
-    let lib_source = include_str!("../src/lib.rs");
-    let exported = lib_source
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-    assert!(
-        !exported.contains("graphql"),
-        "the crate root exports a GraphQL name"
-    );
-
-    let endpoint_source = include_str!("../src/types.rs");
-    assert!(
-        !endpoint_source.contains("fn cross_origin"),
-        "`Endpoint` (src/types.rs) gained a cross-origin setter"
-    );
+    assert!(cross_origin.is_none());
+    assert!(pagination.is_none());
+    assert_eq!(Endpoint::get("Ping", "/ping").describes("Ping").returns_empty().cross_origin(CrossOrigin::deny()).build().unwrap().cross_origin, Some(CrossOrigin::deny()));
 }

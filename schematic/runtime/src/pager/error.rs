@@ -12,6 +12,7 @@
 //! limits (see [`crate::response`]).
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::error::{TransportError, TransportErrorKind};
 use crate::meta::ResponseMeta;
@@ -68,9 +69,9 @@ impl fmt::Display for ContinuationProblem {
 ///
 /// Every variant that saw a response keeps its [`ResponseMeta`]; the
 /// transport variants keep the [`TransportError`] with its request metadata.
-/// A pager that has returned an error returns
-/// [`AlreadyFailed`](Self::AlreadyFailed) from then on, without a request.
-#[derive(Debug, Clone, PartialEq)]
+/// Later iteration calls return the same error and evidence without sending
+/// until the caller explicitly invokes [`Pages::retry`](super::Pages::retry).
+#[derive(Debug, PartialEq)]
 #[non_exhaustive]
 pub enum PagerError<E> {
     /// No response head arrived: a refused argument (such as a page size
@@ -81,7 +82,7 @@ pub enum PagerError<E> {
     /// is not JSON, or does not hold the authored collection of decodable
     /// items. No item of that page is delivered.
     Api {
-        error: ApiError<E>,
+        error: Arc<ApiError<E>>,
         /// The response that carried it.
         meta: Box<ResponseMeta>,
     },
@@ -114,9 +115,23 @@ pub enum PagerError<E> {
         /// time.
         error: TransportError,
     },
-    /// The pager already returned an error of this kind; no request was
-    /// sent.
-    AlreadyFailed { first: PagerErrorKind },
+}
+
+// Sharing only the provider payload keeps failures cloneable without E: Clone.
+impl<E> Clone for PagerError<E> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Transport(error) => Self::Transport(error.clone()),
+            Self::Api { error, meta } => Self::Api { error: error.clone(), meta: meta.clone() },
+            Self::MissingContinuation { meta } => Self::MissingContinuation { meta: meta.clone() },
+            Self::InvalidContinuation { problem, meta } => Self::InvalidContinuation { problem: *problem, meta: meta.clone() },
+            Self::RepeatedContinuation { meta } => Self::RepeatedContinuation { meta: meta.clone() },
+            Self::BoundaryNoProgress { meta } => Self::BoundaryNoProgress { meta: meta.clone() },
+            Self::EmptyPageClaimsMore { meta } => Self::EmptyPageClaimsMore { meta: meta.clone() },
+            Self::MissingSessionHandle { meta } => Self::MissingSessionHandle { meta: meta.clone() },
+            Self::DeadlineExceeded { completed_pages, error } => Self::DeadlineExceeded { completed_pages: *completed_pages, error: error.clone() },
+        }
+    }
 }
 
 /// The variant of a [`PagerError`], without its evidence.
@@ -147,7 +162,6 @@ impl<E> PagerError<E> {
             Self::EmptyPageClaimsMore { .. } => PagerErrorKind::EmptyPageClaimsMore,
             Self::MissingSessionHandle { .. } => PagerErrorKind::MissingSessionHandle,
             Self::DeadlineExceeded { .. } => PagerErrorKind::DeadlineExceeded,
-            Self::AlreadyFailed { first } => *first,
         }
     }
 
@@ -161,7 +175,7 @@ impl<E> PagerError<E> {
             | Self::BoundaryNoProgress { meta }
             | Self::EmptyPageClaimsMore { meta }
             | Self::MissingSessionHandle { meta } => Some(meta),
-            Self::Transport(_) | Self::DeadlineExceeded { .. } | Self::AlreadyFailed { .. } => None,
+            Self::Transport(_) | Self::DeadlineExceeded { .. } => None,
         }
     }
 
@@ -176,14 +190,7 @@ impl<E> PagerError<E> {
             },
             // A redirect hop that failed before a response is a transport
             // failure that kept its earlier 3xx as evidence.
-            Self::Api {
-                error:
-                    ApiError {
-                        kind: ErrorKind::RedirectFailed { .. },
-                        ..
-                    },
-                ..
-            } => IncompleteReason::TransportError,
+            Self::Api { error, .. } if matches!(error.kind, ErrorKind::RedirectFailed { .. }) => IncompleteReason::TransportError,
             Self::Api { .. } => IncompleteReason::HttpError,
             Self::MissingContinuation { .. } | Self::InvalidContinuation { .. } | Self::MissingSessionHandle { .. } => {
                 IncompleteReason::InvalidContinuation
@@ -192,17 +199,6 @@ impl<E> PagerError<E> {
                 IncompleteReason::RepeatedContinuation
             }
             Self::DeadlineExceeded { .. } => IncompleteReason::DeadlineExceeded,
-            Self::AlreadyFailed { first } => match first {
-                PagerErrorKind::Transport => IncompleteReason::TransportError,
-                PagerErrorKind::Api => IncompleteReason::HttpError,
-                PagerErrorKind::MissingContinuation
-                | PagerErrorKind::InvalidContinuation
-                | PagerErrorKind::MissingSessionHandle => IncompleteReason::InvalidContinuation,
-                PagerErrorKind::RepeatedContinuation
-                | PagerErrorKind::BoundaryNoProgress
-                | PagerErrorKind::EmptyPageClaimsMore => IncompleteReason::RepeatedContinuation,
-                PagerErrorKind::DeadlineExceeded => IncompleteReason::DeadlineExceeded,
-            },
         }
     }
 }
@@ -245,7 +241,6 @@ impl<E> fmt::Display for PagerError<E> {
                 "{} deadline exceeded after {completed_pages} page(s)",
                 error.request.endpoint_id
             ),
-            Self::AlreadyFailed { first } => write!(f, "the pager already failed ({first:?})"),
         }
     }
 }
@@ -254,7 +249,7 @@ impl<E: fmt::Debug + 'static> std::error::Error for PagerError<E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Transport(error) | Self::DeadlineExceeded { error, .. } => Some(error),
-            Self::Api { error, .. } => Some(error),
+            Self::Api { error, .. } => Some(error.as_ref()),
             _ => None,
         }
     }

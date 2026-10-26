@@ -9,11 +9,14 @@
 //! |-----|-----------|----------------------|---------------|
 //! | Core REST | HTTP | N/A | Bearer token / Basic auth |
 //! | Core WS | WebSocket | `kind` (req/resp/event) | API key in header |
-//! | Dock WS | WebSocket | `type` (req/resp/event) | Post-connect token |
+//! | Dock WS | WebSocket | `type` (dock/event/auth) | Post-connect token |
 //! | Integration WS | WebSocket | `kind` (req/resp/event) | API key in header |
 //!
-//! All WebSocket envelope types use `Box<RawValue>` for deferred payload parsing.
-//! Use `parse_payload::<T>()` on any envelope to deserialize `msg_data` on demand.
+//! The Core and Integration envelopes keep `msg_data` as a `Box<RawValue>`
+//! for deferred parsing; their `parse_payload::<T>()` deserializes it on
+//! demand. The Dock protocol
+//! has no `msg_data`: its envelopes retain every other top-level field in a
+//! map, which `parse_data::<T>()` deserializes.
 
 pub mod core_rest;
 pub mod core_ws;

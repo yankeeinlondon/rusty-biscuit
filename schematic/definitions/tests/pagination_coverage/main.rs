@@ -270,8 +270,11 @@ fn mismatch(api: &RestApi, endpoint: &schematic_define::Endpoint, row: Option<&R
                 problems.push(format!("items {items:?}, want {want_items:?}"));
             }
             let got_type = list.and_then(|list| list.item_type.as_deref());
-            if got_type != Some(*item_type) {
-                problems.push(format!("item type {got_type:?}, want {item_type:?}"));
+            let expected_type = if endpoint.pagination.as_ref().and_then(|collection| collection.item_type.as_ref()).is_none() {
+                format!("::schematic_definitions::{}::{item_type}", schematic_definitions::naming::resolve_module_name(api))
+            } else { (*item_type).to_owned() };
+            if got_type != Some(expected_type.as_str()) {
+                problems.push(format!("item type {got_type:?}, want {expected_type:?}"));
             }
             let described = describe(got);
             if described != *strategy {
@@ -390,12 +393,12 @@ fn paginated_counts_per_api() {
         ("GitHub", 9),
         ("GitLab", 9),
         ("Gitea", 8),
-        ("OpenAI", 58),
+        ("OpenAI", 57),
     ]
     .into_iter()
     .collect();
     assert_eq!(counts, expected);
-    assert_eq!(counts.values().sum::<usize>(), 94);
+    assert_eq!(counts.values().sum::<usize>(), 93);
 }
 
 /// Every list left unpaginated for want of evidence carries its recalled
@@ -455,7 +458,6 @@ fn every_unverified_list_names_its_recalled_strategy_and_needed_source() {
         "ElevenLabs.ListVoices",
         "GitLab.ListIssueParticipants",
         "Gitea.GetGitTree",
-        "Gitea.GetGitTreeRecursive",
     ]
     .into_iter()
     .map(str::to_owned)

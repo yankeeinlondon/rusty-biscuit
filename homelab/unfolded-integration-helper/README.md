@@ -45,7 +45,7 @@ It also includes `test_fixtures` for generating realistic UC request payloads in
 ## Modules
 
 - `envelope`
-  Request parsing plus response/event builders for the UC Integration WebSocket protocol.
+  Request parsing plus response/event builders for the UC Integration WebSocket protocol, conversions between those JSON values and the host's typed `IntegrationClientMessage`/`IntegrationServerMessage` (`client_message_value`, `server_message`), and `authentication_greeting`, the `authentication` response each handler's `on_authenticated` sends when the host checked no `UCR_INTEGRATION_TOKEN`.
 - `registry`
   Data model types: `KnownDevice`, `ConfiguredDevice`, `RemoteAssignment`, `DeviceMetadata`, `DiscoverySource`.
 - `persistent_registry`
@@ -61,11 +61,11 @@ It also includes `test_fixtures` for generating realistic UC request payloads in
 - `connectivity`
   Per-device and aggregate connectivity state handling.
 - `subscriptions`
-  Thin helper around `UnfoldedCircleEventHub` and `WsConnectionContext`.
+  Thin helper around `UnfoldedCircleIntegrationEventHub` and `WsConnectionContext`.
 - `mdns`
   Optional mDNS/DNS-SD advertisement support for external integrations via the `_uc-integration._tcp.local.` service type.
 - `test_fixtures`
-  Small builders for common request payloads used in unit tests.
+  Small builders for common request payloads used in unit tests, plus `client_message`, which decodes one as the host decodes an inbound frame.
 
 ## What It Does Not Handle
 

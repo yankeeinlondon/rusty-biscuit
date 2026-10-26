@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use schematic_define::RestApi;
-use schematic_gen::cargo_gen::generate_cargo_toml_with_paths;
+use schematic_gen::cargo_gen::{ModuleFeatures, generate_cargo_toml_with_paths};
 use schematic_gen::output::generate_and_write_all;
 use tempfile::TempDir;
 
@@ -129,12 +129,25 @@ impl FreshCrate {
             path_str(&define),
             path_str(&definitions_path),
             path_str(runtime),
+            &ModuleFeatures::new(apis, schematic_definitions::registry::registrations()),
         );
         fs::write(crate_dir.join("Cargo.toml"), manifest).expect("write Cargo.toml");
         fs::copy(lockfile, crate_dir.join("Cargo.lock"))
             .unwrap_or_else(|e| panic!("copy lockfile {}: {e}", lockfile.display()));
 
         Self { _root: root, crate_dir, src_dir }
+    }
+
+    /// Adds `src/<name>.rs` beside the generated modules and declares it in
+    /// `lib.rs`, for a module rendered from a fixture definition the
+    /// generator does not ship (for example
+    /// [`render_ws_api_module`](schematic_gen::output::ws_modules::render_ws_api_module)).
+    pub fn add_module(&self, name: &str, source: &str) {
+        fs::write(self.src_dir.join(format!("{name}.rs")), source).expect("write module");
+        let lib = self.src_dir.join("lib.rs");
+        let mut lib_source = fs::read_to_string(&lib).expect("read lib.rs");
+        lib_source.push_str(&format!("\npub mod {name};\n"));
+        fs::write(&lib, lib_source).expect("write lib.rs");
     }
 
     /// Adds `tests/<name>.rs` to the generated crate.
@@ -166,6 +179,24 @@ impl FreshCrate {
             command.env(key, value);
         }
         run(command)
+    }
+
+    /// `cargo <args> --offline --locked` against the crate, for a command the
+    /// helpers above do not cover (a feature selection, `cargo tree`). Only
+    /// commands that accept `--target-dir` get the shared child target
+    /// directory.
+    pub fn cargo_offline(&self, args: &[&str]) -> CargoRun {
+        self.resolve_offline();
+        if args.first() == Some(&"tree") {
+            let mut command = cargo_command();
+            command
+                .args(args)
+                .args(["--offline", "--locked", "--manifest-path"])
+                .arg(self.crate_dir.join("Cargo.toml"));
+            run(command)
+        } else {
+            self.cargo(args)
+        }
     }
 
     /// Adds the temporary package entries to the copied lockfile without
@@ -212,8 +243,12 @@ fn write_fixture_definitions(stub: &Path, real: &Path, modules: &[(&str, &str)])
          publish = false\n\n\
          [dependencies]\n\
          real = {{ package = \"schematic-definitions\", version = \"0.1.0\", path = {} }}\n\
-         serde = {{ version = \"1.0\", features = [\"derive\"] }}\n",
-        toml_path(real)
+         serde = {{ version = \"1.0\", features = [\"derive\"] }}\n\
+         serde_json = \"1\"\n\
+         schemars = \"1\"\n\
+         schematic-define = {{ path = {} }}\n",
+        toml_path(real),
+        toml_path(&real.parent().unwrap().join("define"))
     );
     fs::write(stub.join("Cargo.toml"), manifest).expect("write fixture manifest");
 

@@ -8,8 +8,8 @@
 
 use schematic_schema::samsung_smart_tv::SamsungSmartTv;
 use schematic_schema::samsung_smart_tv_remote_ws::{
-    ArtModeClient, ArtModeConnectionParams, RemoteControlClient, RemoteControlConnectionParams,
-    SamsungSmartTvRemoteWs,
+    ArtModeClient, ArtModeClientMessage, ArtModeConnectionParams, RemoteControlClient,
+    RemoteControlClientMessage, RemoteControlConnectionParams, SamsungSmartTvRemoteWs,
 };
 use schematic_schema::schematic_runtime::{CallError, NoDeclaredError};
 use schematic_schema::ws_shared::{WsClientOptions, WsError};
@@ -217,7 +217,9 @@ impl SamsungTv {
     ) -> Result<(), SamsungTvError> {
         let client = self.connect_remote_inner(token).await?;
         let cmd = build_key_command(key);
-        client.send(serde_json::to_value(&cmd).unwrap()).await?;
+        client
+            .send(RemoteControlClientMessage::RemoteControlCommand(cmd))
+            .await?;
         client.close().await?;
         Ok(())
     }
@@ -263,7 +265,9 @@ impl SamsungTv {
     ) -> Result<(), SamsungTvError> {
         let client = self.connect_remote_inner(None).await?;
         let cmd = build_app_launch_command(app_id, meta_tag);
-        client.send(serde_json::to_value(&cmd)?).await?;
+        client
+            .send(RemoteControlClientMessage::AppLaunchCommand(cmd))
+            .await?;
         client.close().await?;
         Ok(())
     }
@@ -275,7 +279,9 @@ impl SamsungTv {
     pub async fn request_installed_apps(&self) -> Result<(), SamsungTvError> {
         let client = self.connect_remote_inner(None).await?;
         let cmd = build_installed_apps_command();
-        client.send(serde_json::to_value(&cmd)?).await?;
+        client
+            .send(RemoteControlClientMessage::InstalledAppsCommand(cmd))
+            .await?;
         client.close().await?;
         Ok(())
     }
@@ -307,7 +313,9 @@ impl SamsungTv {
     ) -> Result<(), SamsungTvError> {
         let client = self.connect_art_mode_inner(None).await?;
         let cmd = build_art_mode_command(request, extra);
-        client.send(serde_json::to_value(&cmd)?).await?;
+        client
+            .send(ArtModeClientMessage::ArtModeCommand(cmd))
+            .await?;
         client.close().await?;
         Ok(())
     }

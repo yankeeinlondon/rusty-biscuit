@@ -43,11 +43,25 @@ pub struct ModelInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency_group: Option<String>,
 }
+impl schematic_define::Registration for ModelInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SingleUseTokenResponse {
     pub token: String,
 }
+impl schematic_define::Registration for SingleUseTokenResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SingleUseTokenResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FeedbackModel {
@@ -91,6 +105,13 @@ pub struct SpeechHistoryItemResponseModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alignments: Option<AlignmentModel>,
 }
+impl schematic_define::Registration for SpeechHistoryItemResponseModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SpeechHistoryItemResponseModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GetHistoryResponse {
@@ -101,6 +122,13 @@ pub struct GetHistoryResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanned_until: Option<i64>,
 }
+impl schematic_define::Registration for GetHistoryResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GetHistoryResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadHistoryBody {
@@ -108,6 +136,13 @@ pub struct DownloadHistoryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_format: Option<String>,
 }
+impl schematic_define::Registration for DownloadHistoryBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DownloadHistoryBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateSoundEffectBody {
@@ -120,4 +155,10 @@ pub struct CreateSoundEffectBody {
     pub prompt_influence: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+}
+impl schematic_define::Registration for CreateSoundEffectBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateSoundEffectBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

@@ -54,15 +54,18 @@
 //!
 //! [`Pager::partitioned`] and [`SessionScope::partitioned`] give `n`
 //! independent traversals, each sending its slice index and the slice count
-//! on every request; the caller polls them, and nothing is spawned.
+//! on every request; the caller polls them, and nothing is spawned. Session
+//! partitions require a separately opened shared session; definition validation
+//! rejects first-page opening with partitions.
 //!
 //! ## Completeness
 //!
 //! [`Pager::collect_all`] returns `Ok` only after the provider signaled the
 //! end of the list. Otherwise it returns [`Incomplete`] with the reason, the
 //! items gathered, and the error, never a partial list presented as complete.
-//! A pager that returned an error stays failed. See [`PagerError`] for what
-//! each failure keeps.
+//! After a failure, iteration returns the same complete error without sending
+//! until the caller explicitly invokes [`Pages::retry`]. Retry is optional and
+//! available for every failure category. See [`PagerError`] for the evidence.
 
 mod engine;
 mod error;
@@ -88,16 +91,18 @@ pub use spec::{ItemSelector, Strategy};
 ///
 /// The generator implements it, with the capability traits of the controls
 /// the definition authors, for exactly the endpoints whose resolved
-/// pagination is a strategy. Its constants must agree with its associated
+/// pagination is a strategy and the GraphQL operations that declare one. Its
+/// constants must agree with its associated
 /// types: [`Kind`](Self::Kind) names the kind of
 /// [`STRATEGY`](Self::STRATEGY), and [`Session`](Self::Session) whether it
-/// has a session.
+/// has a session. Failure bodies must be `Sync` so retained error evidence can
+/// be shared across tasks; they need not implement `Clone`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not paginated",
     label = "no pagination strategy is authored for this endpoint",
     note = "the definition authors no pagination strategy for `{Self}`, so the generated client has no pager for it"
 )]
-pub trait Paginated: EndpointSpec {
+pub trait Paginated: EndpointSpec<Failure: Sync> {
     /// The type of one item of a page.
     type Item: DeserializeOwned + Send + 'static;
     /// The strategy's kind: [`PageNumberKind`], [`OffsetKind`],
@@ -108,11 +113,40 @@ pub trait Paginated: EndpointSpec {
 
     /// The strategy.
     const STRATEGY: &'static Strategy;
-    /// Where a page's items are.
+    /// Where a page's items are, within the value
+    /// [`page_root`](Self::page_root) returns.
     const ITEMS: &'static ItemSelector;
     /// The endpoint's path template, whose `{placeholders}` a follow-up path
-    /// may use.
+    /// may use; empty for a GraphQL operation.
     const PATH: &'static str;
+
+    /// The value a 2xx page's item, continuation, and total paths read,
+    /// taken from the body after the client-global JSON hook ran.
+    ///
+    /// The default is the whole body. A GraphQL operation reads its `data`
+    /// and ends paging at a reply carrying GraphQL errors
+    /// ([`graphql::page_data`](crate::graphql::page_data)).
+    ///
+    /// ## Errors
+    ///
+    /// [`PageRootError`] when the page delivers no item: a declared failure,
+    /// or a body that does not hold the value.
+    fn page_root(body: Value) -> Result<Value, PageRootError<Self::Failure>> {
+        Ok(body)
+    }
+}
+
+/// Why [`Paginated::page_root`] found no page in a 2xx body.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PageRootError<E> {
+    /// A declared failure the body carries, such as GraphQL errors. The
+    /// pager reports it as [`ErrorKind::Declared`](crate::ErrorKind::Declared)
+    /// with the body as received, and delivers none of the page's items.
+    Declared(E),
+    /// The body does not hold the value the paths read; reported as
+    /// [`ErrorKind::MalformedSuccess`](crate::ErrorKind::MalformedSuccess).
+    Malformed,
 }
 
 mod sealed {

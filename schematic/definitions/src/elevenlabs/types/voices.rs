@@ -119,6 +119,13 @@ pub struct VoiceResponseModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub safety_control: Option<SafetyControl>,
 }
+impl schematic_define::Registration for VoiceResponseModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("VoiceResponseModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListVoicesResponse {
@@ -130,6 +137,13 @@ pub struct ListVoicesResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_page_token: Option<String>,
 }
+impl schematic_define::Registration for ListVoicesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListVoicesResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LibraryVoiceResponseModel {
@@ -150,21 +164,49 @@ pub struct ListSharedVoicesResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sort_id: Option<String>,
 }
+impl schematic_define::Registration for ListSharedVoicesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListSharedVoicesResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSharedVoiceBody {
     pub new_name: String,
 }
+impl schematic_define::Registration for AddSharedVoiceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AddSharedVoiceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSharedVoiceResponse {
     pub voice_id: String,
 }
+impl schematic_define::Registration for AddSharedVoiceResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AddSharedVoiceResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSampleResponse {
     pub sample_id: String,
 }
+impl schematic_define::Registration for AddSampleResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AddSampleResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreatePvcVoiceBody {
@@ -175,9 +217,22 @@ pub struct CreatePvcVoiceBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<std::collections::HashMap<String, String>>,
 }
+impl schematic_define::Registration for CreatePvcVoiceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreatePvcVoiceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TrainPvcVoiceBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+}
+impl schematic_define::Registration for TrainPvcVoiceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("TrainPvcVoiceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

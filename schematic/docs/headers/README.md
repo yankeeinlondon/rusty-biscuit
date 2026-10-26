@@ -1,11 +1,13 @@
 # Header Auth Precedence
 
-Schematic has two credential paths, one per kind of generated client:
+Generated clients resolve credentials through `schematic-runtime`, with
+the same sources and the same placement rules:
 
-- **REST clients** send through `schematic-runtime`, which resolves a
-  `Credential` per send. They do not use `schematic_define::Headers`.
-- **WebSocket clients** carry a `schematic_define::Headers` builder in their
-  public `headers` field and send its headers with the connection request.
+- **REST clients** resolve one `Credential` per send.
+- **WebSocket clients** resolve one `Credential` per explicit connect and
+  reuse it for every reconnect of that connection.
+
+Neither uses the `schematic_define::Headers` builder.
 
 ## REST clients
 
@@ -20,9 +22,12 @@ supplies one wins:
    (`env_order([..])` replaces the list)
 5. otherwise the request is sent anonymously
 
-There is no missing-credential error: a server that needs a credential
-answers (typically with a 401) inside the response envelope, and the
-metadata records `AuthMethod::Anonymous`.
+For an endpoint that inherits the API policy there is no missing-credential
+error: a server that needs a credential answers (typically with a 401) inside
+the response envelope, and the metadata records `AuthMethod::Anonymous`. An
+endpoint can override this: a public endpoint never sends a credential, and an
+endpoint with its own policy refuses a send that resolves none, before any
+request. See [endpoint authentication](../runtime/credentials.md#endpoint-authentication).
 
 ```rust
 use schematic_schema::prelude::*;
@@ -42,53 +47,45 @@ the runtime's fallback. `EnvMapping` is the authoritative source:
 - `basic_user` + `basic_pass` for Basic fallback (both must resolve)
 - `api_key` for API-key header fallback
 
-Legacy `RestApi::env_auth` and `RestApi::env_username` are still supported
-as authoring inputs and are normalized into `EnvMapping` first. An API key
+Legacy `RestApi::env_auth` (bearer and API-key fallback chains) and the
+username and password lists carried by `AuthStrategy::Basic` are still
+supported as authoring inputs and are normalized into `EnvMapping` first;
+an explicit `env_mapping` replaces that derived mapping wholesale. An API key
 sent as a query parameter or cookie reads the variables `env_auth` names.
 Each generated module's docs list the variables its client reads.
 
-## WebSocket clients and `Headers`
+## WebSocket clients
 
-`Headers` is a builder for a list of header pairs with credential support.
-Generated WebSocket clients create it with the API's `EnvMapping` attached,
-and send whatever `headers.build()` returns when connecting:
+Each `connect_*` call selects one handshake credential, and the first source
+that supplies one wins:
+
+1. a per-connect credential, `WsClientOptions::builder().credential(..)`
+2. the client credential, set with `api_key(..)` or `credentials(..)` on
+   the API struct
+3. the first set, non-empty variable of the API's environment mapping
+4. otherwise the upgrade is sent with no credential, and the endpoint
+   client's `auth_method()` reports `AuthMethod::Anonymous`
 
 ```rust
 use schematic_schema::elevenlabs_ws::ElevenLabsTTSWs;
 
-let mut api = ElevenLabsTTSWs::new();
-
 // Explicit key:
-api.headers = api.headers.clone().use_api_key("my-key", "xi-api-key");
+let api = ElevenLabsTTSWs::new().api_key("my-key");
 
-// Or from the environment, using the attached mapping:
-api.headers = api.headers.clone().from_env();
+// Or nothing: connecting reads ELEVEN_LABS_API_KEY, then ELEVENLABS_API_KEY.
+let api = ElevenLabsTTSWs::new();
 ```
 
-Attaching a mapping does not read the environment by itself; call
-`from_env()` (skip variables that are not set) or `try_from_env()` (fail with
-`HeaderError::MissingCredential` naming the variables) to resolve it.
-
-### Precedence inside `Headers`
-
-1. Explicit auth already set on the builder (`use_bearer_token`,
-   `use_basic_auth`, `use_api_key`)
-2. The environment mapping, in the order bearer token, Basic, API key
-
-Once any explicit auth is present, environment resolution is skipped. This
-includes explicit API keys, not just `Authorization` headers.
-
-### Explicit auth detection
-
-Use `Headers::has_explicit_auth()` when you need to know whether auth was
-supplied programmatically.
-
-`Headers::has_authorization()` is narrower: it only reports whether the
-`Authorization` header is populated.
+The variables come from the definition's environment mapping, exactly as for
+a REST client (see above). A rejected upgrade (401 or 403) is never retried
+with another credential, and a redirect is never followed. `header(name,
+value)` adds a handshake header but cannot carry the credential: a header
+named like the API's credential header is refused. See
+[the handshake credential](../websocket-definitions.md#the-handshake-credential).
 
 ## OAuth
 
 OAuth token acquisition is handled outside generated clients by
 `schematic-oauth`. A REST client takes the token as
-`Credential::access_token(token)`; a WebSocket client takes it through
-`Headers::use_bearer_token(token)`.
+`Credential::access_token(token)`, and so does a WebSocket client
+(`credentials(Credential::access_token(token))`).

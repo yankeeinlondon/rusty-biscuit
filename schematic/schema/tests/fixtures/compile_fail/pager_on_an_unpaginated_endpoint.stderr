@@ -8,13 +8,13 @@ error[E0277]: `schematic_schema::github::GetRepositoryRequest` is not paginated
   = note: the definition authors no pagination strategy for `schematic_schema::github::GetRepositoryRequest`, so the generated client has no pager for it
   = help: the following other types implement trait `Paginated`:
             AdminApiKeysListRequest
-            BetaListInputItemsRequest
             GetChatCompletionMessagesRequest
             GetEvalRunOutputItemsRequest
             GetEvalRunsRequest
             GetHistoryRequest
             ListAuditLogsRequest
             ListBatchesRequest
+            ListChatCompletionsRequest
           and $N others
 note: required by a bound in `pager::pages::<impl Call<'a, A, R>>::pager`
  --> $SCHEMATIC_RUNTIME/src/pager/pages.rs

@@ -56,56 +56,41 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate as schematic_definitions;
+#[cfg(test)]
+use schematic_define::ResponseShape;
+use crate::registry::assemble_module_group;
+use schematic_define::{DefinitionContext, DefinitionError, rust_path};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+    AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
     RestMethod,
-    pagination::{Collection as ListCollection, PaginationException},
+    pagination::{Collection as ListCollection},
 };
 
-/// Creates a schema registry containing all Hugging Face response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Hugging Face Hub API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::huggingface::{openapi_registry, define_huggingface_hub_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_huggingface_hub_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ModelInfo").is_some());
-/// assert!(registry.get("DatasetInfo").is_some());
-/// assert!(registry.get("SpaceInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<CreateRepoBody>("CreateRepoBody")
-        .register::<DeleteRepoBody>("DeleteRepoBody")
-        .register::<MoveRepoBody>("MoveRepoBody")
-        .register::<UpdateRepoSettingsBody>("UpdateRepoSettingsBody")
-        .register::<Vec<ModelInfo>>("Vec<ModelInfo>")
-        .register::<ModelInfo>("ModelInfo")
-        .register::<Vec<RepoFile>>("Vec<RepoFile>")
-        .register::<FileMetadata>("FileMetadata")
-        .register::<Vec<CommitInfo>>("Vec<Commit>")
-        .register::<DiscussionList>("DiscussionList")
-        .register::<Vec<DatasetInfo>>("Vec<DatasetInfo>")
-        .register::<DatasetInfo>("DatasetInfo")
-        .register::<Vec<SpaceInfo>>("Vec<SpaceInfo>")
-        .register::<SpaceInfo>("SpaceInfo")
-        .register::<RepoUrl>("RepoUrl")
-        .register::<StatusResponse>("StatusResponse")
-        .register::<UserInfo>("UserInfo")
-        .register::<Vec<RepoInfo>>("Vec<RepoInfo>")
-        .register::<Vec<Collection>>("Vec<Collection>")
+/// Assemble the APIs and ordered schemas in one destination context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::huggingface", |ctx| {
+        ctx.register::<CreateRepoBody>()?;
+        ctx.register::<DeleteRepoBody>()?;
+        ctx.register::<MoveRepoBody>()?;
+        ctx.register::<UpdateRepoSettingsBody>()?;
+        ctx.register::<Vec<ModelInfo>>()?;
+        ctx.register::<ModelInfo>()?;
+        ctx.register::<Vec<RepoFile>>()?;
+        ctx.register::<FileMetadata>()?;
+        ctx.register_as::<CommitInfo>(rust_path!(schematic_definitions::huggingface::Commit).schema_name("Commit"))?;
+        ctx.register::<DiscussionList>()?;
+        ctx.register::<Vec<DatasetInfo>>()?;
+        ctx.register::<DatasetInfo>()?;
+        ctx.register::<Vec<SpaceInfo>>()?;
+        ctx.register::<SpaceInfo>()?;
+        ctx.register::<RepoUrl>()?;
+        ctx.register::<StatusResponse>()?;
+        ctx.register::<UserInfo>()?;
+        ctx.register::<Vec<RepoInfo>>()?;
+        ctx.register::<Vec<Collection>>()?;
+        Ok(vec![build_huggingface_hub_api(ctx)?])
+    })
 }
 
 /// Creates the Hugging Face Hub API definition.
@@ -132,357 +117,168 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.base_url, "https://huggingface.co/api");
 /// ```
 pub fn define_huggingface_hub_api() -> RestApi {
-    RestApi {
-        name: "HuggingFaceHub".to_string(),
-        description: "Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations".to_string(),
-        base_url: "https://huggingface.co/api".to_string(),
-        docs_url: Some("https://huggingface.co/docs/hub/api".to_string()),
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec![
-            "HF_TOKEN".to_string(),
-            "HUGGING_FACE_API_KEY".to_string(),
-            "HF_API_KEY".to_string(),
-        ],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![
+    module_group().expect("valid shipped API").remove(0)
+}
+
+fn build_huggingface_hub_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    {
+        let endpoints = vec![
             // =================================================================
             // Models Endpoints
             // =================================================================
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/models".to_string(),
-                description: "Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("ModelInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetModel".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}".to_string(),
-                description: "Gets detailed information about a specific model".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ModelInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListModelFiles".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/tree/{revision}".to_string(),
-                description: "Lists files in a model repository at a specific revision".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoFile"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetModelFile".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/blob/{revision}/{+path}".to_string(),
-                description: "Gets file metadata for a specific file in a model repository".to_string(),
-                request: None,
-                response: ApiResponse::json_type("FileMetadata"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListModelCommits".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/commits/{revision}".to_string(),
-                description: "Lists commits for a model repository".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Commit"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetModelReadme".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/resolve/{revision}/README.md".to_string(),
-                description: "Gets the README file content for a model".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListModelDiscussions".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/discussions".to_string(),
-                description: "Lists discussions for a model repository".to_string(),
-                request: None,
-                response: ApiResponse::json_type("DiscussionList"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetModelCard".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{+repo_id}/resolve/{revision}/model_card.md".to_string(),
-                description: "Gets the model card file content".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
+            Endpoint::new("ListModels", RestMethod::Get, "/models")
+            .describes("Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config")
+            .returns_json::<Vec<ModelInfo>>(ctx)
+            .build()?,
+            Endpoint::new("GetModel", RestMethod::Get, "/models/{+repo_id}")
+            .describes("Gets detailed information about a specific model")
+            .returns_json::<ModelInfo>(ctx)
+            .build()?,
+            Endpoint::new("ListModelFiles", RestMethod::Get, "/models/{+repo_id}/tree/{revision}")
+            .describes("Lists files in a model repository at a specific revision")
+            .returns_json::<Vec<RepoFile>>(ctx)
+            .build()?,
+            Endpoint::new("GetModelFile", RestMethod::Get, "/models/{+repo_id}/blob/{revision}/{+path}")
+            .describes("Gets file metadata for a specific file in a model repository")
+            .returns_json::<FileMetadata>(ctx)
+            .build()?,
+            Endpoint::new("ListModelCommits", RestMethod::Get, "/models/{+repo_id}/commits/{revision}")
+            .describes("Lists commits for a model repository")
+            .returns_json::<Vec<Commit>>(ctx)
+            .build()?,
+            Endpoint::new("GetModelReadme", RestMethod::Get, "/models/{+repo_id}/resolve/{revision}/README.md")
+            .describes("Gets the README file content for a model")
+            .returns_text()
+            .build()?,
+            Endpoint::new("ListModelDiscussions", RestMethod::Get, "/models/{+repo_id}/discussions")
+            .describes("Lists discussions for a model repository")
+            .returns_json::<DiscussionList>(ctx)
+            .pagination(ListCollection::at("discussions").item_type("Discussion").unpaginated())
+            .build()?,
+            Endpoint::new("GetModelCard", RestMethod::Get, "/models/{+repo_id}/resolve/{revision}/model_card.md")
+            .describes("Gets the model card file content")
+            .returns_text()
+            .build()?,
 
             // =================================================================
             // Datasets Endpoints
             // =================================================================
-            Endpoint {
-                id: "ListDatasets".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets".to_string(),
-                description: "Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("DatasetInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetDataset".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets/{+repo_id}".to_string(),
-                description: "Gets detailed information about a specific dataset".to_string(),
-                request: None,
-                response: ApiResponse::json_type("DatasetInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListDatasetFiles".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets/{+repo_id}/tree/{revision}".to_string(),
-                description: "Lists files in a dataset repository at a specific revision".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoFile"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetDatasetFile".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets/{+repo_id}/blob/{revision}/{+path}".to_string(),
-                description: "Gets file metadata for a specific file in a dataset repository".to_string(),
-                request: None,
-                response: ApiResponse::json_type("FileMetadata"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListDatasetCommits".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets/{+repo_id}/commits/{revision}".to_string(),
-                description: "Lists commits for a dataset repository".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Commit"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetDatasetReadme".to_string(),
-                method: RestMethod::Get,
-                path: "/datasets/{+repo_id}/resolve/{revision}/README.md".to_string(),
-                description: "Gets the README file content for a dataset".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
+            Endpoint::new("ListDatasets", RestMethod::Get, "/datasets")
+            .describes("Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full")
+            .returns_json::<Vec<DatasetInfo>>(ctx)
+            .build()?,
+            Endpoint::new("GetDataset", RestMethod::Get, "/datasets/{+repo_id}")
+            .describes("Gets detailed information about a specific dataset")
+            .returns_json::<DatasetInfo>(ctx)
+            .build()?,
+            Endpoint::new("ListDatasetFiles", RestMethod::Get, "/datasets/{+repo_id}/tree/{revision}")
+            .describes("Lists files in a dataset repository at a specific revision")
+            .returns_json::<Vec<RepoFile>>(ctx)
+            .build()?,
+            Endpoint::new("GetDatasetFile", RestMethod::Get, "/datasets/{+repo_id}/blob/{revision}/{+path}")
+            .describes("Gets file metadata for a specific file in a dataset repository")
+            .returns_json::<FileMetadata>(ctx)
+            .build()?,
+            Endpoint::new("ListDatasetCommits", RestMethod::Get, "/datasets/{+repo_id}/commits/{revision}")
+            .describes("Lists commits for a dataset repository")
+            .returns_json::<Vec<Commit>>(ctx)
+            .build()?,
+            Endpoint::new("GetDatasetReadme", RestMethod::Get, "/datasets/{+repo_id}/resolve/{revision}/README.md")
+            .describes("Gets the README file content for a dataset")
+            .returns_text()
+            .build()?,
 
             // =================================================================
             // Spaces Endpoints
             // =================================================================
-            Endpoint {
-                id: "ListSpaces".to_string(),
-                method: RestMethod::Get,
-                path: "/spaces".to_string(),
-                description: "Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("SpaceInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetSpace".to_string(),
-                method: RestMethod::Get,
-                path: "/spaces/{+repo_id}".to_string(),
-                description: "Gets detailed information about a specific space".to_string(),
-                request: None,
-                response: ApiResponse::json_type("SpaceInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListSpaceFiles".to_string(),
-                method: RestMethod::Get,
-                path: "/spaces/{+repo_id}/tree/{revision}".to_string(),
-                description: "Lists files in a space repository at a specific revision".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoFile"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetSpaceFile".to_string(),
-                method: RestMethod::Get,
-                path: "/spaces/{+repo_id}/blob/{revision}/{+path}".to_string(),
-                description: "Gets file metadata for a specific file in a space repository".to_string(),
-                request: None,
-                response: ApiResponse::json_type("FileMetadata"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
+            Endpoint::new("ListSpaces", RestMethod::Get, "/spaces")
+            .describes("Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit")
+            .returns_json::<Vec<SpaceInfo>>(ctx)
+            .build()?,
+            Endpoint::new("GetSpace", RestMethod::Get, "/spaces/{+repo_id}")
+            .describes("Gets detailed information about a specific space")
+            .returns_json::<SpaceInfo>(ctx)
+            .build()?,
+            Endpoint::new("ListSpaceFiles", RestMethod::Get, "/spaces/{+repo_id}/tree/{revision}")
+            .describes("Lists files in a space repository at a specific revision")
+            .returns_json::<Vec<RepoFile>>(ctx)
+            .build()?,
+            Endpoint::new("GetSpaceFile", RestMethod::Get, "/spaces/{+repo_id}/blob/{revision}/{+path}")
+            .describes("Gets file metadata for a specific file in a space repository")
+            .returns_json::<FileMetadata>(ctx)
+            .build()?,
 
             // =================================================================
             // Repository Management Endpoints
             // =================================================================
-            Endpoint {
-                id: "CreateRepo".to_string(),
-                method: RestMethod::Post,
-                path: "/repos/create".to_string(),
-                description: "Creates a new repository (model, dataset, or space)".to_string(),
-                request: Some(ApiRequest::json_type("CreateRepoBody")),
-                response: ApiResponse::json_type("RepoUrl"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteRepo".to_string(),
-                method: RestMethod::Delete,
-                path: "/repos/delete".to_string(),
-                description: "Deletes a repository".to_string(),
-                request: Some(ApiRequest::json_type("DeleteRepoBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UpdateRepoSettings".to_string(),
-                method: RestMethod::Put,
-                path: "/repos/{repo_type}/{+repo_id}/settings".to_string(),
-                description: "Updates repository settings (visibility, gated access, etc.)".to_string(),
-                request: Some(ApiRequest::json_type("UpdateRepoSettingsBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "MoveRepo".to_string(),
-                method: RestMethod::Post,
-                path: "/repos/move".to_string(),
-                description: "Moves/renames a repository".to_string(),
-                request: Some(ApiRequest::json_type("MoveRepoBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
+            Endpoint::new("CreateRepo", RestMethod::Post, "/repos/create")
+            .describes("Creates a new repository (model, dataset, or space)")
+            .request_json::<CreateRepoBody>(ctx)
+            .returns_json::<RepoUrl>(ctx)
+            .build()?,
+            Endpoint::new("DeleteRepo", RestMethod::Delete, "/repos/delete")
+            .describes("Deletes a repository")
+            .request_json::<DeleteRepoBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+            Endpoint::new("UpdateRepoSettings", RestMethod::Put, "/repos/{repo_type}/{+repo_id}/settings")
+            .describes("Updates repository settings (visibility, gated access, etc.)")
+            .request_json::<UpdateRepoSettingsBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+            Endpoint::new("MoveRepo", RestMethod::Post, "/repos/move")
+            .describes("Moves/renames a repository")
+            .request_json::<MoveRepoBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
 
             // =================================================================
             // User Endpoints
             // =================================================================
-            Endpoint {
-                id: "WhoAmI".to_string(),
-                method: RestMethod::Get,
-                path: "/whoami-v2".to_string(),
-                description: "Gets information about the authenticated user".to_string(),
-                request: None,
-                response: ApiResponse::json_type("UserInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetUser".to_string(),
-                method: RestMethod::Get,
-                path: "/users/{username}".to_string(),
-                description: "Gets public information about a user".to_string(),
-                request: None,
-                response: ApiResponse::json_type("UserInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListUserRepos".to_string(),
-                method: RestMethod::Get,
-                path: "/users/{username}/repos".to_string(),
-                description: "Lists repositories owned by a user".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetUserCollections".to_string(),
-                method: RestMethod::Get,
-                path: "/users/{username}/collections".to_string(),
-                description: "Gets collections created by a user".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Collection"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-        ],
-        module_path: Some("huggingface".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+            Endpoint::new("WhoAmI", RestMethod::Get, "/whoami-v2")
+            .describes("Gets information about the authenticated user")
+            .returns_json::<UserInfo>(ctx)
+            .build()?,
+            Endpoint::new("GetUser", RestMethod::Get, "/users/{username}")
+            .describes("Gets public information about a user")
+            .returns_json::<UserInfo>(ctx)
+            .build()?,
+            Endpoint::new("ListUserRepos", RestMethod::Get, "/users/{username}/repos")
+            .describes("Lists repositories owned by a user")
+            .returns_json::<Vec<RepoInfo>>(ctx)
+            .build()?,
+            Endpoint::new("GetUserCollections", RestMethod::Get, "/users/{username}/collections")
+            .describes("Gets collections created by a user")
+            .returns_json::<Vec<Collection>>(ctx)
+            .build()?,
+        ];
+        RestApi::builder(ctx, "HuggingFaceHub", "https://huggingface.co/api")
+            .describes("Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations")
+            .authentication(AuthStrategy::BearerToken { header: None }, vec![
+            "HF_TOKEN".to_string(),
+            "HUGGING_FACE_API_KEY".to_string(),
+            "HF_API_KEY".to_string(),
+        ])
+            .env_mapping(EnvMapping {
             bearer_token: Some(EnvList::new(vec![
                 "HF_TOKEN".to_string(),
                 "HUGGING_FACE_API_KEY".to_string(),
                 "HF_API_KEY".to_string(),
             ])),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        // Unverified: believed to page by a 0-based `p`, but the definition
-        // declares no request inputs and no source confirms it.
-        pagination_exceptions: vec![PaginationException::new(
-            "ListModelDiscussions",
-            ListCollection::at("discussions")
-                .item_type("Discussion")
-                .unpaginated(),
-        )],
+        })
+            .docs_url("https://huggingface.co/docs/hub/api".to_string())
+            .module_path("huggingface".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::RestMethod;
+    use schematic_define::{RestMethod, TypeRef};
 
     // =========================================================================
     // REST API Tests
@@ -666,7 +462,7 @@ mod tests {
                 .find(|e| &e.id == id)
                 .unwrap_or_else(|| panic!("Missing endpoint: {}", id));
             assert!(
-                matches!(endpoint.response, ApiResponse::Text),
+                matches!(endpoint.response[0].shape, ResponseShape::Text),
                 "Endpoint {} should have Text response",
                 id
             );
@@ -737,4 +533,22 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_inline_components() {
+        let group = module_group().unwrap();
+        let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&group[0]), ["ListModels", "GetModel", "ListModelFiles", "GetModelFile", "ListModelCommits", "GetModelReadme", "ListModelDiscussions", "GetModelCard", "ListDatasets", "GetDataset", "ListDatasetFiles", "GetDatasetFile", "ListDatasetCommits", "GetDatasetReadme", "ListSpaces", "GetSpace", "ListSpaceFiles", "GetSpaceFile", "CreateRepo", "DeleteRepo", "UpdateRepoSettings", "MoveRepo", "WhoAmI", "GetUser", "ListUserRepos", "GetUserCollections"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
+        }
+        for name in ["Vec<ModelInfo>", "Vec<RepoFile>", "Vec<Commit>", "Vec<DatasetInfo>", "Vec<SpaceInfo>", "Vec<RepoInfo>", "Vec<Collection>"] {
+            assert!(group[0].component(name).is_none(), "container component {name} must be inline");
+        }
+        assert!(group[0].component("Commit").is_some());
+        let commits = group[0].endpoints.iter().find(|ep| ep.id == "ListModelCommits").unwrap();
+        let ResponseShape::Json(schema) = &commits.response[0].shape else { panic!("JSON commits"); };
+        assert!(*schema == TypeRef::Array(Box::new(TypeRef::Named("Commit".into()))));
+    }
+
 }

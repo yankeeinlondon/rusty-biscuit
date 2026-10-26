@@ -1,0 +1,444 @@
+{
+  "definition": {
+    "auth": "None",
+    "auth_policy": null,
+    "base_url": "http://localhost:11434",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Ollama native REST API for local LLM inference and model management",
+    "docs_url": "https://github.com/ollama/ollama/blob/main/docs/api.md",
+    "endpoints": [
+      {
+        "description": "Generate text completion from a prompt (streaming NDJSON by default)",
+        "headers": [],
+        "id": "Generate",
+        "method": "POST",
+        "params": null,
+        "path": "/api/generate",
+        "request": {
+          "Json": {
+            "Named": "GenerateBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Generate chat completion from messages (streaming NDJSON by default)",
+        "headers": [],
+        "id": "Chat",
+        "method": "POST",
+        "params": null,
+        "path": "/api/chat",
+        "request": {
+          "Json": {
+            "Named": "ChatBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Generate embeddings for text",
+        "headers": [],
+        "id": "Embeddings",
+        "method": "POST",
+        "params": null,
+        "path": "/api/embeddings",
+        "request": {
+          "Json": {
+            "Named": "EmbeddingsBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "EmbeddingsResponse"
+          }
+        }
+      },
+      {
+        "description": "List locally available models",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "params": null,
+        "path": "/api/tags",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Show detailed information about a model",
+        "headers": [],
+        "id": "ShowModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/show",
+        "request": {
+          "Json": {
+            "Named": "ShowModelBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "ShowModelResponse"
+          }
+        }
+      },
+      {
+        "description": "Pull a model from the Ollama registry (streaming progress by default)",
+        "headers": [],
+        "id": "PullModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/pull",
+        "request": {
+          "Json": {
+            "Named": "PullModelBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Push a model to the Ollama registry (streaming progress by default)",
+        "headers": [],
+        "id": "PushModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/push",
+        "request": {
+          "Json": {
+            "Named": "PushModelBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Copy a model to a new name",
+        "headers": [],
+        "id": "CopyModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/copy",
+        "request": {
+          "Json": {
+            "Named": "CopyModelBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "Delete a model",
+        "headers": [],
+        "id": "DeleteModel",
+        "method": "DELETE",
+        "params": null,
+        "path": "/api/delete",
+        "request": {
+          "Json": {
+            "Named": "DeleteModelBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "Create a model from a Modelfile (streaming progress by default)",
+        "headers": [],
+        "id": "CreateModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/create",
+        "request": {
+          "Json": {
+            "Named": "CreateModelBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "List models currently loaded in memory",
+        "headers": [],
+        "id": "ListRunningModels",
+        "method": "GET",
+        "params": null,
+        "path": "/api/ps",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListRunningModelsResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "ollama",
+    "name": "OllamaNative",
+    "request_id_header": null,
+    "request_suffix": "NativeRequest",
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "f872346f58a2f4c03dd15a14cd3c324935991fccd3bc043e5628fb236882c0ee",
+    "endpoints": [
+      {
+        "blake3": "1ee11a525701a3b03b23a1a666693244db2e91ee0b457fd24bc92cf043c7e59f",
+        "id": "Generate"
+      },
+      {
+        "blake3": "279b184ca15b1847b06e4127ecb7c3356c32416b2f76c66645b968b40ce2c7b3",
+        "id": "Chat"
+      },
+      {
+        "blake3": "f3d6d1972fd017a707f484a3cafb7dbb09c62bb63db3a729a342496956ecae76",
+        "id": "Embeddings"
+      },
+      {
+        "blake3": "ef1711f84038df75f05c64ad515594d562b04e6f6ba15e6e5d54945a9bb4b201",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "4d508a46c177cccb643491340ad544272d7157b6acb0c311275ad6d5ba077267",
+        "id": "ShowModel"
+      },
+      {
+        "blake3": "28407657a58d4a58826ed6170162cb525dabea9d8adff63321d7d31c31ae6257",
+        "id": "PullModel"
+      },
+      {
+        "blake3": "7bf439bf367384a38cf79e1f88a2c949738ae6c8a003d8d4d8e10f6d18ba2dbb",
+        "id": "PushModel"
+      },
+      {
+        "blake3": "f45fe2acfd4063a98d0c32d001ea3167f504495ea7a3a9d5ae3943fa5ecb14e8",
+        "id": "CopyModel"
+      },
+      {
+        "blake3": "148f5864937f7db7bde94fd85d2530946641e855ce5f7b11f6c92fede52fae19",
+        "id": "DeleteModel"
+      },
+      {
+        "blake3": "d2e52a14dd28b66be8ea727d303aac3f866520978eb97322a20fcedc155d8ef1",
+        "id": "CreateModel"
+      },
+      {
+        "blake3": "a0efa341a6e6f53b11a8a2d6df37a474df396873436260c9d70b43ec33ae7b25",
+        "id": "ListRunningModels"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "Generate",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "Chat",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "Embeddings",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ShowModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "PullModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "PushModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CopyModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListRunningModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "34bb9767dcfae55e14c49677c87c1ca9a52159005100277095c379b7c71db81c",
+      "name": "GenerateBody",
+      "rust_path": "::schematic_definitions::ollama::GenerateBody"
+    },
+    {
+      "blake3": "1c90304b157b698c80ce547c218f35869670c91de22257014bd3580c126190ba",
+      "name": "ModelOptions",
+      "rust_path": null
+    },
+    {
+      "blake3": "24f0dc310f534e411ca643bad26eb60c297ddfca5bb7847668be0b9f7128d198",
+      "name": "ChatBody",
+      "rust_path": "::schematic_definitions::ollama::ChatBody"
+    },
+    {
+      "blake3": "66d1cf704e3545655063fb620c48a99f67a47009fdf57d4cfe41395a8e0c33d6",
+      "name": "Message",
+      "rust_path": "::schematic_definitions::ollama::Message"
+    },
+    {
+      "blake3": "ffe846a56174d23212e8f74bda8d4e9ee437a1bde773339b43411e4a7222bb9e",
+      "name": "EmbeddingsBody",
+      "rust_path": "::schematic_definitions::ollama::EmbeddingsBody"
+    },
+    {
+      "blake3": "39789d390e91c582a97a851c30a32c0209d6b77ba682bf0b88ece5fa6f0f2a83",
+      "name": "ShowModelBody",
+      "rust_path": "::schematic_definitions::ollama::ShowModelBody"
+    },
+    {
+      "blake3": "f648bd1ea2c709e62d4c4027ecf3b11ad51f28604b1fe24d4b6e9b6c6a88d368",
+      "name": "PullModelBody",
+      "rust_path": "::schematic_definitions::ollama::PullModelBody"
+    },
+    {
+      "blake3": "9ea4b79fab4fbfdd6683bac0baa46e8fe56652b1a9064a0285a33582d4d70835",
+      "name": "PushModelBody",
+      "rust_path": "::schematic_definitions::ollama::PushModelBody"
+    },
+    {
+      "blake3": "ae6ba418242949cb3a01ffe25cd7cb87abcce7ac6d374e4a42a78a7ca43088f6",
+      "name": "CopyModelBody",
+      "rust_path": "::schematic_definitions::ollama::CopyModelBody"
+    },
+    {
+      "blake3": "de3c50d1a025151d0a106df3229acdbb2ba1a143798d64b77cb3a0d3ec2eb2cf",
+      "name": "DeleteModelBody",
+      "rust_path": "::schematic_definitions::ollama::DeleteModelBody"
+    },
+    {
+      "blake3": "23dbbfa95c24115fb8ba15f5e1d6b892c0aac0cb20cab3f5630b77bb58693d26",
+      "name": "CreateModelBody",
+      "rust_path": "::schematic_definitions::ollama::CreateModelBody"
+    },
+    {
+      "blake3": "a1f3e0d8172cc068aedc8980b97474f60824ef781b4cde9c1d84e4751c4fc4dd",
+      "name": "EmbeddingsResponse",
+      "rust_path": "::schematic_definitions::ollama::EmbeddingsResponse"
+    },
+    {
+      "blake3": "c2b4bb9df6dfe775afc2f4f263558131a5b881da9f6fdb8b52545a50f2bb269a",
+      "name": "ListModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::ListModelsResponse"
+    },
+    {
+      "blake3": "126c2c47ecbc0483086d1205a11a667e126d68057694bfa2a2a097efd48d0a37",
+      "name": "ModelDetails",
+      "rust_path": "::schematic_definitions::ollama::ModelDetails"
+    },
+    {
+      "blake3": "0bcb3d76944f385c788db4751e82592fbf017a59f6f46f301c2fd1aa2b23c4e8",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::ollama::ModelInfo"
+    },
+    {
+      "blake3": "0ae9031e2468faaf5138b77d09becd39c60b6de8b0524460adb30557d77cbc6e",
+      "name": "ShowModelResponse",
+      "rust_path": "::schematic_definitions::ollama::ShowModelResponse"
+    },
+    {
+      "blake3": "e5f89ff65b2b1347889b0fb2bd1597559fb6a9bb68c7da9926879b6a9b37ac88",
+      "name": "ListRunningModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::ListRunningModelsResponse"
+    },
+    {
+      "blake3": "6cde031896040e5880a81d5134f1e6b741afd73dc0fe9b7853f7d9992b40cdfd",
+      "name": "RunningModel",
+      "rust_path": "::schematic_definitions::ollama::RunningModel"
+    },
+    {
+      "blake3": "1a1f6729582c26a31298cccb8186affc6df009199b5f0606db47d8a9841459e5",
+      "name": "OpenAIChatCompletionRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAIChatCompletionRequest"
+    },
+    {
+      "blake3": "a5d5394d268ddaea96b24be3d9bbe8469b7bef16e22dcd87699144ff5fd168a2",
+      "name": "OpenAIMessage",
+      "rust_path": "::schematic_definitions::ollama::OpenAIMessage"
+    },
+    {
+      "blake3": "334921dc241c9f8e6c719023f427936109e00eefd4b2cbb38dbd37724796d519",
+      "name": "OpenAICompletionRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAICompletionRequest"
+    },
+    {
+      "blake3": "be3f71c2fe952599a4ee03bf3edc793dd1a0e6109a7f3fd55478fc34e68c3390",
+      "name": "OpenAIEmbeddingRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingRequest"
+    },
+    {
+      "blake3": "ffb01e193ca70ef2af2b5c8303818deca63559d88855750269e1fb19c51af2fb",
+      "name": "OpenAIEmbeddingResponse",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingResponse"
+    },
+    {
+      "blake3": "5be7b7d58979a6181df5089fa69d9f06a46b722698ad7f26f8d435254f9da88a",
+      "name": "OpenAIEmbeddingData",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingData"
+    },
+    {
+      "blake3": "59e586737c640638d56552bddb7bff5f0a2001bc71e4e369fa72fa80812a0e42",
+      "name": "OpenAIUsage",
+      "rust_path": "::schematic_definitions::ollama::OpenAIUsage"
+    },
+    {
+      "blake3": "46f2023b077f887c6a51bc2905adc921bcea3230fe11b8c9075b9c27e113c771",
+      "name": "OpenAIListModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::OpenAIListModelsResponse"
+    },
+    {
+      "blake3": "f7a23707db69e4b7cc7333a7c6e5a0f6c4e0fd4e219bac4714d2661888f2981a",
+      "name": "OpenAIModel",
+      "rust_path": "::schematic_definitions::ollama::OpenAIModel"
+    }
+  ]
+}

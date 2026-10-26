@@ -58,6 +58,13 @@ pub struct Tool {
     pub cache_control: Option<CacheControl>,
 }
 
+impl schematic_define::Registration for Tool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Tool");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Tool {
     /// Creates a new tool definition.
     pub fn new(

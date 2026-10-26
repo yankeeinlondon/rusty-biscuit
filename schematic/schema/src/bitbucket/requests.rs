@@ -7,11 +7,10 @@ use super::{Bitbucket, BitbucketApi};
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value")
-///;
+/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -31,9 +30,11 @@ impl GetRepositoryRequest {
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
     type Api = BitbucketApi;
-    type Success = Repository;
+    type Success = ::schematic_definitions::bitbucket::Repository;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Repository>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::bitbucket::Repository,
+    >;
     const ENDPOINT_ID: &'static str = "GetRepository";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -43,7 +44,7 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
             "/repositories/{}/{}", urlencoding::encode(& self.workspace.to_string()),
             urlencoding::encode(& self.repo_slug.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -58,13 +59,12 @@ impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetSourceRequest;
 ///
 /// let request = GetSourceRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
-///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
-///;
+///     .with_page(1)
+///     .with_pagelen(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSourceRequest {
@@ -109,11 +109,56 @@ impl GetSourceRequest {
         self
     }
 }
+/// The success reply of `GetSource`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum GetSourceResponse {
+    /// returned for a directory: its paginated listing. Bitbucket serves a file in the media type its name implies, so a committed `.json` file also arrives as `application/json` and selects this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header tells the two apart; read a file's bytes with `send_raw`
+    ///
+    /// Chosen by media type `application/json`.
+    Directory(
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::SourceEntry,
+        >,
+    ),
+    /// returned for a file: its raw content, in the media type Bitbucket derives from the file name
+    ///
+    /// Chosen when no other shape matches the reply's media type.
+    File(bytes::Bytes),
+}
+impl schematic_runtime::Alternatives for GetSourceResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Binary).fallback(),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    schematic_definitions::bitbucket::PaginatedResponse<
+                        schematic_definitions::bitbucket::SourceEntry,
+                    >,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Directory)
+            }
+            _ => {
+                <schematic_runtime::Binary as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::File)
+            }
+        }
+    }
+}
 impl schematic_runtime::EndpointSpec for GetSourceRequest {
     type Api = BitbucketApi;
-    type Success = bytes::Bytes;
+    type Success = GetSourceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Shapes<GetSourceResponse>;
     const ENDPOINT_ID: &'static str = "GetSource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -125,12 +170,12 @@ impl schematic_runtime::EndpointSpec for GetSourceRequest {
             urlencoding::encode(& self.commit.to_string()), urlencoding::encode(& self
             .path.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
+            query.push(("pagelen".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -146,13 +191,12 @@ impl schematic_runtime::EndpointSpec for GetSourceRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///     .with_state(/* value */)
-///;
+///     .with_page(1)
+///     .with_state("state_value".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -188,9 +232,15 @@ impl ListPullRequestsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<PullRequest>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::PullRequest,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequest>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::PullRequest,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequests";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -200,12 +250,12 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             "/repositories/{}/{}/pullrequests", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         if let Some(ref value) = self.state {
-            query.push(("state".to_string(), value.to_string()));
+            query.push(("state".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -221,11 +271,10 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetPullRequestRequest;
 ///
-/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value")
-///;
+/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPullRequestRequest {
@@ -252,9 +301,11 @@ impl GetPullRequestRequest {
 }
 impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
     type Api = BitbucketApi;
-    type Success = PullRequest;
+    type Success = ::schematic_definitions::bitbucket::PullRequest;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PullRequest>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::bitbucket::PullRequest,
+    >;
     const ENDPOINT_ID: &'static str = "GetPullRequest";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -265,7 +316,7 @@ impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -280,12 +331,11 @@ impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListPullRequestCommentsRequest;
 ///
 /// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestCommentsRequest {
@@ -320,9 +370,15 @@ impl ListPullRequestCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<PullRequestComment>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::PullRequestComment,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequestComment>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::PullRequestComment,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequestComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -333,9 +389,9 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
             .workspace.to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -351,12 +407,11 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -384,9 +439,15 @@ impl ListIssuesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Issue>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Issue,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Issue>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Issue,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssues";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -396,9 +457,9 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/repositories/{}/{}/issues", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -414,11 +475,10 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value")
-///;
+/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -445,9 +505,9 @@ impl GetIssueRequest {
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
     type Api = BitbucketApi;
-    type Success = Issue;
+    type Success = ::schematic_definitions::bitbucket::Issue;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Issue>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Issue>;
     const ENDPOINT_ID: &'static str = "GetIssue";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -458,7 +518,7 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -473,12 +533,11 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -513,9 +572,15 @@ impl ListIssueCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<IssueComment>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::IssueComment,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<IssueComment>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::IssueComment,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -526,9 +591,9 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .workspace.to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -544,12 +609,11 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListIssueChangesRequest;
 ///
 /// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueChangesRequest {
@@ -584,9 +648,15 @@ impl ListIssueChangesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<IssueChange>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::IssueChange,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<IssueChange>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::IssueChange,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueChanges";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -597,9 +667,9 @@ impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -615,11 +685,10 @@ impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetBranchRequest;
 ///
-/// let request = GetBranchRequest::new("workspace_value", "repo_slug_value", "name_value")
-///;
+/// let request = GetBranchRequest::new("workspace_value", "repo_slug_value", "name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetBranchRequest {
@@ -646,9 +715,9 @@ impl GetBranchRequest {
 }
 impl schematic_runtime::EndpointSpec for GetBranchRequest {
     type Api = BitbucketApi;
-    type Success = Branch;
+    type Success = ::schematic_definitions::bitbucket::Branch;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Branch>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Branch>;
     const ENDPOINT_ID: &'static str = "GetBranch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -659,7 +728,7 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -674,12 +743,11 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -707,9 +775,15 @@ impl ListTagsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Tag>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Tag,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Tag>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Tag,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListTags";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -719,9 +793,9 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repositories/{}/{}/refs/tags", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -737,11 +811,10 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetTagRequest;
 ///
-/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value")
-///;
+/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagRequest {
@@ -768,9 +841,9 @@ impl GetTagRequest {
 }
 impl schematic_runtime::EndpointSpec for GetTagRequest {
     type Api = BitbucketApi;
-    type Success = Tag;
+    type Success = ::schematic_definitions::bitbucket::Tag;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Tag>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Tag>;
     const ENDPOINT_ID: &'static str = "GetTag";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -781,7 +854,7 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -796,12 +869,11 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListDownloadsRequest;
 ///
 /// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDownloadsRequest {
@@ -829,9 +901,15 @@ impl ListDownloadsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Download>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Download,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Download>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Download,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListDownloads";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -841,9 +919,9 @@ impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
             "/repositories/{}/{}/downloads", urlencoding::encode(& self.workspace
             .to_string()), urlencoding::encode(& self.repo_slug.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -859,11 +937,10 @@ impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::GetDownloadRequest;
 ///
-/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value")
-///;
+/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadRequest {
@@ -903,7 +980,7 @@ impl schematic_runtime::EndpointSpec for GetDownloadRequest {
             .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
             urlencoding::encode(& self.filename.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -918,12 +995,11 @@ impl schematic_runtime::EndpointSpec for GetDownloadRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::bitbucket::ListWorkspaceReposRequest;
 ///
 /// let request = ListWorkspaceReposRequest::new("workspace_value")
-///     .with_page(/* value */)
-///;
+///     .with_page(1);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWorkspaceReposRequest {
@@ -964,9 +1040,15 @@ impl From<String> for ListWorkspaceReposRequest {
 }
 impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Repository>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Repository,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Repository>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Repository,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListWorkspaceRepos";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -975,9 +1057,9 @@ impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
         let path = format!(
             "/repositories/{}", urlencoding::encode(& self.workspace.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
+        let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
+            query.push(("page".to_string(), value.to_string().into()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {

@@ -1,5 +1,12 @@
 # OAuth2 Support Design for the Schematic Ecosystem
 
+> **Historical proposal.** This is the original design and is not maintained.
+> Its flat `OAuth2Config` struct and `env_username` field are gone: a
+> definition now declares one `OAuth2Config` variant per grant, and Basic
+> carries its own variable lists. For current behavior read
+> [OAuth2 grants](../docs/definition-builders.md#oauth2-grants) and
+> [OAuth](../docs/runtime/credentials.md#oauth).
+
 ## Summary
 
 This document proposes first-class OAuth2 support across the Schematic ecosystem. The core recommendation is:

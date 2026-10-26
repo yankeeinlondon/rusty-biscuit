@@ -47,6 +47,6 @@ failure:
 
 # Uncommitted Changes
 
-This document decides what happens to uncommitted changes from its `start` stack and is never meant to reach an agent.
+This document decides what happens to uncommitted changes from its `start` event and is never meant to reach an agent.
 
 If you are an agent reading this, neither handoff fired. Do not stage, commit, or push anything. Report that `prompts/_pr/dirty.md` reached its body, and stop.

@@ -107,7 +107,7 @@ async fn answer(mut stream: TcpStream) {
     write_all(&mut stream, route.body.as_bytes()).await;
 }
 
-async fn typed<D: Decode, E: ErrorBody>(client: &Client<TestApi>, path: &str) -> Response<D::Output, E> {
+async fn typed<D: Decode, E: ErrorBody<TestApi>>(client: &Client<TestApi>, path: &str) -> Response<D::Output, E> {
     client.send(Call::<D, E>::get(path)).full().await.expect("a head arrived")
 }
 

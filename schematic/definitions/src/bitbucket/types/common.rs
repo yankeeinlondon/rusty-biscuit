@@ -78,6 +78,21 @@ pub struct PaginatedResponse<T> {
     pub page: Option<u64>,
 }
 
+// Each shipped nominal instantiation has a concrete public path; spelling T
+// here would leak an unbound generic into downstream generated clients.
+macro_rules! paginated_registration {
+    ($($item:ident),+ $(,)?) => { $(
+        impl schematic_define::Registration for PaginatedResponse<crate::bitbucket::$item> {
+            fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+                use crate as schematic_definitions;
+                ctx.register_as::<Self>(schematic_define::rust_path!(schematic_definitions::bitbucket::PaginatedResponse<schematic_definitions::bitbucket::$item>)
+                    .schema_name(concat!("PaginatedResponse<", stringify!($item), ">")))
+            }
+        }
+    )+ };
+}
+paginated_registration!(SourceEntry, PullRequest, PullRequestComment, Issue, IssueComment, IssueChange, Tag, Download, Repository);
+
 impl<T> PaginatedResponse<T> {
     /// Returns `true` if there are more pages available.
     pub fn has_next(&self) -> bool {

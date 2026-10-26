@@ -137,8 +137,8 @@ Three things change for such a caller:
   wrapper's items are `page.items`; its total, when the definition authors
   one, is `page.total`; the reply's metadata is `page.meta`.
 - **The error is a `PagerError`,** whose `Transport` and `Api { error, meta }`
-  variants carry the same evidence as `CallError`'s. A retry is still an
-  explicit second call: `call.anonymous().page_size(n).fetch_page()`.
+  variants carry the same evidence as `CallError`'s. Single-page calls can be
+  repeated explicitly; a retained traversal also offers `pages.retry().await`.
 - **A size outside the authored bounds is refused before sending.**
   Previously an out-of-range `per_page` went to the provider unchecked; now
   `page_size(0)` or `page_size(101)` on GitHub fails without a request. Clamp
@@ -210,7 +210,8 @@ flowchart TD
     cont -->|yes| req
     cont -->|no| fail
     fail --> inc["collect_all → Incomplete<br/>{ reason, items, pages, error }"]
-    fail --> stays["the pager stays failed:<br/>AlreadyFailed, no request"]
+    fail --> stays["next/prev return the retained error:<br/>no request"]
+    stays -->|"optional explicit retry()"| req
 ```
 
 ## A complete list or an honest failure
@@ -240,7 +241,7 @@ match gh.list_releases("o", "r").pager().page_limit(5).collect_all().await {
 | `RepeatedContinuation` | a continuation came back that this traversal already sent, a page made no progress, or an empty page claimed more |
 | `HttpError` | a page's response is an error status, was cut off, was refused at a redirect, failed a hook, or is malformed |
 | `DeadlineExceeded` | the shared deadline expired before a page's response head |
-| `CrossOriginRejected` | a next link points to an origin the API's policy refuses |
+| `CrossOriginRejected` | a next link points to an origin the endpoint's effective policy refuses |
 | `InvalidContinuation` | a continuation, end signal, or total was missing where required, or unusable |
 | `InvalidArgument` | a page size, start position, or page limit was refused before sending |
 | `TransportError` | any other failure before a response arrived, including a failed redirect hop |
@@ -288,8 +289,12 @@ reports as `RepeatedContinuation`).
 - **Next links are sent as the provider wrote them,** with GET. A relative
   link resolves against the URL of the response that carried it, after any
   redirect. The pager does not re-add the page size to a followed link unless
-  the caller changed the size during the traversal. A response that names
-  two different next links is `InvalidContinuation`.
+  the caller changed the size during the traversal. When it does add a value
+  to a link (a changed size or a carried query parameter), it replaces only
+  the pairs of that name: the link's other pairs are kept byte for byte, and
+  the added value is encoded as every declared query value is (a space is
+  `%20`). A response that names two different next links is
+  `InvalidContinuation`.
 - **Next links obey the API's cross-origin policy.** Each link is checked
   with the listing endpoint's policy before it is requested, and a refused
   link reaches no server; see
@@ -299,13 +304,18 @@ reports as `RepeatedContinuation`).
   are returned (and kept by `collect_all`); the failure is returned by the
   next request, before anything is sent. A page whose collection or items do
   not decode contributes no items.
-- **A failed pager stays failed.** After any error, every further `next()`
-  returns `PagerError::AlreadyFailed { first }` without a request.
+- **Failure evidence stays available.** After any error, further `next()`
+  and `prev()` calls return that specific error with the same details without
+  sending. An explicit `retry().await` is always available, regardless of the
+  error category; each failed retry replaces the retained error with its own
+  complete evidence. Retry is optional and never automatic.
 - **One deadline covers the traversal.** A `.deadline(&deadline)` on the call
   or the pager bounds every page request; see
   [Deadlines and timeouts](./runtime/deadlines-and-timeouts.md).
 - **The global JSON hook runs on every page,** before items and continuations
-  are read; an endpoint's typed mutator does not; see
+  are read; an endpoint's typed mutator does not. This applies to `.pages()`,
+  `.fetch_page()`, and `.collect_all()`, including session pages. Ordinary
+  endpoint sends still run both hooks; see
   [Response hooks](./runtime/hooks.md).
 
 ### Bounds are checked before sending
@@ -324,6 +334,68 @@ let refused = gh.list_releases("o", "r").page_size(101).fetch_page().await;
 `collect_all` reports the same refusal as `IncompleteReason::InvalidArgument`
 with `pages` counting the refused request.
 
+The size is checked every time the pager settles on the size the next
+request sends: the caller's `.page_size(n)`, an authored `sent_default` when
+the caller set none, and a `pages.set_page_size(n)` made during the
+traversal. A followed next link that already carries the provider's own size
+is sent as written, so it is not checked, unless the caller changed the size.
+The refusal names the bound it broke:
+
+```text
+the page size is above the declared maximum, 100
+the page size is below the declared minimum, 1
+```
+
+This check compares the size the same way, with the same evaluator, as a
+generated request's `minimum` and `maximum` rules (see
+[Value constraints](./value-constraints.md)). It stays in the pager
+because an adopted page-size parameter is not a request field: the
+request's `validate()` and its send-time check never see the size the pager
+chooses, including one changed mid-traversal.
+
+### Explicit recovery of a traversal
+
+Use a retained traversal when you need to decide whether to retry:
+
+```rust
+let mut pages = client.list_files().pages();
+if let Err(error) = pages.next().await {
+    report(&error);
+    pages.retry().await?; // optional; immediately attempts the failed position
+}
+let recovered = pages.next().await?; // the recovered page is delivered once
+```
+
+`retry()` returns `Result<(), PagerError<_>>` and sends nothing when no failure
+is retained. On success, the next iteration call yields the recovered page.
+Earlier pages, their delivered-item identities, and the failed page's number
+are preserved; `pages_fetched()` counts every attempted request, including
+retries. `items_delivered()` excludes a recovered page until iteration yields
+it; on `Items`, it counts each item only when `next()` returns it.
+`Items::retry()` offers the same recovery for item iteration.
+
+When a page's items were already delivered but its continuation failed,
+retry refreshes that source page to recover continuation evidence and discards
+its replayed items. The next iteration continues from the repaired continuation;
+no item from that source page is delivered again. If the refreshed continuation
+is still unusable or loops, retry returns the new specific error and metadata.
+This refresh also applies after loop detection; it does not erase loop history.
+
+Retries retain credentials, origin policy, partition, direction, and deadline.
+They cannot guarantee recovery: an expired deadline remains expired, an invalid
+argument remains invalid unless an available setter corrects it, and a refused
+origin remains refused. The caller can still retry every such error and inspect
+the new attempt's evidence. `collect_all()` and `fetch_page()` consume their
+traversal and return its error; use `.pages()` or `.items()` to retain a position
+for recovery. Renew failures are ordinary independent calls and may be retried
+by calling `renew()` again; cleanup still makes one bounded close attempt.
+
+The `Api` variant shares its `ApiError` through `Arc`, retaining decoded provider
+errors and exact raw response bytes without requiring the provider error to
+implement `Clone`. Paginated endpoint failure types must implement `Sync`, so
+shared evidence can cross tasks; ordinary endpoint failure types still require
+only `Send`.
+
 ## Errors and the evidence they keep
 
 | `PagerError` variant | When | Keeps |
@@ -337,7 +409,6 @@ with `pages` counting the refused request.
 | `EmptyPageClaimsMore { meta }` | an empty page-number or offset page said more follows | the response metadata |
 | `MissingSessionHandle { meta }` | a session's open request succeeded without a usable handle | the response metadata |
 | `DeadlineExceeded { completed_pages, error }` | the shared deadline expired before the next page's head | the pages received and the transport error |
-| `AlreadyFailed { first }` | the pager had already failed | the kind of the first error; no request was sent |
 
 `error.kind()` gives the variant without its evidence, `error.response_meta()`
 the response when one arrived, and `error.incomplete_reason()` the reason
@@ -398,8 +469,9 @@ sequenceDiagram
 
 - **Open.** The session opens with the first page request, not before the
   closure runs. A failed open is that page's error inside the closure, and
-  every later traversal in the scope gets `AlreadyFailed`. An open reply
-  without a handle is `MissingSessionHandle`.
+  later traversals retain that same complete open error. `pages.retry().await`
+  can explicitly retry opening; a successful open is shared by later traversals.
+  An open reply without a handle is `MissingSessionHandle`.
 - **Handle.** Each page may return a new handle; the latest one received
   wins, and is used by the next request and by the close.
 - **Keep-alive.** The authored default is sent on the open request and on
@@ -424,7 +496,7 @@ sequenceDiagram
 
 ## Partitions
 
-A partitioned list (such as a sliced scroll) is read as `n` independent
+A partitioned list (such as a sliced point-in-time search) is read as `n` independent
 traversals. Traversal `i` sends slice index `i` (from 0) and the count `n`
 on every request, including followed links. Each has its own continuation
 and loop detection, so one partition can fail while the others complete.
@@ -456,54 +528,46 @@ handle, and its single close. The latest handle is the one whose response
 complete out of order, that may not be the provider's newest handle; a
 provider that invalidates older handles could then reject a request or keep a
 newer handle open until its lease expires. The pager neither serializes
-partitions nor guards against this. For a session that the first page opens,
-each partition's first request opens server-side state of its own, and only
-the latest handle is closed.
+partitions nor guards against this.
+
+Definitions combining partitions with `Session::opened_by_first_page()` are
+rejected with `partitioned-first-page-session`: each partition would open
+independent server state, while the scope closes only one handle. Use a
+separate open request for a shared partition session. First-page sessions
+remain supported without partitions. Independent-session tracking and cleanup
+must be designed before the combination can be supported.
 
 ## Authoring pagination
 
-### A default and a table of exceptions
+### An API default and endpoint collections
 
-`RestApi` has two fields; the types are in `schematic_define::pagination`
-(and its authoring subset in `schematic_define::prelude`):
-
-- `default_pagination: Option<Strategy>`: the strategy a list inherits.
-- `pagination_exceptions: Vec<PaginationException>`: one row per endpoint
-  id that differs: a wrapper list, an opt-out, an override, or a non-GET
-  list.
-
-GitHub's definition is a typical example:
+Use `RestApiBuilder::default_pagination(strategy)` for the inherited strategy
+and `EndpointBuilder::pagination(collection)` for wrapper lists, opt-outs,
+overrides, and non-GET lists. Types live in `schematic_define::pagination`.
 
 ```rust
-use schematic_define::pagination::{
-    Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
-};
+use schematic_define::prelude::*;
 
-fn github_page_number() -> Strategy {
-    Strategy::page_number("page", MoreSignal::link_rel("next"))
-        .page_size(PageSize::new("per_page").server_default(30).max(100))
-        .build()
-}
-
-// RestApi {
-//     default_pagination: Some(github_page_number()),
-//     pagination_exceptions: vec![PaginationException::new(
-//         "ListWorkflowRuns",
-//         Collection::at("workflow_runs")
-//             .item_type("WorkflowRun")
-//             .paginate(github_page_number().total(ValueSource::body("total_count"))),
-//     )],
-//     ..
-// }
+let mut context = DefinitionContext::types_in("::my_models");
+let endpoint = Endpoint::get("ListItems", "/items")
+    .describes("List items")
+    .returns_json::<Vec<String>>(&mut context)
+    .pagination(Collection::root().unpaginated())
+    .build()?;
 ```
 
-A row's `Collection` says where the items are and how the list pages:
+This endpoint remains an unpaginated list even when the API has a default.
+For a wrapper response, use `Collection::at("data").item_type("Item")`.
+Provider-local strategy helpers supply the paging mechanism and remain local
+to each provider module.
 
-| Row | Meaning |
+An endpoint's `Collection` says where the items are and how the list pages:
+
+| Collection | Meaning |
 | --- | --- |
 | `Collection::root()` | the body is the array of items |
 | `Collection::at("data")` | the items are at a path; `at("edges[*].node")` and `at("data.children[*].data")` reach nested records |
-| `.item_type("WorkflowRun")` | the Rust type of one item; required unless the row is a root array of an explicit `Vec<T>` response, where `T` is used |
+| `.item_type("WorkflowRun")` | the Rust type of one item; required unless the collection is a root array of an explicit `Vec<T>` response, where `T` is used |
 | (nothing more) | inherit the API default; unpaginated when there is none |
 | `.paginate(strategy)` | this strategy instead of the default |
 | `.unpaginated()` | a list without pagination, whatever the default |
@@ -516,8 +580,8 @@ order:
 
 ```mermaid
 flowchart TD
-    e["endpoint"] --> row{"a row in pagination_exceptions<br/>for its id? (the first row wins)"}
-    row -->|yes| kind{"the row's pagination"}
+    e["endpoint"] --> row{"an explicit endpoint collection?"}
+    row -->|yes| kind{"the collection's pagination"}
     kind -->|".paginate(strategy)"| explicit["paginated by that strategy<br/>(origin: Exception)"]
     kind -->|".unpaginated()"| optout["unpaginated list<br/>(origin: Exception)"]
     kind -->|inherit| d1{"default_pagination set?"}
@@ -534,9 +598,9 @@ flowchart TD
 
 - Only the literal spelling `Vec<..>` is recognized. A type alias, a
   qualified `std::vec::Vec`, `serde_json::Value`, or any non-GET endpoint is a
-  list only with a row.
+  list only with an explicit collection.
 - A GET `Vec<T>` endpoint that is not a list the provider pages, such as a
-  lookup, needs an opt-out row: `Collection::root().unpaginated()`.
+  lookup, needs an explicit opt-out: `Collection::root().unpaginated()`.
 - Only a paginated list gets a pager. An unpaginated list and a non-list
   generate no pagination code at all.
 
@@ -574,15 +638,60 @@ flowchart TD
     required -->|no| adopted["adopted"]
     required -->|yes| value{"a value to send when<br/>the caller sets none?"}
     value -->|no| missing["pager-managed-required-without-default"]
-    value -->|yes| adoptedreq["adopted; ordinary sends<br/>send that value"]
+    value -->|yes| typed{"valid for the<br/>declared type?"}
+    typed -->|no| invalid["pager-managed-default-invalid"]
+    typed -->|yes| adoptedreq["adopted; ordinary sends<br/>send that value"]
 ```
 
 A required adopted parameter needs a value the pager sends when the caller
 sets none: the first page or offset of the index base, the size's
 `sent_default`, or the keep-alive default. A cursor or partition input has
-none, so it cannot be required. An ordinary `.await` of the endpoint sends
+none, so it cannot be required. The value must also suit the parameter's
+declared type: a size of `50` cannot fill a `Boolean` parameter or an enum
+without a `"50"` value. An ordinary `.await` of the endpoint sends
 that value too; an optional adopted parameter is omitted from an ordinary
 send.
+
+#### Page-size bounds on the adopted parameter
+
+The pager sends the page size, so the strategy's `PageSize` is where its
+bounds live: `min` (default 1) and `max` become the adopted parameter's
+`minimum` and `maximum`. `pagination::page_size_constraints(&size)` returns
+those rules, and `pagination::adopted_page_size(&api, &endpoint)` returns
+the adopted page-size parameter (its location, name, and effective rules).
+OpenAPI export writes those effective bounds into the parameter's schema, so
+GitHub's `per_page` exports `minimum: 1, maximum: 100` without declaring
+them itself.
+
+Declare the parameter with no rules and the bounds come from the strategy.
+If it declares its own rules, they must agree, or API build and bundle load
+fail with `page-size-constraint-conflict`:
+
+- `minimum` and `maximum`, when either is present, must be exactly the
+  strategy's `min` and `max`. Declare `maximum` exactly when the strategy
+  has a `max`; `maximum` alone, or `minimum` alone while the strategy has a
+  `max`, is rejected.
+- No other value rule is allowed (`exclusiveMinimum`, `multipleOf`, `enum`,
+  `pattern`, and so on), because the pager chooses the value and could not
+  honor it. `format` is only an annotation and is allowed.
+
+An imported parameter carries the bounds its OpenAPI document declares, so a
+pagination overlay that adopts it must make the two agree. OpenAI's documents
+`limit` as `minimum: 0`, while its strategies start at 1 (the lowest the
+pagination model accepts); its overlay replaces each adopted parameter's
+bounds with the strategy's, keeping any other rule such as `format`.
+
+```rust
+.default_pagination(Strategy::page_number("page", MoreSignal::NonEmptyPage)
+    .page_size(PageSize::new("per_page").min(5).max(100)).build())
+// on the endpoint:
+.query(ParamDef::new("per_page", QueryParamType::Integer)
+    .constraints(Constraints::new().minimum(5).maximum(50)))
+```
+
+```text
+Items endpoint ListItems: page-size-constraint-conflict: page-size parameter `per_page` declares minimum 5 and maximum 50, but the strategy's page size has min 5 and max 100; declare exactly those bounds or none
+```
 
 Adoption changes only the Rust client. The OpenAPI and Postman exports keep
 every declared parameter. A remaining setter named like a pager control
@@ -617,6 +726,11 @@ An input is a query parameter by default; `InputParam::header(..)` and
 `InputParam::body("pit.id")` place it elsewhere. Follow-ups re-send every
 ordinary input by default, except a followed link, which carries nothing.
 
+A GraphQL operation pages a Relay connection with the
+`Relay::forward(root)` and `Relay::backward(root)` presets, which build a
+cursor strategy writing into `variables` and reading under the reply's `data`;
+see [GraphQL operations](graphql.md#pagination).
+
 A hypothetical point-in-time search with four partitions:
 
 ```rust
@@ -642,12 +756,12 @@ let point_in_time = Strategy::cursor(InputParam::body("search_after"), CursorSou
 
 ### Validation
 
-`pagination::validate_pagination(&api)` checks every strategy and row, and
+`pagination::validate_pagination(&api)` checks every strategy and endpoint collection, and
 `schematic-gen` runs it before writing the Rust client. A definition with an
 error generates nothing:
 
 ```text
-severity=error api=GitHub endpoint=ListReleaze feature=pagination-exception output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; did you mean `ListReleases`?
+severity=error api=Catalog endpoint=ListItems feature=pagination-exception output=rust: missing-item-type: collection requires an item type
 ```
 
 Every rule is listed in
@@ -656,8 +770,7 @@ Every rule is listed in
 and `pagination::param_adoptions` what happens to each declared parameter a
 strategy names; the generator emits exactly those.
 
-`PaginationStyle`, `PaginationResponse`, and `EndpointParams::with_pagination`
-are superseded and generate no pager.
+Pagination is authored only through strategies and endpoint collections; legacy pagination enums, helpers, and API exception tables are removed.
 
 ### Imported definitions
 
@@ -706,7 +819,6 @@ reason is a distinct state:
 | ElevenLabs | `ListVoices` | definition gap: the definition sends the cursor as `page_token`; the research note names the input `next_page_token` | cursor `next_page_token` from `next_page_token`, more while `has_more`; `page_size` max 100, default 10; total `total_count` | ElevenLabs API reference for `GET /v2/voices`, confirming the cursor's request parameter name |
 | GitLab | `ListIssueParticipants` | unverified | the API default: page number `page`, `per_page`, more while `X-Next-Page`, total `X-Total` | GitLab REST API reference for `GET /projects/:id/issues/:issue_iid/participants` |
 | Gitea | `GetGitTree` | unverified | page number `page`, `per_page`, flag `truncated`; total `total_count` | Gitea API reference (swagger) for `GET /repos/{owner}/{repo}/git/trees/{sha}` |
-| Gitea | `GetGitTreeRecursive` | unverified | as `GetGitTree` | as `GetGitTree` |
 | EMQX basic, EMQX bearer | `ListAlarms` | unverified | page number `page`, `limit`, flag `meta.hasnext`; total `meta.count` | EMQX 5 REST API reference for `GET /api/v5/alarms` |
 | EMQX basic, EMQX bearer | `ListClients` | unverified | as `ListAlarms` | … for `GET /api/v5/clients` |
 | EMQX basic, EMQX bearer | `ListSubscriptions` | unverified | as `ListAlarms` | … for `GET /api/v5/subscriptions` |
@@ -734,3 +846,18 @@ cover 32 endpoints. A few more lists are unpaginated by design: Gitea's
 `GetTagReference` is a prefix lookup that returns every matching ref,
 OpenAI's `ListModels` reply has no continuation, and ElevenLabs'
 `ListModels` is a root array with no evidence of paging.
+
+### Endpoint collections for imported APIs
+
+An endpoint can state its collection with `.pagination(Collection::at("data")
+.item_type("Item").paginate(strategy))`. Its collection takes precedence over
+root-array inference. Without an endpoint collection, GET root-array inference
+and the API default determine whether the endpoint pages.
+
+OpenAI's importer leaves pagination to its hand-written overlay. The overlay
+finds each named imported endpoint, assigns its collection, and rejects an
+unknown ID. Its seven beta Responses operations share their ordinary endpoint
+IDs with optional `beta` query inputs. `ListInputItems` uses `BetaItemResource`
+for its compatible superset. The serialized resolution origin remains
+`Exception` for explicit endpoint collections to preserve the transfer format.
+All 93 shipped pagers use the same resolution rules.

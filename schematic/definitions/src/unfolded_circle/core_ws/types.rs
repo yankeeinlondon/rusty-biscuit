@@ -220,12 +220,16 @@ pub struct CoreWsEventEnvelope {
 }
 
 /// Auth-required event emitted by the server.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreWsAuthRequired {
     /// Message kind discriminator.
     pub kind: CoreWsEnvelopeKind,
     /// Event message id/name (`auth_required`).
     pub msg: CoreWsKnownMessage,
+    /// Optional raw payload; the Core API names itself here
+    /// (`{"api":{"name":…,"version":…}}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg_data: Option<Box<RawValue>>,
 }
 
 /// Message-based authentication request body.
@@ -762,5 +766,18 @@ mod tests {
                 .to_string()
                 .contains("msg_data is absent")
         );
+    }
+
+    /// The `authRequiredEvent` frame keeps the API identity it carries.
+    #[test]
+    fn auth_required_retains_msg_data() {
+        let text = r#"{"kind":"event","msg":"auth_required","msg_data":{"api":{"name":"UC Core API","version":"0.20.0"}}}"#;
+        let event: CoreWsAuthRequired = serde_json::from_str(text).unwrap();
+        assert_eq!(event.msg, CoreWsKnownMessage::AuthRequired);
+        assert_eq!(
+            event.msg_data.as_deref().map(RawValue::get),
+            Some(r#"{"api":{"name":"UC Core API","version":"0.20.0"}}"#)
+        );
+        assert_eq!(serde_json::to_string(&event).unwrap(), text);
     }
 }

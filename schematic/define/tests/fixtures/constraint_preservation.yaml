@@ -1,0 +1,433 @@
+# Every supported value-constraint keyword, in the positions a rule can sit:
+# parameters and their array items, a text body root, an inline JSON array
+# root, URL-encoded form fields, component properties (renamed, optional,
+# nested-only, recursive, alias-typed), a component shared by two endpoints,
+# and a response-only component. Bounds include OpenAPI 3.0 Boolean
+# exclusive flags, `const`, an integer beyond u64, and decimal divisors that
+# no f64 holds exactly. `Item` also holds the positions whose emitted Rust
+# type is not a primitive: a map's values, a free-form value, a `format`
+# annotation, a map's whole value, a model's root (`Settings`) and its extra
+# properties (`Extras`), a rule beside a model reference, and the items of
+# an inline-object array and of a model array. The `mixed_*` fields and
+# `MixedExtras` hold an object whose extra values are checked beside a
+# declared property without rules (`label`) at every free-form position:
+# a value's root, nested property, and items, its extra values, a map
+# field's values, inline array items, and a struct's flattened extra values.
+# Each of those objects also declares `owner`, a reference to `Owner`, whose
+# rule is reached through the free-form value, and `nullable_probe` and
+# `allof_probe`, which reach `Owner` through a nullable alternative and a
+# one-member `allOf`, and `any_of_probe`, `one_of_probe`, `all_of_probe`,
+# and `not_probe`, which hold a `maxLength` beneath a generic `anyOf`,
+# `oneOf`, two-member `allOf`, and `not`; `linked_value` references `Owner`
+# as a free-form value's items and extra values, and beside a rule.
+# `MixedUnion` is a component-root `anyOf` with a constrained member and
+# `MixedAll` a component-root `allOf` of `Owner` and a constrained inline
+# object.
+openapi: 3.0.3
+info:
+  title: Constraint Preservation
+  version: "1.0.0"
+servers:
+  - url: https://constraints.example.com
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 18446744073709551616
+        - name: score
+          in: query
+          schema:
+            type: number
+            minimum: 0
+            exclusiveMinimum: true
+            maximum: 10
+            exclusiveMaximum: true
+            multipleOf: 0.10000000000000000001
+        - name: step
+          in: query
+          schema:
+            type: number
+            multipleOf: 0.1
+        - name: tags
+          in: query
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 5
+            uniqueItems: true
+            items:
+              type: string
+              minLength: 2
+              maxLength: 12
+              pattern: "^[a-z][a-z0-9-]*$"
+        - name: order
+          in: query
+          schema:
+            type: integer
+            enum: [1, -1]
+        - name: X-Trace
+          in: header
+          schema:
+            type: string
+            format: uuid
+            minLength: 36
+            maxLength: 36
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+    post:
+      operationId: createItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Item"
+      responses:
+        "204":
+          description: Created
+  /items/{id}:
+    put:
+      operationId: replaceItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Item"
+      responses:
+        "204":
+          description: Replaced
+  /notes:
+    post:
+      operationId: createNote
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              type: string
+              minLength: 1
+              maxLength: 280
+      responses:
+        "204":
+          description: Created
+  /batches:
+    post:
+      operationId: createBatch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items:
+                type: integer
+                minimum: 0
+      responses:
+        "204":
+          description: Created
+  /search:
+    post:
+      operationId: search
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                mode:
+                  type: string
+                  enum: [fast, deep]
+      responses:
+        "204":
+          description: Searched
+components:
+  schemas:
+    Limit:
+      type: integer
+      minimum: 1
+      maximum: 500
+    Item:
+      type: object
+      required: [display-name, kind, owner]
+      properties:
+        display-name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        kind:
+          type: string
+          const: item
+        price:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          multipleOf: 0.01
+        quantity:
+          type: integer
+          minimum: 0
+          maximum: 9223372036854775808
+        page_size:
+          $ref: "#/components/schemas/Limit"
+        labels:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            maxLength: 20
+        root:
+          $ref: "#/components/schemas/Node"
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 3
+        free_value:
+          maxLength: 3
+        identifier:
+          type: string
+          format: uuid
+        palette:
+          type: object
+          additionalProperties:
+            type: string
+          enum:
+            - primary: red
+        owner:
+          $ref: "#/components/schemas/Owner"
+          const:
+            name: boss
+        settings:
+          $ref: "#/components/schemas/Settings"
+        extras:
+          $ref: "#/components/schemas/Extras"
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+            const:
+              code: x
+        owners:
+          type: array
+          items:
+            $ref: "#/components/schemas/Owner"
+            const:
+              name: boss
+        mixed_value:
+          properties:
+            label: {type: string}
+            code: {type: string, maxLength: 2}
+            owner: {$ref: "#/components/schemas/Owner"}
+            nullable_probe:
+              anyOf:
+                - {$ref: "#/components/schemas/Owner"}
+                - {type: string, nullable: true, enum: [null]}
+            allof_probe:
+              allOf: [{$ref: "#/components/schemas/Owner"}]
+            any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+            one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+            all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+            not_probe: {not: {type: string, maxLength: 11}}
+            inner:
+              properties:
+                label: {type: string}
+                code: {type: string, maxLength: 2}
+                owner: {$ref: "#/components/schemas/Owner"}
+                nullable_probe:
+                  anyOf:
+                    - {$ref: "#/components/schemas/Owner"}
+                    - {type: string, nullable: true, enum: [null]}
+                allof_probe:
+                  allOf: [{$ref: "#/components/schemas/Owner"}]
+                any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+                one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+                all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+                not_probe: {not: {type: string, maxLength: 11}}
+              additionalProperties: {type: string, maxLength: 3}
+          items:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
+            additionalProperties: {type: string, maxLength: 3}
+          additionalProperties: {type: string, maxLength: 3}
+        mixed_map:
+          additionalProperties:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_attributes:
+          type: object
+          additionalProperties:
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_entries:
+          type: array
+          items:
+            type: object
+            properties:
+              label: {type: string}
+              code: {type: string, maxLength: 2}
+              owner: {$ref: "#/components/schemas/Owner"}
+              nullable_probe:
+                anyOf:
+                  - {$ref: "#/components/schemas/Owner"}
+                  - {type: string, nullable: true, enum: [null]}
+              allof_probe:
+                allOf: [{$ref: "#/components/schemas/Owner"}]
+              any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+              one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+              all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+              not_probe: {not: {type: string, maxLength: 11}}
+            additionalProperties: {type: string, maxLength: 3}
+        mixed_extras:
+          $ref: "#/components/schemas/MixedExtras"
+        mixed_union:
+          $ref: "#/components/schemas/MixedUnion"
+        mixed_all:
+          $ref: "#/components/schemas/MixedAll"
+        linked_value:
+          properties:
+            pinned:
+              $ref: "#/components/schemas/Owner"
+              const: {name: boss}
+          items:
+            $ref: "#/components/schemas/Owner"
+          additionalProperties:
+            $ref: "#/components/schemas/Owner"
+    Owner:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 10
+    Settings:
+      type: object
+      properties:
+        version:
+          type: string
+      const:
+        version: "1"
+    Extras:
+      type: object
+      properties:
+        id:
+          type: string
+      additionalProperties:
+        type: string
+        maxLength: 3
+    MixedExtras:
+      type: object
+      properties:
+        id: {type: string}
+      additionalProperties:
+        properties:
+          label: {type: string}
+          code: {type: string, maxLength: 2}
+          owner: {$ref: "#/components/schemas/Owner"}
+          nullable_probe:
+            anyOf:
+              - {$ref: "#/components/schemas/Owner"}
+              - {type: string, nullable: true, enum: [null]}
+          allof_probe:
+            allOf: [{$ref: "#/components/schemas/Owner"}]
+          any_of_probe: {anyOf: [{type: string, maxLength: 11}, {type: integer}]}
+          one_of_probe: {oneOf: [{type: string, maxLength: 11}, {type: integer}]}
+          all_of_probe: {allOf: [{type: string, maxLength: 11}, {type: string}]}
+          not_probe: {not: {type: string, maxLength: 11}}
+        additionalProperties: {type: string, maxLength: 3}
+    MixedUnion:
+      anyOf:
+        - {type: string, maxLength: 11}
+        - {type: integer}
+    MixedAll:
+      allOf:
+        - {$ref: "#/components/schemas/Owner"}
+        - type: object
+          properties:
+            code: {type: string, maxLength: 11}
+    Node:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 40
+          pattern: "^[A-Za-z]+$"
+        children:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/Node"
+    Stats:
+      type: object
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        ratio:
+          type: number
+          minimum: 0
+          maximum: 1

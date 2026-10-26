@@ -1,4 +1,4 @@
-//! List shapes and the API-level exceptions table.
+//! Endpoint-owned list shapes and pagination policies.
 
 use serde::{Deserialize, Serialize};
 
@@ -104,26 +104,5 @@ impl Collection {
             strategy: strategy.into(),
         });
         self
-    }
-}
-
-/// One row of [`RestApi::pagination_exceptions`](crate::RestApi::pagination_exceptions):
-/// the list shape of the endpoint with this id.
-///
-/// A row decides before the API default: it marks a wrapper list, opts a list
-/// out, overrides the strategy, or makes a non-GET endpoint a list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PaginationException {
-    pub endpoint: String,
-    pub collection: Collection,
-}
-
-impl PaginationException {
-    pub fn new(endpoint: &str, collection: Collection) -> Self {
-        Self {
-            endpoint: endpoint.to_owned(),
-            collection,
-        }
     }
 }

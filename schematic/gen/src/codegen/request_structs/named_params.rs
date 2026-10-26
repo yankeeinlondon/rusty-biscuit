@@ -17,7 +17,7 @@ use quote::{format_ident, quote};
 use schematic_define::QueryParamType;
 
 use crate::codegen::request_structs::shared::{
-    QueryParamInfo, param_field_name, param_serde_rename, query_param_type_to_rust_type,
+    QueryParamInfo, query_param_type_to_rust_type,
 };
 
 /// Where a named parameter travels.
@@ -42,8 +42,8 @@ pub(super) fn generate_named_param_fields(
     location: ParamLocation,
 ) -> TokenStream {
     let fields = params.iter().map(|param| {
-        let field_name = format_ident!("{}", param_field_name(&param.name));
-        let rename = param_serde_rename(&param.name);
+        let field_name = format_ident!("{}", param.field_name());
+        let rename = param.serde_rename();
         let rust_type = query_param_type_to_rust_type(&param.param_type);
         let doc = format!(
             " {} parameter `{}`{}",
@@ -56,8 +56,13 @@ pub(super) fn generate_named_param_fields(
                 .unwrap_or_default()
         );
 
+        let deprecated = param.deprecation_doc();
+        let rules = param.rules_doc();
+
         quote! {
             #[doc = #doc]
+            #deprecated
+            #rules
             #rename
             pub #field_name: Option<#rust_type>,
         }
@@ -72,7 +77,7 @@ pub(super) fn generate_named_builder_methods(
     location: ParamLocation,
 ) -> TokenStream {
     let methods = params.iter().map(|param| {
-        let field = param_field_name(&param.name);
+        let field = param.field_name();
         let method_name = format_ident!("with_{}", field);
         let field_name = format_ident!("{}", field);
         let rust_type = query_param_type_to_rust_type(&param.param_type);
@@ -81,9 +86,11 @@ pub(super) fn generate_named_builder_methods(
             param.name,
             location.label().to_lowercase()
         );
+        let deprecated = param.deprecation_doc();
 
         quote! {
             #[doc = #doc]
+            #deprecated
             pub fn #method_name(mut self, value: #rust_type) -> Self {
                 self.#field_name = Some(value);
                 self
@@ -126,7 +133,7 @@ pub(super) fn generate_headers_assembly(
     }
 
     let header_setters = header_params.iter().map(|param| {
-        let field_name = format_ident!("{}", param_field_name(&param.name));
+        let field_name = format_ident!("{}", param.field_name());
         let wire_name = &param.name;
         let value = header_value_expr(&param.param_type);
         quote! {
@@ -146,7 +153,7 @@ pub(super) fn generate_headers_assembly(
         }
     } else {
         let cookie_pushes = cookie_params.iter().map(|param| {
-            let field_name = format_ident!("{}", param_field_name(&param.name));
+            let field_name = format_ident!("{}", param.field_name());
             let wire_name = &param.name;
             let value = cookie_value_expr(&param.param_type);
             quote! {

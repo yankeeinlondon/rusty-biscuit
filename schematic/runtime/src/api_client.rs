@@ -128,6 +128,18 @@ macro_rules! api_client {
                 Self(self.0.cross_origin(policy))
             }
 
+            /// See [`Client::max_frame_bytes`](schematic_runtime::Client::max_frame_bytes).
+            #[must_use]
+            pub fn max_frame_bytes(self, limit: usize) -> Self {
+                Self(self.0.max_frame_bytes(limit))
+            }
+
+            /// See [`Client::graphql_url`](schematic_runtime::Client::graphql_url).
+            #[must_use]
+            pub fn graphql_url(self, url: impl Into<String>) -> Self {
+                Self(self.0.graphql_url(url))
+            }
+
             /// See [`Client::pre_response_json`](schematic_runtime::Client::pre_response_json).
             #[must_use]
             pub fn pre_response_json<F>(self, hook: F) -> Self

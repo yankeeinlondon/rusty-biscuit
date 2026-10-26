@@ -17,7 +17,8 @@
 use reqwest::header::HeaderMap;
 use schematic_schema::schematic_runtime::pager::{Page, PagerError};
 use schematic_schema::schematic_runtime::{
-    ApiError, BuildError, CallError, ErrorKind, ResponseMeta, TransportError,
+    ApiError, BuildError, CallError, ErrorKind, RawCompletion, RawResponse, ResponseMeta,
+    TransportError,
 };
 
 use crate::error::SniffError;
@@ -51,6 +52,22 @@ impl Replies {
     /// The data of an awaited call, or the error it classifies as.
     pub(super) fn value<T, E>(&self, sent: Result<T, CallError<E>>) -> Result<T, SniffError> {
         sent.map_err(|error| self.error(&error))
+    }
+
+    /// A raw send's 2xx reply with its complete body, or the error it
+    /// classifies as: an error status as for a call, and a cut-off body or an
+    /// unfollowed redirect without a status.
+    pub(super) fn raw(&self, sent: Result<RawResponse, TransportError>) -> Result<RawResponse, SniffError> {
+        let raw = sent.map_err(|error| self.transport(&error))?;
+        let status = raw.meta.status;
+        if !status.is_success() && !status.is_redirection() {
+            return Err(self.status(status.as_u16(), &raw.meta.headers, &raw.body));
+        }
+        match raw.completion {
+            RawCompletion::Complete if status.is_success() => Ok(raw),
+            RawCompletion::BodyInterrupted => Err(self.remote_api(0, "the response body was cut off".to_string())),
+            _ => Err(self.remote_api(status.as_u16(), "the response was a redirect that was not followed".to_string())),
+        }
     }
 
     /// A fetched list page, or the error it classifies as.

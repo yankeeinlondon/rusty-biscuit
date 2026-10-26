@@ -6,16 +6,16 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiRequest, Endpoint};
+use schematic_define::{ApiRequest, Endpoint, RestApi};
 
 use crate::codegen::request_structs::shared::{
-    QueryParamInfo, param_field_name, type_name_to_tokens,
+    QueryParamInfo, json_type_name, type_name_to_tokens,
 };
 
 /// Generates the body field if the endpoint has a request schema.
-pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
+pub fn generate_body_field(api: &RestApi, endpoint: &Endpoint) -> TokenStream {
     let type_name = match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => type_name_to_tokens(&schema.type_name),
+        Some(ApiRequest::Json(reference)) => type_name_to_tokens(&json_type_name(api, reference)),
         // Form bodies carry a generated `{EndpointId}Form` struct; see `form.rs`.
         Some(ApiRequest::FormData { .. }) | Some(ApiRequest::UrlEncoded { .. }) => {
             match super::form::form_body_type_name(endpoint) {
@@ -36,14 +36,14 @@ pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
 
 /// Generates the Default implementation for structs with a body.
 ///
-/// Returns empty TokenStream since Default is now always derived.
+/// Returns an empty TokenStream: a request that has `Default` derives it
+/// (see `derives.rs`).
 pub fn generate_default_impl(
     _struct_name: &proc_macro2::Ident,
     _path_params: &[&str],
     _query_params: &[QueryParamInfo],
     _has_body: bool,
 ) -> TokenStream {
-    // Default is derived for all structs, no manual impl needed
     quote! {}
 }
 
@@ -73,7 +73,7 @@ pub fn generate_from_body_impl(
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", param_field_name(&qp.name));
+                let name = format_ident!("{}", qp.field_name());
                 quote! { #name: None }
             })
             .collect();

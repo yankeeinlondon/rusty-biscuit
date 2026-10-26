@@ -235,8 +235,8 @@ fn import_with_module_path_override() {
 #[test]
 fn an_imported_definition_records_the_supplied_request_id_header() {
     for (request_id_header, expected) in [
-        (Some("x-request-id"), r#"request_id_header: Some("x-request-id".to_string())"#),
-        (None, "request_id_header: None"),
+        (Some("x-request-id"), true),
+        (None, false),
     ] {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let definitions = temp_dir.path().join("petstore");
@@ -257,6 +257,49 @@ fn an_imported_definition_records_the_supplied_request_id_header() {
         run_import(&opts).expect("import succeeds");
 
         let module = std::fs::read_to_string(definitions.join("mod.rs")).expect("definition module written");
-        assert!(module.contains(expected), "{request_id_header:?}: {module}");
+        assert_eq!(module.contains(r#".request_id_header("x-request-id")"#), expected, "{request_id_header:?}: {module}");
     }
+}
+
+#[test]
+fn a_referenced_separable_union_generates_a_multi_shape_success() {
+    // R28 / R1-F2.10: a `oneOf` behind a schema `$ref` reaches the generator
+    // as several tagged shapes, so the success is an enum decoded by `Shapes`.
+    use schematic_define::openapi::{OpenApiImport, OpenApiSource};
+
+    let document = serde_json::json!({
+        "openapi": "3.0.3",
+        "info": {"title": "Fixture", "version": "1"},
+        "paths": {"/reply": {"get": {"operationId": "GetReply", "responses": {"200": {
+            "description": "x",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Reply"}}},
+        }}}}},
+        "components": {"schemas": {
+            "Directory": {"type": "object"},
+            "File": {"type": "object"},
+            "Reply": {
+                "oneOf": [{"$ref": "#/components/schemas/Directory"}, {"$ref": "#/components/schemas/File"}],
+                "discriminator": {"propertyName": "type", "mapping": {"dir": "#/components/schemas/Directory", "file": "#/components/schemas/File"}},
+            },
+        }},
+    });
+    let imported = OpenApiImport::new(OpenApiSource::json(document.to_string())).build().unwrap();
+    let api = crate::common::components::with_referenced_components(imported.api);
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let src_dir = temp_dir.path().join("src");
+
+    schematic_gen::output::generate_and_write(&api, &src_dir, false).unwrap();
+
+    // The run also writes the shipped WebSocket modules, and `read_dir` order
+    // differs by filesystem, so exclude those and require one candidate.
+    let candidates: Vec<_> = std::fs::read_dir(&src_dir).unwrap().map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs")
+            && !["lib.rs", "shared.rs", "prelude.rs", "ws_shared.rs"].iter().any(|name| path.ends_with(name))
+            && !path.file_stem().is_some_and(|stem| stem.to_string_lossy().ends_with("_ws")))
+        .collect();
+    let [module] = candidates.as_slice() else { panic!("expected one API module, found {candidates:?}") };
+    let flat: String = std::fs::read_to_string(module).unwrap().split_whitespace().collect();
+    assert!(flat.contains("typeSuccess=GetReplyResponse;"), "{flat}");
+    assert!(flat.contains("typeDecoder=schematic_runtime::Shapes<GetReplyResponse>;"), "{flat}");
+    assert!(flat.contains("Directory(Directory)") && flat.contains("File(File)"), "{flat}");
 }

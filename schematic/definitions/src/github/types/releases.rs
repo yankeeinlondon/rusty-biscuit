@@ -22,6 +22,13 @@ pub struct RepoTag {
     #[serde(default)]
     pub node_id: Option<String>,
 }
+impl schematic_define::Registration for RepoTag {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RepoTag));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Commit info embedded in a tag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -84,6 +91,13 @@ pub struct Release {
     #[serde(default)]
     pub assets: Vec<ReleaseAsset>,
 }
+impl schematic_define::Registration for Release {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Release));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// An asset attached to a release.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -129,6 +143,13 @@ pub struct GitRef {
     /// Object the ref points to.
     pub object: GitRefObject,
 }
+impl schematic_define::Registration for GitRef {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GitRef));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Object pointed to by a Git reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -187,6 +208,13 @@ pub struct AnnotatedTagObject {
     #[serde(default)]
     pub url: Option<String>,
 }
+impl schematic_define::Registration for AnnotatedTagObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AnnotatedTagObject));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Object reference from an annotated tag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

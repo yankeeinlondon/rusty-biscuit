@@ -4,8 +4,9 @@
 //! the endpoint when one applies, the [`Feature`] at fault, and the [`Output`]
 //! it concerns. [`Severity::Error`] blocks that output; [`Severity::Warning`]
 //! is reported and never blocks. This is the one diagnostic format for
-//! generation: WebSocket validation maps onto the same types rather than
-//! inventing another.
+//! generation: WebSocket lowering maps onto the same types
+//! ([`Feature::WebSocketDefinition`], [`Output::Rust`]) rather than inventing
+//! another.
 //!
 //! See `schematic/docs/generation/validation.md` for the rules each output
 //! applies.
@@ -16,9 +17,9 @@
 //! use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 //!
 //! let diagnostic = ValidationDiagnostic::new(
-//!     Severity::Warning,
-//!     "Gitea",
-//!     Some("GetGitTreeRecursive"),
+//!     Severity::Error,
+//!     "FixtureApi",
+//!     Some("Tree"),
 //!     Feature::QueryInPath,
 //!     Output::OpenApi,
 //!     "path template embeds a query string",
@@ -26,7 +27,7 @@
 //!
 //! assert_eq!(
 //!     diagnostic.to_string(),
-//!     "severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path \
+//!     "severity=error api=FixtureApi endpoint=Tree feature=query-in-path \
 //!      output=openapi: path template embeds a query string"
 //! );
 //! ```
@@ -72,6 +73,9 @@ pub enum Output {
     OpenApi,
     /// Postman collections.
     Postman,
+    /// AsyncAPI documents of WebSocket APIs.
+    #[serde(rename = "asyncapi")]
+    AsyncApi,
 }
 
 impl Output {
@@ -81,6 +85,7 @@ impl Output {
             Self::Rust => "rust",
             Self::OpenApi => "openapi",
             Self::Postman => "postman",
+            Self::AsyncApi => "asyncapi",
         }
     }
 }
@@ -109,6 +114,10 @@ pub enum Feature {
     HeaderParameter,
     /// `EndpointParams.cookie` entries.
     CookieParameter,
+    /// A fixed or explicit header an OpenAPI operation does not carry as a
+    /// header parameter (a credential, `Accept`, `Content-Type`, or
+    /// `Authorization` header, or a conflicting declaration).
+    FixedHeader,
     /// Two endpoints of one API share an id.
     DuplicateEndpointId,
     /// Two endpoints of one API share a method and normalized path.
@@ -136,15 +145,37 @@ pub enum Feature {
     InvalidModulePath,
     /// An output file name that is not one safe path component.
     InvalidOutputFilename,
-    /// A JSON type with no schema in the module's OpenAPI registry.
-    IncompleteSchemaRegistry,
+    /// A JSON body reference that does not resolve in the API's own
+    /// [`RestApi::schemas`](schematic_define::RestApi::schemas), or a
+    /// malformed schema component.
+    InvalidSchemaReference,
     /// The shape of a pagination strategy, alone or on its endpoint.
     PaginationStrategy,
-    /// A pagination exceptions row or the list shape it names: unknown or
-    /// duplicate ids, item selectors, item types.
+    /// An endpoint collection: invalid item selectors or item types.
+    /// Retains the existing serialized diagnostic category.
     PaginationException,
     /// A pagination strategy input against the endpoint's declared parameters.
     PaginationParameter,
+    /// An endpoint's own authentication (public, or a replacement policy).
+    EndpointAuth,
+    /// An OAuth2 grant an output has no form for.
+    #[serde(rename = "oauth2-grant")]
+    OAuth2Grant,
+    /// A typed path parameter (`EndpointParams.path`).
+    PathParameter,
+    /// A GraphQL operation an output does not carry, or cannot address.
+    #[serde(rename = "graphql-operation")]
+    GraphQlOperation,
+    /// A request body, saved response, or GraphQL `variables` for which no
+    /// value validating against its registered schema could be built.
+    ExampleValue,
+    /// A WebSocket API definition, found while lowering it into its
+    /// generated module. The message starts with the definition path.
+    #[serde(rename = "websocket-definition")]
+    WebSocketDefinition,
+    /// A value constraint on a parameter, form field, or request body root
+    /// that contradicts itself or its value's type.
+    TypeConstraint,
 }
 
 impl Feature {
@@ -157,6 +188,7 @@ impl Feature {
             Self::QueryParameter => "query-parameter",
             Self::HeaderParameter => "header-parameter",
             Self::CookieParameter => "cookie-parameter",
+            Self::FixedHeader => "fixed-header",
             Self::DuplicateEndpointId => "duplicate-endpoint-id",
             Self::DuplicateMethodPath => "duplicate-method-path",
             Self::InvalidTypeSyntax => "invalid-type-syntax",
@@ -169,10 +201,17 @@ impl Feature {
             Self::EndpointMethodRename => "endpoint-method-rename",
             Self::InvalidModulePath => "invalid-module-path",
             Self::InvalidOutputFilename => "invalid-output-filename",
-            Self::IncompleteSchemaRegistry => "incomplete-schema-registry",
+            Self::InvalidSchemaReference => "invalid-schema-reference",
             Self::PaginationStrategy => "pagination-strategy",
             Self::PaginationException => "pagination-exception",
             Self::PaginationParameter => "pagination-parameter",
+            Self::EndpointAuth => "endpoint-auth",
+            Self::OAuth2Grant => "oauth2-grant",
+            Self::PathParameter => "path-parameter",
+            Self::GraphQlOperation => "graphql-operation",
+            Self::ExampleValue => "example-value",
+            Self::WebSocketDefinition => "websocket-definition",
+            Self::TypeConstraint => "type-constraint",
         }
     }
 }
@@ -318,7 +357,7 @@ mod tests {
         let error = ValidationDiagnostic::for_group(
             Severity::Error,
             ["A"],
-            Feature::IncompleteSchemaRegistry,
+            Feature::InvalidSchemaReference,
             Output::Postman,
             "missing",
         );
@@ -337,7 +376,7 @@ mod tests {
         let error_json = serde_json::to_value(&error).unwrap();
         assert_eq!(error_json["severity"], "error");
         assert_eq!(error_json["endpoint"], serde_json::Value::Null);
-        assert_eq!(error_json["feature"], "incomplete-schema-registry");
+        assert_eq!(error_json["feature"], "invalid-schema-reference");
         assert_eq!(error_json["output"], "postman");
     }
 
@@ -361,7 +400,11 @@ mod tests {
             Feature::GeneratedNameCollision,
             Feature::InvalidModulePath,
             Feature::InvalidOutputFilename,
-            Feature::IncompleteSchemaRegistry,
+            Feature::InvalidSchemaReference,
+            Feature::GraphQlOperation,
+            Feature::ExampleValue,
+            Feature::WebSocketDefinition,
+            Feature::TypeConstraint,
         ];
         for feature in features {
             assert_eq!(
@@ -370,7 +413,7 @@ mod tests {
                 "{feature:?}"
             );
         }
-        for output in [Output::Rust, Output::OpenApi, Output::Postman] {
+        for output in [Output::Rust, Output::OpenApi, Output::Postman, Output::AsyncApi] {
             assert_eq!(serde_json::to_value(output).unwrap(), output.to_string());
         }
         for severity in [Severity::Warning, Severity::Error] {

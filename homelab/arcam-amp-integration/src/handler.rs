@@ -2,17 +2,20 @@
 
 use std::time::Duration;
 
-use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};
+use schematic_schema::unfolded_circle_integration_ws::{
+    IntegrationClientMessage, IntegrationServerMessage, WsConnectionContext, WsHandler,
+};
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 use tracing::{debug, info, warn};
 use unfolded_integration_helper::{
     ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
-    KnownDevice, SetupSession, SetupSessions, SetupState, available_entities_response,
-    bounded_scan, build_candidate_list, device_selection_schema, driver_metadata_response,
-    driver_version_response, entity_states_response, envelope_kind, envelope_message_name,
-    local_ipv4_candidates, remote_id_from_context, remote_setup_abort_error, result_response,
+    KnownDevice, SetupSession, SetupSessions, SetupState, authentication_greeting,
+    available_entities_response, bounded_scan, build_candidate_list, client_message_value,
+    device_selection_schema, driver_metadata_response, driver_version_response,
+    entity_states_response, envelope_kind, envelope_message_name, local_ipv4_candidates,
+    remote_id_from_context, remote_setup_abort_error, result_response, server_message,
     setup_driver_response, setup_progress_event, setup_wait_user_action_event,
 };
 
@@ -69,7 +72,10 @@ impl ArcamIntegrationHandler {
         request: &IntegrationRequest,
         context: &WsConnectionContext,
     ) -> Option<Value> {
-        if let Err(error) = context.send(setup_driver_response(request.id, 200)).await {
+        if let Err(error) = context
+            .send_value(setup_driver_response(request.id, 200))
+            .await
+        {
             warn!(error = %error, req_id = request.id, "failed to acknowledge Arcam setup start");
             return None;
         }
@@ -108,7 +114,7 @@ impl ArcamIntegrationHandler {
             .await;
 
         if let Err(error) = context
-            .send(setup_progress_event(&SetupState::Discovering))
+            .send_value(setup_progress_event(&SetupState::Discovering))
             .await
         {
             warn!(error = %error, "failed to send Arcam discovery progress");
@@ -123,7 +129,7 @@ impl ArcamIntegrationHandler {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]),
         );
-        if let Err(error) = context.send(selection_event).await {
+        if let Err(error) = context.send_value(selection_event).await {
             warn!(error = %error, "failed to send Arcam setup selection");
         }
 
@@ -135,7 +141,7 @@ impl ArcamIntegrationHandler {
         request: &IntegrationRequest,
         context: &WsConnectionContext,
     ) -> Option<Value> {
-        if let Err(error) = context.send(result_response(request.id, 200)).await {
+        if let Err(error) = context.send_value(result_response(request.id, 200)).await {
             warn!(
                 error = %error,
                 req_id = request.id,
@@ -314,7 +320,7 @@ impl ArcamIntegrationHandler {
             "Arcam setup completed"
         );
         if let Err(error) = context
-            .send(setup_progress_event(&SetupState::Complete))
+            .send_value(setup_progress_event(&SetupState::Complete))
             .await
         {
             warn!(error = %error, "failed to send Arcam setup completion");
@@ -361,7 +367,7 @@ impl ArcamIntegrationHandler {
             "Arcam setup failed"
         );
         if let Err(error) = context
-            .send(setup_progress_event(&SetupState::Error(message.clone())))
+            .send_value(setup_progress_event(&SetupState::Error(message.clone())))
             .await
         {
             warn!(error = %error, "failed to send Arcam setup error");
@@ -370,8 +376,9 @@ impl ArcamIntegrationHandler {
     }
 }
 
-impl WsHandler for ArcamIntegrationHandler {
-    async fn handle_message(&self, message: Value, context: WsConnectionContext) -> Option<Value> {
+impl ArcamIntegrationHandler {
+    /// Routes one inbound message, as JSON, to its JSON reply.
+    async fn route(&self, message: Value, context: WsConnectionContext) -> Option<Value> {
         if let Some(error) = remote_setup_abort_error(&message) {
             let remote_id = remote_id_from_context(&context);
             self.sessions.clear(&remote_id).await;
@@ -450,6 +457,40 @@ impl WsHandler for ArcamIntegrationHandler {
     }
 }
 
+// Replies cross the host boundary typed. Messages pushed mid-request
+// (setup progress, acknowledgements) are the helper crate's JSON builders
+// and go out unchanged through `context.send_value`.
+impl WsHandler for ArcamIntegrationHandler {
+    async fn handle_message(
+        &self,
+        message: IntegrationClientMessage,
+        context: WsConnectionContext,
+    ) -> Option<IntegrationServerMessage> {
+        let message = match client_message_value(&message) {
+            Ok(message) => message,
+            Err(error) => {
+                warn!(error = %error, "failed to re-encode UC message");
+                return None;
+            }
+        };
+        let reply = self.route(message, context).await?;
+        match server_message(reply) {
+            Ok(reply) => Some(reply),
+            Err(error) => {
+                warn!(error = %error, "Arcam reply is not a UC response or event envelope");
+                None
+            }
+        }
+    }
+
+    async fn on_authenticated(
+        &self,
+        context: WsConnectionContext,
+    ) -> Option<IntegrationServerMessage> {
+        authentication_greeting(&context)
+    }
+}
+
 fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
     msg_data
         .get("input_values")
@@ -474,10 +515,12 @@ fn setup_value_to_string(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;
+    use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationEventHub;
     use unfolded_integration_helper::{
         ConfiguredDevice, PersistentRegistry, SubscriptionRegistry,
-        test_fixtures::{entity_command_request, request, subscribe_events_request},
+        test_fixtures::{
+            client_message, entity_command_request, request, subscribe_events_request,
+        },
     };
 
     async fn make_handler(add_device: bool) -> ArcamIntegrationHandler {
@@ -485,7 +528,7 @@ mod tests {
         let registry = PersistentRegistry::load(tmp.path().join("registry.json"))
             .await
             .unwrap();
-        let hub = UnfoldedCircleEventHub::new();
+        let hub = UnfoldedCircleIntegrationEventHub::new();
         let subs = SubscriptionRegistry::new(hub.clone());
         let manager = DeviceManager::new(
             registry,
@@ -514,16 +557,35 @@ mod tests {
     }
 
     fn context() -> WsConnectionContext {
-        WsConnectionContext::new(1, UnfoldedCircleEventHub::new())
+        WsConnectionContext::new(1, UnfoldedCircleIntegrationEventHub::new())
+    }
+
+    /// Sends a JSON fixture through the typed host boundary, returning the
+    /// reply as JSON.
+    async fn handle(handler: &ArcamIntegrationHandler, message: Value) -> Value {
+        let reply = handler
+            .handle_message(client_message(message), context())
+            .await
+            .expect("reply");
+        serde_json::to_value(reply).unwrap()
+    }
+
+    #[tokio::test]
+    async fn on_authenticated_sends_authentication_without_a_verified_credential() {
+        let handler = make_handler(false).await;
+
+        let greeting = handler.on_authenticated(context()).await.expect("greeting");
+
+        assert_eq!(
+            serde_json::to_string(&greeting).unwrap(),
+            r#"{"kind":"resp","req_id":0,"msg":"authentication","code":200,"msg_data":{}}"#
+        );
     }
 
     #[tokio::test]
     async fn test_handle_get_driver_version() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(request(1, "get_driver_version", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(1, "get_driver_version", json!({}))).await;
 
         assert_eq!(resp["kind"], "resp");
         assert_eq!(resp["req_id"], 1);
@@ -534,10 +596,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_get_device_state_no_devices() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(request(2, "get_device_state", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(2, "get_device_state", json!({}))).await;
 
         assert_eq!(resp["msg_data"]["state"], "DISCONNECTED");
     }
@@ -545,10 +604,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_get_driver_metadata() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(request(8, "get_driver_metadata", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(8, "get_driver_metadata", json!({}))).await;
 
         assert_eq!(resp["kind"], "resp");
         assert_eq!(resp["req_id"], 8);
@@ -567,10 +623,7 @@ mod tests {
             .assign_device("connection-1", "192.168.99.99:50000")
             .await
             .unwrap();
-        let resp = handler
-            .handle_message(request(3, "get_available_entities", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(3, "get_available_entities", json!({}))).await;
 
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         assert_eq!(entities.len(), 2);
@@ -579,10 +632,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_subscribe_events() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(subscribe_events_request(4), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, subscribe_events_request(4)).await;
 
         assert_eq!(resp["code"], 200);
     }
@@ -596,23 +646,31 @@ mod tests {
             .assign_device("connection-1", "192.168.99.99:50000")
             .await
             .unwrap();
-        let resp = handler
-            .handle_message(request(5, "get_entity_states", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(5, "get_entity_states", json!({}))).await;
 
         assert_eq!(resp["msg"], "entity_states");
         let states = resp["msg_data"].as_array().unwrap();
         assert_eq!(states.len(), 2);
     }
 
+    /// An `auth` request decodes as the typed `Auth` message and keeps its
+    /// `id`, so it is still answered as an unknown request.
+    #[tokio::test]
+    async fn an_auth_request_keeps_its_id_and_is_answered_as_unknown() {
+        let handler = make_handler(false).await;
+        let message = client_message(request(10, "auth", json!({"token": "t"})));
+        assert!(matches!(message, IntegrationClientMessage::Auth(_)));
+
+        let resp = serde_json::to_value(handler.handle_message(message, context()).await.unwrap()).unwrap();
+
+        assert_eq!(resp["req_id"], 10);
+        assert_eq!(resp["code"], 400);
+    }
+
     #[tokio::test]
     async fn test_handle_unknown_message() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(request(6, "bogus_message", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(6, "bogus_message", json!({}))).await;
 
         assert_eq!(resp["msg"], "result");
         assert_eq!(resp["code"], 400);
@@ -621,13 +679,11 @@ mod tests {
     #[tokio::test]
     async fn test_entity_command_unknown_entity() {
         let handler = make_handler(false).await;
-        let resp = handler
-            .handle_message(
-                entity_command_request(7, "arcam.office.unknown", "on", json!({})),
-                context(),
-            )
-            .await
-            .unwrap();
+        let resp = handle(
+            &handler,
+            entity_command_request(7, "arcam.office.unknown", "on", json!({})),
+        )
+        .await;
 
         assert_eq!(resp["msg"], "result");
         assert_eq!(resp["code"], 404);
@@ -636,13 +692,11 @@ mod tests {
     #[tokio::test]
     async fn test_entity_command_unknown_cmd() {
         let handler = make_handler(true).await;
-        let resp = handler
-            .handle_message(
-                entity_command_request(8, "arcam.office.power", "invalid", json!({})),
-                context(),
-            )
-            .await
-            .unwrap();
+        let resp = handle(
+            &handler,
+            entity_command_request(8, "arcam.office.power", "invalid", json!({})),
+        )
+        .await;
 
         assert_eq!(resp["msg"], "result");
         assert!(resp["code"].as_u64().unwrap() >= 400);
@@ -657,10 +711,7 @@ mod tests {
             .assign_device("connection-1", "192.168.99.99:50000")
             .await
             .unwrap();
-        let resp = handler
-            .handle_message(request(9, "get_available_entities", json!({})), context())
-            .await
-            .unwrap();
+        let resp = handle(&handler, request(9, "get_available_entities", json!({}))).await;
 
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         for entity in entities {

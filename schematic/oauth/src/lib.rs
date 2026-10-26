@@ -13,6 +13,10 @@
 //! - **Token Refresh** (automatic when calling [`OAuth2Manager::get_valid_token`])
 //! - **Token Revocation** via [`OAuth2Manager::revoke_token`]
 //!
+//! Each acquisition flow runs only for the grant the provider declares, and
+//! the provider's `client_auth` decides how the client authenticates. The
+//! device-code grant has no flow here.
+//!
 //! ## Token Storage
 //!
 //! Tokens are persisted through the [`TokenStore`] trait. Two built-in

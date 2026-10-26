@@ -97,7 +97,7 @@ These methods exist on every call, whatever the endpoint:
 
 | Method | Effect for this call only |
 | --- | --- |
-| `.credential(Credential)` | sends this credential instead of the client's or the environment's |
+| `.credential(Credential)` | sends this credential instead of the client's or the environment's; dropped on a public endpoint |
 | `.anonymous()` | sends no credential from any source |
 | `.deadline(&Deadline)` | bounds the call by a deadline shared with other calls |
 | `.full()` | returns the whole reply instead of the data; chain it after the endpoint's setters |
@@ -106,7 +106,7 @@ These methods exist on every call, whatever the endpoint:
 ```rust
 use schematic_schema::prelude::*;
 
-// a public read that should not spend the user's token
+// a read that should not spend the user's token
 let repo = gh.get_repository("yankeeinlondon", "rusty-biscuit")
     .anonymous()
     .await?;
@@ -119,8 +119,13 @@ let repo = gh.get_repository("yankeeinlondon", "rusty-biscuit")
 
 `.credential(..)` and `.anonymous()` replace each other, and the last one set
 wins. The order in which credentials are chosen, and what `.anonymous()`
-strips, are described in [Credentials](./credentials.md). Deadlines are
-described in [Deadlines and timeouts](./deadlines-and-timeouts.md).
+strips, are described in [Credentials](./credentials.md). An endpoint can
+also authenticate differently from its API: one declared public never sends
+a credential, and one with its own policy fails before sending when no
+credential it accepts resolves; its method's docs say so, and
+[Endpoint authentication](./credentials.md#endpoint-authentication) has the
+rules. Deadlines are described in
+[Deadlines and timeouts](./deadlines-and-timeouts.md).
 
 If an endpoint has an optional value with one of these names, its setter is
 generated with a `_param` suffix (`.full_param(..)`), so `.full()` means the
@@ -266,6 +271,10 @@ let page = gh.list_releases("yankeeinlondon", "rusty-biscuit")
 Awaiting the call directly still sends one ordinary request and returns the
 endpoint's own response type. Iteration, completeness, and every pager
 control are described in [Pagination](../pagination.md).
+
+A paginated GraphQL operation has no endpoint method; its request value gets
+the same pager through `client.send(request).pager()`, reading every page
+from the reply's `data` (see [GraphQL operations](../graphql.md#paging-a-generated-operation)).
 
 ## When to use request objects instead
 

@@ -1,0 +1,265 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "Integration": {
+      "address": "/intg",
+      "description": "Integration driver channel. The driver hosts it and the remote connects; requests flow from the remote, responses and entity events from the driver.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/Integration.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/Integration.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/Integration.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/Integration.EventEnvelope"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/Integration.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/Integration.ResponseEnvelope"
+        }
+      },
+      "x-schematic-role": "both"
+    }
+  },
+  "components": {
+    "messages": {
+      "Integration.Auth": {
+        "description": "Remote's message-based authentication request (`msg=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "auth"
+          }
+        ]
+      },
+      "Integration.AuthRequired": {
+        "description": "Driver challenge for message-based auth (`msg=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          },
+          {
+            "field": "msg",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "Integration.Authentication": {
+        "description": "Driver's authentication result (`msg=authentication`); `code` is the outcome.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "Integration.EventEnvelope": {
+        "description": "Asynchronous event envelope (`kind=event`): the driver pushes entity and device state, the remote sends connection and setup events.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          }
+        ]
+      },
+      "Integration.RequestEnvelope": {
+        "description": "Request envelope `{kind=req,id,msg,msg_data}` sent by the remote to the driver.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          }
+        ]
+      },
+      "Integration.ResponseEnvelope": {
+        "description": "Driver response envelope; `req_id` echoes the request `id`.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/IntegrationWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      }
+    },
+    "schemas": {
+      "IntegrationWsAuthMessage": {
+        "description": "Payload type `IntegrationWsAuthMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "IntegrationWsAuthRequired": {
+        "description": "Payload type `IntegrationWsAuthRequired`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "IntegrationWsAuthenticationMessage": {
+        "description": "Payload type `IntegrationWsAuthenticationMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "IntegrationWsEventEnvelope": {
+        "description": "Payload type `IntegrationWsEventEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "IntegrationWsRequestEnvelope": {
+        "description": "Payload type `IntegrationWsRequestEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "IntegrationWsResponseEnvelope": {
+        "description": "Payload type `IntegrationWsResponseEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "auth-token",
+        "type": "httpApiKey"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "Unfolded Circle Integration WebSocket API",
+    "externalDocs": {
+      "url": "https://unfoldedcircle.github.io/core-api/integration/"
+    },
+    "title": "UnfoldedCircleIntegrationWs",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "Integration.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/AuthRequired"
+        }
+      ]
+    },
+    "Integration.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/Authentication"
+        }
+      ]
+    },
+    "Integration.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/EventEnvelope"
+        }
+      ]
+    },
+    "Integration.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "Integration.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/Auth"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/Integration"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/Integration/messages/Authentication"
+          }
+        ]
+      }
+    },
+    "Integration.send.EventEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/EventEnvelope"
+        }
+      ]
+    },
+    "Integration.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/Integration"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/Integration/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/Integration"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/Integration/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    }
+  },
+  "servers": {
+    "default": {
+      "host": "remote.local",
+      "protocol": "ws",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/apiKey"
+        }
+      ]
+    }
+  }
+}

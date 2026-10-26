@@ -5,11 +5,15 @@
 //! pre-buffered copy. A buffering codec collects it; a streaming codec can
 //! return a value that owns the body and yields items as they arrive.
 //!
-//! The built-in codecs are [`Json`], [`Text`], [`Binary`], and [`Empty`].
+//! The built-in buffering codecs are [`Json`], [`Text`], [`Binary`], and
+//! [`Empty`]; the streaming codecs live in [`crate::stream`], the multi-shape
+//! codec in [`crate::shapes`], and the GraphQL codec in [`crate::graphql`].
 
+use std::any::Any;
 use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -66,14 +70,31 @@ pub struct LiveBody {
     /// The bounds that apply after [`into_streaming`](Self::into_streaming).
     stream_bounds: StreamBounds,
     streaming: bool,
+    /// When the idle bound was last restarted: the head's arrival, then each
+    /// item a streaming codec yields.
+    idle_anchor: Instant,
 }
 
-/// The per-request timeout, as an idle bound between reads, and the shared
-/// deadline over the whole stream.
-#[derive(Debug, Clone, Copy, Default)]
+/// The default per-frame byte limit of the SSE and NDJSON codecs: 16 MiB.
+pub const DEFAULT_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// The per-request timeout, as an idle bound between items, the shared
+/// deadline over the whole stream, and the per-frame byte limit.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct StreamBounds {
     pub(crate) idle: Option<Duration>,
     pub(crate) deadline: Option<Instant>,
+    pub(crate) max_frame_bytes: usize,
+}
+
+impl Default for StreamBounds {
+    fn default() -> Self {
+        Self {
+            idle: None,
+            deadline: None,
+            max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+        }
+    }
 }
 
 impl LiveBody {
@@ -93,26 +114,60 @@ impl LiveBody {
             read_until,
             stream_bounds: StreamBounds::default(),
             streaming: false,
+            idle_anchor: Instant::now(),
         }
     }
 
+    /// A body whose bytes have already been read, for a codec that decides
+    /// how to decode only after reading them.
+    pub(crate) fn buffered(status: StatusCode, headers: HeaderMap, bytes: Bytes) -> Self {
+        let stream = futures_util::stream::iter((!bytes.is_empty()).then_some(Ok(bytes)));
+        Self::new(status, headers, stream, None)
+    }
+
+    /// Applies the client's stream bounds; the idle bound starts now, when
+    /// the head has arrived.
     pub(crate) fn with_stream_bounds(mut self, bounds: StreamBounds) -> Self {
         self.stream_bounds = bounds;
+        self.idle_anchor = Instant::now();
         self
+    }
+
+    /// Sets the per-frame byte limit the SSE and NDJSON codecs enforce
+    /// (default [`DEFAULT_MAX_FRAME_BYTES`]); a client applies its
+    /// [`max_frame_bytes`](crate::Client::max_frame_bytes) setting.
+    #[must_use]
+    pub fn with_max_frame_bytes(mut self, limit: usize) -> Self {
+        self.stream_bounds.max_frame_bytes = limit;
+        self
+    }
+
+    /// The per-frame byte limit a framing codec enforces.
+    pub fn max_frame_bytes(&self) -> usize {
+        self.stream_bounds.max_frame_bytes
     }
 
     /// Switches to the bounds of a streamed body, for a codec whose output
     /// keeps reading after `decode` returns.
     ///
-    /// From then on each read must arrive within the client's per-request
-    /// timeout of the previous one (an idle bound), and the shared deadline,
-    /// when the send has one, bounds the whole stream. The send's single
-    /// expiration no longer applies, so a long stream that keeps delivering
-    /// is not cut off.
+    /// From then on a read fails with [`BodyReadError::TimedOut`] once the
+    /// client's per-request timeout has passed since the head arrived or
+    /// since the codec last called [`mark_item`](Self::mark_item) (an idle
+    /// bound between items, not between reads), and with
+    /// [`BodyReadError::DeadlineExceeded`] once the send's shared deadline
+    /// passes. The send's single expiration no longer applies, so a long
+    /// stream that keeps delivering is not cut off.
     #[must_use]
     pub fn into_streaming(mut self) -> Self {
         self.streaming = true;
         self
+    }
+
+    /// Restarts the idle bound of a streamed body: a streaming codec calls it
+    /// each time it yields an item. Bytes that arrive without completing an
+    /// item do not restart it.
+    pub fn mark_item(&mut self) {
+        self.idle_anchor = Instant::now();
     }
 
     /// The response status.
@@ -128,26 +183,32 @@ impl LiveBody {
 
     /// The next piece of the body, or `None` at its end.
     ///
+    /// Bytes the server has already sent are returned even when the caller
+    /// polls after a bound has passed: the read is attempted before its
+    /// timer.
+    ///
     /// ## Errors
     ///
-    /// Returns the stream's [`BodyReadError`], or
-    /// [`BodyReadError::TimedOut`] when the expiration passes first.
+    /// Returns the stream's [`BodyReadError`], or the bound that passed
+    /// first: [`BodyReadError::TimedOut`] for the expiration or idle bound,
+    /// [`BodyReadError::DeadlineExceeded`] for a streamed body's shared
+    /// deadline.
     pub async fn chunk(&mut self) -> Result<Option<Bytes>, BodyReadError> {
-        let read_until = if self.streaming {
-            let idle = self.stream_bounds.idle.and_then(|idle| Instant::now().checked_add(idle));
+        let (read_until, expired) = if self.streaming {
+            let idle = self.stream_bounds.idle.and_then(|idle| self.idle_anchor.checked_add(idle));
             match (idle, self.stream_bounds.deadline) {
-                (Some(idle), Some(deadline)) => Some(idle.min(deadline)),
-                (idle, deadline) => idle.or(deadline),
+                (Some(idle), Some(deadline)) if deadline <= idle => (Some(deadline), BodyReadError::DeadlineExceeded),
+                (Some(idle), _) => (Some(idle), BodyReadError::TimedOut),
+                (None, Some(deadline)) => (Some(deadline), BodyReadError::DeadlineExceeded),
+                (None, None) => (None, BodyReadError::TimedOut),
             }
         } else {
-            self.read_until
+            (self.read_until, BodyReadError::TimedOut)
         };
         let stream = &mut self.stream;
         let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx));
         let item = match read_until {
-            Some(read_until) => tokio::time::timeout_at(read_until, next)
-                .await
-                .map_err(|_| BodyReadError::TimedOut)?,
+            Some(read_until) => tokio::time::timeout_at(read_until, next).await.map_err(|_| expired)?,
             None => next.await,
         };
         item.transpose()
@@ -187,8 +248,11 @@ impl fmt::Debug for LiveBody {
 pub enum BodyReadError {
     /// The connection failed or closed before the body was complete.
     Interrupted,
-    /// The send's expiration passed while waiting for the body.
+    /// The send's expiration, or a streamed body's idle bound, passed while
+    /// waiting for the body.
     TimedOut,
+    /// A streamed body's shared deadline passed while waiting for it.
+    DeadlineExceeded,
 }
 
 impl fmt::Display for BodyReadError {
@@ -196,6 +260,7 @@ impl fmt::Display for BodyReadError {
         f.write_str(match self {
             Self::Interrupted => "response body was interrupted",
             Self::TimedOut => "response body read timed out",
+            Self::DeadlineExceeded => "shared deadline expired while reading the response body",
         })
     }
 }
@@ -210,12 +275,56 @@ pub struct DecodeFailure {
     /// The bytes received before an interruption, or the original bytes of a
     /// body that did not parse.
     pub retained: Bytes,
+    /// The typed failure of a [`DecodeFailureKind::Declared`] failure.
+    declared: Option<DeclaredPayload>,
 }
 
 impl DecodeFailure {
     /// A failure of `kind` keeping `retained`.
     pub fn new(kind: DecodeFailureKind, retained: Bytes) -> Self {
-        Self { kind, retained }
+        Self { kind, retained, declared: None }
+    }
+
+    /// A 2xx body that carries a failure the endpoint declares, such as a
+    /// GraphQL `errors` array, keeping `retained`.
+    ///
+    /// The runtime hands `failure` to the endpoint's
+    /// [`ErrorBody::from_declared`](crate::ErrorBody::from_declared); a
+    /// failure type that does not accept it makes the reply
+    /// [`ErrorKind::MalformedSuccess`](crate::ErrorKind::MalformedSuccess).
+    pub fn declared<F: Any + Send>(failure: F, retained: Bytes) -> Self {
+        Self {
+            kind: DecodeFailureKind::Declared,
+            retained,
+            declared: Some(DeclaredPayload(Arc::new(Mutex::new(Some(Box::new(failure)))))),
+        }
+    }
+
+    /// Takes the typed failure of a [`DecodeFailureKind::Declared`] failure;
+    /// `None` for every other kind and once taken.
+    pub(crate) fn take_declared(&mut self) -> Option<Box<dyn Any + Send>> {
+        let payload = self.declared.take()?;
+        let mut slot = payload.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.take()
+    }
+}
+
+/// The type-erased failure of a [`DecodeFailure::declared`] failure. Clones
+/// share it, so it is taken once; equality is identity.
+#[derive(Clone)]
+struct DeclaredPayload(Arc<Mutex<Option<Box<dyn Any + Send>>>>);
+
+impl PartialEq for DeclaredPayload {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DeclaredPayload {}
+
+impl fmt::Debug for DeclaredPayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DeclaredPayload(..)")
     }
 }
 
@@ -229,6 +338,12 @@ pub enum DecodeFailureKind {
     Malformed,
     /// A response hook rejected the body.
     Hook,
+    /// No declared shape of a multi-shape endpoint matches the reply's
+    /// status, media type, or JSON tag.
+    UnexpectedContentType,
+    /// The 2xx body carries a failure the endpoint declares; built by
+    /// [`DecodeFailure::declared`].
+    Declared,
 }
 
 /// Decodes a JSON body into `T`.

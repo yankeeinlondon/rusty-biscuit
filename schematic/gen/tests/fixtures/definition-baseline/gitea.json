@@ -1,0 +1,1572 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "Authorization",
+        "value_prefix": "token "
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://gitea.example.com/api/v1",
+    "cross_origin": "SameOrigin",
+    "default_pagination": {
+      "constants": [],
+      "follow_up": null,
+      "kind": {
+        "base": "one_based",
+        "kind": "page_number",
+        "more": {
+          "rel": "next",
+          "signal": "link_rel"
+        },
+        "page": {
+          "in": "query",
+          "name": "page"
+        },
+        "size": {
+          "adjustable": false,
+          "max": 50,
+          "min": 1,
+          "param": {
+            "in": "query",
+            "name": "limit"
+          },
+          "sent_default": null,
+          "server_default": 30
+        }
+      },
+      "partition": null,
+      "session": null,
+      "terminal_values": [],
+      "total": {
+        "at": "X-Total-Count",
+        "from": "header"
+      }
+    },
+    "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
+    "docs_url": "https://docs.gitea.com/api/1.25/",
+    "endpoints": [
+      {
+        "description": "Get repository metadata including default branch",
+        "headers": [],
+        "id": "GetRepository",
+        "method": "GET",
+        "params": null,
+        "path": "/repos/{owner}/{repo}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "RepositoryInfo"
+          }
+        }
+      },
+      {
+        "description": "Get a Git tree; set recursive to include nested entries",
+        "headers": [],
+        "id": "GetGitTree",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "GitTreeEntry",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "tree"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": null,
+              "explode": false,
+              "name": "recursive",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/git/trees/{sha}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "GitTreeResponse"
+          }
+        }
+      },
+      {
+        "description": "Get raw file content from repository",
+        "headers": [],
+        "id": "GetRepositoryContentRaw",
+        "method": "GET",
+        "params": null,
+        "path": "/repos/{owner}/{repo}/raw/{+filepath}",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "List pull requests with metadata",
+        "headers": [],
+        "id": "ListPullRequests",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by PR state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "open",
+                  "closed",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Sort order for results",
+              "explode": false,
+              "name": "sort",
+              "param_type": {
+                "Enum": [
+                  "oldest",
+                  "recentupdate",
+                  "leastupdate",
+                  "mostcomment",
+                  "leastcomment",
+                  "priority"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/pulls",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "PullRequestSummary"
+            }
+          }
+        }
+      },
+      {
+        "description": "List files changed in a pull request",
+        "headers": [],
+        "id": "ListPullRequestFiles",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/pulls/{index}/files",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "PullRequestFile"
+            }
+          }
+        }
+      },
+      {
+        "description": "List issues (use type=issues to exclude PRs)",
+        "headers": [],
+        "id": "ListIssues",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by issue state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "open",
+                  "closed",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by type (issues, pulls, or all)",
+              "explode": false,
+              "name": "issue_type",
+              "param_type": {
+                "Enum": [
+                  "issues",
+                  "pulls",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/issues",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "IssueSummary"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single issue by index",
+        "headers": [],
+        "id": "GetIssue",
+        "method": "GET",
+        "params": null,
+        "path": "/repos/{owner}/{repo}/issues/{index}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "IssueSummary"
+          }
+        }
+      },
+      {
+        "description": "List comments on an issue",
+        "headers": [],
+        "id": "ListIssueComments",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/issues/{index}/comments",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "IssueComment"
+            }
+          }
+        }
+      },
+      {
+        "description": "List timeline events for an issue",
+        "headers": [],
+        "id": "ListIssueTimeline",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/issues/{index}/timeline",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "TimelineEvent"
+            }
+          }
+        }
+      },
+      {
+        "description": "List repository tags",
+        "headers": [],
+        "id": "ListTags",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/tags",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepoTag"
+            }
+          }
+        }
+      },
+      {
+        "description": "List releases (linked to tags via tag_name)",
+        "headers": [],
+        "id": "ListReleases",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include draft releases",
+              "explode": false,
+              "name": "draft",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include pre-releases",
+              "explode": false,
+              "name": "pre_release",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repos/{owner}/{repo}/releases",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Release"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a branch (commit.id is the branch head commit)",
+        "headers": [],
+        "id": "GetBranch",
+        "method": "GET",
+        "params": null,
+        "path": "/repos/{owner}/{repo}/branches/{branch}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Branch"
+          }
+        }
+      },
+      {
+        "description": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')",
+        "headers": [],
+        "id": "GetTagReference",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/refs/{git_ref}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "GitRef"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get annotated tag object details (message, tagger)",
+        "headers": [],
+        "id": "GetAnnotatedTag",
+        "method": "GET",
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/tags/{sha}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "AnnotatedTagObject"
+          }
+        }
+      },
+      {
+        "description": "List repositories for an organization",
+        "headers": [],
+        "id": "ListOrgRepos",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/orgs/{org}/repos",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepositoryInfo"
+            }
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "GITEA_TOKEN"
+    ],
+    "env_mapping": null,
+    "env_username": null,
+    "headers": [
+      [
+        "Accept",
+        "application/json"
+      ]
+    ],
+    "module_path": "gitea",
+    "name": "Gitea",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "ca8a44d53dc680dfa3fc76a292d1a29effabef1b3bd27522f4e4688c0dfcd944",
+    "endpoints": [
+      {
+        "blake3": "0fcc165d650229cce2654ce5ac8994aad66634a2f258d1c2b718311a1aa83552",
+        "id": "GetRepository"
+      },
+      {
+        "blake3": "2b01d81c350af464d4d2005c186743a7402a3e1e96429dc68b8dd8f0147ee362",
+        "id": "GetGitTree"
+      },
+      {
+        "blake3": "d9517b1a4f3d5ee9defea0535c8899be4c1600a3ed3bbf2c5d26b1ebb4957edd",
+        "id": "GetRepositoryContentRaw"
+      },
+      {
+        "blake3": "767442fa3c8f5eac856393572a3054a2c09b5deaff8f0153a0f527795468c6cf",
+        "id": "ListPullRequests"
+      },
+      {
+        "blake3": "d6df22110e2c1d1a551fa3e7d17fd9564e4cbd2e67e3628eda2b2a3d7953adf0",
+        "id": "ListPullRequestFiles"
+      },
+      {
+        "blake3": "72b4303d539dc2f12b59b217a5a01fbef671f820da40c2cea9a7276bf5cecaa9",
+        "id": "ListIssues"
+      },
+      {
+        "blake3": "63dd83e094821f5148d21dcda47f7d3d051e10cc34068fab69979535c36692dc",
+        "id": "GetIssue"
+      },
+      {
+        "blake3": "e1b8c147d2f3ba733f78f5404714265e1817a02c3a06151e5d01e4911bf0e37e",
+        "id": "ListIssueComments"
+      },
+      {
+        "blake3": "b19f5461daf57eb003e5891f9b3d7018aecc56f154cf2458dcd1eae6dec0a940",
+        "id": "ListIssueTimeline"
+      },
+      {
+        "blake3": "f13f63ab08cb4b3e812c6bebf25df1d36fda5e6b3c6cc90eca3216dbc6c28fa3",
+        "id": "ListTags"
+      },
+      {
+        "blake3": "80ef3d0e2eab6a48f2f027cd45205f39dab3fc95cf5def9d7a3dc585230f9eea",
+        "id": "ListReleases"
+      },
+      {
+        "blake3": "dc50cfe9a659eb4fb38a9466b0cf917c597f32ccee5ef237c8ac15b96fd95e48",
+        "id": "GetBranch"
+      },
+      {
+        "blake3": "78249bd0eabd231bd46446d283717e82627bbe6f8aba3cdee5f348d9bafc57db",
+        "id": "GetTagReference"
+      },
+      {
+        "blake3": "d5b1c4d3f2883ec038d06abd01ebc7488863e6f93006f6ab26ec3e278fd9014e",
+        "id": "GetAnnotatedTag"
+      },
+      {
+        "blake3": "14b92068e1b74cb6150e875ba509003741c5b08bff31fcc9aed6738804253675",
+        "id": "ListOrgRepos"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepository",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetGitTree",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "GitTreeEntry",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "tree"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepositoryContentRaw",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListPullRequests",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::PullRequestSummary",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListPullRequestFiles",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::PullRequestFile",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssues",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::IssueSummary",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetIssue",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssueComments",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::IssueComment",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssueTimeline",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::TimelineEvent",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListTags",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::RepoTag",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListReleases",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::Release",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetBranch",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetTagReference",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::gitea::GitRef",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetAnnotatedTag",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListOrgRepos",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitea::RepositoryInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "25639af632aa047c9e6f381eb35003386e1bd46d689183bc79b421ecf55a3ea7",
+      "name": "RepositoryInfo",
+      "rust_path": "::schematic_definitions::gitea::RepositoryInfo"
+    },
+    {
+      "blake3": "2ad096587bb15e2fac9801a9704cf90e8047eedecf4f84fd10dc20d3531fbffa",
+      "name": "UserSummary",
+      "rust_path": null
+    },
+    {
+      "blake3": "a66dee5ec68db348d2c793fdacda9809485098d34609ef683dcdc088169e2452",
+      "name": "GitTreeResponse",
+      "rust_path": "::schematic_definitions::gitea::GitTreeResponse"
+    },
+    {
+      "blake3": "3f5c55aa22b04b5fc08d5fa8c9ce8c970fefe248c0e7d7fe35ecbba757ca536f",
+      "name": "GitTreeEntry",
+      "rust_path": null
+    },
+    {
+      "blake3": "ea1113f281ac65611b6cd2775bd9f8a823c0fbf20f1098cd55ac338c5d387568",
+      "name": "PullRequestSummary",
+      "rust_path": "::schematic_definitions::gitea::PullRequestSummary"
+    },
+    {
+      "blake3": "dc22017a106dd6967a46be36de5ab27af09b5a47155c036bdd3b0fc39a55ee77",
+      "name": "Label",
+      "rust_path": "::schematic_definitions::gitea::Label"
+    },
+    {
+      "blake3": "911d42510770771c1e0f54f997f0ec0c8a97022b9b9381e6dc8482eccfbb8dc7",
+      "name": "PullRef",
+      "rust_path": null
+    },
+    {
+      "blake3": "36f84b16ca7526fbc29307262ed5fe9b34fb1e9bef3f916f7039090df8ea57f8",
+      "name": "PullRequestFile",
+      "rust_path": "::schematic_definitions::gitea::PullRequestFile"
+    },
+    {
+      "blake3": "fa5003705f33cbe7f6845e367b7131101784759d086718942b8894a28f1e2ab3",
+      "name": "IssueSummary",
+      "rust_path": "::schematic_definitions::gitea::IssueSummary"
+    },
+    {
+      "blake3": "e677a59bfb0b37ecb99dffe73eafb6ca1f914ac497d9754df60d54e3350da1a2",
+      "name": "IssueComment",
+      "rust_path": "::schematic_definitions::gitea::IssueComment"
+    },
+    {
+      "blake3": "7626869af7f223c7c08c4d46e49c6699e4a2f4237fcb27d46ee14b167f628e1f",
+      "name": "TimelineEvent",
+      "rust_path": "::schematic_definitions::gitea::TimelineEvent"
+    },
+    {
+      "blake3": "21f6b3440a7561308d6d007a944dc44e141e4c883cfee0e55d05c54d03f41349",
+      "name": "RepoTag",
+      "rust_path": "::schematic_definitions::gitea::RepoTag"
+    },
+    {
+      "blake3": "e553a5419317d21243d518e5742b4d487de9fb32bdd1eb0d94bb3d5acf930308",
+      "name": "TagCommit",
+      "rust_path": null
+    },
+    {
+      "blake3": "a5704959493703856f51da79f4e8639faf269fa741a2a091e15dd87395f5ae0e",
+      "name": "Release",
+      "rust_path": "::schematic_definitions::gitea::Release"
+    },
+    {
+      "blake3": "1ff769676ecf25e5d4408037a8ab457944c7548551c94b0fa98f0fc0e3ac068f",
+      "name": "Branch",
+      "rust_path": "::schematic_definitions::gitea::Branch"
+    },
+    {
+      "blake3": "9da77f12732384a63a5cdc16986df315cef52fb98694f1c6d58ec5d671eb7403",
+      "name": "BranchCommit",
+      "rust_path": null
+    },
+    {
+      "blake3": "8cc7a0606941c2498a494be295ad23696d2af8070cdeb919d9025091a494b835",
+      "name": "GitRef",
+      "rust_path": "::schematic_definitions::gitea::GitRef"
+    },
+    {
+      "blake3": "75722c75e82faca54cc3a357513c5898e0e3d6d962f09a62e4c15f9590681b94",
+      "name": "GitRefObject",
+      "rust_path": null
+    },
+    {
+      "blake3": "d3ee8afa7724716db741efb5d22b628a35b4279c1ab9e178105941d2bc76bb0a",
+      "name": "AnnotatedTagObject",
+      "rust_path": "::schematic_definitions::gitea::AnnotatedTagObject"
+    }
+  ]
+}

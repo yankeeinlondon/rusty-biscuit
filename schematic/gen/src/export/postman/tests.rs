@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
+use schematic_define::{SuccessShape, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
 use crate::export::auth::{ApiKeyLocation, ExportAuth};
 use crate::export::body::{ExportBody, FormField, FormFieldExportKind, map_body};
@@ -18,27 +18,7 @@ use super::variables::merge_variables;
 use super::write_postman;
 
 fn minimal_api() -> RestApi {
-    RestApi {
-        name: "TestApi".to_string(),
-        description: "A test API".to_string(),
-        base_url: "https://api.test.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "A test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 #[test]
@@ -64,28 +44,8 @@ fn build_minimal_collection() {
 fn build_collection_with_endpoints() {
     let mut api = minimal_api();
     api.endpoints = vec![
-        Endpoint {
-            id: "GetUser".to_string(),
-            method: RestMethod::Get,
-            path: "/users/{id}".to_string(),
-            description: "Get a user".to_string(),
-            request: None,
-            response: ApiResponse::json_type("User"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/users".to_string(),
-            description: "List all users".to_string(),
-            request: None,
-            response: ApiResponse::json_type("UserList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("User")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListUsers".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users".to_string(); fixture.description = "List all users".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("UserList")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -210,12 +170,15 @@ fn body_json() {
     let body = ExportBody::Json {
         content_type: "application/json".to_string(),
     };
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, Some(&serde_json::json!({"model": "string"})));
 
     assert_eq!(postman_body.mode, "raw");
-    assert_eq!(postman_body.raw, Some("{}".to_string()));
+    assert_eq!(postman_body.raw.as_deref(), Some("{\n  \"model\": \"string\"\n}"));
     assert!(postman_body.options.is_some());
     assert_eq!(postman_body.options.unwrap().raw.language, "json");
+
+    // Without a valid example the body stays empty, never an invalid `{}`.
+    assert_eq!(build_body(&body, None).raw.as_deref(), Some(""));
 }
 
 #[test]
@@ -236,7 +199,7 @@ fn body_form_data() {
             },
         ],
     };
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, None);
 
     assert_eq!(postman_body.mode, "formdata");
     assert!(postman_body.formdata.is_some());
@@ -261,7 +224,7 @@ fn body_url_encoded() {
             kind: FormFieldExportKind::Text,
         }],
     };
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, None);
 
     assert_eq!(postman_body.mode, "urlencoded");
     assert!(postman_body.urlencoded.is_some());
@@ -343,7 +306,7 @@ fn body_form_data_real_elevenlabs_upload() {
             .with_description("Name for the sample"),
     ]);
     let body = map_body(&request);
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, None);
 
     assert_eq!(postman_body.mode, "formdata");
     let formdata = postman_body.formdata.expect("formdata array");
@@ -370,7 +333,7 @@ fn body_form_data_real_unfolded_circle_file_upload() {
         schematic_define::request::FormField::file("file"),
     ]);
     let body = map_body(&request);
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, None);
 
     let formdata = postman_body.formdata.expect("formdata array");
     assert_eq!(formdata.len(), 1);
@@ -384,7 +347,7 @@ fn body_text() {
     let body = ExportBody::Text {
         content_type: "text/plain".to_string(),
     };
-    let postman_body = build_body(&body);
+    let postman_body = build_body(&body, None);
 
     assert_eq!(postman_body.mode, "raw");
     assert_eq!(postman_body.raw, Some(String::new()));
@@ -394,8 +357,8 @@ fn body_text() {
 
 #[test]
 fn body_binary() {
-    let body = ExportBody::Binary;
-    let postman_body = build_body(&body);
+    let body = ExportBody::Binary { content_type: "audio/mpeg".to_string() };
+    let postman_body = build_body(&body, None);
 
     assert_eq!(postman_body.mode, "file");
     assert!(postman_body.raw.is_none());
@@ -405,49 +368,26 @@ fn body_binary() {
 
 #[test]
 fn url_with_path_params() {
-    let endpoint = Endpoint {
-        id: "GetModel".to_string(),
-        method: RestMethod::Get,
-        path: "/models/{model}".to_string(),
-        description: "Get a model".to_string(),
-        request: None,
-        response: ApiResponse::json_type("Model"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{model}".to_string(); fixture.description = "Get a model".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Model")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let path_params = extract_path_params(&endpoint.path);
-    let url = build_url(
-        "https://api.test.com/v1",
-        &endpoint.path,
-        &path_params,
-        &endpoint,
-        "baseUrl",
-    );
+    let mut collected = super::variables::Collected::default();
+    let url = build_url(&endpoint.path, &path_params, &endpoint, "baseUrl", &ExportAuth::None, &mut collected);
 
     assert_eq!(url.raw, "{{baseUrl}}/models/:model");
     assert_eq!(url.host, vec!["{{baseUrl}}"]);
     assert_eq!(url.path, vec!["models", ":model"]);
     assert_eq!(url.variable.len(), 1);
     assert_eq!(url.variable[0].key, "model");
-    assert_eq!(url.variable[0].value, Some("<model>".to_string()));
+    assert_eq!(url.variable[0].value, Some("{{path_model}}".to_string()));
+    let declared: Vec<&str> = collected.parameters.iter().map(|v| v.key.as_str()).collect();
+    assert_eq!(declared, ["path_model"]);
 }
 
 #[test]
 fn reserved_path_param_strips_marker_in_collection() {
     let mut api = minimal_api();
-    api.endpoints = vec![Endpoint {
-        id: "GetModel".to_string(),
-        method: RestMethod::Get,
-        path: "/models/{+repo_id}".to_string(),
-        description: "Get a model".to_string(),
-        request: None,
-        response: ApiResponse::json_type("Model"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    }];
+    api.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{+repo_id}".to_string(); fixture.description = "Get a model".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Model")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }];
 
     let collection = build_postman_collection(&api);
     let json = serde_json::to_string(&collection).unwrap();
@@ -463,39 +403,9 @@ fn reserved_path_param_strips_marker_in_collection() {
 fn folder_grouping() {
     let mut api = minimal_api();
     api.endpoints = vec![
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/models".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("ModelList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetModel".to_string(),
-            method: RestMethod::Get,
-            path: "/models/{model}".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("Model"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetHealth".to_string(),
-            method: RestMethod::Get,
-            path: "/health".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("Health"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListModels".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("ModelList")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{model}".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Model")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetHealth".to_string(); fixture.method = RestMethod::Get; fixture.path = "/health".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Health")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -542,7 +452,7 @@ fn write_postman_dry_run() {
     let temp_dir = std::env::temp_dir();
     let path = write_postman(&api, &temp_dir, true).unwrap();
 
-    assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
+    assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 }
 
 #[test]
@@ -554,7 +464,7 @@ fn write_postman_creates_file() {
     let path = write_postman(&api, temp_dir.path(), false).unwrap();
 
     assert!(path.exists());
-    assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
+    assert_eq!(path.file_name().unwrap(), "test.postman_collection.json");
 
     // Verify it's valid JSON
     let content = fs::read_to_string(&path).unwrap();
@@ -566,30 +476,10 @@ fn postman_collection_json_structure() {
     let mut api = minimal_api();
     api.auth = AuthStrategy::BearerToken { header: None };
     api.endpoints = vec![
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/models".to_string(),
-            description: "List all models".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ModelList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateCompletion".to_string(),
-            method: RestMethod::Post,
-            path: "/chat/completions".to_string(),
-            description: "Create a chat completion".to_string(),
-            request: Some(schematic_define::ApiRequest::json_type(
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListModels".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models".to_string(); fixture.description = "List all models".to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("ModelList")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateCompletion".to_string(); fixture.method = RestMethod::Post; fixture.path = "/chat/completions".to_string(); fixture.description = "Create a chat completion".to_string(); fixture.request = Some(schematic_define::ApiRequest::json_type(
                 "CreateCompletionRequest",
-            )),
-            response: ApiResponse::json_type("Completion"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+            )); fixture.response = vec![SuccessShape::json_type("Completion")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -670,7 +560,7 @@ fn build_postman_collection_bearer_declares_bearer_token() {
 #[test]
 fn build_postman_collection_basic_declares_username_and_password() {
     let mut api = minimal_api();
-    api.auth = AuthStrategy::Basic;
+    api.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let collection = build_postman_collection(&api);
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
     assert!(keys.contains(&"baseUrl"));
@@ -729,47 +619,28 @@ fn merge_variables_dedupes_by_key() {
 }
 
 #[test]
-fn build_postman_collection_grouped_uniform_bearer_declares_bearer_token() {
+fn grouped_members_get_their_own_server_and_credential_variables() {
     let mut api1 = minimal_api();
     api1.name = "OneBearer".to_string();
     api1.auth = AuthStrategy::BearerToken { header: None };
     let mut api2 = minimal_api();
     api2.name = "TwoBearer".to_string();
-    api2.base_url = "https://api2.test.com/v1".to_string();
+    // The same server as the first member still gets its own variable.
     api2.auth = AuthStrategy::BearerToken { header: None };
 
     let collection = build_postman_collection_grouped(&[&api1, &api2], "test_module");
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
-    assert!(keys.contains(&"baseUrl"));
-    assert!(keys.contains(&"baseUrl2"));
-    assert!(
-        keys.contains(&"bearerToken"),
-        "missing bearerToken in {:?}",
-        keys,
-    );
-    // Bearer should not be declared twice.
-    let bearer_count = collection
-        .variable
-        .iter()
-        .filter(|v| v.key == "bearerToken")
-        .count();
-    assert_eq!(bearer_count, 1);
+    assert_eq!(keys, ["baseUrl", "baseUrl2", "bearerToken_OneBearer", "bearerToken_TwoBearer"]);
+    assert_eq!(collection.variable[0].value, collection.variable[1].value);
+    // Differently named credentials are different auths, so each request
+    // carries its member's.
+    assert!(collection.auth.is_none());
 }
 
 /// Helper: build a minimal endpoint with a given id and path so the
 /// grouped-auth tests can construct realistic API surfaces.
 fn endpoint(id: &str, path: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method: RestMethod::Get,
-        path: path.to_string(),
-        description: String::new(),
-        request: None,
-        response: ApiResponse::json_type("Resp"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Resp")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 /// Helper: collect every request item out of a built collection so
@@ -778,12 +649,12 @@ fn collect_requests(collection: &PostmanCollection) -> Vec<(String, &PostmanRequ
     let mut out = Vec::new();
     for item in &collection.item {
         match item {
-            PostmanItem::Request { name, request } => {
+            PostmanItem::Request { name, request, .. } => {
                 out.push((name.clone(), request.as_ref()));
             }
             PostmanItem::Folder { item, .. } => {
                 for inner in item {
-                    if let PostmanItem::Request { name, request } = inner {
+                    if let PostmanItem::Request { name, request, .. } = inner {
                         out.push((name.clone(), request.as_ref()));
                     }
                 }
@@ -794,21 +665,19 @@ fn collect_requests(collection: &PostmanCollection) -> Vec<(String, &PostmanRequ
 }
 
 #[test]
-fn grouped_uniform_auth_uses_collection_auth_and_no_request_auth() {
+fn grouped_unauthenticated_members_share_collection_auth() {
     let mut api1 = minimal_api();
-    api1.name = "OneBearer".to_string();
-    api1.auth = AuthStrategy::BearerToken { header: None };
+    api1.name = "OneOpen".to_string();
     api1.endpoints = vec![endpoint("ListA", "/a"), endpoint("ListB", "/b")];
 
     let mut api2 = minimal_api();
-    api2.name = "TwoBearer".to_string();
+    api2.name = "TwoOpen".to_string();
     api2.base_url = "https://api2.test.com/v1".to_string();
-    api2.auth = AuthStrategy::BearerToken { header: None };
-    api2.endpoints = vec![endpoint("ListC", "/c")];
+    api2.endpoints = vec![endpoint("ListA", "/c")];
 
     let collection = build_postman_collection_grouped(&[&api1, &api2], "uniform");
     let coll_auth = collection.auth.as_ref().expect("collection auth set");
-    assert_eq!(coll_auth.type_field, "bearer");
+    assert_eq!(coll_auth.type_field, "noauth");
 
     for (name, request) in collect_requests(&collection) {
         assert!(
@@ -829,7 +698,7 @@ fn grouped_uniform_auth_uses_collection_auth_and_no_request_auth() {
 fn grouped_mixed_auth_omits_collection_auth_and_emits_per_request() {
     let mut basic = minimal_api();
     basic.name = "BasicApi".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![
         endpoint("ListItems", "/items"),
         endpoint("BasicOnly", "/bo"),
@@ -874,7 +743,7 @@ fn grouped_mixed_auth_omits_collection_auth_and_emits_per_request() {
 fn grouped_mixed_auth_declares_both_auth_variable_sets() {
     let mut basic = minimal_api();
     basic.name = "BasicApi".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![endpoint("X", "/x")];
 
     let mut bearer = minimal_api();
@@ -885,20 +754,14 @@ fn grouped_mixed_auth_declares_both_auth_variable_sets() {
 
     let collection = build_postman_collection_grouped(&[&basic, &bearer], "mixed");
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
-    assert!(keys.contains(&"username"), "missing username in {:?}", keys);
-    assert!(keys.contains(&"password"), "missing password in {:?}", keys);
-    assert!(
-        keys.contains(&"bearerToken"),
-        "missing bearerToken in {:?}",
-        keys,
-    );
+    assert_eq!(keys, ["baseUrl", "baseUrl2", "username_BasicApi", "password_BasicApi", "bearerToken_BearerApi"]);
 }
 
 #[test]
 fn grouped_mixed_auth_disambiguates_duplicate_request_names() {
     let mut basic = minimal_api();
     basic.name = "EmqxBasic".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![endpoint("ListAlarms", "/alarms")];
 
     let mut bearer = minimal_api();
@@ -935,7 +798,7 @@ fn grouped_mixed_auth_disambiguates_duplicate_request_names() {
 fn grouped_mixed_auth_preserves_unique_request_names() {
     let mut basic = minimal_api();
     basic.name = "EmqxBasic".to_string();
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     basic.endpoints = vec![
         endpoint("ListAlarms", "/alarms"), // duplicated
         endpoint("BasicOnly", "/bo"),      // unique to Basic
@@ -975,7 +838,7 @@ fn grouped_mixed_auth_preserves_unique_request_names() {
 fn build_postman_collection_grouped_mixed_auth_unions_variables() {
     let mut api1 = minimal_api();
     api1.name = "BasicApi".to_string();
-    api1.auth = AuthStrategy::Basic;
+    api1.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let mut api2 = minimal_api();
     api2.name = "BearerApi".to_string();
     api2.base_url = "https://api2.test.com/v1".to_string();
@@ -983,11 +846,7 @@ fn build_postman_collection_grouped_mixed_auth_unions_variables() {
 
     let collection = build_postman_collection_grouped(&[&api1, &api2], "mixed_module");
     let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
-    assert!(keys.contains(&"username"), "missing username in {:?}", keys);
-    assert!(keys.contains(&"password"), "missing password in {:?}", keys);
-    assert!(
-        keys.contains(&"bearerToken"),
-        "missing bearerToken in {:?}",
-        keys,
-    );
+    assert!(keys.contains(&"username_BasicApi"), "missing username in {:?}", keys);
+    assert!(keys.contains(&"password_BasicApi"), "missing password in {:?}", keys);
+    assert!(keys.contains(&"bearerToken_BearerApi"), "missing bearerToken in {:?}", keys);
 }

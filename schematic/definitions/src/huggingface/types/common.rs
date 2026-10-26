@@ -272,6 +272,13 @@ pub struct RepoFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lfs: Option<LfsInfo>,
 }
+impl schematic_define::Registration for RepoFile {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("RepoFile");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LfsInfo {
@@ -291,6 +298,13 @@ pub struct CommitInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<String>,
 }
+impl schematic_define::Registration for CommitInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CommitInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Author {

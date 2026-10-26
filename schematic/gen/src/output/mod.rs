@@ -49,11 +49,13 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use schematic_define::RestApi;
+use schematic_definitions::naming::resolve_module_name;
+use schematic_definitions::registry::{ApiRegistration, registrations};
 
-use crate::cargo_gen::generate_cargo_toml;
+use crate::cargo_gen::{ModuleFeatures, generate_cargo_toml};
 use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
-use crate::validation::{ensure_no_errors, validate_rust_client};
+use crate::validation::{ensure_no_errors, validate_rust_client_in};
 
 use inventory::{Occupant, Proof, list_entries, occupant};
 
@@ -68,9 +70,9 @@ pub mod ws_modules;
 pub use assemble::{
     SPLIT_THRESHOLD_LINES, SplitApiParts, assemble_api_code, assemble_api_module,
     assemble_api_module_with_options, assemble_combined_api_module, assemble_lib_rs,
-    assemble_lib_rs_with_options, assemble_prelude, assemble_prelude_with_options,
+    assemble_lib_rs_with_options, assemble_prelude,
     assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
-    get_module_path, get_request_suffix,
+    get_request_suffix,
 };
 pub use format::{GENERATED_FILE_HEADER, format_code, validate_code};
 pub use options::OutputOptions;
@@ -143,8 +145,15 @@ pub enum Selection<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct RustOutputRequest<'a> {
     /// Every API the generator knows, in registry order. `lib.rs` and
-    /// `prelude.rs` list modules in this order.
+    /// `prelude.rs` list modules in this order. The manifest declares one
+    /// feature per module group of the whole registry, whatever `selection`
+    /// regenerates.
     pub registry: &'a [&'a RestApi],
+    /// The registration inventory whose WebSocket entries the crate
+    /// packages: their modules, `lib.rs` and `prelude.rs` entries, and
+    /// reserved module names. Its REST entries are not read; REST APIs come
+    /// from `registry`.
+    pub registrations: &'a [ApiRegistration],
     /// What this run regenerates.
     pub selection: Selection<'a>,
     /// The crate's `src` directory.
@@ -197,6 +206,7 @@ pub fn generate_and_write_all(
 ) -> Result<String, GeneratorError> {
     let prepared = prepare_rust_output(&RustOutputRequest {
         registry: apis,
+        registrations: registrations(),
         selection: Selection::All,
         output_dir,
         manifest_dir: None,
@@ -240,11 +250,11 @@ pub fn prepare_rust_output(
     let groups = module_groups(request.registry);
     let selected = selected_groups(request.registry, request.selection)?;
     let regenerated_apis = expand_selection(request.registry, request.selection)?;
-    ensure_valid_rust_batch(&regenerated_apis)?;
+    ensure_valid_rust_batch(&regenerated_apis, request.registrations)?;
 
     let inventory = match request.selection {
         Selection::All => inventory::RustInventory::default(),
-        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected)?,
+        Selection::Apis(_) => inventory::read_rust_inventory(root, &groups, &selected, request.registrations)?,
     };
     let retained = inventory.retained;
     let exported: BTreeSet<&str> = selected.iter().chain(&retained).map(String::as_str).collect();
@@ -252,15 +262,15 @@ pub fn prepare_rust_output(
         .registry
         .iter()
         .copied()
-        .filter(|api| exported.contains(get_module_path(api).as_str()))
+        .filter(|api| exported.contains(resolve_module_name(api).as_str()))
         .collect();
 
-    let lib = render(&assemble_lib_rs(&crate_apis))?;
+    let lib = render(&assemble_lib_rs(&crate_apis, request.registrations))?;
     let shared = render(&assemble_shared_module())?;
-    let prelude = render(&assemble_prelude(&crate_apis))?;
+    let prelude = render(&assemble_prelude(&crate_apis, request.registrations))?;
     let generated = assemble_modules(&regenerated_apis)?;
     let (ws_shared_filename, ws_shared) = ws_modules::generate_ws_shared_module()?;
-    let ws_definition_modules = ws_modules::generate_ws_definition_modules()?;
+    let ws_definition_modules = ws_modules::generate_ws_definition_modules(request.registrations)?;
 
     inventory::shared_runtime_compatibility(
         root,
@@ -281,7 +291,7 @@ pub fn prepare_rust_output(
     if let Some(manifest_dir) = request.manifest_dir {
         planner.write(
             manifest_dir.join("Cargo.toml"),
-            generate_cargo_toml(None),
+            generate_cargo_toml(None, &ModuleFeatures::new(request.registry, request.registrations)),
             Proof::Manifest,
         );
     }
@@ -306,7 +316,7 @@ pub fn prepare_rust_output(
 fn module_groups<'a>(registry: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>> {
     let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
     for api in registry {
-        groups.entry(get_module_path(api)).or_default().push(api);
+        groups.entry(resolve_module_name(api)).or_default().push(api);
     }
     groups
 }
@@ -325,7 +335,7 @@ pub fn expand_selection<'a>(
     Ok(registry
         .iter()
         .copied()
-        .filter(|api| selected.contains(&get_module_path(api)))
+        .filter(|api| selected.contains(&resolve_module_name(api)))
         .collect())
 }
 
@@ -336,14 +346,14 @@ fn selected_groups(
     selection: Selection<'_>,
 ) -> Result<BTreeSet<String>, GeneratorError> {
     let Selection::Apis(apis) = selection else {
-        return Ok(registry.iter().map(|api| get_module_path(api)).collect());
+        return Ok(registry.iter().map(|api| resolve_module_name(api)).collect());
     };
     apis.iter()
         .map(|api| {
             registry
                 .iter()
                 .find(|known| known.name == api.name)
-                .map(|known| get_module_path(known))
+                .map(|known| resolve_module_name(known))
                 .ok_or_else(|| {
                     GeneratorError::ConfigError(format!(
                         "API `{}` is not in the registry, so its module group is unknown",
@@ -362,7 +372,7 @@ fn render(tokens: &TokenStream) -> Result<String, GeneratorError> {
 fn assemble_modules(apis: &[&RestApi]) -> Result<Vec<GeneratedModule>, GeneratorError> {
     let mut module_groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
     for api in apis {
-        module_groups.entry(get_module_path(api)).or_default().push(api);
+        module_groups.entry(resolve_module_name(api)).or_default().push(api);
     }
 
     let mut generated = Vec::new();
@@ -405,9 +415,10 @@ impl GeneratedModule {
 }
 
 /// Fails with [`GeneratorError::Validation`] when the batch cannot produce a
-/// valid Rust client, before anything is assembled or written.
-fn ensure_valid_rust_batch(apis: &[&RestApi]) -> Result<(), GeneratorError> {
-    ensure_no_errors(Output::Rust, validate_rust_client(apis))
+/// valid Rust client beside the WebSocket modules of `registrations`, before
+/// anything is assembled or written.
+fn ensure_valid_rust_batch(apis: &[&RestApi], registrations: &[ApiRegistration]) -> Result<(), GeneratorError> {
+    ensure_no_errors(Output::Rust, validate_rust_client_in(apis, registrations))
 }
 
 /// Remedy shown when a planned path holds content the generator did not write.
@@ -646,7 +657,7 @@ pub fn generate_and_write_standalone(
     has_types: bool,
 ) -> Result<String, GeneratorError> {
     let apis = [api];
-    ensure_valid_rust_batch(&apis)?;
+    ensure_valid_rust_batch(&apis, registrations())?;
     let options = OutputOptions {
         standalone: true,
         include_types_module: has_types,
@@ -654,7 +665,7 @@ pub fn generate_and_write_standalone(
 
     let lib = render(&assemble_lib_rs_with_options(&apis, &options))?;
     let shared = render(&assemble_shared_module())?;
-    let prelude = render(&assemble_prelude_with_options(&apis, false))?;
+    let prelude = render(&assemble_prelude(&apis, &[]))?;
     let api_formatted = render(&assemble_api_module_with_options(api, &options))?;
 
     // The import path writes the API as a single `{module}.rs` file; an owned
@@ -662,7 +673,7 @@ pub fn generate_and_write_standalone(
     // `foo.rs` never stays beside `foo/`, which Rust rejects as ambiguous.
     let mut planner = Planner::new(output_dir);
     planner.module(&GeneratedModule::SingleFile {
-        filename: format!("{}.rs", get_module_path(api)),
+        filename: format!("{}.rs", resolve_module_name(api)),
         content: api_formatted.clone(),
     });
     planner.file("shared.rs", shared);
@@ -682,101 +693,91 @@ pub fn generate_and_write_standalone(
 mod tests {
     use super::*;
     use schematic_define::{
-        ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod,
+        ApiRequest, SuccessShape, AuthStrategy, Endpoint, RestMethod,
     };
     use std::fs;
     use tempfile::TempDir;
 
     fn make_simple_api() -> RestApi {
-        RestApi {
-            name: "TestApi".to_string(),
-            description: "Test API".to_string(),
-            base_url: "https://api.test.com/v1".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List all items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com/v1".to_string())
+                .describes("Test API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List all items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
+                endpoint
+            }];
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
     fn make_complex_api() -> RestApi {
-        RestApi {
-            name: "OpenAI".to_string(),
-            description: "OpenAI REST API".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            docs_url: Some("https://platform.openai.com/docs".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["OPENAI_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "ListModels".to_string(),
-                    method: RestMethod::Get,
-                    path: "/models".to_string(),
-                    description: "Lists available models".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("ListModelsResponse"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "OpenAI".to_string(), "https://api.openai.com/v1".to_string())
+                .describes("OpenAI REST API".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["OPENAI_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://platform.openai.com/docs".to_string());
+            api.endpoints = vec![
+                {
+                    let mut endpoint = Endpoint::new("ListModels".to_string(), RestMethod::Get, "/models".to_string())
+                        .describes("Lists available models".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = vec![SuccessShape::json_type("ListModelsResponse")];
+                    endpoint
                 },
-                Endpoint {
-                    id: "RetrieveModel".to_string(),
-                    method: RestMethod::Get,
-                    path: "/models/{model}".to_string(),
-                    description: "Retrieves a model".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("Model"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+                {
+                    let mut endpoint = Endpoint::new("RetrieveModel".to_string(), RestMethod::Get, "/models/{model}".to_string())
+                        .describes("Retrieves a model".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = vec![SuccessShape::json_type("Model")];
+                    endpoint
                 },
-                Endpoint {
-                    id: "CreateCompletion".to_string(),
-                    method: RestMethod::Post,
-                    path: "/completions".to_string(),
-                    description: "Creates a completion".to_string(),
-                    request: Some(ApiRequest::json_type("CreateCompletionBody")),
-                    response: ApiResponse::json_type("Completion"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+                {
+                    let mut endpoint = Endpoint::new("CreateCompletion".to_string(), RestMethod::Post, "/completions".to_string())
+                        .describes("Creates a completion".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.request = Some(ApiRequest::json_type("CreateCompletionBody"));
+                    endpoint.response = vec![SuccessShape::json_type("Completion")];
+                    endpoint
                 },
-            ],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+            ];
+            crate::test_utils::with_referenced_components(api)
         }
+    }
+
+    #[test]
+    fn typed_builder_fixture_reaches_rust_openapi_and_postman() {
+        let mut ctx = schematic_define::DefinitionContext::types_in("::std::string");
+        let endpoint = Endpoint::get("GetMessage", "/message")
+            .describes("Read a message")
+            .returns_json::<String>(&mut ctx)
+            .build().unwrap();
+        let api = RestApi::builder(&ctx, "MessageApi", "https://api.example.com")
+            .describes("Message API").no_auth().endpoints([endpoint]).build().unwrap();
+        let rust = assemble_api_code(&api).to_string();
+        syn::parse_file(&rust).expect("generated Rust parses");
+        assert!(rust.contains("GetMessage"));
+        assert!(rust.contains("std :: string :: String"));
+
+        let openapi = crate::export::openapi::build_openapi_grouped(
+            &[&api], "message_api",
+            &schematic_define::openapi::ExportOptions::default(),
+        ).unwrap();
+        let document = serde_json::to_value(openapi).unwrap();
+        assert_eq!(document["paths"]["/message"]["get"]["operationId"], "GetMessage");
+        let postman = crate::export::postman::render_postman_module(&[&api], "message_api").unwrap();
+        let collection: serde_json::Value = serde_json::from_str(&postman).unwrap();
+        assert!(collection.to_string().contains("GetMessage"));
+        assert!(collection.to_string().contains("GET"));
     }
 
     #[test]
@@ -1003,12 +1004,11 @@ mod tests {
 
     #[test]
     fn full_pipeline_with_all_auth_strategies() {
-        let test_cases: Vec<(AuthStrategy, Vec<String>, Option<String>)> = vec![
-            (AuthStrategy::None, vec![], None),
+        let test_cases: Vec<(AuthStrategy, Vec<String>)> = vec![
+            (AuthStrategy::None, vec![]),
             (
                 AuthStrategy::BearerToken { header: None },
                 vec!["TOKEN".to_string()],
-                None,
             ),
             (
                 AuthStrategy::ApiKey {
@@ -1016,46 +1016,25 @@ mod tests {
                     value_prefix: None,
                 },
                 vec!["KEY".to_string()],
-                None,
             ),
-            (
-                AuthStrategy::Basic,
-                vec!["PASS".to_string()],
-                Some("USER".to_string()),
-            ),
+            (crate::test_utils::basic_auth(&["USER"], &["PASS"]), vec![]),
         ];
 
-        for (auth, env_auth, env_username) in test_cases {
-            let api = RestApi {
-                name: "TestApi".to_string(),
-                description: "Test".to_string(),
-                base_url: "https://test.com".to_string(),
-                docs_url: None,
-                auth: auth.clone(),
-                auth_policy: None,
-                env_auth,
-                env_username,
-                env_mapping: None,
-                headers: vec![],
-                endpoints: vec![Endpoint {
-                    id: "Test".to_string(),
-                    method: RestMethod::Get,
-                    path: "/test".to_string(),
-                    description: "Test endpoint".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("TestResponse"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-                }],
-                module_path: None,
-                request_suffix: None,
-                version: None,
-                cross_origin: CrossOrigin::default(),
-                request_id_header: None,
-                secret_names: vec![],
-                default_pagination: None,
-                pagination_exceptions: vec![],
+        for (auth, env_auth) in test_cases {
+            let api = {
+                let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://test.com".to_string())
+                    .describes("Test".to_string())
+                    .authentication(auth.clone(), env_auth)
+                    .build().expect("valid API fixture");
+                api.endpoints = vec![{
+                    let mut endpoint = Endpoint::new("Test".to_string(), RestMethod::Get, "/test".to_string())
+                        .describes("Test endpoint".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = vec![SuccessShape::json_type("TestResponse")];
+                    endpoint
+                }];
+                crate::test_utils::with_referenced_components(api)
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1079,39 +1058,23 @@ mod tests {
         let endpoints: Vec<Endpoint> = methods
             .iter()
             .enumerate()
-            .map(|(i, method)| Endpoint {
-                id: format!("Endpoint{}", i),
-                method: *method,
-                path: format!("/path{}", i),
-                description: format!("{:?} endpoint", method),
-                request: None,
-                response: ApiResponse::json_type("Response"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+            .map(|(i, method)| {
+                let mut endpoint = Endpoint::new(format!("Endpoint{}", i), *method, format!("/path{}", i))
+                    .describes(format!("{:?} endpoint", method))
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("Response")];
+                endpoint
             })
             .collect();
 
-        let api = RestApi {
-            name: "AllMethods".to_string(),
-            description: "API with all HTTP methods".to_string(),
-            base_url: "https://test.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints,
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "AllMethods".to_string(), "https://test.com".to_string())
+                .describes("API with all HTTP methods".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = endpoints;
+            crate::test_utils::with_referenced_components(api)
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1133,26 +1096,11 @@ mod tests {
 
     #[test]
     fn full_pipeline_empty_api_produces_valid_code() {
-        let api = RestApi {
-            name: "EmptyApi".to_string(),
-            description: "API with no endpoints".to_string(),
-            base_url: "https://empty.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api = {
+            schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "EmptyApi".to_string(), "https://empty.com".to_string())
+                .describes("API with no endpoints".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture")
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1172,68 +1120,40 @@ mod tests {
     }
 
     fn make_shared_module_apis() -> (RestApi, RestApi) {
-        let api_a = RestApi {
-            name: "FooNative".to_string(),
-            description: "Foo native API".to_string(),
-            base_url: "http://localhost:8080".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/api/items".to_string(),
-                description: "List items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: Some("foo".to_string()),
-            request_suffix: Some("NativeRequest".to_string()),
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api_a = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "FooNative".to_string(), "http://localhost:8080".to_string())
+                .describes("Foo native API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/api/items".to_string())
+                    .describes("List items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
+                endpoint
+            }];
+            api.module_path = Some("foo".to_string());
+            api.request_suffix = Some("NativeRequest".to_string());
+            crate::test_utils::with_referenced_components(api)
         };
 
-        let api_b = RestApi {
-            name: "FooCompat".to_string(),
-            description: "Foo compat API".to_string(),
-            base_url: "http://localhost:8080".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/items".to_string(),
-                description: "List items (compat)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("CompatListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: Some("foo".to_string()),
-            request_suffix: Some("CompatRequest".to_string()),
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api_b = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "FooCompat".to_string(), "http://localhost:8080".to_string())
+                .describes("Foo compat API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/v1/items".to_string())
+                    .describes("List items (compat)".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("CompatListItemsResponse")];
+                endpoint
+            }];
+            api.module_path = Some("foo".to_string());
+            api.request_suffix = Some("CompatRequest".to_string());
+            crate::test_utils::with_referenced_components(api)
         };
 
         (api_a, api_b)
@@ -1243,7 +1163,7 @@ mod tests {
     fn assemble_lib_rs_deduplicates_modules() {
         let (api_a, api_b) = make_shared_module_apis();
         let apis: Vec<&RestApi> = vec![&api_a, &api_b];
-        let tokens = assemble_lib_rs(&apis);
+        let tokens = assemble_lib_rs(&apis, registrations());
         let code = tokens.to_string();
         let count = code.matches("pub mod foo").count();
         assert_eq!(
@@ -1385,7 +1305,7 @@ mod tests {
     fn standalone_import_removes_conflicting_owned_directory() {
         let api = make_simple_api();
         let temp_dir = TempDir::new().unwrap();
-        let module = get_module_path(&api);
+        let module = resolve_module_name(&api);
 
         // Simulate a prior directory-form module owned by the generator.
         let dir = temp_dir.path().join(&module);
@@ -1412,7 +1332,7 @@ mod tests {
     fn standalone_import_preserves_hand_written_conflicting_directory() {
         let api = make_simple_api();
         let temp_dir = TempDir::new().unwrap();
-        let module = get_module_path(&api);
+        let module = resolve_module_name(&api);
 
         // A conflicting directory that is NOT generator-owned is a conflict:
         // the run refuses before writing anything and leaves it in place.
@@ -1435,7 +1355,7 @@ mod tests {
     fn prelude_exports_all_apis_in_shared_module() {
         let (api_a, api_b) = make_shared_module_apis();
         let apis: Vec<&RestApi> = vec![&api_a, &api_b];
-        let tokens = assemble_prelude(&apis);
+        let tokens = assemble_prelude(&apis, registrations());
         let file = validate_code(&tokens).unwrap();
         let code = format_code(&file);
         assert!(
@@ -1454,51 +1374,37 @@ mod tests {
 
     fn make_large_api() -> RestApi {
         let endpoints: Vec<Endpoint> = (0..500)
-            .map(|i| Endpoint {
-                id: format!("Endpoint{}", i),
-                method: if i % 5 == 0 {
+            .map(|i| {
+                let mut endpoint = Endpoint::new(format!("Endpoint{}", i), if i % 5 == 0 {
                     RestMethod::Post
                 } else {
                     RestMethod::Get
-                },
-                path: if i % 3 == 0 {
+                }, if i % 3 == 0 {
                     format!("/endpoint/{}/{{param}}", i)
                 } else {
                     format!("/endpoint/{}", i)
-                },
-                description: format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i),
-                request: if i % 5 == 0 {
+                })
+                    .describes(format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i))
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.request = if i % 5 == 0 {
                     Some(ApiRequest::json_type(format!("Endpoint{}Body", i)))
                 } else {
                     None
-                },
-                response: ApiResponse::json_type("TestResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+                };
+                endpoint.response = vec![SuccessShape::json_type("TestResponse")];
+                endpoint
             })
             .collect();
 
-        RestApi {
-            name: "LargeApi".to_string(),
-            description: "A large API for testing split output".to_string(),
-            base_url: "https://api.large.com/v1".to_string(),
-            docs_url: Some("https://docs.large.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["LARGE_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints,
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "LargeApi".to_string(), "https://api.large.com/v1".to_string())
+                .describes("A large API for testing split output".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["LARGE_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.large.com".to_string());
+            api.endpoints = endpoints;
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
@@ -1593,9 +1499,11 @@ mod tests {
         );
 
         let requests_rs = fs::read_to_string(dir.join("requests.rs")).unwrap();
+        // JSON bodies are spelled by their components' Rust paths; only an
+        // unqualified pager item type needs the `responses` glob import.
         assert!(
-            requests_rs.contains("use super::responses::*;"),
-            "requests.rs should import the response types it names"
+            !requests_rs.contains("use super::responses::*;"),
+            "requests.rs imports responses only for a local pager item type"
         );
         assert!(
             requests_rs.contains("use super::{LargeApi, LargeApiApi};"),

@@ -1,0 +1,299 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "x-api-key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://artificialanalysis.ai/api/v2",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.",
+    "docs_url": "https://artificialanalysis.ai/api-reference",
+    "endpoints": [
+      {
+        "description": "Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing.",
+        "headers": [],
+        "id": "ListLlmModels",
+        "method": "GET",
+        "params": null,
+        "path": "/data/llms/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "LlmModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Returns Elo ratings for text-to-image models.",
+        "headers": [],
+        "id": "ListTextToImageModels",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Include a breakdown of Elo scores by category.",
+              "explode": false,
+              "name": "include_categories",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/data/media/text-to-image",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MediaModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Returns Elo ratings for image-editing models.",
+        "headers": [],
+        "id": "ListImageEditingModels",
+        "method": "GET",
+        "params": null,
+        "path": "/data/media/image-editing",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MediaModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Returns Elo ratings for text-to-speech models.",
+        "headers": [],
+        "id": "ListTextToSpeechModels",
+        "method": "GET",
+        "params": null,
+        "path": "/data/media/text-to-speech",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MediaModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Returns Elo ratings for text-to-video models.",
+        "headers": [],
+        "id": "ListTextToVideoModels",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Include a breakdown of Elo scores by category.",
+              "explode": false,
+              "name": "include_categories",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/data/media/text-to-video",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MediaModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Returns Elo ratings for image-to-video models.",
+        "headers": [],
+        "id": "ListImageToVideoModels",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Include a breakdown of Elo scores by category.",
+              "explode": false,
+              "name": "include_categories",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/data/media/image-to-video",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MediaModelsResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ARTIFICIAL_ANALYSIS_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "x-api-key",
+        "names": {
+          "names": [
+            "ARTIFICIAL_ANALYSIS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "artificial_analysis",
+    "name": "ArtificialAnalysisData",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "a7eaa1d4dc6853a6a1d8ef0ac0f14b42bd8b3e8db81e0484faf1a5afbdcf1000",
+    "endpoints": [
+      {
+        "blake3": "c527497040adc797c8de0309083cb142c6e0813151ae21814510f1f3766f6ad0",
+        "id": "ListLlmModels"
+      },
+      {
+        "blake3": "3c680498ee6f0f690a8039a19df9e30bc77da384dc32d8f53e342e181d8af297",
+        "id": "ListTextToImageModels"
+      },
+      {
+        "blake3": "df2d223224de9a9cf5400e38d7b3bdb311a3712155e702c33ae5f6c190652899",
+        "id": "ListImageEditingModels"
+      },
+      {
+        "blake3": "abe83d313c40dbde9c19c5778593126eef09f45fd1de84c10fe91aeb3a126227",
+        "id": "ListTextToSpeechModels"
+      },
+      {
+        "blake3": "24363038ec8014d1613a86542e5317718611b2385ce8262615397da625e47102",
+        "id": "ListTextToVideoModels"
+      },
+      {
+        "blake3": "e9b71c43bc205b468625228a1cf72f74fb23706e7d3303fd97e4b07c98735956",
+        "id": "ListImageToVideoModels"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "ListLlmModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListTextToImageModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListImageEditingModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListTextToSpeechModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListTextToVideoModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListImageToVideoModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "fc25ada9649460aeabd2bd5b14cef1a4b7dae29d1e5f25e4fbc2460eddf2fb06",
+      "name": "ModelCreator",
+      "rust_path": "::schematic_definitions::artificial_analysis::ModelCreator"
+    },
+    {
+      "blake3": "f06cf720a3d599b8f0f714cdd304abcfbcacb5fd1da070c4a3cb43dba6fe2b2a",
+      "name": "CategoryBreakdown",
+      "rust_path": "::schematic_definitions::artificial_analysis::CategoryBreakdown"
+    },
+    {
+      "blake3": "e3f60015de298a69d6310da78b205f03ed03d63e3877b993db09cca7a2133680",
+      "name": "LlmEvaluations",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmEvaluations"
+    },
+    {
+      "blake3": "ba5ced4558af4ba648e3d8bc28c6884ca13b7195d906265c96aac39a2e82a97b",
+      "name": "LlmPricing",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmPricing"
+    },
+    {
+      "blake3": "a7360203cc008f1287556f57935d28be3bcd21c9ed0c125a5a9b9e6568110356",
+      "name": "LlmModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModel"
+    },
+    {
+      "blake3": "a27b7a33d6224cd4c29ffa400a24bef1e0986ff1e0712f4ef014118550c21e3b",
+      "name": "PromptOptions",
+      "rust_path": "::schematic_definitions::artificial_analysis::PromptOptions"
+    },
+    {
+      "blake3": "e65f1f015a9cc0f1261f43e10b2531a512fb5da52a2a65485a84913c317a6c35",
+      "name": "LlmModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModelsResponse"
+    },
+    {
+      "blake3": "19cf97d77fdae6343b9b6d3ba73029f487026fbf7f4dfc689c013f04dd52cf11",
+      "name": "MediaModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModel"
+    },
+    {
+      "blake3": "24010320af07636a9b56bd4d72da340717eb2b6db7b9d152a3c91d495716c93a",
+      "name": "MediaModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
+    },
+    {
+      "blake3": "d5237d155cb4158062e9991bd8e2785ec30d6e23b7085b144561a81c5ea82d14",
+      "name": "CritPtMessage",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtMessage"
+    },
+    {
+      "blake3": "3424e8b4dffad6e3b907389c3f3de7df9a529e7120fcff907a218b7a3a71c442",
+      "name": "CritPtSubmission",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtSubmission"
+    },
+    {
+      "blake3": "66640d274bd34fef32ad5657f73af9687fd412a312c7d03191023143da2bb4b4",
+      "name": "CritPtEvaluateBody",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateBody"
+    },
+    {
+      "blake3": "51f1803bad8a7fd631235b94ab676db1049345e95bc624c0a5b8ec8e0c84b174",
+      "name": "CritPtEvaluateResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateResponse"
+    }
+  ]
+}

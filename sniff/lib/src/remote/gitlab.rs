@@ -272,17 +272,17 @@ impl RemoteRepoProvider for GitLabRemote {
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         // Map PullRequestState to GitLab API state parameter
         let api_state = match state {
-            PullRequestState::Open => "opened",
-            PullRequestState::Closed => "closed",
-            PullRequestState::Merged => "merged",
-            PullRequestState::Draft | PullRequestState::All => "all",
+            PullRequestState::Open => ListMergeRequestsRequestState::Opened,
+            PullRequestState::Closed => ListMergeRequestsRequestState::Closed,
+            PullRequestState::Merged => ListMergeRequestsRequestState::Merged,
+            PullRequestState::Draft | PullRequestState::All => ListMergeRequestsRequestState::All,
         };
 
         count_api_request("pulls");
         let mrs = REPLIES.value(
             self.client
                 .list_merge_requests(project_path(owner, repo))
-                .state(api_state.to_string())
+                .state(api_state)
                 .await,
         )?;
 

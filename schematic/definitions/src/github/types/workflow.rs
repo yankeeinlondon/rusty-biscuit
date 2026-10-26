@@ -16,6 +16,13 @@ pub struct WorkflowRunsResponse {
     #[serde(default)]
     pub workflow_runs: Vec<WorkflowRun>,
 }
+impl schematic_define::Registration for WorkflowRunsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WorkflowRunsResponse));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A single workflow run from GitHub Actions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

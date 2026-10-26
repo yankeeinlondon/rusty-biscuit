@@ -33,24 +33,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::gitlab::ListRepositoryTreeRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = GitLab::new();
-//!     let data = client.list_repository_tree("id").await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = GitLab::new();
+//! let data = client.list_repository_tree("id").await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_repository_tree("id").full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListRepositoryTreeRequest::new("id")).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_repository_tree("id").full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = GitLab::new().base_url("https://staging.example.com/v1");
