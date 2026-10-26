@@ -6,6 +6,23 @@ phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1:
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine
+    - darkmatter
+    - dmls
 ---
 
 # Remove quadratic sequence frontmatter work
@@ -131,7 +148,7 @@ do not introduce a new loader to implement shared state.
 
 ### Wave 1 — Attribution spike
 
-- [ ] **Attribute preflight**
+- [x] **Attribute preflight**
   - Run the existing large prompt and A6 shell scenarios in release mode.
     Sample each preflight entry point with `sample <pid> 15`, demangle with
     `rustfilt`, and inspect its call tree. If a scenario is too short, repeat
