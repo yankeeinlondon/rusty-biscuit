@@ -816,6 +816,7 @@ struct InvocationInner {
     hardware: OnceLock<Result<HardwareInfo, Arc<sniff::SniffError>>>,
     gpus: OnceLock<Vec<GpuInfo>>,
     work: InvocationWork,
+    trigger_findings: crate::composition::TriggerFindings,
 }
 
 /// Everything in an invocation that reads one document's environment.
@@ -1255,12 +1256,19 @@ impl InvocationContext {
                 hardware: OnceLock::new(),
                 gpus: OnceLock::new(),
                 work,
+                trigger_findings: crate::composition::TriggerFindings::default(),
             }),
         })
     }
 
     pub fn launch_cwd(&self) -> &Path {
         &self.inner.launch_cwd
+    }
+
+    /// The schema triggers discovery skipped as invalid anywhere in this
+    /// invocation, shared by every document view, so each is shown once.
+    pub fn trigger_findings(&self) -> &crate::composition::TriggerFindings {
+        &self.inner.trigger_findings
     }
 
     pub fn home_dir(&self) -> Option<&Path> {

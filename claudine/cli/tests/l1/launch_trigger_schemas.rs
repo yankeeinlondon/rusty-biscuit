@@ -686,7 +686,6 @@ fn inline_completion_lists_a_payload_problem_beside_the_authored_table() {
 }
 
 /// Make `dir` a repository by layout alone, so `{root}/schemas` is searched.
-#[cfg(unix)]
 fn write_git_skeleton(dir: &Path) {
     let git = dir.join(".git");
     fs::create_dir_all(git.join("objects")).unwrap();
@@ -695,21 +694,34 @@ fn write_git_skeleton(dir: &Path) {
     fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
 }
 
+/// A malformed disk `claudine.yaml` is skipped with one warning naming it and
+/// its grammar failure, and the prompt launches. The skipped file still
+/// shadows the embedded copy, so the embedded payload's `start` rule never
+/// judges the launch.
 #[test]
-fn a_malformed_disk_trigger_blocks_launch_instead_of_using_the_embedded_copy() {
+fn a_malformed_disk_trigger_is_skipped_with_a_warning_and_shadows_the_embedded_copy() {
     let (fixture, marker) = marker_fixture("launch-trigger-schemas-broken-disk");
     write_git_skeleton(fixture.cwd());
     let schemas = fixture.cwd().join("schemas");
     fs::create_dir_all(&schemas).unwrap();
     fs::write(schemas.join("claudine.yaml"), "kind: schema-trigger\nmatch: 42\n$schema: {}\n").unwrap();
-    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: review the diff\n---\nBody\n");
+    // Only the embedded payload rejects this operand (the parser does not
+    // type-check it), and the `failure` stack never fires on a passing run.
+    let doc = write_doc(&fixture, "prompt.md", "---\nfailure:\n  - pr_list: three\n---\nBody\n");
 
-    let result = run(&fixture, "inline-compose", &doc, &[]);
+    let result = run(&fixture, "compose", &doc, &[]);
 
-    assert_eq!(result.code, Some(1), "{}", result.stderr);
-    assert!(result.stderr.contains("claudine.yaml"), "the failed source is visible:\n{}", result.stderr);
+    assert_eq!(result.code, Some(0), "the prompt launches:\n{}", result.stderr);
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
+    assert_eq!(
+        result.stderr.matches("ignoring invalid schema trigger").count(),
+        1,
+        "the skipped trigger is reported once:\n{}",
+        result.stderr
+    );
+    assert!(result.stderr.contains("claudine.yaml"), "the skipped source is visible:\n{}", result.stderr);
     assert!(result.stderr.contains("match"), "the trigger grammar failure is visible:\n{}", result.stderr);
-    assert!(!marker.exists(), "the embedded fallback must not permit a launch:\n{}", result.stderr);
+    assert!(!result.stderr.contains("schema load failed"), "never a schema-load error:\n{}", result.stderr);
 }
 
 /// A disk `claudine.yaml` that replaces the embedded one and loosens

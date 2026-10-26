@@ -91,7 +91,7 @@ fn supplied_file_failure_matches_existing_partial_diagnostic() {
     .caller_input_records;
     let pending = unresolved_supplied_files(&source, &records, &context.for_source(&path));
     let previous =
-        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()), &crate::test_support::context())
+        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .unwrap_err();
     let CompositionError::UnresolvedFileReference { reason: old_reason, .. } = previous else {
         panic!("expected the existing partial-file classification");
@@ -630,7 +630,7 @@ fn late_verdict_on_a_settled_union_completes_against_that_arm_alone() {
     );
     std::fs::write(&path, settled).unwrap();
     let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
-    let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context())
+    let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
     .unwrap_err();
     let CompositionError::UnresolvedFileReference { alternatives, .. } = error else {
         panic!("expected UnresolvedFileReference, got {error:?}");
@@ -770,6 +770,7 @@ fn late_verdict_reads_a_settled_arms_file_through_a_reference() {
         Some(&json!({"spec": "cli"})),
         Some(dir.path()),
         &crate::test_support::context(),
+        &crate::composition::TriggerFindings::default(),
     )
     .unwrap_err();
     let CompositionError::UnresolvedFileReference { alternatives, .. } = error else {

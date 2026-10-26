@@ -513,6 +513,7 @@ pub fn build_schema_status_report(
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &super::TriggerFindings,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     build_schema_status_report_for_mode(
         source,
@@ -520,6 +521,7 @@ pub fn build_schema_status_report(
         file_ref_fallback_dir,
         file_resolution_context,
         CompositionMode::ChainedDocument,
+        trigger_findings,
     )
 }
 
@@ -537,6 +539,7 @@ pub fn build_schema_status_report_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &super::TriggerFindings,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     let phase = launch_phase_for_mode(mode);
     // Skip when the document has no `$schema`.
@@ -558,6 +561,7 @@ pub fn build_schema_status_report_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         &callers,
+        trigger_findings,
     )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still

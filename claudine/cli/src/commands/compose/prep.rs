@@ -216,6 +216,10 @@ pub(crate) fn run_composition_inner(
     let mut invocation = InvocationContext::capture(crate::request::snapshot())?
         .with_environment_source(crate::request::document_environment_source())
         .with_prewarm(prewarm.handle());
+    // Dropped on every return, so a skipped schema trigger recorded before a
+    // failure is shown ahead of the error `main` renders.
+    let _trigger_warnings =
+        super::loop_run::TriggerWarningDrain::new(invocation.trigger_findings(), shared.silent);
     let provisional_context = invocation.launch_file_resolution_context().clone();
     let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
@@ -311,6 +315,7 @@ pub(crate) fn run_composition_inner(
             &file_resolution_context,
             !caller_input_records.is_empty(),
             kind.mode(),
+            invocation.trigger_findings(),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
@@ -1321,7 +1326,7 @@ fn build_and_run_loop(
                 })?;
             }
 
-            emit_compose_warnings(&prepared.warnings, shared.silent);
+            emit_compose_warnings(&prepared.warnings, prep_context.invocation.trigger_findings(), shared.silent);
 
             // Repoint the guard at THIS iteration's freshly composed lifecycle.
             // The guard was built from the seed (iteration-1) lifecycle, whose
@@ -1769,7 +1774,7 @@ fn execute_loop_or_single(
             .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
-    emit_compose_warnings(&prepared.warnings, shared.silent);
+    emit_compose_warnings(&prepared.warnings, prep_context.invocation.trigger_findings(), shared.silent);
 
     let request = build_execution_request(
         shared,
@@ -2051,7 +2056,7 @@ fn run_staged_single(
     let prepared = prepared
         .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?;
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
-    emit_compose_warnings(&prepared.warnings, shared.silent);
+    emit_compose_warnings(&prepared.warnings, prep_context.invocation.trigger_findings(), shared.silent);
     guard.set_config(prepared.lifecycle.clone());
 
     let request = build_execution_request(

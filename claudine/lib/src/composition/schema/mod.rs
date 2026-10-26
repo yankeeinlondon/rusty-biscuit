@@ -57,12 +57,14 @@ use darkmatter::markdown::schemas::{PositionMap, SchemaPhase, ValidationReport};
 
 pub mod bundle;
 pub mod classify;
+pub mod findings;
 pub mod globals;
 mod status_render;
 pub mod supplied;
 pub mod translate;
 
 pub use classify::*;
+pub use findings::{TriggerFindings, TriggerWarning};
 pub use status_render::{
     description_suffix, escape_schema_prose, render_optional_line, render_required_line,
     schema_status_report_prose,
@@ -549,13 +551,16 @@ pub fn authored_schema_parameters(
 /// record's origin, as composition judges them.
 ///
 /// Returns `Ok(None)` when no schema applies: no authored `$schema` and no
-/// matching trigger.
+/// matching trigger. Either way, and when the authored `$schema` then fails,
+/// the triggers discovery skipped as invalid are recorded in
+/// `trigger_findings`; they are warnings, never a [`CompositionError`].
 pub(super) fn load_effective_schema(
     source: &ResolvedCompositionSource,
     snapshot: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     callers: &darkmatter::markdown::compose::CallerInputRecords,
+    trigger_findings: &TriggerFindings,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
     let schema_error = |err: SchemaError| {
         // A grammar/convert/shape error is a body-syntax problem (`SchemaParse`);
@@ -570,6 +575,9 @@ pub(super) fn load_effective_schema(
         .map_err(schema_error)?
         .with_file_resolution_context(file_resolution_context.clone())
         .with_caller_input_records(callers);
+    // Recorded before the effective schema resolves, so a later authored
+    // `$schema` failure is delivered with the triggers skipped before it.
+    trigger_findings.record(schemas.discovery_findings());
     if let Some(fallback) = file_ref_fallback_dir {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
@@ -689,6 +697,10 @@ pub struct PreValidatedSchema {
 /// - **Schema load failure** → returned as
 ///   [`CompositionError::SchemaLoad`].
 ///
+/// Whatever the outcome, the schema triggers discovery skipped as invalid
+/// are recorded in `trigger_findings` (the invocation's record), never
+/// turned into an error.
+///
 /// ## Errors
 ///
 /// Returns one of the typed `CompositionError` variants listed above when
@@ -699,6 +711,7 @@ pub fn pre_validate_schema(
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_schema_for_mode(
         source,
@@ -706,6 +719,7 @@ pub fn pre_validate_schema(
         file_ref_fallback_dir,
         file_resolution_context,
         CompositionMode::ChainedDocument,
+        trigger_findings,
     )
 }
 
@@ -727,6 +741,7 @@ pub fn pre_validate_schema_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -735,6 +750,7 @@ pub fn pre_validate_schema_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
 }
 
@@ -752,6 +768,7 @@ pub fn pre_validate_layered_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -760,6 +777,7 @@ pub fn pre_validate_layered_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
 }
 
@@ -770,6 +788,7 @@ fn pre_validate_with_origin(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_verdict(
         source,
@@ -778,6 +797,7 @@ fn pre_validate_with_origin(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
     .map_err(|err| prefer_removed_grammar(source, &build_effective_instance(source, set_overrides), err))
 }
@@ -807,6 +827,7 @@ fn pre_validate_verdict(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let phase = launch_phase_for_mode(mode);
 
@@ -818,6 +839,7 @@ fn pre_validate_verdict(
         data_keys,
         file_ref_fallback_dir,
         file_resolution_context,
+        trigger_findings,
     );
 
     // Deferral is decided on the raw values, where a stored literal token is
@@ -830,6 +852,7 @@ fn pre_validate_verdict(
         file_ref_fallback_dir,
         file_resolution_context,
         &callers,
+        trigger_findings,
     ) {
         Ok(Some(e)) => e,
         // No authored `$schema` and no matching trigger: nothing to judge.
@@ -1027,12 +1050,14 @@ fn normalize_file_array_values(
 ///
 /// Retained as a building block for [`pre_validate_schema`] and for
 /// callers (notably `sequence`) that want to scrub doc-wide invalid
-/// optionals before per-step validation.
+/// optionals before per-step validation. Skipped schema triggers are
+/// recorded in `trigger_findings`, as by [`pre_validate_schema`].
 pub fn drop_invalid_optionals(
     source: ResolvedCompositionSource,
     set_overrides: Option<serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -1044,6 +1069,7 @@ pub fn drop_invalid_optionals(
         &std::collections::BTreeSet::new(),
         file_ref_fallback_dir,
         file_resolution_context,
+        trigger_findings,
     )
 }
 
@@ -1055,6 +1081,7 @@ fn drop_invalid_optionals_with_origin(
     data_keys: &std::collections::BTreeSet<String>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -1072,10 +1099,12 @@ fn drop_invalid_optionals_with_origin(
         file_ref_fallback_dir,
         file_resolution_context,
         &callers,
+        trigger_findings,
     ) {
         Ok(Some(e)) => e,
         // No schema applies, or it cannot be loaded: the prepare-time
-        // validator reports a load failure.
+        // validator reports a load failure. Skipped triggers are already in
+        // `trigger_findings` either way.
         Ok(None) | Err(_) => return (source, set_overrides, dropped),
     };
 

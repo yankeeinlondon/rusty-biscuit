@@ -201,6 +201,15 @@ pub struct PrepareOptions {
 }
 
 impl PrepareOptions {
+    /// Where this preparation records the schema triggers discovery skipped:
+    /// the invocation's record, or a record of this call alone without one.
+    pub(crate) fn trigger_findings(&self) -> super::TriggerFindings {
+        self.invocation_context
+            .as_ref()
+            .map(|invocation| invocation.trigger_findings().clone())
+            .unwrap_or_default()
+    }
+
     /// The caller records the schema stage judges `match()` globs by: the
     /// captured records, else every override supplied in the launch area,
     /// as composition derives them.
@@ -520,6 +529,7 @@ fn resolve_launch_schema(
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
         &options.schema_caller_records(),
+        &options.trigger_findings(),
     ) {
         Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
             effective,
@@ -734,9 +744,7 @@ fn compose_selecting(
     select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<(Markdown, darkmatter::markdown::compose::ComposeReport, Option<SelectedIdentity>), CompositionError> {
     let Some(select) = select else {
-        let (composed, report) = markdown
-            .compose_with(request)
-            .map_err(|e| map_compose_error(source_path, e))?;
+        let (composed, report) = recording_triggers(markdown.compose_with_warnings(request), source_path, options)?;
         return Ok((composed, report, None));
     };
     let captured = options
@@ -765,7 +773,28 @@ fn compose_selecting(
         return Err(error);
     }
     let (composed, report) = result.map_err(|e| map_compose_error(source_path, e))?;
+    options.trigger_findings().record_compose_warnings(&report.warnings);
     Ok((composed, report, selected))
+}
+
+/// A composition's outcome, after recording the invalid schema triggers it
+/// reported (a transcluded child's included) in the preparation's trigger
+/// record, also when the composition failed.
+fn recording_triggers(
+    outcome: Result<(Markdown, darkmatter::markdown::compose::ComposeReport), Box<darkmatter::markdown::compose::ComposeFailure>>,
+    source_path: &std::path::Path,
+    options: &PrepareOptions,
+) -> Result<(Markdown, darkmatter::markdown::compose::ComposeReport), CompositionError> {
+    match outcome {
+        Ok((composed, report)) => {
+            options.trigger_findings().record_compose_warnings(&report.warnings);
+            Ok((composed, report))
+        }
+        Err(failure) => {
+            options.trigger_findings().record_compose_warnings(&failure.warnings);
+            Err(map_compose_error(source_path, failure.error))
+        }
+    }
 }
 
 /// Whether a preparation runs the body's `::shell` and `::shell-block`
@@ -1357,10 +1386,8 @@ pub(super) fn compose_bootstrap(
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) = source
-        .markdown
-        .compose_with(&compose_request)
-        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+    let (composed, report) =
+        recording_triggers(source.markdown.compose_with_warnings(&compose_request), &source.resolved_path, &options)?;
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
         effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;

@@ -342,7 +342,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     let source_context = invocation.derive_source(&source_path).unwrap();
     let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), crate::request::snapshot())
     .unwrap();
-    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir), &crate::request::test_context())
+    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir), &crate::request::test_context(), &claudine::composition::TriggerFindings::default())
         .expect("the source-side schema must be selected");
     let env = BTreeMap::from([
         ("AGENT".to_string(), "codex".to_string()),

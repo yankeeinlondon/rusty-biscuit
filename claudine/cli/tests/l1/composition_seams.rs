@@ -821,10 +821,12 @@ fn module_identity(rel: &str) -> String {
 /// Every `.compose_with(` method call. A call has no declared name, so its
 /// identity is its enclosing function alone.
 fn find_compose_with_calls(src: &[u8]) -> Vec<Occurrence> {
-    find_all(src, b".compose_with(")
-        .into_iter()
-        .map(|offset| Occurrence { offset, name: None })
-        .collect()
+    // `compose_with_warnings` is the same composition, keeping a failure's
+    // warnings; it must not be a way around the allowlist.
+    let mut offsets = find_all(src, b".compose_with(");
+    offsets.extend(find_all(src, b".compose_with_warnings("));
+    offsets.sort_unstable();
+    offsets.into_iter().map(|offset| Occurrence { offset, name: None }).collect()
 }
 
 /// Every argument-less `ComposeContext::capture()` call — the ambient capture.

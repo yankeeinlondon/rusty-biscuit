@@ -233,8 +233,10 @@ pub(super) fn compose_step_selecting(
         } else {
             composition::CompositionMode::ChainedDocument
         },
+        ctx.invocation.trigger_findings(),
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
+    crate::commands::compose::emit_trigger_warnings(ctx.invocation.trigger_findings(), ctx.shared.silent);
     let step_source = pre.source;
     // Pre-validation may drop invalid optional keys; the rest keep their origin.
     let step_overrides =

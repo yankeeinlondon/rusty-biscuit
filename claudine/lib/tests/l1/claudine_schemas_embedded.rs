@@ -663,11 +663,22 @@ impl Locations {
     /// Claudine's launch verdict for a document holding `frontmatter`.
     #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
     fn verdict(&self, name: &str, frontmatter: &str) -> Result<PreValidatedSchema, CompositionError> {
+        self.verdict_recording(name, frontmatter, &claudine::composition::TriggerFindings::default())
+    }
+
+    /// [`Self::verdict`], recording the skipped triggers in `findings`.
+    #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
+    fn verdict_recording(
+        &self,
+        name: &str,
+        frontmatter: &str,
+        findings: &claudine::composition::TriggerFindings,
+    ) -> Result<PreValidatedSchema, CompositionError> {
         let path = self.document(name, frontmatter);
         let context = self.context();
         let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context)
             .expect("the document resolves");
-        pre_validate_schema(&source, None, None, &context)
+        pre_validate_schema(&source, None, None, &context, findings)
     }
 
     /// The trigger discovery the launch verdict uses, from the document
@@ -877,7 +888,10 @@ fn assert_skipped_without_embedded_fallback(locations: &Locations, name: &str) {
         .filter(|finding| finding.source().path().is_some_and(|path| path.ends_with("claudine.yaml")))
         .collect();
     assert_eq!(skipped.len(), 1, "{:?}", schemas.discovery_findings());
-    assert_accepts(locations.verdict(name, "start: [{ inf0: hi }]"), "no Claudine payload applies");
+    let findings = claudine::composition::TriggerFindings::default();
+    assert_accepts(locations.verdict_recording(name, "start: [{ inf0: hi }]", &findings), "no Claudine payload applies");
+    let recorded: Vec<_> = findings.warnings().into_iter().map(|warning| warning.source).collect();
+    assert_eq!(recorded, [skipped[0].identity().clone()], "the launch verdict carries the skipped trigger");
     assert_accepts(locations.verdict(name, "title: x"), "an unrelated document launches");
 }
 
@@ -1001,7 +1015,7 @@ fn invalid_claudine_controls_fail_the_launch_and_are_not_dropped() {
 
         let path = locations.document("strict", frontmatter);
         let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
-        let (cleaned, _, dropped) = drop_invalid_optionals(source, None, None, &context);
+        let (cleaned, _, dropped) = drop_invalid_optionals(source, None, None, &context, &claudine::composition::TriggerFindings::default());
         assert!(dropped.is_empty(), "{frontmatter}: dropped {dropped:?}");
         assert!(cleaned.markdown.frontmatter().as_map().contains_key(property), "{frontmatter}: `{property}` is kept");
     }
@@ -1024,7 +1038,7 @@ fn authored_optional_is_dropped_while_a_claudine_control_fails() {
 
     let path = locations.document("cleanup", &both);
     let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
-    let (cleaned, _, dropped) = drop_invalid_optionals(source, None, None, &context);
+    let (cleaned, _, dropped) = drop_invalid_optionals(source, None, None, &context, &claudine::composition::TriggerFindings::default());
     let dropped: Vec<&str> = dropped.iter().map(|dropped| dropped.property.as_str()).collect();
     assert_eq!(dropped, ["count"]);
     let kept = cleaned.markdown.frontmatter().as_map();
@@ -1080,7 +1094,7 @@ fn assert_passive_parity(name: &str, text: &str) {
 
     let context = repo.context();
     let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
-    match (pre_validate_schema(&source, None, None, &context), editor.valid) {
+    match (pre_validate_schema(&source, None, None, &context, &claudine::composition::TriggerFindings::default()), editor.valid) {
         (Ok(validated), true) => assert!(validated.dropped_optionals.is_empty(), "{name}: {:?}", validated.dropped_optionals),
         (Err(CompositionError::SchemaValidation { problems, .. }), false) => {
             assert_eq!(top_level(problems), editor_properties, "{name}: the launch verdict and DMLS name the same properties");

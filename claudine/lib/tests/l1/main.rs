@@ -20,6 +20,7 @@ mod context_construction_guard;
 mod deprecated_compatibility;
 mod diagnostic_detail_conformance;
 mod host_catalog;
+mod invalid_trigger_findings;
 mod kimi_wire;
 mod lifecycle_control_flow_spike;
 mod lifecycle_lift_ready_guard;

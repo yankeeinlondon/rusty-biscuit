@@ -126,6 +126,7 @@ pub(super) fn translate_schema_failure(
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
         &options.schema_caller_records(),
+        &options.trigger_findings(),
     )?;
     let phase = match mode {
         PrepareMode::Inline(_) => Some(SchemaPhase::Launch),
@@ -185,6 +186,7 @@ pub(super) fn translate_schema_failure(
                     &options.file_resolution_context,
                     &options.compose_caller_records(),
                     phase,
+                    &options.trigger_findings(),
                 )
             }
         };
@@ -216,6 +218,7 @@ pub(super) fn handle_retry_error(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     phase: Option<SchemaPhase>,
+    trigger_findings: &super::TriggerFindings,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
         mut problems,
@@ -233,6 +236,7 @@ pub(super) fn handle_retry_error(
         file_ref_fallback_dir,
         file_resolution_context,
         caller_input_records,
+        trigger_findings,
     )?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 

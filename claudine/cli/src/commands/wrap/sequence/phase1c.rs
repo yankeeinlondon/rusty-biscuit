@@ -321,6 +321,9 @@ fn collect_sequence_missing_values(
                     ctx.effective_overrides.as_ref(),
                     launch_area,
                     file_resolution_context,
+                    // Display only: the step's own pre-validation already
+                    // recorded the triggers its discovery skipped.
+                    &composition::TriggerFindings::default(),
                 )
             {
                 let status = Status::from_prose(format!(

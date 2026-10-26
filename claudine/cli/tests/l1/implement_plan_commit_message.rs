@@ -152,11 +152,19 @@ impl ImplementPlan {
     }
 
     /// Every argument vector `git` or `just` received, in order.
+    ///
+    /// Leaves out `git --exec-path`: on Windows, repository discovery asks the
+    /// `git` on `PATH` (this stub) where its installation is; that is the
+    /// host's lookup, not a command the prompt ran.
     fn runs(&self) -> Vec<Vec<String>> {
         if !self.records.exists() {
             return Vec::new();
         }
-        read_argv_records(&self.records).expect("the recorder writes whole records")
+        read_argv_records(&self.records)
+            .expect("the recorder writes whole records")
+            .into_iter()
+            .filter(|argv| argv.as_slice() != ["--exec-path"])
+            .collect()
     }
 
     fn provider_launches(&self) -> usize {

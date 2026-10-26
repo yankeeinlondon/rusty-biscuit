@@ -152,7 +152,7 @@ pub use runtime_state::{
     layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
-    InteractiveSchemaOptions, authored_schema_parameters, PreValidatedSchema, PropertyState, PropertyStatus,
+    InteractiveSchemaOptions, TriggerFindings, TriggerWarning, authored_schema_parameters, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,

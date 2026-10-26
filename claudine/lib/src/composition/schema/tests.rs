@@ -756,7 +756,7 @@ fn inline_launch_fails_naming_a_missing_eager_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nbody\n"));
 
-    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
     .unwrap_err();
     let CompositionError::MissingProperties { missing, .. } = err else {
         panic!("expected MissingProperties naming prompt, got: {err:?}");
@@ -780,7 +780,7 @@ fn inline_launch_type_checks_a_present_required_non_eager_value() {
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\nproducts: not-an-object\n---\nbody\n"),
     );
 
-    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
     .unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { ref problems, .. } if problems.iter().any(|p| p == "/products")),
@@ -799,7 +799,7 @@ fn a_caller_supplied_prompt_satisfies_the_eager_launch_gate_transiently() {
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nauthored body\n"));
     let overrides = serde_json::json!({ "prompt": "Research VoIP handsets" });
 
-    let pre = pre_validate_schema_for_mode(&source, Some(&overrides), None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
+    let pre = pre_validate_schema_for_mode(&source, Some(&overrides), None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
     .unwrap();
     let prepared = prepare_inline_with_schema(
         &pre.source,
@@ -826,10 +826,10 @@ fn status_report_for_inline_mode_defers_required_non_eager_gaps() {
         &dir,
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
     );
-    let inline = build_schema_status_report_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
+    let inline = build_schema_status_report_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
     .unwrap()
     .unwrap();
-    let direct = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let direct = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     let state = |report: &SchemaStatusReport, name: &str| {
         report.required.iter().find(|p| p.name == name).unwrap().state
     };
@@ -1048,7 +1048,7 @@ fn a_reused_file_type_keeps_inherited_presence_and_every_match_group() {
 
     // A provided partial completes against the same groups.
     let overrides = serde_json::json!({ "doc": "intro" });
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("`intro` names no file");
     let CompositionError::UnresolvedFileReference { property, alternatives, .. } = err else {
         panic!("expected UnresolvedFileReference, got {err:?}");
@@ -1065,7 +1065,7 @@ fn match_groups_stay_passive_for_an_existing_file_in_a_single_schema() {
     // only shapes completion and rejects none of them.
     for value in ["guide-intro.md", "notes.md", "guide.txt"] {
         let overrides = serde_json::json!({ "doc": value });
-        pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .unwrap_or_else(|err| panic!("`{value}` is accepted: {err}"));
     }
 }
@@ -1078,7 +1078,7 @@ fn an_empty_match_intersection_parses_and_reports_the_partial() {
         "---\n$schema:\n  doc: \"file(required; eager; match('*.md'); match('*.txt'))\"\n---\nbody\n",
     );
     let overrides = serde_json::json!({ "doc": "partial" });
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("`partial` names no file");
     let CompositionError::UnresolvedFileReference { alternatives, .. } = err else {
         panic!("expected UnresolvedFileReference, not a schema error: {err:?}");
@@ -1128,7 +1128,7 @@ fn missing_nested_field_reports_its_instance_path() {
 fn status_report_is_none_when_no_schema() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, "---\ntitle: hi\n---\nbody\n");
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap();
     assert!(report.is_none());
 }
 
@@ -1139,7 +1139,7 @@ fn status_report_categorizes_required_and_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  description: 'string'\ntitle: Plan\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert_eq!(report.required.len(), 1);
     assert_eq!(report.required[0].name, "title");
     assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -1155,7 +1155,7 @@ fn status_report_marks_missing_required_correctly() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Missing);
 }
 
@@ -1166,7 +1166,7 @@ fn status_report_marks_invalid_required_correctly() {
         &dir,
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
 
@@ -1177,7 +1177,7 @@ fn status_report_marks_a_value_missing_a_nested_field_invalid() {
         &dir,
         "---\n$schema:\n  config: '{ name: string(required) }(required)'\nconfig: {}\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert_eq!(report.required[0].name, "config");
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
@@ -1195,7 +1195,7 @@ fn status_report_judges_a_caller_file_from_the_launch_area() {
 
     let state = |spec: &str| {
         let overrides = serde_json::json!({ "spec": spec });
-        build_schema_status_report(&source, Some(&overrides), Some(launch.path()), &crate::test_support::context())
+        build_schema_status_report(&source, Some(&overrides), Some(launch.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .unwrap()
             .unwrap()
             .required[0]
@@ -1217,7 +1217,7 @@ fn status_report_overrides_supply_missing_required() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
     let overrides = serde_json::json!({ "title": "supplied" });
-    let report = build_schema_status_report(&source, Some(&overrides), None, &crate::test_support::context())
+    let report = build_schema_status_report(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .unwrap()
         .unwrap();
     assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -1230,7 +1230,7 @@ fn status_report_flags_invalid_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ntitle: Plan\ncount: nope\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert!(report.has_invalid_optional);
 }
 
@@ -1255,7 +1255,7 @@ fn status_report_does_not_mark_templated_required_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     let runtime = report
         .required
         .iter()
@@ -1295,7 +1295,7 @@ fn status_report_does_not_mark_templated_optional_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert!(
         !report.has_invalid_optional,
         "templated optional must not be flagged invalid: {:?}",
@@ -1349,7 +1349,7 @@ fn pre_validate_does_not_reject_template_bearing_value() {
         "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context())
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect("template-bearing required value must pass pre-validation");
     // Source/overrides are returned unchanged.
     assert!(pre.set_overrides.is_none());
@@ -1376,7 +1376,7 @@ fn pre_validate_defers_template_invalid_required_to_prepare_time() {
         "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context());
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
     assert!(
         pre.is_ok(),
         "pre-validation must defer template-bearing invalid-required to prepare-time"
@@ -1394,7 +1394,7 @@ fn pre_validate_still_surfaces_literal_invalid_required() {
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap_err();
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
         "expected SchemaValidation for literal invalid-required, got: {err:?}"
@@ -1406,7 +1406,7 @@ fn pre_validate_still_surfaces_literal_invalid_required() {
 fn pre_validation_problems(frontmatter: &str) -> Option<Vec<String>> {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &format!("---\n{frontmatter}---\nbody\n"));
-    match pre_validate_schema(&source, None, None, &crate::test_support::context()) {
+    match pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()) {
         Ok(_) => None,
         Err(CompositionError::SchemaValidation { problems, .. }) => Some(problems),
         Err(other) => panic!("expected SchemaValidation, got: {other:?}"),
@@ -1491,7 +1491,7 @@ fn pre_validate_still_surfaces_genuinely_missing_required() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap_err();
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
         "expected MissingProperties, got: {err:?}"
@@ -1509,7 +1509,7 @@ fn drop_invalid_optionals_skips_template_bearing_values() {
         "---\n$schema:\n  count: 'number'\ncount: '{{ env.COUNT }}'\n---\nbody\n",
     );
 
-    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
+    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
     let value = scrubbed
         .markdown
         .frontmatter()
@@ -1529,7 +1529,7 @@ fn drop_invalid_optionals_still_drops_literal_invalid_values() {
         "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
     );
 
-    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
+    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
     assert!(
         !scrubbed
             .markdown
@@ -1548,7 +1548,7 @@ fn drop_invalid_optionals_keeps_optional_eager_file_failures() {
         "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
     );
 
-    let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
+    let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
     assert!(dropped.is_empty());
     assert_eq!(
         scrubbed.markdown.frontmatter().as_map().get("spec"),
@@ -1565,7 +1565,7 @@ fn pre_validate_schema_reports_optional_eager_file_failures() {
         "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("optional eager file failures should not be dropped");
     match err {
         CompositionError::SchemaValidation {
@@ -1592,7 +1592,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         &dir,
         "---\n$schema:\n  label: 'string(eager)'\n---\nbody\n",
     );
-    pre_validate_schema_for_mode(&absent, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
+    pre_validate_schema_for_mode(&absent, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default())
     .expect("an eager-only property remains optional");
 
     let invalid = make_source(
@@ -1600,7 +1600,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         "---\n$schema:\n  label: 'string(eager)'\nlabel: []\n---\nbody\n",
     );
     assert!(matches!(
-        pre_validate_schema_for_mode(&invalid, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt),
+        pre_validate_schema_for_mode(&invalid, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt, &crate::composition::TriggerFindings::default()),
         Err(CompositionError::SchemaValidation { .. })
     ));
 }
@@ -1618,7 +1618,7 @@ fn provided_file_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "spec": "everywhere" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("a provided file(match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1654,7 +1654,7 @@ fn provided_file_array_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "attachments": ["everywhere"] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("a provided file[](match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1690,7 +1690,7 @@ fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file
     );
     let overrides = serde_json::json!({ "attachments": "everywhere" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("a scalar partial for file[](match) should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1719,7 +1719,7 @@ fn provided_file_array_multi_element_partial_reports_first_element() {
     );
     let overrides = serde_json::json!({ "attachments": ["everywhere", "here"] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context()).expect_err(
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).expect_err(
         "a multi-element file[](match) partial with no literal match should surface a typed error",
     );
     match err {
@@ -1776,7 +1776,7 @@ fn provided_file_array_with_non_string_elements_stays_schema_validation() {
     );
     let overrides = serde_json::json!({ "attachments": [42, true] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("non-string array elements should fail validation");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -1796,7 +1796,7 @@ fn provided_file_without_match_stays_schema_validation() {
     );
     let overrides = serde_json::json!({ "spec": "missing/spec.md" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("a bare-file bad value should still fail validation");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -1951,7 +1951,7 @@ fn pre_validation_drop_surfaces_diagnostic() {
         "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap();
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap();
     assert_eq!(pre.dropped_optionals.len(), 1);
     assert_eq!(pre.dropped_optionals[0].property, "count");
     assert_eq!(
@@ -1979,7 +1979,7 @@ fn drop_reason_locates_a_problem_inside_the_value() {
         reasons
     };
 
-    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap();
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap();
     let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     for drops in [reasons(&pre.dropped_optionals), reasons(&prepared.dropped_optionals)] {
         assert_eq!(drops.len(), 2, "{drops:?}");
@@ -2025,6 +2025,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
+        &crate::composition::TriggerFindings::default(),
     ).unwrap();
     assert!(
         effective.is_some(),
@@ -2055,6 +2056,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
+        &crate::composition::TriggerFindings::default(),
     ).unwrap();
     assert!(
         effective.is_some(),
@@ -2158,7 +2160,7 @@ fn pre_validate_schema_resolves_file_against_document_dir() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let pre = pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
+    let pre = pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect("spec.md under the document dir must validate, CWD-independently");
     assert!(pre.dropped_optionals.is_empty());
 }
@@ -2179,7 +2181,7 @@ fn pre_validate_schema_rejects_launch_only_file() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let err = pre_validate_schema(&source, None, None, &crate::test_support::context())
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect_err("launch-only spec.md must be unreachable from the document context");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -2206,7 +2208,7 @@ fn pre_validate_schema_defers_caller_eager_file_to_canonical_preparation() {
         let overrides = serde_json::json!({ "spec": "spec.md" });
 
         let _cwd = CwdGuard::enter(unrelated.path());
-        let pre = pre_validate_schema(&source, Some(&overrides), Some(launch_dir.path()), &crate::test_support::context())
+        let pre = pre_validate_schema(&source, Some(&overrides), Some(launch_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .expect("caller-originated `spec.md` must reach canonical preparation");
         assert_eq!(pre.set_overrides, Some(overrides));
     }
@@ -2245,7 +2247,7 @@ fn pre_validate_schema_keeps_unresolved_caller_file_partials_interactive() {
             &format!("---\n$schema:\n  {schema}\n---\nbody\n"),
         );
 
-        let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()), &crate::test_support::context())
+        let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .expect_err("the exact `everywhere` partial must remain interactive");
         match err {
             CompositionError::UnresolvedFileReference {
@@ -2280,7 +2282,7 @@ fn pre_validate_schema_ignores_launch_copy_when_source_exists() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
+    pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect("the source-local value must validate independently of the launch copy");
 }
 
@@ -2301,7 +2303,7 @@ fn drop_invalid_optionals_keeps_unresolvable_eager_file_for_validation() {
 
     let _cwd = CwdGuard::enter(unrelated.path());
     let (scrubbed, _overrides, dropped) =
-        drop_invalid_optionals(source, None, Some(fallback_dir.path()), &crate::test_support::context());
+        drop_invalid_optionals(source, None, Some(fallback_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default());
 
     assert!(
         scrubbed
@@ -2336,7 +2338,7 @@ fn drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
+    let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
 
     assert!(
         scrubbed
@@ -2377,7 +2379,7 @@ fn sequence_step_pre_validation_resolves_file_against_document_dir() {
     let step_overrides = serde_json::json!({ "spec": "step-spec.md" });
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    pre_validate_schema(&source, Some(&step_overrides), Some(fallback_dir.path()), &crate::test_support::context())
+    pre_validate_schema(&source, Some(&step_overrides), Some(fallback_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .expect("a per-step file value under the document dir must pass sequence pre-validation");
 }
 
@@ -2400,7 +2402,7 @@ fn status_report_marks_document_dir_file_valid() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let report = build_schema_status_report(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
+    let report = build_schema_status_report(&source, None, Some(fallback_dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
         .unwrap()
         .unwrap();
     let spec = report
@@ -2431,13 +2433,13 @@ fn a_stored_literal_token_is_judged_by_its_text() {
             encode_yaml_scalar("alpha")
         ),
     );
-    let pre = pre_validate_schema(&valid, None, None, &crate::test_support::context()).expect("the decoded text is in the enum");
+    let pre = pre_validate_schema(&valid, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).expect("the decoded text is in the enum");
     assert_eq!(
         pre.source.markdown.frontmatter().as_map()["mode"],
         serde_json::json!(encode("alpha")),
         "the token is kept for composition to decode"
     );
-    let status = build_schema_status_report(&valid, None, None, &crate::test_support::context()).unwrap().unwrap();
+    let status = build_schema_status_report(&valid, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).unwrap().unwrap();
     assert!(!status.has_invalid_optional, "{status:?}");
 
     let invalid = make_source(
@@ -2447,7 +2449,7 @@ fn a_stored_literal_token_is_judged_by_its_text() {
             encode_yaml_scalar("$(echo 1)")
         ),
     );
-    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None, &crate::test_support::context());
+    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None, &crate::test_support::context(), &crate::composition::TriggerFindings::default());
     assert!(
         !scrubbed.markdown.frontmatter().as_map().contains_key("count"),
         "a token holding command text is data, not a pending command"
@@ -2468,13 +2470,13 @@ fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
     let value = serde_json::json!({"count": "{{ n }}"});
 
     let authored = LayeredOverrides::from_parts(Some(&value), &Default::default());
-    pre_validate_layered_for_mode(&source, &authored, None, &crate::test_support::context(), CompositionMode::ChainedDocument)
+    pre_validate_layered_for_mode(&source, &authored, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default())
         .expect("an authored template is deferred to composition");
 
     let data_keys = std::collections::BTreeSet::from(["count".to_string()]);
     let data = LayeredOverrides::from_parts(Some(&value), &data_keys);
     let error =
-        pre_validate_layered_for_mode(&source, &data, None, &crate::test_support::context(), CompositionMode::ChainedDocument)
+        pre_validate_layered_for_mode(&source, &data, None, &crate::test_support::context(), CompositionMode::ChainedDocument, &crate::composition::TriggerFindings::default())
             .expect_err("a data string cannot satisfy `number`");
     assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
 }
@@ -2502,7 +2504,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         ),
     ] {
         let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
-        let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .expect_err("a union file(match) partial with no literal match must fail");
         let CompositionError::UnresolvedFileReference {
             property,
@@ -2528,7 +2530,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         "---\n$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n  \
          - spec: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
     );
-    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context()).expect_err("still invalid");
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context(), &crate::composition::TriggerFindings::default()).expect_err("still invalid");
     assert!(matches!(err, CompositionError::SchemaValidation { .. }), "{err}");
 }
 
