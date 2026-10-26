@@ -523,15 +523,7 @@ where
     use std::fmt::Write as _;
     use std::hash::Hasher as _;
 
-    struct DebugHasher(std::collections::hash_map::DefaultHasher);
-    impl std::fmt::Write for DebugHasher {
-        fn write_str(&mut self, text: &str) -> std::fmt::Result {
-            self.0.write(text.as_bytes());
-            Ok(())
-        }
-    }
-
-    let mut hasher = DebugHasher(std::collections::hash_map::DefaultHasher::new());
+    let mut hasher = biscuit_hash::XxHasher::new();
     write!(hasher, "{atom:?}").ok()?;
     let mut pending: Vec<DefKey> = Vec::new();
     collect_atom_refs(atom, &mut pending);
@@ -545,7 +537,7 @@ where
         collect_def_refs(&definition.body, &mut pending);
         seen.insert(key);
     }
-    Some(hasher.0.finish())
+    Some(hasher.finish())
 }
 
 fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {

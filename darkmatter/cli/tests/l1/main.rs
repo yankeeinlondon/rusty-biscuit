@@ -70,6 +70,7 @@ mod hash;
 mod hash_directory;
 mod hash_entry_precedence;
 mod hash_kind_save_diff;
+mod hashing_guard;
 mod help;
 mod invalid_trigger_warnings;
 mod layout_alignment;

@@ -53,6 +53,7 @@ mod content_policy_fixtures;
 
 mod absent_property_contract;
 mod fm_namespace_contract;
+mod hashing_guard;
 mod host_globals_compose;
 mod shell_child_environment;
 mod schemas_effective_presence;

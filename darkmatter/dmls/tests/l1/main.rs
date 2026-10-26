@@ -17,6 +17,7 @@ mod context_construction_guard;
 mod core_schema_types;
 mod entry_point_parity;
 mod call_check_agreement;
+mod hashing_guard;
 mod recursive_call_check;
 mod recursive_schema_editor;
 mod expression_call_diagnostics;

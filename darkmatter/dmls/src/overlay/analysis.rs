@@ -204,12 +204,12 @@ impl CrossSnapshotSchema {
         atoms: &[&PropertyAtom],
         build: impl FnOnce(&[&PropertyAtom]) -> Option<PropertyDef>,
     ) -> Arc<Option<PropertyDef>> {
-        let mut hasher = DebugHasher(std::collections::hash_map::DefaultHasher::new());
+        let mut hasher = biscuit_hash::XxHasher::new();
         for atom in atoms {
             // Infallible: the sink never fails.
             let _ = write!(hasher, "\u{0}{atom:?}");
         }
-        shared(&self.items, hasher.0.finish(), || {
+        shared(&self.items, hasher.finish(), || {
             work_counters::record_item_synthesis();
             Arc::new(build(atoms))
         })
@@ -230,17 +230,6 @@ fn shared<V: Clone>(map: &Mutex<HashMap<u64, V>>, key: u64, build: impl FnOnce()
     }
     held.insert(key, value.clone());
     value
-}
-
-/// Streams derived `Debug` text into a hasher, so a large schema value is
-/// fingerprinted without building its text. Stable within one process only.
-struct DebugHasher(std::collections::hash_map::DefaultHasher);
-
-impl std::fmt::Write for DebugHasher {
-    fn write_str(&mut self, text: &str) -> std::fmt::Result {
-        self.0.write(text.as_bytes());
-        Ok(())
-    }
 }
 
 /// The shared analysis of one document snapshot.
