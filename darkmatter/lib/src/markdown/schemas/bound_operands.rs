@@ -348,7 +348,10 @@ impl<'s> Walker<'s> {
             return;
         }
         if let Some((verb, forms)) = self.marks(schema) {
-            match self.sites.iter_mut().find(|site| site.path == *path) {
+            match self.sites.iter_mut().find(|site| {
+                crate::note_work!(OperandSiteComparison);
+                site.path == *path
+            }) {
                 Some(site) if site.verb == verb => {
                     for form in forms {
                         if !site.forms.contains(&form) {
@@ -417,6 +420,7 @@ impl<'s> Walker<'s> {
     /// The verb and spellings marked on `schema` itself or on the
     /// alternatives it is made of, never below a value descent.
     fn marks(&self, schema: &'s Value) -> Option<(String, Vec<OperandForm>)> {
+        crate::note_work!(OperandMarksComputation);
         let mut found: Option<(String, Vec<OperandForm>)> = None;
         let mut ambiguous = false;
         self.collect_marks(schema, 0, &mut found, &mut ambiguous);
@@ -436,6 +440,7 @@ impl<'s> Walker<'s> {
         if hops > MAX_HOPS {
             return;
         }
+        crate::note_work!(OperandMarksNodeVisit);
         if let Some((verb, form)) = map.get(DARKMATTER_OPERANDS_KEYWORD).and_then(Value::as_str).and_then(operands_verb) {
             match found {
                 Some((known, forms)) if known == verb => {

@@ -456,6 +456,7 @@ impl TaskExecution<'_> {
             .iter()
             .map(|_| Arc::new(RuntimeState::from_snapshot(base.clone())))
             .collect();
+        crate::note_work!(RuntimeStateBranch, group.tasks.len());
         let slots: Vec<Mutex<Option<MemberRun>>> =
             group.tasks.iter().map(|_| Mutex::new(None)).collect();
         // The live document cell is per-*attempt* and therefore shared by
@@ -469,6 +470,7 @@ impl TaskExecution<'_> {
             .into_iter()
             .flat_map(|seed| group.tasks.iter().map(move |_| Mutex::new(seed.clone())))
             .collect();
+        crate::note_work!(LiveFrontmatterCopy, live_cells.len());
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.

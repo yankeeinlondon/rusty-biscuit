@@ -1023,6 +1023,9 @@ impl InvocationContext {
     #[must_use]
     pub fn enter_document(&self, environment: DocumentEnvironment) -> Self {
         let launch = &self.inner.launch_document;
+        // `vars`, its copy for the snapshot, and the launch snapshot and
+        // file-resolution context, whose maps `with_env` then discards.
+        crate::note_work!(EnvironmentMapCopy, 4);
         let vars = environment.vars().clone();
         let document = DocumentScope {
             snapshot: launch.snapshot.clone().with_env(vars.clone()),

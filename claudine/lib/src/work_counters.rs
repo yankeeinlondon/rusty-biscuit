@@ -22,11 +22,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub enum Work {
     /// A complete `RuntimeState` snapshot taken.
     RuntimeSnapshot,
+    /// A private `RuntimeState` built for one group leg.
+    RuntimeStateBranch,
+    /// A copy of the live frontmatter cell made for one group leg.
+    LiveFrontmatterCopy,
+    /// The whole reserved `hook` object built for one lookup.
+    HookPayloadMaterialize,
+    /// The whole `loop` global object built for one lookup.
+    LoopAmbientMaterialize,
+    /// An evaluation state built to resolve one pre-warm phrase.
+    PrewarmStateBuild,
+    /// A full frontmatter-sized state map built by provider prediction.
+    PredictionStateBuild,
+    /// An environment map copied (or a copy of an owner holding one) when a
+    /// document is entered.
+    EnvironmentMapCopy,
 }
 
 impl Work {
     /// Every kind, in declaration order.
-    pub const ALL: &[Work] = &[Work::RuntimeSnapshot];
+    pub const ALL: &[Work] = &[
+        Work::RuntimeSnapshot,
+        Work::RuntimeStateBranch,
+        Work::LiveFrontmatterCopy,
+        Work::HookPayloadMaterialize,
+        Work::LoopAmbientMaterialize,
+        Work::PrewarmStateBuild,
+        Work::PredictionStateBuild,
+        Work::EnvironmentMapCopy,
+    ];
 }
 
 static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work::ALL.len()];

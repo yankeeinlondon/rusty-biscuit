@@ -146,6 +146,7 @@ impl RuntimeState {
 
     /// Copy the current layers out of the cell.
     pub fn snapshot(&self) -> RuntimeSnapshot {
+        crate::note_work!(RuntimeSnapshot);
         self.inner.lock().expect(POISONED).clone()
     }
 

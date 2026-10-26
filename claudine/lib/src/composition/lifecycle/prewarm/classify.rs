@@ -195,6 +195,7 @@ fn authored_text(text: &Expr) -> String {
 
 /// Resolve an early phrase exactly as lifecycle playback would.
 fn resolve(text: &Expr, (view, globals): Bindings, inputs: &PrewarmInputs) -> Classification {
+    crate::note_work!(PrewarmStateBuild);
     let frontmatter: HashMap<String, Value> = inputs
         .frontmatter
         .iter()

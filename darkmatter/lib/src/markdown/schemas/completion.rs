@@ -624,6 +624,7 @@ pub fn alternative_accepts_in<L>(atom: &PropertyAtom, value: &Value, definitions
 where
     L: DefinitionLookup + ?Sized,
 {
+    crate::note_work!(AlternativeMatcherPrepare);
     let Some(table) = reachable_definitions(atom, definitions) else {
         return false;
     };

@@ -80,6 +80,7 @@ impl LoopAmbient {
     /// The `loop` global's runtime value:
     /// `{count, is_first, is_last, last_output, last_exit_code}`.
     pub fn to_value(&self) -> Value {
+        crate::note_work!(LoopAmbientMaterialize);
         let mut object = Map::new();
         for member in AmbientVariable::ALL {
             object.insert(member.as_str().to_string(), self.member(member));

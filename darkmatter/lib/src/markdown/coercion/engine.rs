@@ -577,6 +577,7 @@ pub(super) fn fail(
     converted: Option<Value>,
     reason: FailureReason,
 ) -> Failures {
+    crate::note_work!(CoercionFailureBuild);
     vec![ValueFailure {
         path: path.to_vec(),
         expected: shape.describe(),

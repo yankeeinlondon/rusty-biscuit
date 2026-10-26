@@ -296,6 +296,7 @@ impl<'d> TypeScope<'d> {
         let theirs = other.link_addresses();
         let mut link = self.head.clone();
         while let Some(current) = link {
+            crate::note_work!(ScopeJoinAncestorVisit);
             if theirs.contains(&Arc::as_ptr(&current)) {
                 return Some(current);
             }
@@ -310,6 +311,7 @@ impl<'d> TypeScope<'d> {
         let mut steps = Vec::new();
         let mut link = self.head.as_deref();
         while let Some(current) = link {
+            crate::note_work!(ScopeJoinAncestorVisit);
             if theirs.contains(&std::ptr::from_ref(current)) {
                 break;
             }
@@ -324,6 +326,7 @@ impl<'d> TypeScope<'d> {
         let mut addresses = HashSet::new();
         let mut link = self.head.as_deref();
         while let Some(current) = link {
+            crate::note_work!(ScopeJoinAncestorVisit);
             addresses.insert(std::ptr::from_ref(current));
             link = current.parent.as_deref();
         }

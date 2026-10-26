@@ -1144,3 +1144,6 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
     assert!(validator.is_valid(&serde_json::json!({"nested": {"name": "child", "sequence": [], "cancelled": []}})));
     assert!(!validator.is_valid(&serde_json::json!({"nested": {"sequence": [], "cancelled": 123}})));
 }
+
+#[cfg(test)]
+mod x2_spike;

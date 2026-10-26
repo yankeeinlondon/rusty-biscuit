@@ -416,6 +416,7 @@ fn rewrite_property_union(
         // Preserve the production validator's request-scoped candidate plan
         // during arm acceptance; do not rebuild from ambient CWD.
         // The arm compiles alone, so it takes its root's definitions.
+        crate::note_work!(RewriteArmCompile);
         let Ok(validator) = validate::build_validator_in_context(
             &super::scope::with_root_definitions(arm, root),
             Some(base_dir),

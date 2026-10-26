@@ -1,0 +1,352 @@
+{
+  "catalog_hash": "88ae2a0349cbd4dcf297eec7ac1db9714098c91c391afa2e0a98b83d61e0b7e4",
+  "effects": [
+    "air-reverse-burst",
+    "air-woosh",
+    "air-zoom-vacuum",
+    "arrow-whoosh",
+    "bicycle-horn",
+    "bong",
+    "bottle-cork",
+    "bullet",
+    "cartoon-accent1",
+    "cartoon-accent10",
+    "cartoon-accent11",
+    "cartoon-accent12",
+    "cartoon-accent2",
+    "cartoon-accent3",
+    "cartoon-accent4",
+    "cartoon-accent5",
+    "cartoon-accent6",
+    "cartoon-accent7",
+    "cartoon-accent8",
+    "cartoon-accent9",
+    "cartoon-cry",
+    "click",
+    "confirmation",
+    "creepy-dark-logo",
+    "crowd-applause",
+    "crowd-applause-recital",
+    "crowd-applause-stadium",
+    "crowd-laugh",
+    "crowd-laugh-applause",
+    "dit-hit-1",
+    "dit-hit-2",
+    "doorbell",
+    "doorbell-2",
+    "drop-1",
+    "drop-2",
+    "drop-3",
+    "drop-4",
+    "electronic-hit-fx1",
+    "electronic-hit-fx2",
+    "electronic-hit-fx3",
+    "electronic-hit-fx4",
+    "electronic-hit-fx5",
+    "electronic-hit-fx6",
+    "elemental-magic-spell-impact",
+    "epic-orchestra-transition",
+    "error-1",
+    "error-2",
+    "female-astonished-gasp",
+    "glass-1",
+    "glass-2",
+    "glass-3",
+    "glass-4",
+    "high-down",
+    "high-up",
+    "maximize-1",
+    "maximize-2",
+    "maximize-3",
+    "maximize-4",
+    "maximize-5",
+    "minimize-1",
+    "minimize-2",
+    "minimize-3",
+    "mouseclick",
+    "mysterious-bass",
+    "phase-jump-1",
+    "phase-jump-2",
+    "phase-jump-3",
+    "phase-jump-4",
+    "phase-jump-5",
+    "phaser-down-1",
+    "phaser-down-2",
+    "phaser-down-3",
+    "pluck-1",
+    "pluck-2",
+    "question-1",
+    "question-2",
+    "retro-game",
+    "sad-trombone",
+    "select-1",
+    "select-2",
+    "select-3",
+    "select-4",
+    "small-group-cheer",
+    "sneeze",
+    "space-alarm",
+    "switch-1",
+    "switch-2",
+    "two-tone"
+  ],
+  "events": [
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow"
+      ],
+      "core": "initialize",
+      "globals": {
+        "declarations": [
+          {
+            "availability": {
+              "unavailable": {
+                "code": "claudine.event-has-no-error",
+                "parameters": {}
+              }
+            },
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.initialize"
+      },
+      "name": "initialize",
+      "position": null,
+      "role": null
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": "composed",
+      "globals": {
+        "declarations": [
+          {
+            "availability": {
+              "unavailable": {
+                "code": "claudine.event-has-no-error",
+                "parameters": {}
+              }
+            },
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.start"
+      },
+      "name": "start",
+      "position": null,
+      "role": null
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": "failed",
+      "globals": {
+        "declarations": [
+          {
+            "availability": "available",
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.blocked"
+      },
+      "name": "blocked",
+      "position": null,
+      "role": null
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": "cancelled",
+      "globals": {
+        "declarations": [
+          {
+            "availability": "available",
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.cancelled"
+      },
+      "name": "cancelled",
+      "position": null,
+      "role": null
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": "finalize",
+      "globals": {
+        "declarations": [
+          {
+            "availability": "available",
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.finalize"
+      },
+      "name": "finalize",
+      "position": null,
+      "role": null
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": null,
+      "globals": {
+        "declarations": [
+          {
+            "availability": {
+              "unavailable": {
+                "code": "claudine.event-has-no-error",
+                "parameters": {}
+              }
+            },
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.success"
+      },
+      "name": "success",
+      "position": "after-composition",
+      "role": "terminal-outcome"
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": null,
+      "globals": {
+        "declarations": [
+          {
+            "availability": "available",
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.failure"
+      },
+      "name": "failure",
+      "position": "after-composition",
+      "role": "terminal-outcome"
+    },
+    {
+      "actions": [
+        "communicate",
+        "expression",
+        "flow",
+        "shell"
+      ],
+      "core": null,
+      "globals": {
+        "declarations": [
+          {
+            "availability": {
+              "unavailable": {
+                "code": "claudine.event-has-no-error",
+                "parameters": {}
+              }
+            },
+            "description": "The failure the run is handling.",
+            "root": "err"
+          },
+          {
+            "availability": "available",
+            "description": "Observed durations.",
+            "root": "timing"
+          }
+        ],
+        "scope": "claudine.lifecycle.loop"
+      },
+      "name": "loop",
+      "position": "after-finalize",
+      "role": "iteration-gate"
+    }
+  ],
+  "format_version": 1,
+  "global_catalog": true,
+  "host": "claudine",
+  "host_globals": [
+    "loop",
+    "group"
+  ],
+  "outcome_pair": {
+    "downgrades": [
+      [
+        "success",
+        "failure"
+      ],
+      [
+        "blocked",
+        "failure"
+      ]
+    ],
+    "failed": "failure",
+    "succeeded": "success"
+  },
+  "unknown_verbs": "reject"
+}

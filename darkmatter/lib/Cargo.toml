@@ -301,6 +301,19 @@ harness = false
 name = "clean_hot_paths"
 harness = false
 
+# Timings for the 2026-10-25-pipeline-work-reduction spike scenarios
+# (system allocator); counts and allocations are `pipeline_work_alloc`'s.
+[[bench]]
+name = "pipeline_work"
+harness = false
+
+# Work counts, allocations, and peak live bytes for the same scenarios,
+# under the counting allocator.
+[[bench]]
+name = "pipeline_work_alloc"
+harness = false
+required-features = ["work-counters"]
+
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the library owns
 # L2 (render-tree terminal) and browser (headless) tier tests. Its L2 suite
 # drives WezTerm only (tmux is the CLI's backend); a backend declared here

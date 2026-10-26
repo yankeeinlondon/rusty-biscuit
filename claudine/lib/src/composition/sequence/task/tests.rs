@@ -6731,3 +6731,7 @@ mod group_preparation_contract {
 
 #[path = "container_regressions.rs"]
 mod container_regressions;
+
+#[cfg(feature = "work-counters")]
+#[path = "tests/pipeline_spike.rs"]
+mod pipeline_spike;

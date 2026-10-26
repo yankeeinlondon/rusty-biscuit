@@ -141,6 +141,7 @@ pub fn parse_lifecycle_config_with(
     source_file: &Path,
     options: &LifecycleParseOptions<'_>,
 ) -> Result<LifecycleConfig, LifecycleError> {
+    crate::note_work!(LifecycleConfigParse);
     let Some(fm_obj) = frontmatter.as_object() else {
         return Ok(LifecycleConfig::default());
     };

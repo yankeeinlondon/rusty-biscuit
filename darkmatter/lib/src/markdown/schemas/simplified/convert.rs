@@ -2283,6 +2283,7 @@ fn check_alphanumeric_values(
         map.remove("default");
         map.remove("x-darkmatter-suggest");
     }
+    crate::note_work!(AlphanumericCheckCompile);
     let validator = super::super::validate::build_structural_validator(&target)?;
     match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {
         Some((keyword, value)) => Err(SchemaError::Convert {

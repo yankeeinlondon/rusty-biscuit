@@ -262,6 +262,7 @@ pub(crate) fn predict(
     evaluate: &mut Evaluator<'_>,
 ) -> Result<ProviderPrediction, crate::composition::CompositionError> {
     let mut dependencies = Vec::new();
+    crate::note_work!(PredictionStateBuild);
     let mut document_state: HashMap<String, Value> = layers
         .document
         .iter()
@@ -347,6 +348,7 @@ fn predict_key(
         source_path: layers.document_path.to_path_buf(),
         property: key.to_string(),
     };
+    crate::note_work!(PredictionStateBuild);
     let mut raw_state: HashMap<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     raw_state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
     raw_state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));

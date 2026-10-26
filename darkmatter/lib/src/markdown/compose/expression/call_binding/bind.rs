@@ -342,6 +342,7 @@ impl FunctionRegistration {
 }
 
 fn candidate(signature: &CompiledSignature, problem: SignatureProblem) -> CandidateFailure {
+    crate::note_work!(CandidateFailureBuild);
     CandidateFailure {
         signature: signature.to_string(),
         problem,

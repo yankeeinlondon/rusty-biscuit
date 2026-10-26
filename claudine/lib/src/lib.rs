@@ -59,3 +59,11 @@ macro_rules! note_work {
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+// The spike's crate-private scenarios measure allocations; a unit-test binary
+// is a final binary, so it may declare the counting allocator.
+#[cfg(all(test, feature = "work-counters"))]
+#[global_allocator]
+static SPIKE_ALLOCATOR: test_toolkit::alloc_count::CountingAllocator = test_toolkit::alloc_count::CountingAllocator;
+#[cfg(all(test, feature = "work-counters"))]
+mod pipeline_spike;

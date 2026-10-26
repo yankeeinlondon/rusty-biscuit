@@ -135,6 +135,7 @@ pub struct DiagnosticSource {
 /// `None` when the offset is out of bounds or splits a character.
 pub fn one_based_position(text: &str, offset: usize) -> Option<(usize, usize)> {
     let before = text.get(..offset)?;
+    crate::note_work!(PositionPrefixScanBytes, offset);
     let line_start = before.rfind('\n').map_or(0, |index| index + 1);
     Some((before.matches('\n').count() + 1, before[line_start..].chars().count() + 1))
 }

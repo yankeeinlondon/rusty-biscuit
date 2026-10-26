@@ -782,6 +782,7 @@ impl<'s> Translator<'s> {
             descent: self.descent.get(),
             slot: RefSlot::new(reference_name(reference)),
         });
+        crate::note_work!(RecursiveTargetTranslate);
         let shape = self.node(target, references);
         let frame = references.pop().expect("the frame pushed above");
         if frame.slot.is_referenced() {

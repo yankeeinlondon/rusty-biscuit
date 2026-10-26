@@ -2584,6 +2584,7 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     if let Some(cached) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(&key) {
         return Ok(Arc::clone(cached));
     }
+    crate::note_work!(NamedTypeTableParse);
     let named_types = Arc::new(named_types_from_text(text, path)?);
     let mut memo = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned");
     if memo.len() >= FILE_NAMED_TYPES_CAPACITY {

@@ -161,6 +161,7 @@ impl LifecycleSourceMap {
     }
 
     fn from_frontmatter_named<'n>(frontmatter: &Value, name: impl Fn(LifecycleSignal) -> Option<&'n str>) -> Self {
+        crate::note_work!(LifecycleSourceMapBuild);
         let mut map = Self::default();
         let Some(root) = frontmatter.as_object() else {
             return map;

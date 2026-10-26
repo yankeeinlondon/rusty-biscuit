@@ -19,6 +19,18 @@ path = "tests/l1/main.rs"
 name = "runtime_hot_paths"
 harness = false
 
+# Measurement spike (`2026-10-25-pipeline-work-reduction`): allocation and
+# work-count rows, under the counting allocator.
+[[bench]]
+name = "pipeline_work_alloc"
+harness = false
+required-features = ["work-counters"]
+
+# Measurement spike: Criterion timings, under the system allocator.
+[[bench]]
+name = "pipeline_work"
+harness = false
+
 [features]
 # Process-level test seams, off in every default and installed build. Enabled
 # only through `claudine-cli`'s own `test-fixtures` feature, whose L1 tests

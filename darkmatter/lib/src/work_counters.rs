@@ -25,11 +25,73 @@ pub enum Work {
     TriggerDiscovery,
     /// An effective schema prepared for one document.
     EffectivePreparation,
+    /// A `jsonschema` validator compiled with Darkmatter's formats and
+    /// keywords, whoever asked for it.
+    ValidatorCompile,
+    /// An eager-file union arm compiled by the rewrite (also counted as a
+    /// [`Work::ValidatorCompile`]).
+    RewriteArmCompile,
+    /// An `alphanumeric` default/suggest check compiled during lowering (also
+    /// counted as a [`Work::ValidatorCompile`]).
+    AlphanumericCheckCompile,
+    /// A source [`PositionMap`](crate::markdown::schemas::PositionMap)
+    /// prepared for one validation.
+    PositionMapBuild,
+    /// A `LifecycleSourceMap` built from frontmatter.
+    LifecycleSourceMapBuild,
+    /// A link visited while a scope join collects ancestor addresses or
+    /// walks a branch back to the shared history.
+    ScopeJoinAncestorVisit,
+    /// An earlier operand site compared by path while recording a new one.
+    OperandSiteComparison,
+    /// A schema node's operand markers collected.
+    OperandMarksComputation,
+    /// A schema node visited while collecting operand markers.
+    OperandMarksNodeVisit,
+    /// A named-type table parsed from an imported file's text (a memo miss).
+    NamedTypeTableParse,
+    /// A rejected overload's `CandidateFailure` built while binding a call.
+    CandidateFailureBuild,
+    /// An owned conversion `ValueFailure` built by the coercion engine.
+    CoercionFailureBuild,
+    /// Bytes of prefix scanned to turn one byte offset into a line and
+    /// column.
+    PositionPrefixScanBytes,
+    /// A one-alternative schema prepared (definitions collected, lowered,
+    /// hashed) to test one value in editor assistance.
+    AlternativeMatcherPrepare,
+    /// A recursive `$ref` target body translated into a conversion shape.
+    RecursiveTargetTranslate,
+    /// A mapping entry key compared while locating a problem's position.
+    PositionKeyComparison,
+    /// A document's lifecycle configuration parsed from frontmatter.
+    LifecycleConfigParse,
 }
 
 impl Work {
     /// Every kind, in declaration order.
-    pub const ALL: &[Work] = &[Work::ExpressionParse, Work::TriggerDiscovery, Work::EffectivePreparation];
+    pub const ALL: &[Work] = &[
+        Work::ExpressionParse,
+        Work::TriggerDiscovery,
+        Work::EffectivePreparation,
+        Work::ValidatorCompile,
+        Work::RewriteArmCompile,
+        Work::AlphanumericCheckCompile,
+        Work::PositionMapBuild,
+        Work::LifecycleSourceMapBuild,
+        Work::ScopeJoinAncestorVisit,
+        Work::OperandSiteComparison,
+        Work::OperandMarksComputation,
+        Work::OperandMarksNodeVisit,
+        Work::NamedTypeTableParse,
+        Work::CandidateFailureBuild,
+        Work::CoercionFailureBuild,
+        Work::PositionPrefixScanBytes,
+        Work::AlternativeMatcherPrepare,
+        Work::RecursiveTargetTranslate,
+        Work::PositionKeyComparison,
+        Work::LifecycleConfigParse,
+    ];
 }
 
 static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work::ALL.len()];
@@ -58,6 +120,13 @@ impl WorkSnapshot {
         WorkSnapshot {
             counts: self.counts.iter().enumerate().map(|(index, count)| count - earlier.counts.get(index).copied().unwrap_or(0)).collect(),
         }
+    }
+
+    /// The work of this snapshot and `other` together, for a total over
+    /// separately measured phases.
+    pub fn plus(&self, other: &WorkSnapshot) -> WorkSnapshot {
+        let count = |snapshot: &WorkSnapshot, index: usize| snapshot.counts.get(index).copied().unwrap_or(0);
+        WorkSnapshot { counts: (0..Work::ALL.len()).map(|index| count(self, index) + count(other, index)).collect() }
     }
 
     /// `(kind, count)` for every nonzero counter.

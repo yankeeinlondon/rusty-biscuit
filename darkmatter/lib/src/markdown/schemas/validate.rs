@@ -519,6 +519,7 @@ pub(crate) enum FileValues {
 
 fn build_validator_with(schema: &Value, file_values: &FileValues) -> Result<Validator, SchemaError> {
     let _compile = super::timings::compiling();
+    crate::note_work!(ValidatorCompile);
     // Feature C literal-precedence emits negative-lookahead `patternProperties`
     // keys, which the linear `regex` engine rejects. Opt such schemas into the
     // backtracking `fancy-regex` engine while keeping every lookaround-free

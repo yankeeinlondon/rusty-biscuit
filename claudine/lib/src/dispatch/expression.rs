@@ -254,6 +254,7 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
 /// `git`, `project`) as a JSON object. Process environment (`env.*`) is
 /// deliberately excluded.
 fn hook_payload_object(meta: &EventMeta) -> Value {
+    crate::note_work!(HookPayloadMaterialize);
     const TOP_LEVEL_KEYS: [&str; 14] = [
         "provider",
         "event",
