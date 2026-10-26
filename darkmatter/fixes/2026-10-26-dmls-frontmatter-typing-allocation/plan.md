@@ -5,6 +5,26 @@ phase: 1
 agent: "codex/gpt-6.1-sol"
 yolo: "true"
 human_review: false
+source_files_during_phase_1:
+    - darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_diagnostics.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_interpolation_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_item_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_fault_shape_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_faults.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_loop_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_navigation.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_plain_and_silent_hovers.json
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_property_hovers.json
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - dmls
 ---
 
 # DMLS frontmatter typing allocation implementation plan
@@ -62,7 +82,7 @@ Wave numbers are unique across the plan. Tasks within a wave may use concurrent 
   - Create `implementation-log.md` alongside this plan, recording the command, build settings, input identity, and raw output location plus expression-hover, verb-hover, and diagnostics bytes for every case. Record benchmark order: overlay → diagnostics → completion → verb hover → expression hover.
   - Capture enough build/environment information to repeat the measurement exactly; use Sniff for host discovery. Do not substitute the spec's historical byte counts for this baseline.
 
-- [ ] **Pin response contracts**
+- [x] **Pin response contracts**
   - Independently inspect/reuse existing assertions in `providers/frontmatter/sequence_tests.rs`, frontmatter provider/diagnostics unit tests, and `dmls/tests/l1/lifecycle_event_views.rs` and `lifecycle_host_profile.rs`. Add only missing focused characterization cases, in separate test files from benchmark/log work.
   - Preserve exact hover text/ranges, completion order and edits, and diagnostic codes/ranges/messages/severities. Include definition targets and document links so their consumer split remains observable.
   - Use existing test-toolkit fixtures and consolidated test registration; keep baseline behavior assertions passing before changing ownership.
