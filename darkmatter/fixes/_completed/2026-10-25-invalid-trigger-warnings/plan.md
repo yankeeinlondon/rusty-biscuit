@@ -146,10 +146,116 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-commands.md
-source_files_during_phase_6: []
+source_files_during_phase_6:
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+source_code:
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/cli/src/commands/trigger_findings.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - claudine/lib/src/composition/schema/findings.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/tests/l1/invalid_trigger_findings.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+documentation:
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/frontmatter-properties.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Plan — Warn and skip invalid schema triggers
@@ -884,7 +990,7 @@ Wave 9. Walks the spec's acceptance list against the finished tree.
 
 ### Wave 9 — Acceptance walkthrough
 
-- [ ] **Acceptance checklist**
+- [x] **Acceptance checklist**
     - Walk spec acceptance items 1–10 in order with isolated repository
       fixtures (controlled home/schema roots; never the author's incident
       file; fixture provider only): the incident reproduction through the
@@ -901,7 +1007,7 @@ Wave 9. Walks the spec's acceptance list against the finished tree.
       formatting rows.
     - Where an item is already covered by a Phase 1–5 test, cite it; add the
       missing ones rather than re-testing covered behavior.
-- [ ] **Final gates and hygiene**
+- [x] **Final gates and hygiene**
     - `just test` and `just lint` in `darkmatter/` and `claudine/`; confirm
       all new tests are L1 with no terminal/browser windows or focus gain and
       no permission-bit-dependent additions outside the existing unix-gated

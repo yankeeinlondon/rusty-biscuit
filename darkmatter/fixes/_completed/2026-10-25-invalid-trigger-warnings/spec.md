@@ -27,8 +27,9 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-25
 clarified: false
-implemented: false
-review_iterations: 0
+implemented: true
+review_iterations: 3
+completed: true
 human_review: false
 needs_rulings: false
 packages:
@@ -38,6 +39,7 @@ packages:
     - claudine
     - claudine-cli
 os_failing: windows
+implemented_by: "claude/opus"
 ---
 
 # Warn and skip invalid schema triggers

@@ -46,13 +46,6 @@ packages:
     - claudine
     - claudine-cli
 human_review: false
-message_to_agent: |-
-    Phase 5 (docs) is done; no code changed. Facts for Phase 6:
-    (1) The user-facing contract is documented in one place per area: darkmatter/docs/topics/schemas/schema-triggers.md section "Invalid discovered triggers" (has a per-host delivery table) and claudine/docs/topics/schemas.md section "When a trigger is invalid". When the acceptance walkthrough checks behavior, those pages are the record; if a test contradicts them, fix whichever is wrong and record it.
-    (2) The real warning text includes the cause's own prefix: `ignoring invalid schema trigger <path>: invalid schema-trigger: ...`; the spec's example omits `invalid schema-trigger:`. Assert the real text.
-    (3) `trigger_spelling_guard` (darkmatter lib L1) rejects the retired kind spelling written literally in docs; avoid it in any new prose or fixtures outside its allowlist.
-    (4) The working tree still holds Phase 4's uncommitted Claudine source changes, so the scope calculator over the whole tree selects claudine, claudine-cli, darkmatter, and test-toolkit.
-    (5) `os_failing: windows` on the spec is for two pre-existing Windows quoting tests (see the Phase 4 log); nothing this fix added fails on Windows.
 source_files_during_phase_2:
     - darkmatter/cli/src/commands/trigger_findings.rs
     - darkmatter/cli/src/commands/mod.rs
@@ -152,6 +145,118 @@ skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_6:
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+pipeline_refreshed: []
+decisions_for_author: []
+source_code:
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/cli/tests/l1/schema_trigger_rename.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate_timings.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/cli/src/commands/trigger_findings.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/clean/json.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/document.rs
+    - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/formatting_transaction.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - claudine/lib/src/composition/schema/findings.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/tests/l1/invalid_trigger_findings.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+documentation:
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/frontmatter-properties.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-25-invalid-trigger-warnings (6 phases)
@@ -605,3 +710,120 @@ Boundary and fidelity: the library carry is covered in-process at Claudine's pub
 ### Cross-OS Check
 
 - Not run: the phase is docs only and carries no OS risk.
+
+## Phase 6
+
+### Progress
+
+- walked spec acceptance items 1–10 against the finished tree, citing the Phase 1–5 tests for each and finding four cases with no test: a matcher-only trigger beside an invalid one, same-named triggers at distinct paths, a new in-process composition reporting again, and Claudine's `sequence` as another composition consumer
+- added one test for each; each passed on its first targeted run
+- acceptance checklist checked off; final gates run; final-gates task checked off
+
+### Design Decisions
+
+1. **Decision: "distinct paths with the same filename" is proven across two packages in one `md schema validate` invocation**
+    - **decision:** two workspace packages each hold an invalid `schemas/memory.yaml`; validating one document from each must give two warnings, each on its own file's JSON record.
+    - **alternatives considered:** two same-named files in one context (impossible: shadowing reads only the nearer one, and the shadowing case is already covered); a library-only test (the per-invocation dedup that could merge them lives in the CLI).
+    - **why:** the dedup that could wrongly key on a file name runs per invocation in the CLI, so one invocation spanning two package roots is the only place the merge could happen.
+    - **downsides:** it spawns `md` once (about 0.3 s).
+2. **Decision: "a new invocation using cached discovery" is proven in-process for Darkmatter**
+    - **decision:** compose the same prompt twice in one process. The second compose reuses the process-wide payload memo and file-revision caches, and both reports must carry the same two warnings in discovery order: one for an envelope failure and one for a missing payload.
+    - **alternatives considered:** two spawned `md` runs (a fresh process has no cache, so it proves nothing about caching).
+    - **why:** only an in-process repeat exercises cached discovery state; Claudine's equivalent is already `invalid_trigger_findings::repeated_checks_record_each_trigger_once_in_discovery_order`.
+    - **downsides:** none.
+3. **Decision: no Windows cross-check this phase**
+    - **decision:** this phase adds four tests and no production code. They build paths from `canonicalize_simplified` temp roots and compare them as `Path` components, as the Phase 1–4 tests that passed on Windows do.
+    - **alternatives considered:** `just cross-check` for darkmatter and claudine-cli (the claudine-cli run carries the two known Windows quoting failures).
+    - **why:** these tests carry no new OS risk, and CI's nightly covers native Windows.
+    - **downsides:** the four new tests first run on Windows in the nightly.
+
+### Work Completed
+
+- `darkmatter/lib/tests/l1/trigger_discovery_recovery.rs`: `a_matcher_only_trigger_installs_beside_an_invalid_one`.
+- `darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs`: `a_new_composition_reports_the_skipped_triggers_again`.
+- `darkmatter/cli/tests/l1/invalid_trigger_warnings.rs`: `schema_validate_json_keeps_same_named_triggers_of_two_packages_distinct`.
+- `claudine/cli/tests/l1/invalid_trigger_warnings.rs`: `a_sequence_launches_every_task_beside_the_incident_trigger_and_warns_once` (two tasks, two fake-goose launches, one warning).
+- No production code, docs, or skills changed. The docs record (`schema-triggers.md` § "Invalid discovered triggers", `claudine/docs/topics/schemas.md` § "When a trigger is invalid") agrees with every test. The darkmatter skill needed no change.
+
+### Requirement-to-Test Mapping (spec acceptance 1–10)
+
+Tests are in-process at the public API (F2) unless marked; ★ marks the tests added this phase. Every test is L1 and opens no terminal or browser window.
+
+| # | Item | Test(s) |
+| --- | --- | --- |
+| 1 | Incident `memory.yaml`, `$schema`-less prompt, normal CLI path | CLI F3 `darkmatter-cli invalid_trigger_warnings::compose_beside_the_incident_trigger_succeeds_with_one_warning`; lib `invalid_triggers::a_prompt_without_schema_composes_beside_the_incident_trigger` |
+| 2 | Valid beside invalid, both orders, validation enforced | `trigger_discovery_recovery::a_valid_trigger_{after,before}_an_invalid_one_still_applies`; CLI `schema_validate_assignments_use_the_valid_trigger_beside_an_invalid_one`, `compose_keeps_the_warning_when_a_valid_trigger_rejects_the_document` |
+| 3 | Failure shapes; raw JSON that passes the shape gate but fails compilation; passive parsers strict | `trigger_input_matrix::*`, `trigger_payload_load_errors::*`, `trigger_discovery_recovery::{malformed_claimed_yaml_…, a_missing_payload_…, a_broken_import_…, a_payload_cycle_…, a_root_union_payload_…, a_raw_payload_that_fails_to_compile_is_skipped_even_when_a_later_layer_redeclares_its_property, an_invalid_embedded_trigger_…}`, `schema_embedded_trigger_bundles::*`; passive: `schema_roots_parity`, `trigger_envelope_claim::*` |
+| 4 | All-invalid, matcher-only, ignored ordinary YAML, shadowing across roots and bundles, infrastructure errors | `an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous` (all-invalid, no baseline, no effective schema); ★`a_matcher_only_trigger_installs_beside_an_invalid_one`; `malformed_unclaimed_yaml_is_silently_ignored`; `a_nearer_invalid_trigger_shadows_a_same_named_valid_one_until_deleted`, `schema_embedded_trigger_bundles::a_same_name_malformed_disk_trigger_is_skipped_with_no_embedded_fallback`; `an_unreadable_schema_root_still_fails_discovery`, `an_invalid_embedded_bundle_structure_still_fails_discovery` |
+| 5 | Repeat/cache display once; repair/creation/deletion; distinct identities | ★`invalid_triggers::a_new_composition_reports_the_skipped_triggers_again`; `a_transcluded_child_reports_the_shared_trigger_once`; `creating_a_missing_payload_and_its_parent_folder_installs_the_trigger`, `a_broken_import_…_repairing_it_installs_the_trigger`; `payload_memo_tests::a_failed_resolution_is_a_miss_and_is_not_kept`; `two_triggers_sharing_a_broken_payload_are_two_findings`; ★CLI F3 `schema_validate_json_keeps_same_named_triggers_of_two_packages_distinct`; DMLS all-invalid first load then repair: `registry::tests::a_first_load_with_only_invalid_triggers_installs_an_empty_ready_registry`, `deleting_a_trigger_removes_it_and_creating_a_missing_payload_recovers` |
+| 6 | Hosts: validate, triggers, Claudine, DMLS, assignments, other composition commands, multi-file, retained-before-failure, new invocation | CLI F3 `schema_validate_*` (6), `schema_triggers_*` (2), `compose_report_json_carries_the_warning_as_a_diagnostic_and_not_on_stderr`; Claudine F3 `claudine-cli invalid_trigger_warnings::{compose_…, inline_compose_…, every_loop_iteration_…, ★a_sequence_launches_every_task_beside_the_incident_trigger_and_warns_once, a_rejected_prompt_…, an_authored_schema_that_cannot_load_…}`; Claudine lib `invalid_trigger_findings::*` (incl. new-invocation re-report); DMLS `invalid_trigger_warnings::*` |
+| 7 | Explicit `$schema` failures and valid-trigger validation failures stay errors; shipped-schema corpus | `phase4_trigger_assembly::document_schema_referencing_an_ignored_trigger_file_still_fails`, `invalid_triggers::the_warning_is_kept_when_the_authored_schema_fails_to_load`, CLI `compose_of_a_document_referencing_the_ignored_trigger_still_fails`; corpus: `shipped_schema_corpus::{shipped_schema_artifacts_parse_passively, loadable_shipped_schemas_resolve_and_lower, …}` |
+| 8 | DMLS editor scenarios | `dmls invalid_trigger_warnings::{a_trigger_saved_invalid_loses_its_properties_while_a_valid_neighbor_changes, a_first_load_with_only_invalid_triggers_warns_on_each_and_an_unchanged_refresh_publishes_nothing, an_open_trigger_stays_strict_while_edited_and_keeps_its_warning_once_closed}`, `registry::tests::a_shared_source_is_published_once_and_cleared_only_when_no_scope_reports_it`, `workspace_schema_scopes::*`, `lsp_session::closed_trigger_envelope_diagnostic_round_trip` |
+| 9 | Default succeeds; `--deny` code / all; `--disable`; `$schema` naming the ignored file | `invalid_triggers::{denying_the_code_stops_before_the_first_effect, denying_all_stops_before_the_first_effect, disabled_trigger_discovery_reports_nothing}`; CLI F3 `compose_deny_of_the_code_or_all_stops_before_writing_the_document`, `compose_with_schema_triggers_disabled_reports_nothing` |
+| 10 | `md clean` / `--json` / `--disable`; DMLS formatting | CLI F3 `clean_beside_the_incident_trigger_succeeds_with_one_stderr_warning`, `clean_json_carries_the_warning_in_the_top_level_warnings_array`, `clean_with_schema_triggers_disabled_reports_nothing`, `clean_json::test_json_envelope_has_exactly_the_documented_top_level_fields`; DMLS `formatting_transaction::an_invalid_schema_trigger_beside_the_document_neither_blocks_formatting_nor_adds_a_message` |
+
+Input Robustness Matrix: no parser or loader changed in this phase. The smell grep over the fix's whole Rust diff (`git diff 03561b072 -- '*.rs'`) found no new `#[serde(default)]`, no `filter_map(.. as_str())` on a load-bearing parse, and no `.ok()` on one. Each `unwrap_or_default()` it found is an option default, an optional blocking list, a test helper, or the observation stack. None is on a parse.
+
+### Hygiene
+
+- Permission bits: the only permission-dependent test added by the fix (`an_unreadable_schema_root_still_fails_discovery`) is `#[cfg(unix)]`. No test activates or focuses a window.
+- `docs/dependencies.md` (root and per-area): untouched by the fix.
+- Comment drift: this phase changed no behavior. The earlier phases' behavior edits each carried their doc and comment updates (see their logs). READMEs were re-checked in Phase 5.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages: [claudine-cli, darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`. Both gates ran.
+- `just lint` (darkmatter): pass. `just lint` (claudine): pass.
+- `just test` (darkmatter): 12,474/12,474 passed (10 skipped by the recipe).
+- `just test` (claudine): 11,648/11,648 passed (9 skipped by the recipe).
+- `just check-tier-coverage darkmatter` and `claudine`: 0 stranded.
+- Targeted first runs: the three Darkmatter tests (3/3) and the Claudine sequence test (1/1).
+- Dependents: only tests changed, so no dependent package is affected.
+
+### Load-Sensitive and Pre-Existing Failures
+
+- None on macOS. The Windows-only quoting failures recorded in Phase 4 (`os_failing: windows`) are unchanged.
+
+### Cross-OS Check
+
+- Not run; see Design Decision 3.
+
+## Pipeline Refresh
+
+- Not part of a pipeline: the spec has no `pipeline_step`, and no active spec names `2026-10-25-invalid-trigger-warnings` in `depends-on`. `pipeline_refreshed: []`.
+
+## Review 1
+
+### Design Decisions
+
+1. **Decision: continue the implementation review without human escalation**
+    - **decision:** `human_in_the_loop` is `null`, and no human review is required. The review records three high findings in `review-1.md`; the implementation's output-contract exceptions are repair work, not questions for the author.
+    - **alternatives considered:** stop for confirmation of the implementation's recorded choices; accept the exceptions as new requirements.
+    - **why:** both independent decision audits found `decisions_for_author: []`. The spec already decides recovery, output streams, source attribution, and invocation ownership. The remaining choices have recommendations supported by the spec and are reversible.
+    - **downsides:** the repair must correct the two output exceptions even though the implementation log, docs, and one CLI test currently describe them as deliberate behavior.
+2. **Decision: ordinary inspection follows the stderr-warning contract, and clean JSON failures retain structured warnings**
+    - **decision:** `md schema triggers` must deliver warning rows on stderr without duplicating the full warning in its stdout trace. A later schema failure in `md clean --json` must retain the discovered warning in the existing version-1 envelope's `warnings` array, preserve the nonzero status and existing schema-error presentation, and emit no human-readable trigger-warning row on stderr.
+    - **alternatives considered:** exempt human-readable inspection from the ordinary-output rule; retain stderr-only clean failure warnings; introduce a new report mode or version.
+    - **why:** the opening output contract applies to ordinary commands, and the clean contract explicitly names a version-1 warning collection and no stderr repetition. Neither passage grants a failure exception. The Phase 2 choices narrowed requested scope and are covered together by high finding R1-F2.
+    - **downsides:** callers relying on the newly introduced inspection stdout warning text must follow stderr; failed clean invocations must construct a report before returning their error.
+3. **Decision: retain Claudine's current discovery boundaries when assessing its selected-composition caveat**
+    - **decision:** the Phase 4 hook limitation does not require enabling discovery on previously unscanned child documents or adding a new hook API for this fix. The selected and nonselected canonical composition passes leave `trigger_schemas` false; the separate effective-schema checks own automatic discovery and record its findings independently.
+    - **alternatives considered:** treat the generic hook's dropped failure warnings as proof that invalid-trigger findings are lost there; expand automatic discovery to every transcluded child.
+    - **why:** source inspection and public direct/inline preparation probes with and without a selector establish that no invalid-trigger finding originates in those composition passes. The spec changes recovery for automatic discovery, not which previously unscanned documents Claudine subjects to trigger enforcement. Root preliminary-check and invocation-drain tests pass, including independent failures.
+    - **downsides:** the generic hook still discards other warning families on failure. If a later change enables trigger discovery in that pass, it must also provide warning-preserving hooked composition; this invariant cannot then justify omitting it.
+4. **Decision: preserve known source provenance without inventing locations or new report formats**
+    - **decision:** carry a malformed envelope's available position into the existing shared compose diagnostic, preserve known resolved payload identity before merge/compile rejection, and extract path-bearing causes such as `AmbiguousReferenced`. Keep file-level or source-free fallbacks when no exact location exists, and never turn an embedded identity into a host path.
+    - **alternatives considered:** rely exclusively on paths/positions written into message text; choose an arbitrary file from failed-load observations; add position fields and new wire shapes to every warning format.
+    - **why:** the spec requires available source information to survive, and the public discovery results and DMLS session probes demonstrate specific losses in R1-F3. Existing diagnostic and editor-related-information fields already represent the required values. A missing reference does not establish an exact source-file position.
+    - **downsides:** resolution failures must retain provenance long enough to construct their warning, including alias chains; formats without a related-information field continue explaining related sources in their existing message text.
+5. **Decision: verify this fix's behavior at L1 and keep unrelated OS evidence outside readiness**
+    - **decision:** use public-library, isolated CLI/fake-provider, and DMLS protocol-session checks for these findings. No real-terminal, keyboard-injection, or additional cross-OS run is required to complete this review. Temporary source probes are removed after their results are recorded.
+    - **alternatives considered:** require terminal-emulator captures for stream assertions; repeat full-area and remote-OS gates during the review; block on the two pre-existing Windows shell-quoting failures.
+    - **why:** the promises concern schema results, JSON, process streams, editor messages, and effect prevention, not terminal encoding or focus. Focused nextest runs and tier listings exercised the declared targets; the review instructions explicitly exclude cross-OS proof and unrelated defects from readiness.
+    - **downsides:** this review does not independently repeat the implementation's full-area lint/test evidence or CI's OS coverage. Repairs must run the gates appropriate to the code they change.
+
+### Review Result
+
+- Not production ready: R1-F1 (early composition exits lose warnings), R1-F2 (warning streams and failed clean JSON reports), and R1-F3 (available source information lost during warning projection).
+- Reviewed runs: Darkmatter `just test invalid_trigger` (34 passed), `just test trigger_` (328 passed), `just test shipped_schema` (14 passed); Claudine `just test invalid_trigger` (13 passed). These filters overlap. Both area's tier-coverage checks report zero stranded tests.
+- Additional isolated CLI/public-library and temporary DMLS session probes established the findings' sibling tables. Temporary examples and test edits were removed. No production code changed for the review, and no terminal or browser gained focus.
