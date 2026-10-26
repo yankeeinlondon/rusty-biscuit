@@ -150,6 +150,7 @@ impl<'a> Parser<'a> {
     ///
     /// Returns an error if the lexer fails to tokenize the input.
     pub fn with_mode(input: &'a str, mode: ParseMode) -> Result<Self, ParseError> {
+        crate::note_work!(ExpressionParse);
         let tokens = lex_spanned(input, mode)?;
         Ok(Self {
             _input: input,

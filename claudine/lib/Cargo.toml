@@ -27,6 +27,10 @@ test-fixtures = []
 # Opt-in tests of the repository's internal `prompts/`; run by
 # `just test-prompts`, never by CI.
 prompt-tests = []
+# Test-only instrumentation. Exposes the process-wide `work_counters` module
+# (and Darkmatter's) that measurement benches and complexity regressions read.
+# Off by default; without it no counter state is compiled.
+work-counters = ["darkmatter/work-counters"]
 
 [dependencies]
 # Internal

@@ -20,3 +20,15 @@ Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 - **A bench measures latency; it is not a contract test.** Prove contracts
   such as "one request per operation" with work counters in an L1 test
   ([test-design.md](test-design.md)).
+- **Pick the measurement by the claim.**
+
+  | Claim | Tool |
+  | ----- | ---- |
+  | "this does N units of work" (parses, compilations, reads, snapshots) | a work counter, asserted as a delta in an L1 test: `darkmatter::work_counters` / `claudine::work_counters` behind each package's test-only `work-counters` feature, `dmls::work_counters` |
+  | "this allocates / copies less" | `test_toolkit::alloc_count::CountingAllocator`, declared as `#[global_allocator]` in a dedicated `*_alloc` bench target; report, never assert exact byte counts |
+  | "this is faster" | Criterion, under the system allocator, compared against a saved baseline |
+
+  New counters go through each crate's root `note_work!` macro, which
+  compiles to nothing without the feature, so production builds carry no
+  counter state.
+

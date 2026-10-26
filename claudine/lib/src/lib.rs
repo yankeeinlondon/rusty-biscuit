@@ -39,5 +39,23 @@ pub mod signals;
 pub mod steering;
 pub mod stream;
 pub mod system_prompt;
+#[cfg(feature = "work-counters")]
+pub mod work_counters;
+
+/// Records units of [`Work`](crate::work_counters::Work): `note_work!(RuntimeSnapshot)` adds one,
+/// `note_work!(RuntimeSnapshot, n)` adds `n`. Expands to nothing without the
+/// `work-counters` feature, so `n` is not evaluated in production builds.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! note_work {
+    ($work:ident) => {
+        $crate::note_work!($work, 1)
+    };
+    ($work:ident, $count:expr) => {
+        #[cfg(feature = "work-counters")]
+        $crate::work_counters::add($crate::work_counters::Work::$work, ($count) as u64);
+    };
+}
+
 #[cfg(test)]
 pub(crate) mod test_support;

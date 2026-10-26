@@ -29,10 +29,12 @@ default = []
 # default; production builds carry no counter state and expose none of the
 # instrumentation API.
 effects-instrumentation = []
-# Test-only instrumentation. Exposes the thread-local work counters that
-# complexity regressions in downstream crates (DMLS) read across the crate
-# boundary, where `cfg(test)` does not reach. Off by default; without it the
-# counters and their accessors are not compiled.
+# Test-only instrumentation. Exposes the work counters that complexity
+# regressions and measurement benches in this and downstream crates (DMLS,
+# Claudine) read across the crate boundary, where `cfg(test)` does not reach:
+# the thread-local alias-search counter and the process-wide
+# `work_counters` module. Off by default; without it the counters and their
+# accessors are not compiled.
 work-counters = []
 # Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
 # body-cleanup candidate before the fidelity check so consumer suites (the CLI,

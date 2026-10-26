@@ -624,6 +624,7 @@ impl DarkmatterSchemas {
         schema_override: Option<&Value>,
     ) -> Result<Option<EffectiveSchema>, SchemaError> {
         let _resolve = timings::stage(ValidationStage::Resolve);
+        crate::note_work!(EffectivePreparation);
         let base_dir = base_dir_for(source, &self.file_resolution_context);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
@@ -2493,6 +2494,7 @@ pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
     // The raw YAML's first line is the file's second: the opening `---` is
     // line 1.
     const RAW_SOURCE_BASE_LINE: u32 = 2;
+    crate::note_work!(PositionMapBuild);
     let frontmatter = source.frontmatter();
     // Loaded text is kept even when frontmatter parsing failed, so only a
     // parsed frontmatter's own source may be projected.

@@ -624,6 +624,7 @@ pub fn scan_with_source(
     source: &mut dyn SchemaRootSource,
 ) -> Result<TriggerRegistry, SchemaError> {
     let _discover = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Discover);
+    crate::note_work!(TriggerDiscovery);
     let roots = SchemaRoots::for_document(context)?;
 
     // Apply filename shadowing: the first root wins by filename.
