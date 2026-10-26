@@ -134,6 +134,28 @@ fn every_loop_iteration_rediscovers_the_trigger_and_it_is_shown_once() {
     assert_incident_warning(&run, &trigger, "loop.md");
 }
 
+/// A sequence prepares each task's prompt on its own and rediscovers the
+/// trigger for every task; every task launches and the invocation shows the
+/// warning once.
+#[test]
+fn a_sequence_launches_every_task_beside_the_incident_trigger_and_warns_once() {
+    let (fixture, trigger) = incident_fixture("trigger-warn-sequence");
+    write_doc(&fixture, "first.md", "---\ntitle: First\n---\nDo the {{ title }} step.\n");
+    write_doc(&fixture, "second.md", "Do the second step.\n");
+    let doc = write_doc(
+        &fixture,
+        "seq.md",
+        "---\nsequence:\n  - name: first\n    prompt: first.md\n  - name: second\n    prompt: second.md\n---\n",
+    );
+
+    let run = run(&fixture, "sequence", &doc);
+
+    assert_eq!(run.code, Some(0), "the sequence completes:\n{}", run.stderr);
+    assert_eq!(run.launches, 2, "each task launched once:\n{}", run.stderr);
+    assert!(!run.stderr.contains("CompositionError"), "no composition error:\n{}", run.stderr);
+    assert_incident_warning(&run, &trigger, "first.md");
+}
+
 /// A valid trigger beside the invalid one still enforces its schema: the
 /// prompt is rejected before any launch, and the skipped trigger's warning
 /// is delivered with that rejection, ahead of it.

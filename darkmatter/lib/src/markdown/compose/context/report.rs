@@ -450,6 +450,20 @@ impl ComposeReport {
         }
     }
 
+    /// Adds the skipped-trigger warnings (`dm.schema.invalid_trigger`) in
+    /// `warnings` whose trigger this report does not already carry, in order;
+    /// any other warning is ignored.
+    pub(crate) fn add_trigger_warnings(&mut self, warnings: impl IntoIterator<Item = ComposeWarning>) {
+        for warning in warnings {
+            let Some(trigger) = warning.invalid_trigger_source() else {
+                continue;
+            };
+            if !self.warnings.iter().any(|kept| kept.invalid_trigger_source().as_ref() == Some(&trigger)) {
+                self.add_warning(warning);
+            }
+        }
+    }
+
     /// Adds a schema advisory unless this report already carries the same
     /// semantic code and referenced path.
     pub(crate) fn add_schema_advisory(
@@ -591,9 +605,10 @@ pub struct ComposeWarning {
     pub(crate) identity: Option<WarningIdentity>,
 
     /// The shared diagnostic this warning reports, for a family whose
-    /// findings DMLS reports too (the call diagnostics): the same code,
-    /// severity, message, authored position, and types the editor shows.
-    /// [`Self::message`] is that finding phrased for a terminal row.
+    /// findings DMLS reports too (the call diagnostics and skipped schema
+    /// triggers): the same code, severity, message, authored position, and
+    /// types the editor shows. [`Self::message`] is that finding phrased
+    /// for a terminal row.
     pub diagnostic: Option<Box<crate::markdown::compose::expression::Diagnostic>>,
 }
 
@@ -745,7 +760,10 @@ impl ComposeWarning {
     ///
     /// A disk trigger's identity and `path` are its normalized path; an
     /// embedded trigger has no `path`. Either way the warning collapses
-    /// across every document and pass that discovers the same trigger.
+    /// across every document and pass that discovers the same trigger. The
+    /// shared record is placed in the trigger file at the finding's
+    /// [`position`](crate::markdown::schemas::InvalidTriggerFinding::position)
+    /// and is source-free without one or for an embedded trigger.
     pub(crate) fn from_invalid_trigger(
         finding: &crate::markdown::schemas::InvalidTriggerFinding,
         consumer: impl Into<PathBuf>,
@@ -761,9 +779,23 @@ impl ComposeWarning {
                 },
             ),
         };
+        let message = finding.message();
+        // The record's source is the trigger file at the finding's position.
+        // `line_number` stays `None`: it counts lines of the consuming
+        // document, which the trigger's line does not.
+        let diagnostic = crate::markdown::compose::expression::Diagnostic {
+            code: finding.code().to_string(),
+            severity: crate::markdown::compose::expression::Severity::Warning,
+            message: message.clone(),
+            source: path.as_ref().zip(finding.position()).map(|(file, (line, column))| {
+                crate::markdown::compose::expression::DiagnosticSource { file: Some(file.clone()), line, column }
+            }),
+            expected_type: None,
+            actual_type: None,
+        };
         Self {
             stage: "schema_validation".to_string(),
-            message: finding.message(),
+            message,
             line_number: None,
             source: Some(finding.source_family().to_string()),
             code: Some(finding.code().to_string()),
@@ -771,7 +803,7 @@ impl ComposeWarning {
             path,
             consumer: Some(consumer.into()),
             resolution_failure: None,
-            diagnostic: None,
+            diagnostic: Some(Box::new(diagnostic)),
         }
     }
 

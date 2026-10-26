@@ -2,8 +2,9 @@
 //! records: what `md compose --output report-json` reports.
 //!
 //! Every record keeps the code, severity, and message its producer gave it.
-//! A warning that carries a shared record (a call finding) is reported as
-//! that record; any other warning, and every failure, is classified by its
+//! A warning that carries a shared record (a call finding or a skipped
+//! schema trigger) is reported as that record; any other warning, and every
+//! failure, is classified by its
 //! typed error into a code of the same `dm.<family>.<kind>` taxonomy DMLS
 //! reports, with `source` and the types left `None` where the error holds no
 //! authored position. Classification reads only the error and warning

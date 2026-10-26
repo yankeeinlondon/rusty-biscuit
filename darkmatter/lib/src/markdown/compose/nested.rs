@@ -166,7 +166,9 @@ impl NestedCompose {
     }
 
     /// Folds every nested child's report, depth, and context groups into the
-    /// calling document once its stages finish.
+    /// calling document once its stages finish. When the document fails,
+    /// the skipped triggers those reports (the pre-approved gate's included)
+    /// carry join the failure's warnings instead.
     pub(crate) fn finish(
         self,
         result: MarkdownResult<ComposeReport>,
@@ -177,14 +179,19 @@ impl NestedCompose {
         if let Some(groups) = &outcome.context_groups {
             runtime.record_context_groups(groups);
         }
-        if let Some(error) = outcome.restored {
-            return Err(error);
-        }
-        let mut report = result?;
-        for child in outcome.reports {
-            report.merge(child);
-        }
-        Ok(report)
+        let failure = match (outcome.restored, result) {
+            (Some(error), _) | (None, Err(error)) => error,
+            (None, Ok(mut report)) => {
+                for child in outcome.reports {
+                    report.merge(child);
+                }
+                return Ok(report);
+            }
+        };
+        // The document's own warnings are already kept; the triggers its
+        // nested children and the pre-approved gate found follow them.
+        runtime.record_failed_triggers(outcome.reports.into_iter().flat_map(|report| report.warnings));
+        Err(failure)
     }
 
     /// A blocking warning the child's last stages reported stops the calling
@@ -234,11 +241,19 @@ impl NestedCompose {
         if let Some(root) = &self.scope.root_gate
             && !runtime.preflight_validated().load(Ordering::Acquire)
         {
-            if let Err(error) = super::preflight::validate_pre_approved(root, &options) {
+            // The gate's skipped-trigger warnings fold into the calling
+            // document with the nested reports, or follow its warnings into
+            // the failure when the gate (a denied trigger included) stops it.
+            let mut gate_report = ComposeReport::default();
+            let gate = super::preflight::validate_pre_approved(root, &options, &mut gate_report);
+            let mut outcome = lock(&self.scope.outcome);
+            outcome.reports.push(gate_report);
+            if let Err(error) = gate {
                 let message = format!("the pre-approved command gate failed: {error}");
-                lock(&self.scope.outcome).restored.get_or_insert(error);
+                outcome.restored.get_or_insert(error);
                 return Err(violation(message));
             }
+            drop(outcome);
             runtime.preflight_validated().store(true, Ordering::Release);
         }
         // Relative references resolve against the root document (R11), not

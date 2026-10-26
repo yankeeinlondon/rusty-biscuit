@@ -105,7 +105,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--disable <ID>`: stop a feature from running. Repeatable; there is no `all`.
     - `baseline-schema`: validate without the default Darkmatter baseline frontmatter schema.
     - `schema-triggers`: skip repository schema-trigger discovery and bare-name schema-root lookup.
-- `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow host=HOST` entry already grants each one. No command runs and no packet is sent.
+- `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow host=HOST` entry already grants each one. No command runs and no packet is sent. A [schema trigger skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) is reported on stderr after the report.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
 - `--allow host=HOST`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
     - a hostname or `*.wildcard` pattern allows remote URL reads from that host, and grants no ICMP;
@@ -177,7 +177,7 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
 ### Validation and Errors
 
-- **Reference validation** runs automatically before composition when input is a file path. If any references (hyperlinks, images, transclusions, CSS imports, etc.) point to missing targets, compose reports grouped errors and exits with code 2.
+- **Reference validation** runs automatically before composition when input is a file path. If any references (hyperlinks, images, transclusions, CSS imports, etc.) point to missing targets, compose reports grouped errors and exits with code 2. It is passive: body `::shell` directives are not run for it, so a reference only a command's output would contain is checked when the document composes.
 
   ```
   Invalid Hyperlink(s)
@@ -202,7 +202,7 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
   md compose doc.md --allow missing-hyperlinks > output.md
   ```
 
-- **`--deny` selections** make diagnostics blocking. One found by passive analysis (the call check, reference validation, the lifecycle call check) stops compose before anything runs; one found while composing stops compose before the document is written, without undoing effects that already ran. See [Policy Flags](./policy.md).
+- **`--deny` selections** make diagnostics blocking. One found by passive analysis (the call check, reference validation, the lifecycle call check) stops compose before anything runs; one found by shell preparation, which walks every transcluded document whatever its `when=` (such as an invalid schema trigger only a skipped child holds), stops compose before any shell command is approved or runs; one found while composing stops compose before the document is written, without undoing effects that already ran. See [Policy Flags](./policy.md).
 
 - Invalid JSON/JSON5 in `--state` returns an error.
 - Non-object JSON (array/string/number/etc.) in `--state` returns an error.

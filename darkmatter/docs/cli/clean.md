@@ -309,8 +309,14 @@ and in `--json` mode it is not repeated on stderr.
   referenced schema, or `--save` with stdin. Human mode writes the error to
   stderr and leaves a save target untouched; the body is not cleaned either.
   When a schema error follows skipped schema triggers, their warnings are
-  written to stderr ahead of it, in `--json` mode too, since no envelope is
-  printed.
+  written to stderr ahead of it.
+- With `--json`, a missing or invalid referenced schema still exits `1` and
+  writes the error to stderr, but stdout first gets the v1 envelope with
+  `diagnostics: []`, `applied: []`, `changed: false`, and the skipped schema
+  triggers in `warnings`; no trigger warning is written to stderr. Other
+  failures before cleanup (a near-miss opening fence, an unreadable input, a
+  `--baseline-schema` that cannot be resolved, `--save` with stdin) print no
+  envelope.
 - With `--json`, unreadable frontmatter still exits `1`, but stdout contains
   the v1 envelope (including `yaml.parse`, with `applied: []`), stderr is
   empty, and the file is untouched.

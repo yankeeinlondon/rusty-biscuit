@@ -16,6 +16,11 @@
 //! - `Invalid`: Darkmatter cannot load the frontmatter that would be
 //!   emitted; nothing is saved and the run fails (exit `1`).
 //!
+//! A referenced schema that is missing, unreadable, or invalid fails the run
+//! (exit `1`) before any outcome; under `--json` the version-1 envelope is
+//! still written first, carrying the skipped-trigger `warnings` discovery
+//! retained.
+//!
 //! This module owns what is specific to the `md` binary: flags as explicit
 //! rule overrides, schema flags and the request contexts they resolve in,
 //! terminal findings, and (in [`json`]) the version-1 JSON envelope.
@@ -39,7 +44,7 @@ use darkmatter::markdown::cleanup::rules::{
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::CleanSchemaConfig;
+use darkmatter::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -149,7 +154,20 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     let overrides = rule_overrides(options)?;
 
     let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
-    let result = clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request)?;
+    let result = match clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request) {
+        Ok(result) => result,
+        Err(CleanFailure { error, trigger_findings: None }) => return Err(error),
+        Err(CleanFailure { error, trigger_findings: Some(findings) }) => {
+            if options.json {
+                let report = json::schema_failure_report(&findings, resolved, &raw);
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                io::stdout().flush()?;
+            } else {
+                emit_warnings(&findings, &Terminal::new());
+            }
+            return Err(error);
+        }
+    };
 
     if options.json {
         let report = json_report(&result, resolved, &raw);
@@ -243,20 +261,23 @@ fn body_offset(text: &str) -> usize {
     }
 }
 
+/// A failed clean transaction: the original error, so messages are
+/// unchanged, and for a schema failure the triggers discovery skipped before
+/// it (`None` for any other failure, where no envelope is written).
+struct CleanFailure {
+    error: Report,
+    trigger_findings: Option<Vec<InvalidTriggerFinding>>,
+}
+
 /// Runs the library clean transaction with this invocation's overrides and
-/// schema configuration, keeping each failure's original error so messages
-/// are unchanged.
-///
-/// A schema failure has no report to carry the triggers discovery skipped
-/// before it, so they are written to stderr ahead of the error, in either
-/// output mode.
+/// schema configuration.
 fn clean(
     raw: &str,
     overrides: &MarkdownRuleOverrides,
     document_path: Option<&Path>,
     flags: &CleanSchemaFlags,
     request: &DocumentRequest<'_>,
-) -> Result<CleanResult> {
+) -> std::result::Result<CleanResult, CleanFailure> {
     let clean_request = CleanRequest {
         source: raw,
         overrides,
@@ -265,12 +286,13 @@ fn clean(
     };
     clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
         |error| match error {
-            FrontmatterRepairError::Extraction(error) => Report::new(error),
-            FrontmatterRepairError::Schema { error, trigger_findings } => {
-                emit_warnings(&trigger_findings, &Terminal::new());
-                Report::new(*error)
+            FrontmatterRepairError::Extraction(error) => {
+                CleanFailure { error: Report::new(error), trigger_findings: None }
             }
-            FrontmatterRepairError::Context(error) => error,
+            FrontmatterRepairError::Schema { error, trigger_findings } => {
+                CleanFailure { error: Report::new(*error), trigger_findings: Some(trigger_findings) }
+            }
+            FrontmatterRepairError::Context(error) => CleanFailure { error, trigger_findings: None },
         },
     )
 }

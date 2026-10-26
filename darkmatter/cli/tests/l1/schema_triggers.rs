@@ -645,8 +645,9 @@ fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working
 
 /// A schema-root file that claims the envelope but is not valid YAML is
 /// skipped: composition succeeds and warns with the file and its YAML
-/// location, never the match-grammar help, and the trigger trace lists it
-/// as skipped beside the neighboring trigger it still matches.
+/// location, never the match-grammar help; the trigger trace writes the
+/// same warning to stderr and lists the file as skipped on stdout beside the
+/// neighboring trigger it still matches.
 #[test]
 fn an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location() {
     let process = CliProcessFixture::new();
@@ -675,9 +676,14 @@ fn an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location() {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
+    let stderr = compact(&common::unwrapped(&strip_ansi(&String::from_utf8_lossy(&output.stderr))));
+    for expected in expected {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
+    }
+    assert!(!stderr.contains("combinators"), "{stderr}");
     let stdout = compact(&strip_ansi(&stdout_of(&output)));
-    for expected in expected.iter().chain(&["prompt.trigger.yaml — matched"]) {
+    for expected in ["broken.yaml", "dm.schema.invalid_trigger", "prompt.trigger.yaml — matched"] {
         assert!(stdout.contains(&compact(expected)), "`{expected}` not in {stdout}");
     }
-    assert!(!stdout.contains("combinators"), "{stdout}");
+    assert!(!stdout.contains(&compact("ignoring invalid schema trigger")), "warning repeated on stdout: {stdout}");
 }

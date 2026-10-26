@@ -159,6 +159,28 @@ fn a_valid_trigger_before_an_invalid_one_still_applies() {
     assert_valid_trigger_applies_beside_invalid("schemas/a-good.yaml", "schemas/z-bad.yaml");
 }
 
+/// A matcher-only trigger (no `$schema`) is valid and installs beside an
+/// invalid one; a matcher-only trigger with a broken `match:` is a finding.
+#[test]
+fn a_matcher_only_trigger_installs_beside_an_invalid_one() {
+    let matcher = "schemas/a-matcher.yaml";
+    let broken = "schemas/b-broken-matcher.yaml";
+    let good = "schemas/c-good.yaml";
+    let repo = Repo::new(&[
+        (matcher, "kind: schema-trigger\nmatch:\n  title: string(required)\n"),
+        (broken, "kind: schema-trigger\nmatch: 3\n"),
+        (good, GOOD_TRIGGER),
+    ]);
+
+    let schemas = repo.schemas();
+
+    assert_eq!(file_sources(schemas.trigger_registry().expect("registry")), [repo.path(matcher), repo.path(good)]);
+    assert_eq!(finding_sources(schemas.discovery_findings()), [TriggerSource::File(repo.path(broken))]);
+    let document = repo.document("prompt.md", "title: t\nlevel: high\n");
+    assert_eq!(effective_properties(&schemas, &document), ["level"], "the matcher-only trigger layers nothing");
+    assert!(!schemas.validate(&document).expect("validates").valid, "the valid neighbor is still enforced");
+}
+
 #[test]
 fn malformed_claimed_yaml_is_a_positioned_finding() {
     let trigger = "schemas/broken.yaml";
@@ -169,7 +191,137 @@ fn malformed_claimed_yaml_is_a_positioned_finding() {
     let finding = the_finding(registry.findings());
     assert_eq!(finding.source(), &TriggerSource::File(repo.path(trigger)));
     assert!(matches!(finding.cause(), SchemaError::TriggerEnvelopeYaml { .. }), "{finding:?}");
-    assert!(finding.position().is_some(), "{finding:?}");
+    assert_eq!(finding.position(), Some((3, 1)), "{finding:?}");
+    assert_eq!(finding.cause_path(), None, "the cause is in the trigger itself");
+}
+
+/// The canonical path of `relative` in `repo`, as a finding names it.
+fn canonical(repo: &Repo, relative: &str) -> PathBuf {
+    biscuit_file::canonicalize_simplified(&repo.path(relative)).expect("canonical fixture path")
+}
+
+/// The one finding of `repo`'s scan, after asserting it names `related` as
+/// its cause path, has no position, and names that file in its message.
+fn assert_related(repo: &Repo, related: &str) -> InvalidTriggerFinding {
+    let registry = repo.scan();
+    let finding = the_finding(registry.findings()).clone();
+    let expected = canonical(repo, related);
+    assert_eq!(finding.cause_path(), Some(expected.as_path()), "{finding:?}");
+    assert_eq!(finding.position(), None, "a cause-file position never lands on the trigger: {finding:?}");
+    assert!(finding.message().contains(&expected.display().to_string()), "{}", finding.message());
+    finding
+}
+
+#[test]
+fn a_payload_that_is_neither_schema_form_names_the_payload() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("./payload.yaml")),
+        ("schemas/payload.yaml", "42
+"),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/payload.yaml");
+
+    assert!(matches!(finding.cause(), SchemaError::AmbiguousReferenced { .. }), "{finding:?}");
+}
+
+#[test]
+fn a_referenced_root_union_payload_names_the_payload_file() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("./payload.yaml")),
+        ("schemas/payload.yaml", "$schema: [{left: string}, {right: number}]\n"),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/payload.yaml");
+
+    assert!(
+        matches!(
+            finding.cause(),
+            SchemaError::TriggerPayloadNotMergeable { payload_path: Some(path), .. }
+                if *path == canonical(&repo, "schemas/payload.yaml")
+        ),
+        "{finding:?}"
+    );
+}
+
+#[test]
+fn an_inline_root_union_payload_names_no_other_file() {
+    let repo = Repo::new(&[("schemas/host.yaml", &trigger_with_payload("[{left: string}, {right: number}]"))]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    assert!(matches!(finding.cause(), SchemaError::TriggerPayloadNotMergeable { .. }), "{finding:?}");
+    assert_eq!(finding.cause_path(), None, "the union is authored in the trigger");
+}
+
+#[test]
+fn a_non_object_payload_reached_through_an_alias_names_the_schema_file() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
+        ("schemas/alias.yaml", "$schema: ./raw.json\n"),
+        ("schemas/raw.json", r#"{"type":"string"}"#),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/raw.json");
+
+    assert!(matches!(finding.cause(), SchemaError::TriggerPayloadNotMergeable { .. }), "{finding:?}");
+}
+
+#[test]
+fn a_payload_that_fails_to_compile_through_an_alias_names_the_schema_file() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
+        ("schemas/alias.yaml", "$schema: ./raw.json\n"),
+        ("schemas/raw.json", r#"{"type":"object","properties":{"x":{"type":12}}}"#),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/raw.json");
+
+    assert!(
+        matches!(
+            finding.cause(),
+            SchemaError::TriggerPayloadCompile { payload: authored, payload_path: Some(path), .. }
+                if authored == "./alias.yaml" && *path == canonical(&repo, "schemas/raw.json")
+        ),
+        "{finding:?}"
+    );
+}
+
+#[test]
+fn an_unknown_type_referenced_inside_an_import_names_the_import() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("\n  owner: \"Name@./types.yaml\"")),
+        ("schemas/types.yaml", "kind: schema\ntypes:\n  Name: Other\n"),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/types.yaml");
+
+    assert!(matches!(finding.cause(), SchemaError::UnknownNamedType { .. }), "{finding:?}");
+}
+
+#[test]
+fn an_unknown_type_the_trigger_imports_names_the_searched_import() {
+    let repo = Repo::new(&[
+        ("schemas/host.yaml", &trigger_with_payload("\n  owner: \"Missing@./types.yaml\"")),
+        ("schemas/types.yaml", "kind: schema\ntypes:\n  Name: string\n"),
+    ]);
+
+    let finding = assert_related(&repo, "schemas/types.yaml");
+
+    assert!(matches!(finding.cause(), SchemaError::UnknownNamedType { .. }), "{finding:?}");
+}
+
+#[test]
+fn a_missing_import_names_no_file() {
+    let repo = Repo::new(&[("schemas/host.yaml", &trigger_with_payload("\n  owner: \"Name@./absent.yaml\""))]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    assert!(matches!(finding.cause(), SchemaError::NoMatch { .. }), "{finding:?}");
+    assert_eq!(finding.cause_path(), None);
+    assert_eq!(finding.position(), None);
 }
 
 #[test]
@@ -503,4 +655,26 @@ fn a_clean_schema_failure_carries_the_findings_discovered_before_it() {
         }
         other => panic!("expected a schema failure, got {other}"),
     }
+}
+
+
+#[cfg(unix)]
+#[test]
+fn a_self_referencing_trigger_found_through_a_symlink_names_no_other_file() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(real.join(".git")).expect("repository marker");
+    std::fs::create_dir_all(real.join("docs")).expect("docs folder");
+    std::fs::create_dir_all(real.join("schemas")).expect("schemas folder");
+    std::fs::write(real.join("schemas/a-self.yaml"), trigger_with_payload("./a-self.yaml")).expect("trigger");
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let context =
+        FileResolutionContext::from_snapshot(link.join("docs"), None, HashMap::new()).with_repository_root(&link);
+
+    let registry = triggers::scan(&context).expect("an invalid trigger never fails discovery");
+
+    let finding = the_finding(registry.findings());
+    assert!(matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }), "{finding:?}");
+    assert_eq!(finding.cause_path(), None, "the payload is the trigger itself: {finding:?}");
 }

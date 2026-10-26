@@ -193,6 +193,7 @@ pub(crate) fn collect_effects(
     let mut candidates = Vec::new();
     let mut icmp = Vec::new();
     let mut capabilities = DeferredCapabilities::default();
+    let mut trigger_warnings = Vec::new();
     let mut visited = HashSet::new();
     // Reuse the caller-supplied shared runtime when present so the terminal
     // compose pass that follows fetches each remote URL once (single-flight),
@@ -207,6 +208,7 @@ pub(crate) fn collect_effects(
         &mut candidates,
         &mut icmp,
         &mut capabilities,
+        &mut trigger_warnings,
         &mut visited,
         &remote_fetch,
         &root,
@@ -218,6 +220,7 @@ pub(crate) fn collect_effects(
         candidates,
         icmp,
         capabilities,
+        trigger_warnings,
         graph,
     })
 }
@@ -230,6 +233,9 @@ pub(crate) struct CollectedEffects {
     pub candidates: Vec<ShellCandidate>,
     pub icmp: Vec<PlannedIcmpProbe>,
     pub capabilities: DeferredCapabilities,
+    /// The skipped-trigger warnings the walked documents reported, once per
+    /// trigger, in discovery order.
+    pub trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
     pub graph: super::PreflightGraphNode,
 }
 
@@ -319,6 +325,12 @@ pub(crate) fn frontmatter_shell_commands(
 /// executed form discovery cannot know (see [`InheritedDiscovery`]); a
 /// command built from one fails exactly as it does in the document that
 /// authored the value.
+///
+/// When the walk fails after this document's inline pass, the request's
+/// pre-flight failure sink gets this document's warnings, then the trigger
+/// warnings of the descendants it walked successfully, ahead of whatever its
+/// failed descendant kept: the failure carries every warning discovered
+/// before it, in discovery order.
 #[allow(clippy::too_many_arguments)]
 fn collect_recursive(
     markdown: &Markdown,
@@ -328,11 +340,68 @@ fn collect_recursive(
     candidates: &mut Vec<ShellCandidate>,
     icmp: &mut Vec<PlannedIcmpProbe>,
     capabilities: &mut DeferredCapabilities,
+    trigger_warnings: &mut Vec<crate::markdown::compose::ComposeWarning>,
     visited: &mut HashSet<String>,
     remote_fetch: &remote_fetch::RemoteFetchRuntime,
     root: &RootSource,
     nested_key: Option<String>,
     inherited: &InheritedDiscovery,
+) -> MarkdownResult<super::PreflightGraphNode> {
+    let start = trigger_warnings.len();
+    let mut kept = None;
+    let walked = collect_document(
+        markdown,
+        options,
+        seen,
+        entries,
+        candidates,
+        icmp,
+        capabilities,
+        trigger_warnings,
+        visited,
+        remote_fetch,
+        root,
+        nested_key,
+        inherited,
+        &mut kept,
+    );
+    if walked.is_err()
+        && let Some(KeptOnFailure { mut warnings, own_end }) = kept
+    {
+        // A failed descendant already took its own triggers off the list, so
+        // what follows this document's own are its successful descendants'.
+        warnings.extend(trigger_warnings.drain(own_end..));
+        trigger_warnings.truncate(start);
+        options.preflight_failure_warnings.prepend(warnings);
+    }
+    walked
+}
+
+/// A walked document's warnings after its inline pass, and where its own
+/// skipped triggers end in the walk's trigger list: what
+/// [`collect_recursive`] keeps if the walk then fails.
+struct KeptOnFailure {
+    warnings: Vec<crate::markdown::compose::ComposeWarning>,
+    own_end: usize,
+}
+
+/// [`collect_recursive`]'s walk of one document.
+#[allow(clippy::too_many_arguments)]
+fn collect_document(
+    markdown: &Markdown,
+    options: &crate::markdown::compose::ComposeRequest,
+    seen: &mut HashSet<String>,
+    entries: &mut Vec<ShellCommandEntry>,
+    candidates: &mut Vec<ShellCandidate>,
+    icmp: &mut Vec<PlannedIcmpProbe>,
+    capabilities: &mut DeferredCapabilities,
+    trigger_warnings: &mut Vec<crate::markdown::compose::ComposeWarning>,
+    visited: &mut HashSet<String>,
+    remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    root: &RootSource,
+    nested_key: Option<String>,
+    inherited: &InheritedDiscovery,
+    kept: &mut Option<KeptOnFailure>,
 ) -> MarkdownResult<super::PreflightGraphNode> {
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
@@ -462,10 +531,19 @@ fn collect_recursive(
     // reports it. The rest of this lenient pass's warnings stand in for
     // failures the compose pass would raise, so they are not kept.
     prepared_report.warnings.truncate(prepared_report.passive_warnings);
-    let warnings_on_failure = WarningsOnFailure {
-        sink: &options.preflight_failure_warnings,
-        warnings: Some(std::mem::take(&mut prepared_report.warnings)),
-    };
+    // A skipped trigger is reported whether or not the walk goes on to
+    // compose, so an inspection-only caller can deliver it.
+    for warning in &prepared_report.warnings {
+        if let Some(trigger) = warning.invalid_trigger_source()
+            && !trigger_warnings.iter().any(|kept| kept.invalid_trigger_source().as_ref() == Some(&trigger))
+        {
+            trigger_warnings.push(warning.clone());
+        }
+    }
+    *kept = Some(KeptOnFailure {
+        warnings: std::mem::take(&mut prepared_report.warnings),
+        own_end: trigger_warnings.len(),
+    });
     // The bytes of the prepared body that interpolation inserted. Discovery
     // reads the body through the same data-aware scanners as the compose pass,
     // so the approval set is exactly what can execute.
@@ -858,6 +936,7 @@ fn collect_recursive(
                     candidates,
                     icmp,
                     capabilities,
+                    trigger_warnings,
                     visited,
                     remote_fetch,
                     root,
@@ -887,6 +966,7 @@ fn collect_recursive(
                     candidates,
                     icmp,
                     capabilities,
+                    trigger_warnings,
                     visited,
                     remote_fetch,
                     root,
@@ -977,6 +1057,7 @@ fn collect_recursive(
                     candidates,
                     icmp,
                     capabilities,
+                    trigger_warnings,
                     visited,
                     remote_fetch,
                     root,
@@ -997,6 +1078,7 @@ fn collect_recursive(
                     candidates,
                     icmp,
                     capabilities,
+                    trigger_warnings,
                     visited,
                     remote_fetch,
                     root,
@@ -1036,6 +1118,7 @@ fn collect_recursive(
             candidates,
             icmp,
             capabilities,
+            trigger_warnings,
             visited,
             remote_fetch,
             root,
@@ -1052,7 +1135,6 @@ fn collect_recursive(
         (ComposeSource::Url(u), _) => Some(PathBuf::from(u.to_string())),
     };
 
-    warnings_on_failure.succeeded();
     Ok(super::PreflightGraphNode {
         source,
         entries: local_entries,
@@ -1060,29 +1142,6 @@ fn collect_recursive(
         children,
         targets,
     })
-}
-
-/// A walked document's warnings, kept in the request's pre-flight failure
-/// sink when the walk fails after its inline pass: dropped without
-/// [`Self::succeeded`], it prepends them to whatever its failed descendants
-/// kept.
-struct WarningsOnFailure<'a> {
-    sink: &'a super::PreflightFailureWarnings,
-    warnings: Option<Vec<crate::markdown::compose::ComposeWarning>>,
-}
-
-impl WarningsOnFailure<'_> {
-    fn succeeded(mut self) {
-        self.warnings = None;
-    }
-}
-
-impl Drop for WarningsOnFailure<'_> {
-    fn drop(&mut self) {
-        if let Some(warnings) = self.warnings.take() {
-            self.sink.prepend(warnings);
-        }
-    }
 }
 
 /// Fetches a remote Markdown child for pre-flight collection.

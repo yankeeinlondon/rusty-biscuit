@@ -195,7 +195,11 @@ the one registry of identifiers, commands, and help; on `md compose`,
 usage errors (`main.rs::REMOVED_FLAGS`); see `docs/cli/policy.md`. The
 pipeline's call precheck consults the policy per document, before its
 expressions run (`MarkdownError::BlockedDiagnostics`; a child's is fatal,
-never a tolerated transclusion failure); a runtime warning is checked by
+never a tolerated transclusion failure); the pre-flight walk's warnings
+(a skipped child's invalid trigger) are judged before any command is
+approved: by `compose_preflight_approvals*` (`pipeline::stop_if_warnings_blocked`,
+before policy files or the handler) and by `validate_pre_approved` before
+membership, at the root and `as_markdown` gates; a runtime warning is checked by
 `pipeline::stop_if_blocked` before each body stage, after transclusion
 `when=` preparation, between `::shell` commands, and before frontmatter
 shell expansion, and within a stage before each further expression
@@ -219,8 +223,26 @@ invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
 typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
 returns a failure with the warnings reported before it (`PipelineRuntime`'s
 failed-document stash); a failed pre-flight walk leaves its failed document's
-warnings for `ComposeOptions::take_preflight_failure_warnings`, and a
-lifecycle call rejection carries its earlier warnings (`earlier_warnings`).
+warnings for `ComposeOptions::take_preflight_failure_warnings` (with the
+triggers of the siblings walked before it, each trigger once), as does any
+policy error `compose_preflight_approvals*` raises after a successful walk;
+a successful one returns them in `ComposePreflightApprovals::warnings`; the
+in-pipeline pre-approval gate (`validate_pre_approved`) adds its walk's
+triggers to the composition report; and a
+lifecycle call rejection carries its earlier warnings (`earlier_warnings`);
+a failing document keeps the triggers its `as_markdown` children and gate
+found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
+`md compose`'s reference check is passive: its graph preparation runs no
+`::shell` (`prepare_content` never re-enables an operation the request
+disabled). Skipped-trigger
+warnings found by a pass that runs ahead of the delivering report (reference
+validation via `ReferenceValidationReport::trigger_warnings`, which prepares
+each transcluded child in its own context; the lifecycle call check via
+`effective_schema_for`; the lifecycle bootstrap; the `--shell` walk via
+`ComposePreflightReport::warnings`; the shell-approval walk via
+`ComposePreflightApprovals::warnings`) are held in
+`compose.rs::PendingTriggerWarnings`: merged once into the first report or
+failure, or delivered by any exit that never composes.
 The call precheck orders findings by authored position and keeps the prefix
 before a rejection. Never print to stdout on a report-mode path; see
 `docs/cli/report-json.md`.

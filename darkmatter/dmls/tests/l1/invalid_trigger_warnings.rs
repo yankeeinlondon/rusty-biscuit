@@ -274,3 +274,84 @@ fn an_open_trigger_stays_strict_while_edited_and_keeps_its_warning_once_closed()
     assert_eq!(invalid_trigger_warnings(&closed).len(), 1, "{closed:#?}");
     fixture.shutdown();
 }
+
+/// The one skipped-trigger warning `diagnostics` holds.
+fn the_trigger_warning(diagnostics: &[Value]) -> Value {
+    let warnings = invalid_trigger_warnings(diagnostics);
+    let [warning] = warnings[..] else { panic!("one trigger warning: {diagnostics:#?}") };
+    warning.clone()
+}
+
+/// The related file of a warning whose cause is in another file: `related`
+/// at its start, while the warning itself stays at the trigger's start (a
+/// payload's coordinates never land on the trigger). The cause spells the
+/// path as resolution reached it, so the file is compared canonically and
+/// the explanation must name it in that same spelling.
+fn assert_related_at_file_start(warning: &Value, related: &Path) {
+    let file_start = json!({ "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } });
+    assert_eq!(warning["range"], file_start, "{warning:#}");
+    let information = warning["relatedInformation"].as_array().expect("related information");
+    let [entry] = &information[..] else { panic!("one related location: {warning:#}") };
+    let published = url::Url::parse(entry["location"]["uri"].as_str().unwrap()).unwrap().to_file_path().unwrap();
+    assert_eq!(
+        biscuit_file::canonicalize_simplified(&published).unwrap(),
+        biscuit_file::canonicalize_simplified(related).unwrap(),
+        "{warning:#}"
+    );
+    assert_eq!(entry["location"]["range"], file_start, "{warning:#}");
+    assert_eq!(entry["message"], "the trigger's schema failed to load here", "{warning:#}");
+    assert!(
+        warning["message"].as_str().unwrap().contains(&published.display().to_string()),
+        "the explanation names the file: {warning:#}"
+    );
+}
+
+#[test]
+fn payload_failures_relate_the_file_that_authored_the_rejected_schema() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    init_repository(root);
+    let envelope = |payload: &str| format!("kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: {payload}\n");
+    let ambiguous = root.join("schemas/ambiguous.trigger.yaml");
+    let ambiguous_payload = root.join("schemas/scalar.yaml");
+    write(&ambiguous, &envelope("./scalar.yaml"));
+    write(&ambiguous_payload, "42\n");
+    let union = root.join("schemas/union.trigger.yaml");
+    let union_payload = root.join("schemas/union.yaml");
+    write(&union, &envelope("./union.yaml"));
+    write(&union_payload, "$schema: [{left: string}, {right: number}]\n");
+    let alias = root.join("schemas/alias.trigger.yaml");
+    let raw = root.join("schemas/raw.json");
+    write(&alias, &envelope("./alias.yaml"));
+    write(&root.join("schemas/alias.yaml"), "$schema: ./raw.json\n");
+    write(&raw, r#"{"type":"object","properties":{"x":{"type":12}}}"#);
+    let import = root.join("schemas/import.trigger.yaml");
+    let types = root.join("schemas/types.yaml");
+    write(&import, &envelope("\n  owner: \"Name@./types.yaml\""));
+    write(&types, "kind: schema\ntypes:\n  Name: Other\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(root));
+
+    for (trigger, related) in [(&ambiguous, &ambiguous_payload), (&union, &union_payload), (&alias, &raw), (&import, &types)] {
+        let warning = the_trigger_warning(&fixture.wait_for_diagnostics(&uri(trigger)));
+        assert_related_at_file_start(&warning, related);
+    }
+    fixture.shutdown();
+}
+
+#[test]
+fn a_malformed_envelope_is_placed_on_its_error_line_with_no_related_file() {
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    init_repository(root);
+    let trigger = root.join("schemas/broken.trigger.yaml");
+    write(&trigger, "kind: schema-trigger\nmatch: [unclosed\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(root));
+
+    let warning = the_trigger_warning(&fixture.wait_for_diagnostics(&uri(&trigger)));
+
+    assert_eq!(warning["range"]["start"], json!({ "line": 2, "character": 0 }), "{warning:#}");
+    assert!(warning.get("relatedInformation").is_none_or(Value::is_null), "{warning:#}");
+    fixture.shutdown();
+}

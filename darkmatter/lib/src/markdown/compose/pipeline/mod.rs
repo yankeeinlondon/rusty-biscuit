@@ -529,7 +529,7 @@ impl Markdown {
         // frontmatter-surface compose checks its frontmatter commands only,
         // so it never dereferences the body graph.
         if let Some(preflight_source) = &preflight_source {
-            super::preflight::validate_pre_approved(preflight_source, options)?;
+            super::preflight::validate_pre_approved(preflight_source, options, report)?;
             runtime
                 .preflight_validated()
                 .store(true, std::sync::atomic::Ordering::Release);
@@ -789,11 +789,36 @@ pub(crate) fn stop_if_blocked_with(
             pending
         })
         .unwrap_or_default();
-    let all = || report.warnings.iter().chain(stage_warnings).chain(&pending);
-    if !all().any(|warning| policy.blocks_warning(warning)) {
+    policy_stop(policy, report.warnings.iter().chain(stage_warnings).chain(&pending))
+}
+
+/// [`stop_if_blocked`] over warnings a pass found ahead of any composition
+/// report: the pre-flight walk's skipped triggers, judged before the
+/// approvals that permit the walk's commands to run.
+///
+/// ## Errors
+///
+/// As [`stop_if_blocked`], over `warnings` alone.
+pub(crate) fn stop_if_warnings_blocked(
+    options: &crate::markdown::compose::ComposeRequest,
+    warnings: &[ComposeWarning],
+) -> MarkdownResult<()> {
+    let policy = options.blocking_policy();
+    if policy.is_empty() || options.defer_expression_failures {
         return Ok(());
     }
-    let (blocking, earlier) = all().cloned().partition(|warning| policy.blocks_warning(warning));
+    policy_stop(policy, warnings.iter())
+}
+
+/// The policy stop over `warnings`, in report order, when one blocks.
+fn policy_stop<'w>(
+    policy: &super::policy::BlockingPolicy,
+    warnings: impl Iterator<Item = &'w ComposeWarning> + Clone,
+) -> MarkdownResult<()> {
+    if !warnings.clone().any(|warning| policy.blocks_warning(warning)) {
+        return Ok(());
+    }
+    let (blocking, earlier) = warnings.cloned().partition(|warning| policy.blocks_warning(warning));
     Err(crate::markdown::types::MarkdownError::BlockedDiagnostics { blocking, earlier })
 }
 

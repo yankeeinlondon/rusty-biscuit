@@ -424,7 +424,10 @@ pub enum SchemaError {
     /// unions and non-object schemas are rejected because the property-keyed
     /// merge has no sound "later wins" meaning for them. `path` is the
     /// trigger envelope file; `payload` is the authored `$schema:` reference
-    /// (or `<inline>` for an inline payload); `reason` explains the rejection.
+    /// (or `<inline>` for an inline payload); `payload_path` is the file
+    /// that authored the rejected schema when the payload is a file
+    /// reference (the last file of an alias chain); `reason` explains the
+    /// rejection.
     #[error(
         "schema-trigger payload in `{}` is not merge-compatible: {reason}",
         path.display()
@@ -432,14 +435,16 @@ pub enum SchemaError {
     TriggerPayloadNotMergeable {
         path: PathBuf,
         payload: String,
+        payload_path: Option<PathBuf>,
         reason: String,
     },
 
     /// A schema-trigger payload passed the merge-compatibility gate but its
     /// JSON Schema could not be compiled into a validator. `path` is the
     /// trigger envelope; `payload` is the authored `$schema:` reference (or
-    /// `<inline>`); `payload_path` is the payload file when the payload is a
-    /// file reference; `message` is the compiler's reason.
+    /// `<inline>`); `payload_path` is the file that authored the schema when
+    /// the payload is a file reference (the last file of an alias chain);
+    /// `message` is the compiler's reason.
     #[error(
         "schema-trigger payload in `{}` failed to compile: {message}",
         path.display()
@@ -1142,6 +1147,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 path,
                 payload,
                 reason,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",

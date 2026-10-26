@@ -185,15 +185,28 @@ pub(crate) struct PreparedSchemas {
 /// A host checks its own lifecycle syntax against this before a run starts
 /// ([`crate::lifecycle::reject_incompatible_calls`]).
 ///
+/// ## Returns
+///
+/// The schema, and the warnings for the schema triggers discovery skipped
+/// as invalid (`dm.schema.invalid_trigger`), as composition reports them,
+/// so a host that stops before composing can still deliver them.
+///
 /// ## Errors
 ///
 /// A schema configuration composition itself would refuse.
 pub fn effective_schema_for(
     markdown: &Markdown,
     request: &crate::markdown::compose::ComposeRequest,
-) -> MarkdownResult<Option<crate::markdown::schemas::EffectiveSchema>> {
+) -> MarkdownResult<(Option<crate::markdown::schemas::EffectiveSchema>, Vec<super::ComposeWarning>)> {
     let mut trigger_registry = None;
-    Ok(prepare_schemas(markdown, request, &mut trigger_registry)?.effective_for(markdown))
+    let prepared = prepare_schemas(markdown, request, &mut trigger_registry)?;
+    let consumer = source_path(markdown, request);
+    let warnings = prepared
+        .discovery_findings()
+        .iter()
+        .map(|finding| super::ComposeWarning::from_invalid_trigger(finding, consumer.clone()))
+        .collect();
+    Ok((prepared.effective_for(markdown), warnings))
 }
 
 impl PreparedSchemas {

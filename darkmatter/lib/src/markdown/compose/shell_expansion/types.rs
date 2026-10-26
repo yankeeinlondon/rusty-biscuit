@@ -1753,9 +1753,34 @@ impl PipelineRuntime {
         failed.splice(0..0, warnings);
     }
 
-    /// The warnings [`Self::record_failed_document`] kept, in report order.
+    /// Keeps, after those already kept, the skipped-trigger warnings among
+    /// `warnings`: what a failed document's nested compositions found.
+    pub(crate) fn record_failed_triggers(
+        &self,
+        warnings: impl IntoIterator<Item = crate::markdown::compose::ComposeWarning>,
+    ) {
+        let mut failed = self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        failed.extend(warnings.into_iter().filter(|warning| warning.invalid_trigger_source().is_some()));
+    }
+
+    /// The warnings [`Self::record_failed_document`] and
+    /// [`Self::record_failed_triggers`] kept, in report order, each skipped
+    /// trigger once (its first report).
     pub(crate) fn take_failed_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
-        std::mem::take(&mut *self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+        let failed =
+            std::mem::take(&mut *self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let mut triggers = Vec::new();
+        failed
+            .into_iter()
+            .filter(|warning| match warning.invalid_trigger_source() {
+                Some(trigger) if triggers.contains(&trigger) => false,
+                Some(trigger) => {
+                    triggers.push(trigger);
+                    true
+                }
+                None => true,
+            })
+            .collect()
     }
 
     /// Whether this runtime composes the request root rather than a child.

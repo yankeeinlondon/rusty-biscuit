@@ -44,8 +44,9 @@ use serde_json::{Map, Value};
 use crate::args::policy::ResolvedPolicy;
 
 use super::{
-    DocumentOutput, ReferenceCheck, blocked_diagnostics, check_references, compose_error, open_output_artifact,
-    preflight_approval_error, render_reference_report, render_reference_warnings, report_compose_diagnostics,
+    DocumentOutput, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
+    open_output_artifact, preflight_approval_error, render_reference_report, render_reference_warnings,
+    report_compose_diagnostics,
 };
 use super::report::ReportedExit;
 
@@ -68,6 +69,9 @@ pub(super) fn root_lifecycle(md: &Markdown, source_path: &Path) -> Result<Option
 /// Rejects a lifecycle call the design-time check proves wrong, against the
 /// effective schema `request` composes `md` with, before the run starts.
 ///
+/// The skipped triggers the schema's discovery found are held in
+/// `pending_triggers`, before the check can reject.
+///
 /// ## Returns
 ///
 /// The lifecycle surfaces' call warnings (category 3, always-false calls),
@@ -81,8 +85,10 @@ pub(super) fn reject_incompatible_calls(
     config: &LifecycleConfig,
     source_path: &Path,
     request: &ComposeRequest,
+    pending_triggers: &mut PendingTriggerWarnings,
 ) -> Result<Vec<ComposeWarning>> {
-    let schema = darkmatter::markdown::compose::effective_schema_for(md, request).map_err(compose_error)?;
+    let (schema, triggers) = darkmatter::markdown::compose::effective_schema_for(md, request).map_err(compose_error)?;
+    pending_triggers.hold(&triggers);
     darkmatter::lifecycle::reject_incompatible_calls(
         &frontmatter_value(md),
         config,
@@ -123,6 +129,8 @@ pub(super) struct LifecycleCompose<'a> {
     /// The lifecycle surfaces' call warnings ([`reject_incompatible_calls`]),
     /// reported ahead of composition's own.
     pub(super) call_warnings: Vec<ComposeWarning>,
+    /// The skipped triggers the call check found, which the bootstrap adds to.
+    pub(super) pending_triggers: PendingTriggerWarnings,
 }
 
 /// Runs the lifecycle and exits with its status when it did not succeed.
@@ -130,12 +138,12 @@ pub(super) struct LifecycleCompose<'a> {
 /// ## Errors
 ///
 /// A bootstrap failure, before `initialize` runs.
-pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
-    let bootstrap = bootstrap_frontmatter(compose.md, &compose.request)?;
+pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
+    let sink = compose.document.sink;
+    let bootstrap = bootstrap_frontmatter(compose.md, &compose.request, &mut compose.pending_triggers, sink)?;
     let interrupted = install_interrupt_handler();
     ignore_broken_pipe_signal();
     let term = Terminal::default();
-    let sink = compose.document.sink;
     let effects = TerminalEffects {
         term: &term,
         stdout_is_terminal: std::io::stdout().is_terminal(),
@@ -144,6 +152,11 @@ pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
     let mut host = ComposeHost::new(compose, bootstrap, &effects, interrupted);
     let config = host.config.clone();
     let end = md_host::drive(&mut host, &config);
+    // A run that never reached composition (`initialize` skipped or failed)
+    // still delivers what the bootstrap found.
+    let term_cell = OnceCell::new();
+    let _ = term_cell.set(term.clone());
+    host.pending_triggers.deliver(sink, None, &term_cell);
     if let Some(error) = &end.error
         && host.reported.as_deref() != Some(error.msg.as_str())
     {
@@ -171,7 +184,15 @@ pub(super) fn run(compose: LifecycleCompose<'_>) -> Result<()> {
 /// The shell-free frontmatter bootstrap `initialize` reads: the frontmatter
 /// surface only, with frontmatter `$( … )` disabled and the event keys still
 /// deferred.
-fn bootstrap_frontmatter(md: &Markdown, request: &ComposeRequest) -> Result<Map<String, Value>> {
+///
+/// Its skipped triggers join `pending_triggers`; a failed bootstrap delivers
+/// them with its failure.
+fn bootstrap_frontmatter(
+    md: &Markdown,
+    request: &ComposeRequest,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&super::report::ReportSink>,
+) -> Result<Map<String, Value>> {
     let bootstrap = request.clone().map_options(|options| {
         options
             .with_deferred_schema_verdict(true)
@@ -179,7 +200,12 @@ fn bootstrap_frontmatter(md: &Markdown, request: &ComposeRequest) -> Result<Map<
             .disable(ComposeOperation::FrontmatterShellExpansion)
             .with_pre_approved_commands(ShellPreApprovals::new())
     });
-    let (projected, _report) = md.compose_with(&bootstrap).map_err(compose_error)?;
+    let (projected, report) = md.compose_with_warnings(&bootstrap).map_err(|failure| {
+        pending_triggers.hold(&failure.warnings);
+        pending_triggers.deliver(sink, failure.error.blocked_diagnostics(), &OnceCell::new());
+        compose_error(failure.error)
+    })?;
+    pending_triggers.hold(&report.warnings);
     Ok(projected.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect())
 }
 
@@ -301,6 +327,9 @@ struct ComposeHost<'a> {
     document: DocumentOutput<'a>,
     verbose: u8,
     call_warnings: Vec<ComposeWarning>,
+    /// Delivered with the first report or failure of the composition pass,
+    /// or at the run's end when it never composes.
+    pending_triggers: PendingTriggerWarnings,
     frontmatter: Map<String, Value>,
     live: Mutex<Map<String, Value>>,
     state: MdRuntimeState,
@@ -343,6 +372,7 @@ impl<'a> ComposeHost<'a> {
             document: compose.document,
             verbose: compose.verbose,
             call_warnings: compose.call_warnings,
+            pending_triggers: compose.pending_triggers,
             live: Mutex::new(bootstrap.clone()),
             frontmatter: bootstrap,
             state: MdRuntimeState::default(),
@@ -375,12 +405,17 @@ impl<'a> ComposeHost<'a> {
             match check_references(self.md, &self.request, allow) {
                 ReferenceCheck::Clean => {}
                 ReferenceCheck::Report(report) => {
+                    self.pending_triggers.hold(&report.trigger_warnings);
                     if let Some(sink) = self.document.sink {
                         sink.references(&report);
                     }
                     self.deferred_report = Some(report);
                 }
                 ReferenceCheck::Refused(report) => {
+                    self.pending_triggers.hold(&report.trigger_warnings);
+                    let term_cell = OnceCell::new();
+                    let _ = term_cell.set(self.effects.term.clone());
+                    self.pending_triggers.deliver(self.document.sink, None, &term_cell);
                     match self.document.sink {
                         Some(sink) => sink.references(&report),
                         None => {
@@ -417,7 +452,8 @@ impl<'a> ComposeHost<'a> {
                 .md
                 .compose_preflight_approvals_with(&self.request, self.approval_handler.clone(), extra)
                 .map_err(|error| {
-                    let warnings = self.request.options().take_preflight_failure_warnings();
+                    let mut warnings = self.request.options().take_preflight_failure_warnings();
+                    self.pending_triggers.merge_into(&mut warnings);
                     match self.document.sink {
                         Some(sink) => sink.warnings(&warnings),
                         None => super::report_failure_trigger_warnings(
@@ -428,6 +464,9 @@ impl<'a> ComposeHost<'a> {
                     }
                     ("shell", preflight_approval_error(error))
                 })?;
+            // A trigger only a child composition skips holds is reported by
+            // this walk alone, whatever the bootstrap found.
+            self.pending_triggers.hold(&approvals.warnings);
             if self.verbose > 0 {
                 eprintln!(
                     "pre-flight: {} discovered, {} whitelisted, {} approved",
@@ -444,7 +483,8 @@ impl<'a> ComposeHost<'a> {
         }
 
         let (composed, mut report) =
-            self.md.compose_with_warnings(&self.request).map_err(|failure| {
+            self.md.compose_with_warnings(&self.request).map_err(|mut failure| {
+                self.pending_triggers.merge_into(&mut failure.warnings);
                 match self.document.sink {
                     Some(sink) => sink.warnings(&failure.warnings),
                     None => super::report_failure_trigger_warnings(
@@ -455,6 +495,7 @@ impl<'a> ComposeHost<'a> {
                 }
                 ("compose", compose_error(failure.error))
             })?;
+        self.pending_triggers.merge_into(&mut report.warnings);
         if let Some(sink) = self.document.sink {
             sink.warnings(&report.warnings);
         }
@@ -522,12 +563,30 @@ impl MdRunHost for ComposeHost<'_> {
     fn prepare(&mut self) -> std::result::Result<ApprovalEpoch, LifecycleErrorInfo> {
         match self.try_prepare() {
             Ok(()) => Ok(ApprovalEpoch(1)),
-            Err((verb, report)) => Err(self.fail(verb, report)),
+            Err((verb, report)) => {
+                // A preparation that stopped before composing (a lifecycle
+                // shell that cannot be stamped) delivers the bootstrap's
+                // findings ahead of its failure; refused references
+                // delivered them with their own report.
+                let term_cell = OnceCell::new();
+                let _ = term_cell.set(self.effects.term.clone());
+                self.pending_triggers.deliver(self.document.sink, None, &term_cell);
+                Err(self.fail(verb, report))
+            }
         }
     }
 
     fn write(&mut self) -> std::result::Result<(), LifecycleErrorInfo> {
         self.try_write().map_err(|report| {
+            // The composition's warnings follow the document; one that could
+            // not be written still delivers its skipped triggers.
+            if self.document.sink.is_none()
+                && let Some((_, composed_report)) = &self.composed
+            {
+                let term_cell = OnceCell::new();
+                let _ = term_cell.set(self.effects.term.clone());
+                super::report_failure_trigger_warnings(&composed_report.warnings, None, &term_cell);
+            }
             LifecycleErrorInfo::from_action_failure_with(&md_host::MdDiagnostics, "write", report.to_string())
         })
     }

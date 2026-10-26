@@ -107,10 +107,10 @@ instead and does not repeat it on stderr.
 
 | Command | Ordinary output | Report mode |
 | --- | --- | --- |
-| `md compose` | stderr, after the document; on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic with `source: null` |
+| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at a YAML error's line and column, else `null` |
 | `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--format json`: a row in the `warnings` of the first file that discovers the trigger |
-| `md schema triggers` | a "Skipped invalid triggers" section on stdout, between the shadowed envelopes and the triggers | — |
-| `md clean` | stderr | [`--json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array |
+| `md schema triggers` | stderr; the trace on stdout names each skipped trigger and its code in a "Skipped invalid triggers" section, between the shadowed envelopes and the triggers, without repeating the warning | — |
+| `md clean` | stderr; on a schema failure, before the error | [`--json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
 | DMLS | a warning diagnostic on the trigger file; see [Failures](../../lsp/indexing.md#failures) | — |
 
 A JSON row has the same four fields everywhere it appears outside
@@ -127,12 +127,59 @@ A JSON row has the same four fields everywhere it appears outside
 
 `path` is `null` for an embedded trigger. When the failure is inside a
 payload or import file, the message also names that file (`… (in
-/repo/schemas/memory-payload.yaml)`).
+/repo/schemas/memory-payload.yaml)`). The named file is the one that holds
+the failure:
+
+- a payload reached through another schema file (`$schema: ./alias.yaml`,
+  whose own `$schema` is `./raw.json`) names the file that wrote the rejected
+  schema, `raw.json`;
+- an unknown type name names the file that wrote the reference, or, when the
+  trigger wrote it, the import whose types were searched;
+- a payload or import that does not exist names no file, only the reference
+  that did not resolve.
+
+A line and column inside a payload or import appear only in the message,
+never as a position in the trigger file.
 
 The warning is kept when the command later fails for another reason, such as
 a valid trigger rejecting the document or the document's `$schema` not
 loading. `md schema validate` keeps its exit status; the warning only rides
 along.
+
+`md compose` delivers the warning even when it stops before composing the
+document: a `--shell` inspection, a lifecycle whose `initialize` skips the
+document (the run still succeeds and writes nothing) or fails (an `error`
+action), a lifecycle `shell` that fails before composition (a missing
+placeholder value or a refused approval), a lifecycle call the passive check
+rejects, references that do not resolve, and a composed document that cannot
+be rendered in the requested `--output` format. Reference checking reads each
+transcluded document in its own context, so a refusal for unresolved
+references also reports a trigger that only a transcluded document's schema
+roots hold (for example `alpha/schemas/` for an included
+`alpha/docs/child.md`), even though the root document never composes.
+
+Shell preparation walks every transcluded document before any command runs,
+whatever its `when=` condition, so it finds such a child-only trigger too.
+`md compose`, with or without a lifecycle, delivers what that walk found:
+
+- when composition then skips the child (`::file ../alpha/docs/child.md
+  when=false`), on success;
+- when preparation refuses a shell command, because no whitelist rule
+  approves it on a non-interactive run (`Approval required`) or a blacklist
+  rule rejects it;
+- when a later document in the walk fails, such as a sibling whose `$schema`
+  does not load: the triggers found before the failure, in the order they
+  were found.
+
+For example, with the trigger above:
+
+```console
+$ md compose --shell prompt.md
+No shell commands discovered.
+
+No ICMP probes discovered.
+⚠ ignoring invalid schema trigger /repo/schemas/memory.yaml: …
+```
 
 Each trigger is reported **once per invocation**, however many documents,
 transclusions, or schema passes discover it. Triggers are told apart by their
@@ -155,6 +202,26 @@ Either stops composition once the document's schemas are prepared, before
 any of its expressions, shell commands, or children run, and writes no
 document. The warning keeps its `warning` severity and its trigger source;
 see [Diagnostic Policy](../../cli/policy.md#diagnostics---deny).
+
+A trigger that only shell preparation finds stops the command at that walk,
+before any shell command is approved, prompted for, or run. With the
+child-only trigger above, the whitelisted `::shell` below never runs:
+
+```console
+$ cat docs/prompt.md
+::shell git init --quiet scratch
+
+::file ../alpha/docs/child.md when=false
+$ md compose --deny dm.schema.invalid_trigger docs/prompt.md
+⤫ MarkdownError: blocking diagnostics
+┃ ignoring invalid schema trigger /repo/alpha/schemas/memory.yaml: …
+$ echo $?
+1
+```
+
+A lifecycle run stops there too, after `initialize` (which runs before
+preparation and keeps its effects). `--shell` inspection runs nothing, so a
+denial leaves it unchanged: it still lists the commands, warns, and succeeds.
 
 `--disable schema-triggers` turns discovery off, so no trigger applies and
 none is reported.

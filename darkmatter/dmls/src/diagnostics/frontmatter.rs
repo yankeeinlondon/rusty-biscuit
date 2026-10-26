@@ -180,7 +180,8 @@ fn invalid_trigger_diagnostic_at(finding: &InvalidTriggerFinding, range: Range) 
         .map(|uri| {
             vec![DiagnosticRelatedInformation {
                 location: Location::new(uri, zero_range()),
-                message: "the trigger's payload failed to load here".to_string(),
+                // The cause may sit in the payload or in a file it imports.
+                message: "the trigger's schema failed to load here".to_string(),
             }]
         });
     out

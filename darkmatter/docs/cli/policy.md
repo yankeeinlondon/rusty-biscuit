@@ -169,7 +169,9 @@ flowchart TD
     A --> B[Passive checks: lifecycle calls, reference validation]
     B -->|blocking| F1[Fail before anything runs]
     B --> C[initialize event, when the document has a lifecycle]
-    C --> D[Each document's call check, before its expressions run]
+    C --> S[Shell preparation walks every document]
+    S -->|blocking| F5[Fail before any command is approved or runs]
+    S --> D[Each document's call check, before its expressions run]
     D -->|blocking| F2[Fail; earlier effects stay]
     D --> E[Compose: each stage, command, expression, condition, and child in order]
     E -->|blocking warning| F3[Fail before the next one runs; effects stay]
@@ -182,6 +184,11 @@ flowchart TD
   finding there fails the command before `initialize`, any shell, or any
   expression runs. A blocking reference issue exits with status 2, like an
   unrecovered missing reference.
+- **Shell preparation** walks every document the composition could reach,
+  a `::file` whose `when=` is false included, before any shell command is
+  approved or prompted for. A blocking warning only that walk finds (an
+  invalid schema trigger in a skipped child) fails the command there, before
+  any command runs; in a lifecycle run, effects of `initialize` stay.
 - **The call check** runs for each document (each transcluded child too) just
   before its expressions are evaluated, so a blocking call warning stops that
   document before it runs anything.

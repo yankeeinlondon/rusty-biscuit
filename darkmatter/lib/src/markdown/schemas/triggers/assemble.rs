@@ -314,13 +314,18 @@ fn resolve_file_payload(
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
 
-    // Merge-compatibility gate: must be a simple-object schema.
-    enforce_merge_compatible(source, payload, &resolved.json_schema)?;
-    let json_schema = std::sync::Arc::new(resolved.json_schema);
-    let payload_path = match (payload, resolved.referenced_files.as_slice()) {
-        (YamlValue::String(_), [file]) => Some(file.clone()),
+    // The file that authored the resolved schema, for a gate rejection to
+    // name: through an alias chain (`$schema: ./alias.yaml` whose own
+    // `$schema` names `./raw.json`) the resolver attributes the schema to
+    // the last file, so that file is named, not merely the first one read.
+    let payload_path = match payload {
+        YamlValue::String(_) => resolved.origin.file().map(Path::to_path_buf),
         _ => None,
     };
+
+    // Merge-compatibility gate: must be a simple-object schema.
+    enforce_merge_compatible(source, payload, payload_path.as_deref(), &resolved.json_schema)?;
+    let json_schema = std::sync::Arc::new(resolved.json_schema);
     enforce_compiles(source, payload, payload_path, &json_schema)?;
 
     // Collect dependency edges: the payload file(s) + imports + examples.
@@ -768,6 +773,7 @@ fn resolve_embedded_payload(
         YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
             path: importer_path.clone(),
             payload: describe_payload(payload),
+            payload_path: None,
             reason: "a root union is not an object schema. Root unions and non-object schemas \
                      are rejected as trigger payloads"
                 .into(),
@@ -780,7 +786,7 @@ fn resolve_embedded_payload(
         }),
     })?;
     let (resolved, reads) = resolved;
-    enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
+    enforce_merge_compatible(&importer_path, payload, None, &resolved.json_schema)?;
     let json_schema = std::sync::Arc::new(resolved.json_schema);
     enforce_compiles(&importer_path, payload, None, &json_schema)?;
     let payload = ResolvedPayload {
@@ -826,6 +832,7 @@ fn enforce_compiles(
 fn enforce_merge_compatible(
     trigger_source: &Path,
     payload: &YamlValue,
+    payload_path: Option<&Path>,
     json_schema: &Value,
 ) -> Result<(), SchemaError> {
     let payload_desc = describe_payload(payload);
@@ -833,6 +840,7 @@ fn enforce_merge_compatible(
         return Err(SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
             payload: payload_desc,
+            payload_path: payload_path.map(Path::to_path_buf),
             reason: "payload did not resolve to a JSON object".into(),
         });
     }
@@ -849,6 +857,7 @@ fn enforce_merge_compatible(
         SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
             payload: payload_desc,
+            payload_path: payload_path.map(Path::to_path_buf),
             reason,
         }
     })

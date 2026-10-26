@@ -248,8 +248,11 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 
   A closed envelope's warning sits at the start of the file, or at the start
   of the line a YAML error reports. When the failure lies in a payload or
-  import file, that file is attached as related information; a cause that
-  names no file (an unresolved import name) has none. Registries are first
+  import file, that file is attached as related information at its start,
+  and the warning stays at the start of the trigger file. Through a chain
+  of schema files the related file is the one that wrote the rejected
+  schema. A cause that names no file (a payload or import that does not
+  exist) has none. Registries are first
   prepared at startup, so a broken envelope in a workspace folder's schema
   roots is reported before any document opens. Each envelope's warning is
   published once, however many scopes skip it, and cleared when the file is

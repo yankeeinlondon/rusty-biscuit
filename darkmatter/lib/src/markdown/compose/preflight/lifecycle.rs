@@ -7,7 +7,8 @@
 //!
 //! The lifecycle is:
 //!
-//! 1. Collect every command the document *could* run (condition-blind).
+//! 1. Collect every command the document *could* run (condition-blind), and
+//!    stop when a warning the walk found blocks under the request's policy.
 //! 2. Validate the set against the built-in blacklist, the user
 //!    blacklist, and the whitelist. Each command site is decided once: a
 //!    site whose value is late by its shape; any other by an `exact` rule,
@@ -62,11 +63,17 @@ pub struct PreflightApprovalStats {
 /// `ComposeOptions::with_preflight_graph(...)` so the final transclusion stage
 /// reuses the resolved targets instead of resolving them a third time — the v2
 /// design's "reuse the collection walk" goal on the primary user-facing path.
+///
+/// The [`warnings`](Self::warnings) are the collection walk's skipped-trigger
+/// warnings ([`ComposePreflightReport::warnings`](super::ComposePreflightReport::warnings)),
+/// for the caller to deliver with the invocation: composition does not
+/// report a trigger only a child it skips holds.
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightApprovals {
     pub pre_approved_commands: ShellPreApprovals,
     pub stats: PreflightApprovalStats,
     pub preflight_graph: super::PreflightGraphNode,
+    pub warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl Markdown {
@@ -94,6 +101,16 @@ impl Markdown {
     ///   `ShellExpansionError::ApprovalRequired` for the first such
     ///   command.
     /// - Collection, policy-file, or pre-flight failures.
+    /// - A walk warning the request's
+    ///   [`BlockingPolicy`](crate::markdown::compose::policy::BlockingPolicy)
+    ///   blocks (a denied skipped trigger) → `ShellExpansionError::Preflight`
+    ///   holding [`MarkdownError::BlockedDiagnostics`](crate::markdown::MarkdownError::BlockedDiagnostics),
+    ///   judged before any policy file is read or the handler is asked.
+    ///
+    /// Whatever the error, the warnings the walk reported before it are left
+    /// for [`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings):
+    /// a policy error after a successful walk leaves the walk's
+    /// skipped-trigger warnings there.
     pub fn compose_preflight_approvals(
         &self,
         request: &crate::markdown::compose::ComposeRequest,
@@ -117,7 +134,6 @@ impl Markdown {
         approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
         extra: ExtraShellSources,
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
-        let options = request.options();
         let mut report = self.compose_preflight(request).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
             // Preserve the rich error (transform parse, ctx merge, schema
@@ -125,6 +141,32 @@ impl Markdown {
             // block instead of an opaque policy-I/O string.
             other => ShellExpansionError::Preflight(Box::new(other)),
         })?;
+        let warnings = std::mem::take(&mut report.warnings);
+        // The walk is the first to learn of a trigger only a skipped child
+        // holds: a policy denying it stops here, before any policy file is
+        // read, any prompt is shown, or any approved command can run.
+        let judged = crate::markdown::compose::pipeline::stop_if_warnings_blocked(request, &warnings)
+            .map_err(|stop| ShellExpansionError::Preflight(Box::new(stop)))
+            .and_then(|()| self.approve_collected(request, approval_handler, extra, report));
+        match judged {
+            Ok(approvals) => Ok(ComposePreflightApprovals { warnings, ..approvals }),
+            Err(error) => {
+                request.options().preflight_failure_warnings.record(warnings);
+                Err(error)
+            }
+        }
+    }
+
+    /// Judges a successful walk's `report`, with `extra`, against the
+    /// request's shell policy.
+    fn approve_collected(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+        extra: ExtraShellSources,
+        mut report: super::ComposePreflightReport,
+    ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
+        let options = request.options();
         report.entries.extend(extra.entries);
         report.candidates.extend(extra.candidates);
 
@@ -185,6 +227,7 @@ impl Markdown {
                 user_approved: policy.user_approved,
             },
             preflight_graph: report.preflight_graph,
+            warnings: Vec::new(),
         })
     }
 }

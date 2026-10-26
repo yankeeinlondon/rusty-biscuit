@@ -316,18 +316,22 @@ pub fn run_compose(
     // Uses the same options (including --state/--set) so interpolation
     // inside transclusion targets resolves correctly.
     let val_start = perf.then(Instant::now);
+    let mut pending_triggers = PendingTriggerWarnings::default();
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
     let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
         match check_references(&md, &prepare_request(options.clone())?, policy) {
             ReferenceCheck::Clean => None,
             ReferenceCheck::Report(report) => {
+                pending_triggers.hold(&report.trigger_warnings);
                 if let Some(sink) = sink {
                     sink.references(&report);
                 }
                 Some(report)
             }
             ReferenceCheck::Refused(report) => {
+                pending_triggers.hold(&report.trigger_warnings);
+                pending_triggers.deliver(sink, None, &term_cell);
                 if let Some(sink) = sink {
                     sink.references(&report);
                     return Err(ReportedExit(2).into());
@@ -416,7 +420,10 @@ pub fn run_compose(
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
     let lifecycle_warnings = match &lifecycle {
-        Some(config) => lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request)?,
+        Some(config) => {
+            lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request, &mut pending_triggers)
+                .inspect_err(|_| pending_triggers.deliver(sink, None, &term_cell))?
+        }
         None => Vec::new(),
     };
     if let Some(sink) = sink {
@@ -424,19 +431,29 @@ pub fn run_compose(
     }
     // The lifecycle check is passive: a warning it blocks stops the command
     // before `initialize` or any composition runs.
-    blocked_diagnostics(&blocking, &lifecycle_warnings, &[])?;
+    blocked_diagnostics(&blocking, &lifecycle_warnings, &[])
+        .inspect_err(|_| pending_triggers.deliver(sink, None, &term_cell))?;
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
         // that *could* run under any document state, routed through the same
         // pre-flight collector that authorization uses.
-        let mut preflight = md.compose_preflight(&compose_request)?;
+        let mut preflight = match md.compose_preflight(&compose_request) {
+            Ok(preflight) => preflight,
+            Err(error) => {
+                pending_triggers.hold(&compose_request.options().take_preflight_failure_warnings());
+                pending_triggers.deliver(sink, error.blocked_diagnostics(), &term_cell);
+                return Err(error.into());
+            }
+        };
         if let Some(config) = &lifecycle {
             // Report-only: the stacks are read, never run.
             preflight.entries.extend(lifecycle::report_candidates(config, &lifecycle_source));
         }
         print_shell_command_report(&preflight.entries);
         print_icmp_effect_report(&preflight.icmp_probes);
+        pending_triggers.hold(&preflight.warnings);
+        pending_triggers.deliver(sink, None, &term_cell);
         drop(options_ctx_ref);
         return Ok(());
     }
@@ -463,6 +480,7 @@ pub fn run_compose(
             document,
             verbose: cli.verbose,
             call_warnings: lifecycle_warnings,
+            pending_triggers,
         });
     }
 
@@ -484,6 +502,9 @@ pub fn run_compose(
     {
         match md.compose_preflight_approvals(&compose_request, preflight_handler.clone()) {
             Ok(approvals) => {
+                // A trigger only a child composition skips holds is reported
+                // by this walk alone.
+                pending_triggers.hold(&approvals.warnings);
                 if cli.verbose > 0 {
                     eprintln!(
                         "pre-flight: {} discovered, {} whitelisted, {} approved",
@@ -502,7 +523,8 @@ pub fn run_compose(
                 });
             }
             Err(e) => {
-                let warnings = compose_request.options().take_preflight_failure_warnings();
+                let mut warnings = compose_request.options().take_preflight_failure_warnings();
+                pending_triggers.merge_into(&mut warnings);
                 match sink {
                     Some(sink) => sink.warnings(&warnings),
                     None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
@@ -512,13 +534,15 @@ pub fn run_compose(
         }
     }
 
-    let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|failure| {
+    let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|mut failure| {
+        pending_triggers.merge_into(&mut failure.warnings);
         match sink {
             Some(sink) => sink.warnings(&failure.warnings),
             None => report_failure_trigger_warnings(&failure.warnings, failure.error.blocked_diagnostics(), &term_cell),
         }
         compose_error(failure.error)
     })?;
+    pending_triggers.merge_into(&mut report.warnings);
     if let Some(sink) = sink {
         sink.warnings(&report.warnings);
     }
@@ -562,7 +586,13 @@ pub fn run_compose(
         }
     }
 
-    document.emit(&composed)?;
+    // The warnings follow the document, so a document that cannot be
+    // written still delivers its skipped triggers with the failure.
+    document.emit(&composed).inspect_err(|_| {
+        if sink.is_none() {
+            report_failure_trigger_warnings(&report.warnings, None, &term_cell);
+        }
+    })?;
     if sink.is_none() {
         report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
     }
@@ -668,7 +698,13 @@ pub(crate) enum ReferenceCheck {
 ///
 /// An error `policy` does not recover refuses the document, and so does a
 /// reported issue its blocking policy selects.
+///
+/// The check is passive: body `::shell` directives stay unexpanded, because
+/// running one here would be an effect ahead of the shell-approval walk and
+/// its policy stop (a lifecycle request already carries the document's
+/// whitelist), and would run it again when the document composes.
 pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> ReferenceCheck {
+    use darkmatter::markdown::compose::ComposeOperation;
     use darkmatter::markdown::compose::expression::Severity;
     use darkmatter::markdown::compose::policy::missing_reference_code;
     use darkmatter::markdown::reference::ReferenceGraphOptions;
@@ -676,7 +712,8 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
     };
 
-    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(request));
+    let passive = request.clone().map_options(|options| options.disable(ComposeOperation::ShellExpansion));
+    let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
     let Ok(report) = md.validate_references(val_options) else {
         return ReferenceCheck::Clean;
     };
@@ -841,6 +878,63 @@ pub(crate) fn report_failure_trigger_warnings(
             let term = term_cell.get_or_init(biscuit_terminal::terminal::Terminal::default);
             eprintln!("{}", warning_rows(&warning.message, term));
         }
+    }
+}
+
+/// The skipped-trigger warnings (`dm.schema.invalid_trigger`) a pass found
+/// ahead of the report that delivers the invocation's warnings: reference
+/// validation, the lifecycle call check, the lifecycle bootstrap, the
+/// `--shell` walk, and the shell-approval walk. A run that
+/// stops before that report delivers them itself; a report that does arrive
+/// carries each trigger once, whichever passes found it.
+#[derive(Default)]
+pub(crate) struct PendingTriggerWarnings(Vec<darkmatter::markdown::compose::ComposeWarning>);
+
+impl PendingTriggerWarnings {
+    /// Holds the trigger warnings in `warnings` not already held.
+    pub(crate) fn hold(&mut self, warnings: &[darkmatter::markdown::compose::ComposeWarning]) {
+        for warning in warnings {
+            if let Some(trigger) = warning.invalid_trigger_source()
+                && !self.0.iter().any(|held| held.invalid_trigger_source().as_ref() == Some(&trigger))
+            {
+                self.0.push(warning.clone());
+            }
+        }
+    }
+
+    /// Puts the held warnings that `warnings` does not already carry ahead
+    /// of it, which then delivers them; nothing stays held.
+    pub(crate) fn merge_into(&mut self, warnings: &mut Vec<darkmatter::markdown::compose::ComposeWarning>) {
+        let missing = Self::missing_from(std::mem::take(&mut self.0), warnings);
+        warnings.splice(0..0, missing);
+    }
+
+    /// Delivers the held warnings, for a run that ends before a report
+    /// carries them. Those `blocking` shows as the failure are left to it.
+    pub(crate) fn deliver(
+        &mut self,
+        sink: Option<&ReportSink>,
+        blocking: Option<&[darkmatter::markdown::compose::ComposeWarning]>,
+        term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+    ) {
+        let held = std::mem::take(&mut self.0);
+        match sink {
+            Some(sink) => sink.warnings(&held),
+            None => report_failure_trigger_warnings(&held, blocking, term_cell),
+        }
+    }
+
+    fn missing_from(
+        candidates: Vec<darkmatter::markdown::compose::ComposeWarning>,
+        present: &[darkmatter::markdown::compose::ComposeWarning],
+    ) -> Vec<darkmatter::markdown::compose::ComposeWarning> {
+        candidates
+            .into_iter()
+            .filter(|candidate| {
+                let trigger = candidate.invalid_trigger_source();
+                !present.iter().any(|warning| warning.invalid_trigger_source() == trigger)
+            })
+            .collect()
     }
 }
 

@@ -1041,9 +1041,12 @@ impl ComposeOptions {
     /// [`compose_preflight`](crate::markdown::Markdown::compose_preflight) or
     /// [`compose_preflight_approvals`](crate::markdown::Markdown::compose_preflight_approvals)
     /// run under these options (or any clone of them) had reported before
-    /// its failure, in report order: what
+    /// its failure, in report order, each skipped trigger once: what
     /// [`ComposeFailure::warnings`](crate::markdown::compose::ComposeFailure::warnings)
-    /// holds for a failed composition. Empty after a successful run.
+    /// holds for a failed composition, plus the skipped triggers of documents
+    /// the walk finished before the one that failed. An approval run that
+    /// fails on policy after a successful walk leaves that walk's
+    /// skipped-trigger warnings. Empty after a successful run.
     pub fn take_preflight_failure_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
         self.preflight_failure_warnings.take()
     }

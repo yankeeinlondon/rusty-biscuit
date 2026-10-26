@@ -196,9 +196,25 @@ A warning whose producer declares no code reports `dm.compose.warning`.
 
 A [schema trigger skipped because it failed to load](../topics/schemas/schema-triggers.md#invalid-discovered-triggers)
 is a `dm.schema.invalid_trigger` warning. It belongs to the trigger, not to
-the composed document, so its `source` is `null`, and its `message` names the
-trigger file (or `embedded:{bundle}/{file name}`) and the reason. The report
-lists each trigger once, even when transcluded documents discover it again:
+the composed document. Its `message` names the trigger file (or
+`embedded:{bundle}/{file name}`) and the reason, and, when the failure is
+inside a payload or import file, that file too. The report lists each
+trigger once, even when transcluded documents discover it again.
+
+Its `source` points into the trigger file only where the failure has a
+known position there, which is a trigger file that is not valid YAML:
+
+```json
+{ "code": "dm.schema.invalid_trigger", "severity": "warning",
+  "message": "ignoring invalid schema trigger /repo/schemas/broken.yaml: not valid YAML at line 3, column 1: …",
+  "source": { "file": "/repo/schemas/broken.yaml", "line": 3, "column": 1 },
+  "expected_type": null, "actual_type": null }
+```
+
+Every other cause has `source: null`, since no position is invented: an
+envelope with unsupported keys, a payload or import that fails to load (a
+position inside that file is never placed on the trigger; the message names
+the file instead), and any embedded trigger, which names no local file:
 
 ```json
 { "code": "dm.schema.invalid_trigger", "severity": "warning",

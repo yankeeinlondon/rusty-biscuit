@@ -7,6 +7,7 @@ use biscuit_terminal::terminal::Terminal;
 use renderable::markdown::code_span;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
+use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::schemas::{
@@ -17,6 +18,9 @@ use std::path::Path;
 
 /// Prints the five schema roots, shadowing, the triggers discovery skipped as
 /// invalid, and condition-by-condition trigger results.
+///
+/// Each skipped trigger's `dm.schema.invalid_trigger` warning is written to
+/// stderr; stdout lists only its source.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
@@ -64,8 +68,10 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
         );
     }
 
-    // Inspection output: the trace lists skipped triggers inline rather
-    // than as stderr warnings.
+    // The warning itself (with its reason) goes to stderr like every other
+    // command's; the trace names only which triggers were skipped, so the
+    // warning is not delivered twice.
+    emit_warnings(registry.findings(), &terminal);
     emit(&terminal, "<bold>Skipped invalid triggers:</bold>".to_string());
     if registry.findings().is_empty() {
         emit(&terminal, "- <dim>none</dim>".to_string());
@@ -75,7 +81,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
             &terminal,
             format!(
                 "- {} <dim>[{}]</dim>",
-                Prose::escape_text_outside_code_spans(&finding.message()),
+                Prose::escape_text(&finding.source().to_string()),
                 finding.code()
             ),
         );

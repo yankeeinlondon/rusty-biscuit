@@ -62,7 +62,7 @@ impl InvalidTriggerFinding {
             } => Some((*line, *column)),
             _ => None,
         };
-        let cause_path = match &source {
+        let cause_path = match &identity {
             TriggerSource::File(trigger) => related_path(&cause, trigger),
             TriggerSource::Embedded { .. } => None,
         };
@@ -112,8 +112,11 @@ impl InvalidTriggerFinding {
     }
 
     /// The payload or import file the cause points into, when it is not the
-    /// trigger file itself. Always `None` for an embedded trigger, whose
-    /// documents are never host files.
+    /// trigger file itself, in the spelling resolution reached it by.
+    /// Through a chain of schema files it is the one that wrote the rejected
+    /// schema. `None` when the cause names no file (a payload or import that
+    /// does not exist), and always for an embedded trigger, whose documents
+    /// are never host files.
     #[must_use]
     pub fn cause_path(&self) -> Option<&Path> {
         self.cause_path.as_deref()
@@ -175,16 +178,82 @@ fn reason(cause: &SchemaError) -> String {
     }
 }
 
-/// The file other than `trigger` that `cause` names as the failure's
-/// location: the payload or import a resolution failure stopped in.
+/// The file other than `trigger` (the trigger's canonical identity) that
+/// `cause` names as the failure's location: the payload or import a
+/// resolution failure stopped in.
+///
+/// Every variant is classified, so a new one must decide whether it names a
+/// file. A named-type failure names the file that wrote the reference, or,
+/// for a reference written in the trigger, the import whose types were
+/// searched. Variants without a typed path name none: a missing reference
+/// (`NoMatch`, `Unresolved`) has no file to point at, and a chain or count
+/// (`ReferenceCycle`, `ImportCycle`, `Aggregate`) is spelled out in the
+/// message instead.
 fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
     let path = match cause {
         SchemaError::Io { path, .. }
         | SchemaError::ReferencedSchema { path, .. }
-        | SchemaError::SchemaDocument { path, .. } => path,
+        | SchemaError::SchemaDocument { path, .. }
+        | SchemaError::AmbiguousReferenced { path } => path,
         SchemaError::TriggerPayloadCycle { payload_path, .. } => payload_path,
-        SchemaError::TriggerPayloadCompile { payload_path: Some(path), .. } => path,
-        _ => return None,
+        SchemaError::TriggerPayloadCompile { payload_path, .. }
+        | SchemaError::TriggerPayloadNotMergeable { payload_path, .. } => payload_path.as_ref()?,
+        SchemaError::UnknownNamedType { site, namespace, .. } => {
+            return host_file(&site.source, trigger).or_else(|| host_file(namespace, trigger));
+        }
+        SchemaError::ConstraintConflict { site, .. } | SchemaError::UnionReference { site, .. } => {
+            return host_file(&site.source, trigger);
+        }
+        SchemaError::NonDescendingCycle { cycles } => {
+            let first = cycles.first()?.first()?;
+            return host_file(&first.site.source, trigger);
+        }
+        SchemaError::TriggerLoad { source, .. } => return related_path(source, trigger),
+        SchemaError::Aggregate { .. }
+        | SchemaError::Grammar { .. }
+        | SchemaError::Convert { .. }
+        | SchemaError::Unresolved { .. }
+        | SchemaError::NoMatch { .. }
+        | SchemaError::RemoteUnsupported { .. }
+        | SchemaError::Baseline { .. }
+        | SchemaError::BuildValidator { .. }
+        | SchemaError::FrontmatterShape { .. }
+        | SchemaError::ImportCycle { .. }
+        | SchemaError::UnresolvedReference { .. }
+        | SchemaError::UnsupportedMergeReference { .. }
+        | SchemaError::ReferenceCycle { .. }
+        | SchemaError::ReferenceDepthExceeded { .. }
+        | SchemaError::InvalidExample { .. }
+        | SchemaError::TriggerMatch { .. }
+        | SchemaError::TriggerRenamed { .. }
+        | SchemaError::TriggerEnvelopeYaml { .. }
+        | SchemaError::TriggerForbiddenConstraint { .. }
+        | SchemaError::TriggerMixedMapping { .. }
+        | SchemaError::TriggerVacuousMatch
+        | SchemaError::TriggerCaseFoldCollision { .. }
+        | SchemaError::EmbeddedTriggerLoad { .. }
+        | SchemaError::EmbeddedBundle { .. }
+        | SchemaError::BareNameSiblingExists { .. }
+        | SchemaError::TriggerSchemaReferenced { .. } => return None,
     };
-    (path != trigger).then(|| path.clone())
+    other_file(path, trigger)
+}
+
+/// `source`'s host file when it is one other than `trigger`; never an
+/// embedded document, which names no host file.
+fn host_file(source: &crate::markdown::schemas::SchemaSourceId, trigger: &Path) -> Option<PathBuf> {
+    match source {
+        crate::markdown::schemas::SchemaSourceId::File(path) => other_file(path, trigger),
+        crate::markdown::schemas::SchemaSourceId::InlineDocument
+        | crate::markdown::schemas::SchemaSourceId::Embedded(_) => None,
+    }
+}
+
+/// `path`, in the spelling the cause gave it, unless it is the file
+/// `trigger` (the trigger's canonical identity) names. A cause spells a path
+/// as resolution reached it, canonical or not, so the comparison is made on
+/// canonical forms.
+fn other_file(path: &Path, trigger: &Path) -> Option<PathBuf> {
+    let canonical = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    (canonical != trigger).then(|| path.to_path_buf())
 }
