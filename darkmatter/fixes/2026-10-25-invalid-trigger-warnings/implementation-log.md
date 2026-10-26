@@ -44,14 +44,15 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
+    - claudine-cli
 human_review: false
 message_to_agent: |-
-    Phase 3 landed DMLS. Facts the next phases need:
-    (1) The temporary bridge `fail_closed_on_findings` is gone. A scan with findings is `Outcome::Ready` and installs its valid subset (even empty); `failed_scopes` never counts a skipped trigger, `failed_triggers` does, so the startup line stays `schema registry ready`. `TriggerRegistries::reconcile_warnings` publishes one warning per skipped disk trigger across all scopes (`TriggerDiagnosticTransition { path, finding }`), clears it when no scope reports it, and logs WARN `ignoring invalid schema trigger …` (fields `trigger=`, `code=`) / INFO `invalid schema trigger no longer reported`. Embedded findings are logged only.
-    (2) Diagnostic: severity Warning, code `dm.schema.invalid_trigger`, source `darkmatter.schema`, message = `InvalidTriggerFinding::message()`, `relatedInformation` = `cause_path()` when present (an unresolved import inside a payload carries no path in its error, so it has none). Open trigger files: buffer envelope parses → the warning (`SuggestionState::TriggerWarning`); malformed buffer → the strict `dm.schema.prepare` ERROR wins. `didClose` republishes the warning.
-    (3) Phase 5 docs to update in `darkmatter/docs/lsp/indexing.md` (log table still lists the old trigger-failure rows and says `initialized with failures` covers failed triggers) and any DMLS schema-support page describing last-good retention for trigger load errors: last-good now applies only to whole-scan failures (case-fold collision); root I/O fails closed; skipped triggers install the valid subset and warn on the trigger file.
-    (4) DMLS only reports triggered schemas' document diagnostics under `[schema] strict = true`; session tests of trigger properties must set it.
-    (5) The load-sensitive DMLS test from Phases 1-2 (`registry_preparation::a_held_preparation_…`) did not fail this phase.
+    Phase 5 (docs) is done; no code changed. Facts for Phase 6:
+    (1) The user-facing contract is documented in one place per area: darkmatter/docs/topics/schemas/schema-triggers.md section "Invalid discovered triggers" (has a per-host delivery table) and claudine/docs/topics/schemas.md section "When a trigger is invalid". When the acceptance walkthrough checks behavior, those pages are the record; if a test contradicts them, fix whichever is wrong and record it.
+    (2) The real warning text includes the cause's own prefix: `ignoring invalid schema trigger <path>: invalid schema-trigger: ...`; the spec's example omits `invalid schema-trigger:`. Assert the real text.
+    (3) `trigger_spelling_guard` (darkmatter lib L1) rejects the retired kind spelling written literally in docs; avoid it in any new prose or fixtures outside its allowlist.
+    (4) The working tree still holds Phase 4's uncommitted Claudine source changes, so the scope calculator over the whole tree selects claudine, claudine-cli, darkmatter, and test-toolkit.
+    (5) `os_failing: windows` on the spec is for two pre-existing Windows quoting tests (see the Phase 4 log); nothing this fix added fails on Windows.
 source_files_during_phase_2:
     - darkmatter/cli/src/commands/trigger_findings.rs
     - darkmatter/cli/src/commands/mod.rs
@@ -93,6 +94,64 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/schema/findings.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/tests/l1/invalid_trigger_findings.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/frontmatter-properties.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
 ---
 
 # Implementation Log for 2026-10-25-invalid-trigger-warnings (6 phases)
@@ -384,3 +443,165 @@ Input robustness: no parser or field validation was added or changed (the plan's
 
 - `just cross-check dmls --os windows`, attempt 1: 1,437 of 1,438. `router::logging_tests::a_mid_edit_unrelated_schema_file_logs_nothing_and_a_broken_trigger_warns_once` failed because my widened log filter (`"trigger"`) also matched Windows's `slow schema validation … matched_triggers=` WARN line. Fixed by filtering on `trigger registry` / `invalid schema trigger`.
 - Attempt 2: 1,438 of 1,438 passed. `os_failing` is not set.
+
+## Phase 4
+
+### Progress
+
+- started Phase 4 (Claudine: carry findings through preparation and launch); the work was done inline (no subagents): the library carry and the CLI delivery share one new type
+- Wave 6 (findings through schema loading) and both Wave 7 tasks (warning delivery, Claudine test suite) implemented and checked off in the plan
+
+### Design Decisions
+
+1. **Decision: an invocation-scoped `TriggerFindings` record, owned by `InvocationContext`**
+    - **decision:** `claudine::composition::TriggerFindings` (`lib/src/composition/schema/findings.rs`) is a shared (`Arc<Mutex<…>>`) record of skipped triggers: one `TriggerWarning { source, message }` per `InvalidTriggerFinding::identity()`, first observation wins, in the order first observed, plus a delivery cursor (`take_undelivered`). `InvocationContext::trigger_findings()` holds one per invocation, shared by every document view (`enter_document`) and thread.
+    - **alternatives considered:** carry findings on `CompositionError` (235 variants, matched by the interactive loop and renderers; a wrapper variant would break every `matches!`); carry them on `ResolvedCompositionSource` (42 struct literals, and a source is a document, not an invocation); a thread-local scope like Darkmatter's `resolve::observed` (sequence groups and the prewarm worker prepare on other threads); a process-global "already shown" set (the spec forbids it).
+    - **why:** the spec requires findings on failure paths that return a `CompositionError`, dedup across retries, loops, proxy targets, and steps "within one top-level invocation", and no process-global display state. `InvocationContext` is exactly the invocation's owner; `PrepareOptions.invocation_context` already carries it into preparation.
+    - **downsides:** the public preliminary checks (`pre_validate_schema`, `pre_validate_schema_for_mode`, `pre_validate_layered_for_mode`, `drop_invalid_optionals`, `build_schema_status_report(_for_mode)`) take one more argument; 70 test call sites were updated mechanically.
+2. **Decision: `load_effective_schema` records findings before the authored schema resolves**
+    - **decision:** `load_effective_schema(…, trigger_findings)` records `DarkmatterSchemas::discovery_findings()` right after discovery, then resolves the effective schema; the `schema_error` closure and `schema_error_to_composition_error` are untouched and never see a finding. Every consumer (pre-validation, `drop_invalid_optionals_with_origin` including its `Ok(None) | Err(_)` early exit, `resolve_launch_schema`, both drop-and-retry legs, status reports, interactive re-runs) passes the record through.
+    - **alternatives considered:** return `(Option<EffectiveSchema>, Vec<Finding>)` from the loader and thread the vector up by value (the error arm still needs a carrier).
+    - **why:** recording before resolution is what keeps a finding when the authored `$schema` then fails.
+    - **downsides:** none found.
+3. **Decision: preparation also records the compose report's trigger warnings, matched by a new Darkmatter accessor**
+    - **decision:** Darkmatter gains `ComposeWarning::invalid_trigger_source() -> Option<TriggerSource>` (the warning's identity, `None` for other warnings). Claudine's `compose_selecting` (plain arm) and `compose_bootstrap` now call `compose_with_warnings` (identical to `compose_with`, which is `run_root_pipeline_collecting(..).0`) and `recording_triggers` records the report's or the failure's trigger warnings. `PreparedComposition.warnings` still carries them unchanged. The `composition_seams` allowlist scanner now also matches `.compose_with_warnings(`, so the new spelling cannot bypass the R1 guard.
+    - **alternatives considered:** dedup compose warnings by message (would merge or split by prose); skip compose warnings (a transcluded child's trigger would never be shown once).
+    - **why:** a child document can discover triggers the root's checks never see, and the same root trigger must be recognized as one entry whether it came from a check or the compose report.
+    - **downsides:** the launch-identity (`select`) arm still uses `compose_with_frontmatter_hook`, which drops warnings on failure; its trigger warnings are recorded on success only (the root's are already recorded by the preliminary checks).
+4. **Decision: the CLI delivers through the record, once, with an end-of-invocation drain**
+    - **decision:** `emit_compose_warnings(warnings, trigger_findings, silent)` records the report, shows the undelivered skipped triggers (`emit_trigger_warnings`: `crate::log::warn("[schema_validation] …")`, the row compose already used), then the other compose warnings without the trigger rows. Sequence routes show them after their pre-validation (`sequence.rs`, `wrap/sequence/jit.rs`). `TriggerWarningDrain`, installed after `InvocationContext::capture` in `run_composition_inner` and `run_sequence`, shows the rest on drop: before the error `main` renders on a failure, or after the run for a re-preparation that renders no warnings (a harness retry's fresh read). `--silent` still marks them shown.
+    - **alternatives considered:** render at each error site (dozens of `?` exits); render in `main` (it has no invocation).
+    - **why:** "never as a `CompositionError`, never attributed to the prompt, never repeated per retry", and delivered with an independent failure.
+    - **downsides:** a finding first observed by a mid-run harness retry is shown when the invocation returns, not at the retry.
+5. **Decision: a `prep` target reports its own warnings**
+    - **decision:** `prep_target.rs` runs a target through `run_composition_inner` as "an invocation of its own", so it captures its own `InvocationContext` and record.
+    - **alternatives considered:** pass the caller's record into the prep runner.
+    - **why:** Claudine already defines a `prep` target as a separate invocation (own approvals, output, runtime layer); the spec's dedup unit is the invocation.
+    - **downsides:** a prep target beside the same invalid trigger shows its warning again.
+6. **Decision: the stale CLI test of the old hard failure asserts the recovered contract**
+    - **decision:** `launch_trigger_schemas::a_malformed_disk_trigger_blocks_launch_instead_of_using_the_embedded_copy` (gated on `test-fixtures`; it asserted that no launch happens, which cannot hold since Phase 1 made discovery recover, so Phase 1's targeted dependent run most likely ran without that feature and never compiled it; not re-run on the base) is now `a_malformed_disk_trigger_is_skipped_with_a_warning_and_shadows_the_embedded_copy`: the prompt launches, one warning names `claudine.yaml` and its `match` failure, and a `failure: [pr_list: three]` value the embedded payload rejects still launches, which proves the skipped file shadows the embedded copy (renaming the file to `other.yaml` makes the test fail with exit 1).
+    - **alternatives considered:** delete it (loses the CLI shadowing proof).
+    - **why:** the spec keeps shadowing unchanged after a skip; the lib tests prove it in-process, this proves it through `claudine compose`.
+    - **downsides:** none.
+
+### Work Completed
+
+- **Library carry (Wave 6):** `schema/findings.rs` (new: `TriggerFindings`, `TriggerWarning`); `InvocationContext::trigger_findings`; `load_effective_schema` records findings; the ledger is threaded through `pre_validate_*`, `drop_invalid_optionals`, `build_schema_status_report(_for_mode)`, `handle_retry_error`, `translate_schema_failure`, and `resolve_launch_schema` (`PrepareOptions::trigger_findings()`); `prepare.rs` records compose-report warnings on success and failure (`recording_triggers`).
+- **Darkmatter:** `ComposeWarning::invalid_trigger_source()` (public), asserted in `compose::tests::invalid_triggers::a_prompt_without_schema_composes_beside_the_incident_trigger`.
+- **Delivery (Wave 7):** `cli/src/commands/compose/loop_run.rs` (`emit_compose_warnings` drains the record, `emit_trigger_warnings`, `TriggerWarningDrain`); `prep.rs` (drain guard; interactive collection gets the invocation's record); `sequence.rs` and `wrap/sequence/jit.rs` (record and show after pre-validation); `schema_interactive/mod.rs` (record threaded through collection, partial-file resolution, and the status report); `wrap/sequence/phase1c.rs` (display-only status report).
+- **Tests:** new `lib/tests/l1/invalid_trigger_findings.rs` (6) and `cli/tests/l1/invalid_trigger_warnings.rs` (6); `claudine_schemas_embedded::assert_skipped_without_embedded_fallback` now also asserts the verdict records the skipped disk `claudine.yaml`; `launch_trigger_schemas` test rewritten (decision 6); `composition_seams` scanner extended.
+- **Pre-existing defects fixed:** `launch_recorder::install` numbered launches with a read-then-increment of a `count` file, so two group legs launching at once shared an index and one record was lost: `sequence_task_providers::a_provider_flag_replaces_circular_agents_in_legs_and_nested_tasks` failed deterministically on the unchanged base (verified with a tagged stash, restored by SHA). It now claims each index with an atomic `mkdir`. `launch_trigger_schemas::write_git_skeleton` was `#[cfg(unix)]` but called from an all-OS test; the gate is removed.
+- Skills: `.claude/skills/darkmatter/schema.md` (Claudine delivery), `.claude/skills/claudine/cli-commands.md` (schema bundle row). Claudine user docs (`claudine/docs/topics/schemas.md`, `composition.md`) are left to Phase 5 as planned.
+
+### Requirement-to-Test Mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| Prompt preparation/launch with a fixture provider succeeds beside the incident trigger, warning once, never a `CompositionError` or blamed on the prompt | CLI `invalid_trigger_warnings::compose_launches_beside_the_incident_trigger_and_warns_once`, `inline_compose_launches_beside_the_incident_trigger_and_warns_once` |
+| Repeated preparation displays once (loop iterations re-prepare) | CLI `invalid_trigger_warnings::every_loop_iteration_rediscovers_the_trigger_and_it_is_shown_once` (3 launches, 1 warning); lib `invalid_trigger_findings::repeated_checks_record_each_trigger_once_in_discovery_order` (2 pre-validations, `drop_invalid_optionals`, a status report; discovery order; delivered once; a new invocation reports again) |
+| Preliminary checks that return no effective schema deliver findings | lib `invalid_trigger_findings::a_check_with_no_effective_schema_records_the_incident_trigger` |
+| Findings retained before an independent schema/composition failure | lib `a_prompt_rejected_by_a_valid_trigger_keeps_the_finding` (`MissingProperties` and `SchemaValidation`), `an_authored_schema_that_cannot_load_is_still_an_error_and_keeps_the_finding`; CLI `a_rejected_prompt_shows_the_skipped_trigger_before_its_error` (warning precedes the error, no launch), `an_authored_schema_that_cannot_load_still_fails_and_reports_the_trigger` |
+| Authored `$schema` referencing the ignored trigger still fails | lib `an_authored_schema_naming_the_skipped_trigger_still_fails`; CLI `an_authored_schema_naming_the_skipped_trigger_still_fails` |
+| Compose-report warning and check finding are one trigger (transclusion path) | lib `a_composition_warning_and_a_check_finding_are_one_trigger`; Darkmatter `invalid_triggers::a_prompt_without_schema_composes_beside_the_incident_trigger` (accessor) |
+| Embedded shadowing preserved, no disk→embedded fallback; the verdict carries the skipped disk trigger | lib `claudine_schemas_embedded::{malformed_disk_trigger_is_skipped_without_embedded_fallback, disk_import_never_falls_back_to_an_embedded_file, broken_disk_recursive_family_never_falls_back_to_an_embedded_file}`; CLI `launch_trigger_schemas::a_malformed_disk_trigger_is_skipped_with_a_warning_and_shadows_the_embedded_copy` |
+| No real provider launched | every CLI test uses the compiled `claudine-fake-goose` |
+
+Boundary and fidelity: the library carry is covered in-process at Claudine's public API (F2, L1) with `RequestSnapshot`-built contexts and a fixture `~/schemas` root; delivery is covered by spawned `claudine compose`/`inline-compose` (F3, L1) with the compiled fake provider, so the tests run on every OS and never focus a window. Regression proof: restoring the pre-phase delivery (no record, no filter, no drain) fails `a_rejected_prompt_…`, `an_authored_schema_that_cannot_load_…`, and `compose_launches_…` (fail-fast cancelled the rest). The Input Robustness Matrix does not apply: no parser or loader changed in this phase.
+
+### Gates
+
+- `just lint` (claudine): pass (only the pre-existing macOS linker `__eh_frame` note). `just lint` (darkmatter): pass.
+- `just test` (claudine), by package: `claudine` 6,393/6,393; `claudine-cli --features test-fixtures` 4,923/4,923 (9 skipped by the recipe); `claudine-catalog-types` 33/33; `claudine-contract` 48/48; `claudine-gen` 250/250.
+- `just check-tier-coverage claudine`: 0 stranded.
+- `just lint` and `just test` (darkmatter, for the new `ComposeWarning::invalid_trigger_source` accessor): lint pass; test 12,471/12,471 (10 skipped by the recipe).
+- Dependents: nothing outside the `claudine/` area calls a changed Claudine signature (`pre_validate_*`, `drop_invalid_optionals`, `build_schema_status_report*`); the Darkmatter change is a new method only, and Darkmatter's own suite (which includes `darkmatter-cli` and `dmls`) passes.
+
+### Load-Sensitive and Pre-Existing Failures
+
+- `sequence_task_providers::a_provider_flag_replaces_circular_agents_in_legs_and_nested_tasks` failed deterministically on the unchanged base (the launch recorder's index race, above); fixed this phase.
+- No load-sensitive failure was seen this phase.
+
+### Cross-OS Check
+
+- `just cross-check claudine --os windows` (the library): 6,335/6,335 passed.
+- `just cross-check claudine-cli --os windows`, attempt 1: 3,840/3,849. Every new and changed test of this phase passed (`invalid_trigger_warnings::*`, `launch_trigger_schemas::*`). Nine pre-existing failures in code this phase does not touch:
+    - seven `implement_plan_commit_message::*`: the recorded `git` argv began with `["--exec-path"]`, the Windows repository lookup asking the stub `git` on `PATH` for its installation. Fixed in the test's `runs()` (the probe is the host's lookup, not a command the prompt ran).
+    - `lifecycle_shell_templates::a_lifecycle_exact_key_keeps_a_quoted_empty_argument` and `sequence_shell_templates::sequence_task_exact_keys_keep_quoted_empty_arguments`: on native Windows an authored `''` reaches the program as the two characters `''`, while approval (`exact … ""`) judged it as an empty word. That is an approval/execution mismatch in Darkmatter's Windows command execution, from the shell-approval feature (`13cbc87c6`), not something this phase can decide: the fix is a choice of Windows command-word semantics.
+- Attempt 2: 3,847/3,849; the seven `--exec-path` tests pass, and the two quoting tests remain. No third attempt: the remaining defect needs that Windows shell-dialect decision in Darkmatter and is outside this fix's scope. `os_failing: windows` is set on the spec so it is flagged, as the process requires. macOS passes everything.
+
+## Phase 5
+
+### Progress
+
+- started Phase 5 (documentation, skills, and drift); two concurrent documentation tasks: Darkmatter docs/skills and Claudine docs/skills
+- Darkmatter docs/skills task done (11 docs, 2 skill files); Claudine docs/skills task done (4 docs, 2 skill files); both plan tasks checked off
+- gates run (the scope calculator selected packages, see Gates); one guard failure fixed in the new prose
+
+### Design Decisions
+
+1. **Decision: the full user-facing contract lives in one page per area; the other pages state their part and link to it**
+    - **decision:** Darkmatter's complete recovery contract (what is skipped, what still fails, shadowing, embedded bundles, per-command delivery, `--deny`, refresh after a repair) is in `darkmatter/docs/topics/schemas/schema-triggers.md` § "Invalid discovered triggers". Claudine's is in `claudine/docs/topics/schemas.md` § "When a trigger is invalid". `definition.md`, `schema-targeting.md`, `policy.md`, `report-json.md`, the DMLS pages, `composition.md`, `execution-flow.md`, and `frontmatter-properties.md` state only their own part and link to it.
+    - **alternatives considered:** repeat the full rules on every page (they drift); write the contract into `definition.md` (a dense reference that would need restructuring).
+    - **why:** one authority per behavior keeps the pages from contradicting each other, and each host page still says what it does.
+    - **downsides:** a reader of a host page needs one click for the full rules, and the short summaries must be kept in step.
+2. **Decision: the docs show the warning text the code actually prints**
+    - **decision:** the example warning carries the cause's own `invalid schema-trigger:` prefix (`ignoring invalid schema trigger <path>: invalid schema-trigger: …`), which the spec's example omits.
+    - **alternatives considered:** copy the spec's example.
+    - **why:** the docs record current behavior; when the code and the spec disagree, the code is authoritative.
+    - **downsides:** the spec's example and the docs differ in text (the spec is a snapshot and is left as decided).
+3. **Decision: removed the "quote the value" hint claim for malformed trigger envelopes**
+    - **decision:** `definition.md` no longer says `md compose`/`md schema validate` print a YAML quoting hint for a malformed claimed envelope. Discovery findings print the cause message only (`preparation_hint` now appears only on preparation errors), so the advice stays as plain guidance.
+    - **alternatives considered:** keep the claim (false); add the hint back to findings (a behavior change in a docs phase).
+    - **why:** the docs must not describe output that no longer exists.
+    - **downsides:** users lose a printed hint they used to get on this path.
+4. **Decision: "an invalid Claudine control fails the launch" wording kept**
+    - **decision:** sentences that describe an invalid *value* checked against a valid Claudine trigger stay unchanged; the invalid-trigger-*file* case is added beside them.
+    - **alternatives considered:** reword every such sentence to contrast the two cases.
+    - **why:** the value behavior did not change, so the edits stay surgical.
+    - **downsides:** a reader must tell an invalid control value apart from an invalid trigger file.
+5. **Decision: whole-scan failure docs keep "last-good" wording**
+    - **decision:** `darkmatter/docs/lsp/indexing.md` still describes last-good retention, but only for a scan that fails as a whole (case-folding collision, root I/O failure). An individually invalid trigger is now described as a valid-subset install with a warning.
+    - **alternatives considered:** none; that is the landed DMLS behavior (Phase 3).
+    - **why:** matches the code.
+    - **downsides:** none.
+
+### Work Completed
+
+- Darkmatter docs:
+    - `docs/topics/schemas/schema-triggers.md`: the planned section is replaced by "Invalid discovered triggers", with the example, what is skipped and what still fails, a shadowing Mermaid flow, embedded triggers, a delivery table per host, once-per-invocation display, `--deny`/`--disable schema-triggers`, and refresh after a repair. The "malformed payload remains an error" sentence is updated.
+    - `definition.md`: "Discovery is transactional" becomes per-trigger recovery; the shadowing, envelope-claim, malformed-YAML, and embedded-bundle passages are updated.
+    - `schema-targeting.md` and `dmls-schema-support.md`: skip-with-warning instead of discovery failure.
+    - `docs/cli/policy.md`: `dm.schema.invalid_trigger` under `--deny`.
+    - `docs/cli/report-json.md`: the code, plus the multi-file/first-input rule.
+    - `docs/cli/clean.md`: the `warnings` array in the `--json` envelope.
+    - `docs/cli/index.md`: the "Skipped invalid triggers" section of `md schema triggers`.
+    - `docs/lsp/indexing.md`: the valid-subset install, warnings published once and cleared, refresh, and logging and counting.
+    - `dmls/docs/diagnostics.md`: the code row, publish/clear semantics, and the strict authoring check for open trigger files.
+    - `dmls/docs/features.md`: skip-and-warn.
+- Claudine docs:
+    - `topics/schemas.md`: the discovery flow and the new "When a trigger is invalid" section.
+    - `topics/composition.md`: prepare-time warnings and the launch-verdict bullet.
+    - `topics/execution-flow.md`: `SchemaLoad` now covers only the authored `$schema`; adds the skip case, the "Schema trigger files" row, and the inline-compose step.
+    - `topics/frontmatter-properties.md`: a broken disk `claudine.yaml` leaves the properties untyped; the `$schema` row is updated.
+- Skills: `.claude/skills/darkmatter/schema.md` (user-docs pointer), `.claude/skills/darkmatter/dmls.md` (stale testing phrase), `.claude/skills/claudine/SKILL.md` (trigger bullet, shadowing), and `.claude/skills/claudine/cli-commands.md` (valid triggers still apply; a skipped disk file still shadows). `.claude/skills/darkmatter/SKILL.md` was checked and had nothing stale.
+- READMEs were checked; none promised the old whole-scan failure, so they are unchanged. `docs/dependencies.md` is unchanged because no crates were added or removed.
+- The plan names the skills under `.opencode/skill/…`, which is a symlink to `.claude/skills/`; the edits are there.
+
+### Requirement-to-Test Mapping
+
+- This phase changes documentation only, with no behavior change. The docs that tests read are covered by the existing doc guards, which run in Darkmatter's L1 suite. `trigger_spelling_guard::no_active_file_spells_a_renamed_trigger_form` caught the retired `kind` spelling written literally in the new `schema-triggers.md` prose. The prose was reworded ("a retired spelling of `schema-trigger`"), and the guard passes.
+
+### Gates
+
+- Scope calculator (all uncommitted files, run from the repository root): `packages: [claudine, claudine-cli, darkmatter, test-toolkit]`, `change_class: package`. The uncommitted tree still holds Phase 4's Claudine source changes. Restricted to this phase's docs and skills, it gives `packages: [darkmatter]`, `change_class: package` ("changed test input read by package(s) darkmatter"). Gates run, not skipped.
+- `just lint` (darkmatter): pass.
+- `just test` (darkmatter): the first run failed on the spelling guard above; after the fix it passed 12,471/12,471 (10 skipped by the recipe).
+- Dependents: no compiled code changed this phase, and the docs-only scope selects no package beyond `darkmatter`, so no dependent tests are needed.
+
+### Load-Sensitive and Pre-Existing Failures
+
+- None this phase. The Windows-only failures recorded in Phase 4 (`os_failing: windows`) are unchanged.
+
+### Cross-OS Check
+
+- Not run: the phase is docs only and carries no OS risk.

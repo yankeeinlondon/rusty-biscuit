@@ -37,6 +37,7 @@ packages:
     - dmls
     - claudine
     - claudine-cli
+os_failing: windows
 ---
 
 # Warn and skip invalid schema triggers

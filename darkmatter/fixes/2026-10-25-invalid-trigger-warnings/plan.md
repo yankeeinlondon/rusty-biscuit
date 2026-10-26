@@ -10,6 +10,7 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
+    - claudine-cli
 source_files_during_phase_1:
     - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
     - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
@@ -87,14 +88,64 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/schema.md
-source_files_during_phase_4: []
+source_files_during_phase_4:
+    - claudine/lib/src/composition/schema/findings.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/tests/l1/invalid_trigger_findings.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/invalid_trigger_warnings.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
 source_files_during_phase_5: []
-docs_updated_during_phase_5: []
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-targeting.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/frontmatter-properties.md
 docs_created_during_phase_5: []
-skills_files_updated_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
 source_files_during_phase_6: []
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
@@ -719,7 +770,7 @@ Phase 3 Wave 7) is delivery and tests.
 
 ### Wave 6 — Library carry
 
-- [ ] **Findings through schema loading**
+- [x] **Findings through schema loading**
     - `load_effective_schema` (`claudine/lib/src/composition/schema/mod.rs:
       553-581`) returns the findings alongside `Option<EffectiveSchema>`
       (outcome struct or equivalent) — the `schema_error` closure and
@@ -741,7 +792,7 @@ Phase 3 Wave 7) is delivery and tests.
 
 ### Wave 7 — Delivery and tests (concurrent with Phase 3 Wave 7)
 
-- [ ] **Warning delivery**
+- [x] **Warning delivery**
     - Compose/inline-compose/sequence routes: findings flow into
       `PreparedComposition.warnings` (`types.rs:876-878`) and render through
       `emit_compose_warnings` (`cli/src/commands/compose/loop_run.rs:33-52`).
@@ -754,7 +805,7 @@ Phase 3 Wave 7) is delivery and tests.
     - The existing `CompositionError::SchemaLoad` rendering
       (`error/render/schema.rs:15-33`) remains exactly as-is for real
       schema-load failures.
-- [ ] **Claudine test suite**
+- [x] **Claudine test suite**
     - Flip `malformed_disk_trigger_fails_without_embedded_fallback` and the
       import-failure tests
       (`claudine/lib/tests/l1/claudine_schemas_embedded.rs:870-916`) to
@@ -781,7 +832,7 @@ and keep READMEs untouched unless their overview promises the old behavior
 
 ### Wave 8 — Docs and skills (concurrent)
 
-- [ ] **Darkmatter documentation**
+- [x] **Darkmatter documentation**
     - `docs/topics/schemas/schema-triggers.md`: replace the "Invalid
       discovered triggers (planned)" section (lines 14-27) with the current
       behavior — recovery, warning identity and streams, shadowing, embedded
@@ -805,7 +856,7 @@ and keep READMEs untouched unless their overview promises the old behavior
       findings, hosts) and any trigger bullet in the darkmatter skill's
       SKILL.md; keep the skill's authority links pointing at the updated
       topic pages.
-- [ ] **Claudine documentation and skills**
+- [x] **Claudine documentation and skills**
     - `claudine/docs/topics/schemas.md`: rewrite the "a malformed disk trigger
       fails the launch visibly" sentence (~1003) and the discovery-flow
       section (~938-1009) for warn-and-skip; keep "$schema pointing at a
