@@ -323,6 +323,7 @@ fn predict_key(
         // document's; a synthetic key keeps the entry apart from a step key of
         // the same name.
         let entry = format!("\u{0}with.{key}");
+        crate::note_work!(PredictionWithStateNodes, crate::work_counters::value_nodes(layers.step_frontmatter.iter()));
         let mut state: HashMap<String, Value> = layers.step_frontmatter.clone();
         state.insert(entry.clone(), value.clone());
         let decided = classify_reads(&entry, &state, &HashSet::new(), dependencies);

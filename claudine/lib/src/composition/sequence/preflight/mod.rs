@@ -525,6 +525,7 @@ pub(crate) fn prepare_nested_sequence(
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.iter()));
     loader.caller_setters = supplied;
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut sequence = loader.load_sequence(
@@ -557,6 +558,7 @@ pub(crate) fn prepare_nested_group(
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.iter()));
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
@@ -690,6 +692,8 @@ impl<'a> Loader<'a> {
         // recursing forever.
         self.ancestry.push((self.source_path.clone(), None));
         self.step_frontmatter = Arc::new(authored.as_object().into_iter().flat_map(|map| map.iter()).map(|(key,value)| (key.clone(),value.clone())).collect());
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
+        crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &HashSet::new());
         let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
         let mut lifecycle = parse_lifecycle_config(&authored, &source_path)?;
@@ -700,6 +704,8 @@ impl<'a> Loader<'a> {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
             let property = format!("tasks[{index}]");
             self.step_frontmatter = Arc::new(self.step_frontmatter(plan, index));
+            crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
+            crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
             self.step_derived = derived_deferred_keys(
                 self.step_frontmatter.iter(),
                 &sequence_deferred_roots(),
@@ -1009,6 +1015,8 @@ impl<'a> Loader<'a> {
             let mut values: HashMap<String, Value> = authored.iter()
                 .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
             values.extend(self.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
+            crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(values.iter()));
+            crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(values.iter()));
             let derived = derived_deferred_keys(values.iter(), &sequence_deferred_roots(), &HashSet::new());
             (std::mem::replace(&mut self.step_frontmatter, Arc::new(values)),
              std::mem::replace(&mut self.step_derived, derived))
@@ -1884,6 +1892,7 @@ impl<'a> Loader<'a> {
         )?;
         // The authored value supplies the structure; the resolved one only its
         // bytes, so interpolation cannot change an executable or add a command.
+        crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         let value = darkmatter::markdown::compose::ResolvedShellValue::resolve(
             key,
             raw,
@@ -2061,6 +2070,7 @@ impl<'a> Loader<'a> {
             with: evaluated.clone(),
             deferred_with: deferred.clone(),
         };
+        crate::note_work!(PromptReferenceCompare, self.graph.prompt_references.len());
         if !self.graph.prompt_references.contains(&reference) {
             self.graph.prompt_references.push(reference);
         }

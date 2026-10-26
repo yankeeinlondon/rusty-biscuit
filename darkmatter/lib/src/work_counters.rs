@@ -66,6 +66,10 @@ pub enum Work {
     PositionKeyComparison,
     /// A document's lifecycle configuration parsed from frontmatter.
     LifecycleConfigParse,
+    /// An expression parsed while scanning frontmatter values for reads of a
+    /// late root (`derived_deferred_keys`); also counted as a
+    /// [`Work::ExpressionParse`].
+    DeferredRootScanParse,
 }
 
 impl Work {
@@ -91,6 +95,7 @@ impl Work {
         Work::RecursiveTargetTranslate,
         Work::PositionKeyComparison,
         Work::LifecycleConfigParse,
+        Work::DeferredRootScanParse,
     ];
 }
 

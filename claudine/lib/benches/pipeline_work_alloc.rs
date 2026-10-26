@@ -510,6 +510,28 @@ fn a6_with_steps(step_count: usize) {
     );
 }
 
+/// Sequence-size multipliers outside the A4/A6/C7 shapes, at 10 and 100
+/// steps: provider prediction of a `with` hint, and a shell `set` value in a
+/// container event. Each step's own work is the same at both sizes, so any
+/// growth in a per-step count is work that visits the other steps.
+fn sq_sequence_size_sites() {
+    for steps in [10usize, 100] {
+        let sandbox = Sandbox::new();
+        sandbox.write("prompt.md", "---\nmodel: m\n---\n\nDo the work.\n");
+        let prompts: Vec<Value> = (0..steps)
+            .map(|index| json!({"name": format!("task-{index}"), "prompt": "prompt.md", "with": {"agent": "codex"}}))
+            .collect();
+        sandbox.write("seq.md", &sequence_document(&prompts));
+        report("SQ-with", &format!("steps={steps}"), &measure(3, preflight(&sandbox, "seq.md")));
+
+        let shells: Vec<Value> = (0..steps)
+            .map(|index| json!({"name": format!("step-{index}"), "sequence": [], "success": [{"set": {"v": format!("$(echo {index})")}}]}))
+            .collect();
+        sandbox.write("seq.md", &sequence_document(&shells));
+        report("SQ-set", &format!("steps={steps}"), &measure(3, preflight(&sandbox, "seq.md")));
+    }
+}
+
 fn main() {
     let filter: Option<String> = std::env::args()
         .skip(1)
@@ -542,5 +564,8 @@ fn main() {
     }
     if selected("A6") {
         a6_shell_preparation();
+    }
+    if selected("SQ") {
+        sq_sequence_size_sites();
     }
 }

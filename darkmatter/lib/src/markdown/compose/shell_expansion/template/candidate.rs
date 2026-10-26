@@ -472,6 +472,7 @@ fn value_roots(value: &Value, roots: &mut Vec<RootRead>) {
     match value {
         Value::String(text) => {
             for location in ExpressionFinder::find_all_plain(text) {
+                crate::note_work!(DeferredRootScanParse);
                 if let Ok(expr) = parse(&location.expression) {
                     read_roots(&expr, roots);
                 }

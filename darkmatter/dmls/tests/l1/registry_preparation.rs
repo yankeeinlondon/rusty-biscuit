@@ -179,10 +179,13 @@ fn a_held_preparation_leaves_edits_cancellation_and_other_requests_running() {
     fixture.open_registry_gate();
     fixture.shutdown();
 
+    // 502's elapsed time includes the held preparation, so on a loaded host it
+    // crosses `SLOW_THRESHOLD` and completes as a `slow request` instead.
     let completion = |id: &str| -> String {
         let lines: Vec<String> = logs
-            .matching("request complete")
+            .lines()
             .into_iter()
+            .filter(|line| line.contains("request complete") || line.contains("slow request"))
             .filter(|line| line.contains(&format!(" id={id} ")))
             .collect();
         assert_eq!(lines.len(), 1, "{:#?}", logs.lines());

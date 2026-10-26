@@ -37,6 +37,23 @@ pub enum Work {
     /// An environment map copied (or a copy of an owner holding one) when a
     /// document is entered.
     EnvironmentMapCopy,
+    /// JSON nodes ([`value_nodes`]) deep-copied into a preflight step's
+    /// early-binding frontmatter.
+    PreflightStepFrontmatterNodes,
+    /// JSON nodes ([`value_nodes`]) a preflight walk scans for reads of a
+    /// late root (`derived_deferred_keys`) over a step's frontmatter.
+    PreflightDeferredScanNodes,
+    /// JSON nodes ([`value_nodes`]) of the frontmatter an early-binding
+    /// evaluation state is built from.
+    EarlyBindingStateNodes,
+    /// JSON nodes ([`value_nodes`]) of the step frontmatter copied to classify
+    /// one `with` provider hint.
+    PredictionWithStateNodes,
+    /// JSON nodes ([`value_nodes`]) of the step frontmatter copied to resolve
+    /// one shell `set` value.
+    ShellValueStateNodes,
+    /// Recorded prompt references compared while deduplicating a new one.
+    PromptReferenceCompare,
 }
 
 impl Work {
@@ -50,6 +67,12 @@ impl Work {
         Work::PrewarmStateBuild,
         Work::PredictionStateBuild,
         Work::EnvironmentMapCopy,
+        Work::PreflightStepFrontmatterNodes,
+        Work::PreflightDeferredScanNodes,
+        Work::EarlyBindingStateNodes,
+        Work::PredictionWithStateNodes,
+        Work::ShellValueStateNodes,
+        Work::PromptReferenceCompare,
     ];
 }
 
@@ -90,4 +113,18 @@ impl WorkSnapshot {
 /// The counters' current values.
 pub fn snapshot() -> WorkSnapshot {
     WorkSnapshot { counts: COUNTS.iter().map(|count| count.load(Ordering::Relaxed)).collect() }
+}
+
+/// The JSON values in `entries`' values, counting every nested value once: a
+/// size measure for a frontmatter-shaped map that grows with an embedded
+/// `sequence:` list.
+pub fn value_nodes<'a>(entries: impl IntoIterator<Item = (&'a String, &'a serde_json::Value)>) -> u64 {
+    fn nodes(value: &serde_json::Value) -> u64 {
+        1 + match value {
+            serde_json::Value::Array(items) => items.iter().map(nodes).sum(),
+            serde_json::Value::Object(map) => map.values().map(nodes).sum(),
+            _ => 0,
+        }
+    }
+    entries.into_iter().map(|(_, value)| nodes(value)).sum()
 }

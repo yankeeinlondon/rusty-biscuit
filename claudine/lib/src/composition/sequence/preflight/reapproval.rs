@@ -170,6 +170,7 @@ pub(super) fn early_binding_state(
     frontmatter: &HashMap<String, Value>,
     context: ComposeContext,
 ) -> Result<EffectiveState, CompositionError> {
+    crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(frontmatter.iter()));
     EffectiveStateBuilder::new()
         .with_frontmatter(frontmatter.clone())
         .with_context(context)
