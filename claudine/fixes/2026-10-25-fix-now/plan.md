@@ -6,6 +6,11 @@ phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Pipeline review: fix now — implementation plan
@@ -114,7 +119,7 @@ Retain or extend existing CLI wiring controls and one or two invalid-input cases
 
 ### Wave 1: Contract preparation
 
-- [ ] **P1.1 Contract inventory**
+- [x] **P1.1 Contract inventory**
   - Verify the predecessor's implementation status from code and evidence, then satisfy Decision 11 before dependent DMLS edits. Preserve unrelated existing worktree changes.
   - Search all consumers of `GlobalRequirement`, `CatalogErrorReason::Mismatch`, registry catalog/global accessors, `UnknownVerbPolicy`, `HostLifecycleProfile::from_artifact`, and `host_lifecycle_profiles`, including tests, compiled hosts, examples, and `darkmatter/lib/benches/pipeline_work_support/mod.rs`.
   - Map existing fixtures and tests to spec acceptance items 1–10 and the reader groups above; identify only missing coverage. Record the implementation task/file owners before parallel work starts.
