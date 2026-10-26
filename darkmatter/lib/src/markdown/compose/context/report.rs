@@ -775,6 +775,26 @@ impl ComposeWarning {
         }
     }
 
+    /// The trigger a [`Self::from_invalid_trigger`] warning reports: the
+    /// finding's [`identity`](crate::markdown::schemas::InvalidTriggerFinding::identity),
+    /// so a host that also reads discovery findings directly can recognize
+    /// the same trigger. `None` for every other warning.
+    #[must_use]
+    pub fn invalid_trigger_source(&self) -> Option<crate::markdown::schemas::TriggerSource> {
+        use crate::markdown::schemas::TriggerSource;
+        if self.code.as_deref() != Some(crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE) {
+            return None;
+        }
+        match &self.identity.as_ref()?.subject {
+            WarningSubject::Path(path) => Some(TriggerSource::File(path.clone())),
+            WarningSubject::Embedded { bundle, name } => Some(TriggerSource::Embedded {
+                bundle: bundle.clone(),
+                name: name.clone(),
+            }),
+            WarningSubject::Root { .. } | WarningSubject::Expression { .. } => None,
+        }
+    }
+
     /// An `unknown context variable` warning for the `ctx.*` group `name`.
     ///
     /// One per source document per group: `ctx.toady` and `ctx.toady.x`

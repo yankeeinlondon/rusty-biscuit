@@ -90,6 +90,12 @@ fn a_prompt_without_schema_composes_beside_the_incident_trigger() {
     assert!(warning.message.starts_with("ignoring invalid schema trigger"), "{}", warning.message);
     assert!(warning.message.contains("found unknown keys: name, description"), "{}", warning.message);
     assert!(!warning.message.contains("merge-conflicts.md"), "never blames the prompt: {}", warning.message);
+    assert_eq!(
+        warning.invalid_trigger_source(),
+        Some(crate::markdown::schemas::TriggerSource::File(repo.trigger())),
+        "a host recognizes the trigger by its discovery identity"
+    );
+    assert_eq!(ComposeWarning::new("schema_validation", "other").invalid_trigger_source(), None);
 }
 
 #[test]
