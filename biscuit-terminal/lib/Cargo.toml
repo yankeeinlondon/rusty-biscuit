@@ -22,14 +22,15 @@ clap = ["dep:clap", "renderable/clap"]
 # RuleAlignment, RuleWeight}`). Off by default — opt in when persisting or
 # round-tripping these values through JSON/YAML.
 serde = []
-# Enables SVG rasterization via resvg for terminal image rendering.
-image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
+# Enables SVG rasterization via resvg for terminal image rendering (SVG
+# images and graphical horizontal rules). Diagrams live in
+# `biscuit-visualized`, which depends on this crate, never the reverse.
+image = ["dep:resvg"]
 terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
 browser-tests = ["dep:biscuit-browser-harness"]
 
 [dependencies]
 base64 = "0.22"
-biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
 # Structured config parsing for app-metadata value extraction. Normalizes
 # TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
 # `file-reference` resolves Prose link destinations for terminal OSC 8 links
@@ -37,6 +38,8 @@ biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5", "file-reference"] }
 ignore = "0.4"
 image = "0.25"
+# Sixel encoding (with its own quantizer) for the Sixel graphics route.
+icy_sixel = "0.7"
 renderable = { path = "../../renderable" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
@@ -54,9 +57,6 @@ globset = "0.4"
 plist = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
-
-# Terminal image rendering
-viuer = { version = "0.11", features = ["print-file"] }
 
 # SVG rasterization for terminal image rendering
 resvg = { version = "0.48.1", optional = true }
@@ -76,6 +76,20 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The Windows Terminal version read: the parent-process walk (Toolhelp32
+# snapshot, `QueryFullProcessImageNameW`) and the executable's version
+# resource (`GetFileVersionInfoW`, `VerQueryValueW`). The terminal query
+# engine's console port: console modes and input records
+# (`Win32_System_Console`), waited on with `WaitForSingleObject`.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
@@ -101,6 +115,12 @@ tracing-test = "0.2"
 # exists under `terminal-tests`.
 test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+
+# A windowless Windows console (ConPTY) whose console host can be chosen, for
+# the console query port's Level 2 test; already built for worktree-cli and
+# claudine-cli.
+[target.'cfg(windows)'.dev-dependencies]
+xpty = "0.3.6"
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a

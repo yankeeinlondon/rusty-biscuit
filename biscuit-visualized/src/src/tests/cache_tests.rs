@@ -313,8 +313,8 @@ fn visualization_kind_as_str() {
 
 #[test]
 fn cache_key_different_mermaid_backend() {
-    // Artifacts laid out before the gitGraph merge repair (bv2) or the
-    // collision-driven tag spacing (bv3) must never be served again.
+    // Artifacts of mermaid-rs-renderer, the backend Merman replaced, and of
+    // an earlier post-process version must never be served again (AC-C6).
     let key = |backend: &str| {
         FileCache::cache_key(
             VisualizationKind::Mermaid,
@@ -324,8 +324,34 @@ fn cache_key_different_mermaid_backend() {
             OutputFormat::Png,
         )
     };
-    assert_eq!(MERMAID_BACKEND, "mermaid-rs-renderer@0.3.x+bv3");
+    assert_eq!(MERMAID_BACKEND, "merman@6e6b1e6554e8+bv7");
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv6"));
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv5"));
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv4"));
+    assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv3"));
     assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.3.x+bv2"));
-    assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.2.x+bv1"));
+    assert_ne!(key(MERMAID_BACKEND), key("merman@6e6b1e6554e8+bv0"));
 }
 
+
+/// `store` renames a staged file into place: storing a key again replaces
+/// the artifact and leaves nothing else behind.
+#[test]
+fn storing_a_key_again_replaces_the_artifact_without_leftovers() {
+    let (cache, _dir) = isolated_cache();
+
+    let first = cache
+        .store(VisualizationKind::Graph, "key", OutputFormat::Png, b"first")
+        .unwrap();
+    let second = cache
+        .store(VisualizationKind::Graph, "key", OutputFormat::Png, b"second")
+        .unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(std::fs::read(&second).unwrap(), b"second");
+    let entries: Vec<_> = std::fs::read_dir(cache.cache_dir(VisualizationKind::Graph, OutputFormat::Png))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, [std::ffi::OsString::from("key.png")]);
+}

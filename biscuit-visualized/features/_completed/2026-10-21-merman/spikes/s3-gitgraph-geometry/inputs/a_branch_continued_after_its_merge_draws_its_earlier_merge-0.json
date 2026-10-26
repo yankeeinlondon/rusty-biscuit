@@ -1,0 +1,69 @@
+{
+  "call": 0,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "016cd61",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "7a8ed47",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "016cd61"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "a6e6cf8",
+      "index": 2,
+      "lane": "b",
+      "parents": [
+        "7a8ed47"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "aab7718",
+      "index": 3,
+      "lane": "main",
+      "parents": [
+        "7a8ed47",
+        "a6e6cf8"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 113.56494140625,
+          "x2": 147.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 134.0
+    },
+    {
+      "id": "e5c3940",
+      "index": 4,
+      "lane": "b",
+      "parents": [
+        "a6e6cf8"
+      ],
+      "tags": [],
+      "x": 176.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 161.6510009765625,
+  "mermaid": "gitGraph\n    commit id: \"016cd61\"\n    commit id: \"7a8ed47\"\n    branch b\n    checkout b\n    commit id: \"a6e6cf8\"\n    checkout main\n    merge b id: \"aab7718\" tag: \"main\"\n    checkout b\n    commit id: \"e5c3940\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__a_branch_continued_after_its_merge_draws_its_earlier_merge",
+  "width": 299.9921875
+}

@@ -1,0 +1,87 @@
+{
+  "call": 0,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "509951e",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "09624cf",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "509951e"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "fd97127",
+      "index": 2,
+      "lane": "parent",
+      "parents": [
+        "09624cf"
+      ],
+      "tags": [
+        {
+          "text": "child",
+          "x1": 71.6064453125,
+          "x2": 105.8935546875,
+          "y1": 48.5,
+          "y2": 63.5
+        }
+      ],
+      "x": 92.0
+    },
+    {
+      "id": "a10f6b2",
+      "index": 3,
+      "lane": "parent",
+      "parents": [
+        "fd97127"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "7f8f568",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "09624cf"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "e0381b7",
+      "index": 5,
+      "lane": "main",
+      "parents": [
+        "7f8f568",
+        "a10f6b2"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 197.56494140625,
+          "x2": 231.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 218.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 160.7577362060547,
+  "mermaid": "gitGraph\n    commit id: \"509951e\"\n    commit id: \"09624cf\"\n    branch parent\n    checkout parent\n    commit id: \"fd97127\" tag: \"child\"\n    commit id: \"a10f6b2\"\n    checkout main\n    commit id: \"7f8f568\"\n    merge parent id: \"e0381b7\" tag: \"main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__a_tip_on_the_parents_first_parent_chain_is_labeled_there_while_main_contains_it",
+  "width": 354.3515625
+}

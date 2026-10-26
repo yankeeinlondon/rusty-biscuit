@@ -80,12 +80,11 @@ mod tests {
     use crate::markdown::compose::interpolation::{EvalResult, Evaluator};
     use crate::markdown::compose::{ComposeContext, EffectiveState};
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn state(frontmatter: Value, context: ComposeContext) -> EffectiveState {
-        let frontmatter: HashMap<String, Value> = match frontmatter {
+        let frontmatter: serde_json::Map<String, Value> = match frontmatter {
             Value::Object(map) => map.into_iter().collect(),
-            _ => HashMap::new(),
+            _ => serde_json::Map::new(),
         };
         EffectiveState::new(&frontmatter, None, context)
     }
@@ -264,7 +263,7 @@ mod tests {
             Err(ExpressionError::ContextNotCaptured { group: ContextGroup::Repo, .. })
         ));
 
-        let seed = FrontmatterSeedState::new(HashMap::new(), ComposeContext::fixed_for_testing());
+        let seed = FrontmatterSeedState::new(serde_json::Map::new(), ComposeContext::fixed_for_testing());
         assert!(matches!(
             seed.resolve("ctx.repo_root").map(ResolvedBinding::into_value),
             Err(ExpressionError::ContextNotCaptured { group: ContextGroup::Repo, .. })
@@ -302,7 +301,7 @@ mod tests {
     #[test]
     fn the_frontmatter_seed_lookup_classifies_through_the_same_path() {
         let seed = FrontmatterSeedState::new(
-            HashMap::new(),
+            serde_json::Map::new(),
             ComposeContext::fixed_for_testing().with_projection_key_removed("today"),
         );
         assert!(matches!(

@@ -141,8 +141,8 @@ pub fn workspace_symbols(query: &str, documents: &[SymbolDocument]) -> Vec<Works
 /// referenced dependency, in document order.
 pub fn graph_symbol_documents(graph: &WorkspaceGraph) -> Vec<SymbolDocument> {
     let mut out = Vec::new();
-    for record in graph.documents().iter().filter(|record| !record.dependency) {
-        let Some(doc_id) = graph.document_id(&record.path) else {
+    for record in graph.documents().filter(|record| !record.dependency) {
+        let Some(doc_id) = graph.document_id(record.path) else {
             continue;
         };
         let headings = graph
@@ -159,7 +159,7 @@ pub fn graph_symbol_documents(graph: &WorkspaceGraph) -> Vec<SymbolDocument> {
                 })
             })
             .collect();
-        out.push((record.path.clone(), headings));
+        out.push((record.path.to_path_buf(), headings));
     }
     out
 }

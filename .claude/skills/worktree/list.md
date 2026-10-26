@@ -314,6 +314,10 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   Before this, the holder reached `git -C <holder> symbolic-ref`/`merge`,
   which in an unlinked directory nested in another repository runs against
   **that** repository. Nothing repairs or prunes the holder.
+- A holder that a `wt remove` has started and not finished
+  (`PendingRemovals`) is `FfRefusal::RemovingHolder { path, name }`, also
+  only when a move is needed: the merge would write files into a folder
+  being deleted.
 - No checkout holds the branch: `update-ref` compare-and-swap.
 - Otherwise re-verifies the holder is still on the branch and runs
   `merge --ff-only --no-autostash <verified sha>` there under `LC_ALL=C`

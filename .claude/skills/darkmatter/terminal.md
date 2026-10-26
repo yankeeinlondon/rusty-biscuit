@@ -28,7 +28,7 @@ pub struct TerminalOptions {
     pub base_path: Option<PathBuf>,   // For relative image paths
     pub italic_mode: ItalicMode,      // Auto, Always, Never
     pub max_width: Option<u16>,       // Text wrapping width
-    pub mermaid_mode: MermaidMode,    // Off, Image, Text
+    pub mermaid_mode: MermaidMode,    // Off, Image, Automatic, Text
     pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
 }
 ```
@@ -164,17 +164,28 @@ to any code that paints adjacent background segments by hand.
 
 ## Mermaid Diagrams
 
-Terminal (via biscuit-terminal):
+Terminal (via biscuit-visualized's `MermaidDiagram` component):
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 
-let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-match renderer.render_for_terminal() {
-    Ok(()) => {},
-    Err(_) => println!("{}", renderer.fallback_code_block()),
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+match diagram.try_render(&Terminal::new()) {
+    Ok(result) => print!("{}", result.output),
+    Err(_) => println!("{}", diagram.fallback_code_block()),
 }
 ```
+
+In the render-tree terminal path, `MermaidMode::Image` and `Automatic` draw
+fences through `biscuit_visualized::components::TerminalDiagramRenderer`, which
+`markdown/render_tree/entrypoints.rs` installs as the diagram hook (with
+`TerminalOptions::mermaid_fallback_policy`); without it biscuit-terminal
+renders every fence as code. `md --mermaid` selects `Automatic`; `md
+--feature no-mermaid-rendering` lowers to `Text`. Mermaid highlighting uses a
+separate syntax set: resolve and highlight with
+`CodeHighlighter::syntax_set_for(grammar)`, never `syntax_set()`, or a
+Mermaid block falls back to plain text.
 
 Browser (via darkmatter): Mermaid browser output is a page **feature**, not a
 method on `Mermaid`. Render a `lang="mermaid"` fence through

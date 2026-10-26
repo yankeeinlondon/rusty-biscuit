@@ -207,16 +207,18 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (`DocumentRecord::dependency`: headings and transclusions only; excluded
   from wiki candidates, path completion, workspace symbols, `transcluded_by`,
   and the index store; its folder joins the schema-location watches; tests in
-  `tests/l1/referenced_targets.rs`). Tests use `context::test_support`
+  `tests/l1/referenced_targets.rs`). Opening a dependency is a role change:
+  `open_buffer` rebuilds even when the text's hash is unchanged, so never
+  gate publication on the content hash alone. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`
   (`ContextFailure::NotProvided`).
 - Wiki candidates come from a caller-supplied `wiki::WikiUniverse` (one slot
   per file, canonicalized against its wiki roots), not from the graph's
-  documents: `build_with_roots`/`build_listed` take it, `assemble` appends any
-  graph document it lacks (a dependency as an unmatchable slot), and every
-  wiki matcher call indexes `graph.wiki_universe().docs()` by
+  documents: `build_with_roots`/`build_listed` take it, table construction
+  appends any graph document it lacks (a dependency as an unmatchable slot),
+  and every wiki matcher call indexes `graph.wiki_universe().docs()` by
   `wiki_slot(doc)` / `slot_document(slot)`, never by `DocumentId`. A graph
   over a few documents therefore judges ambiguity and rename spellings
   against the whole universe: an ambiguous link lists only in-graph
@@ -226,6 +228,23 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   documents; `WorkspaceGraph::build` (tests) passes its documents. The
   equivalence tests are `tests/l1/wiki_universe_equivalence.rs`
   (`Oracle::scoped`, `UniverseScope`).
+- Live rebuilds reuse path-derived state (`docs/lsp/architecture.md`,
+  "Rebuilding the live snapshot"). `WorkspaceIndex::wiki_universe` returns
+  the cached `Arc<WikiUniverse>` while sorted candidates (listed + parsed
+  non-dependencies), sorted dependencies, and ordered wiki roots compare
+  equal; it prepopulates dependencies as unmatchable slots after the
+  candidates. The private `DocumentTable` (records, `by_path`, slot map,
+  basename `KeyIndex`, portability collisions) is shared when
+  `DocumentTable::matches`: same sorted parsed∪listed paths, dependency
+  flags, `Listing` (all three states distinct), and `Arc::ptr_eq` universe.
+  Only `build_listed_reusing` (called only by `rebuild`) reuses; public
+  builders always build fresh and serve as the uncached oracle. Content
+  (nodes, edges, headings, `FrontmatterKey`s/`key_by_name`, resolutions,
+  awaited paths, reverse index) is rebuilt every snapshot; never put
+  content-derived or existence facts in the table. Roots first:
+  `DocumentId(d)`'s root is `NodeId(d)`; node/edge IDs are snapshot-local,
+  so tests compare paths and spans, never IDs across snapshots.
+  `DocumentRecord<'a>` is a borrowed `Copy` view.
 - `index_store` (persistent per-file facts behind references, rename, and
   workspace symbols, which answer only from it): `FileFacts` is the
   R1 row (`from_index`/`into_index`, unstored fields empty), `keys` derives
@@ -323,7 +342,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
 - `context_build_count()` is a process-wide work counter; L1 tests assert
   deltas (nextest runs one test per process). `work_counters::work_counts()`
   does the same for DMLS file reads, content hashes, Markdown document
-  parses, schema-root enumerations, and trigger-registry scans; route every
+  parses, schema-root enumerations, trigger-registry scans, and live-graph
+  path work (`wiki_universes`, `wiki_path_facts`, `wiki_portability_keys`,
+  `document_tables`; a content edit adds 0 to each); route every
   new DMLS read/hash through its `read`/`read_to_string`/`hash_bytes`
   helpers. Timing that decides behavior reads a `clock::Clock`
   (`ManualClock` in tests). `log_capture::CapturedLogs` captures formatted

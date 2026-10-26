@@ -23,7 +23,7 @@
 //! ([`DiscoveryReport::is_complete`]), so no caller can mistake absence from
 //! the list for absence from disk.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -199,32 +199,64 @@ pub fn discover_workspace(roots: &[PathBuf], config: &WorkspaceConfig) -> Discov
 /// `None` when the walk would not list `path`, including when it does not
 /// exist as a regular file.
 pub fn listed_kind(roots: &[PathBuf], config: &WorkspaceConfig, path: &Path) -> Option<ListedKind> {
-    let filter = DiscoveryFilter::from_config(config);
-    let effective_root = effective_roots(roots, config)
-        .into_iter()
-        .find(|root| path.starts_with(root))?;
-    let relative = path.strip_prefix(&effective_root).ok()?;
-    if relative.components().any(|component| component.as_os_str() == ".git") {
-        return None;
+    ListedKinds::new(roots, config).kind(path)
+}
+
+/// [`listed_kind`] for many paths at once: the filter is compiled once and
+/// each directory's ignore-filtered entries are read at most once.
+///
+/// It never re-reads a directory, so it holds for one batch of changes that
+/// already happened on disk, not across batches.
+pub struct ListedKinds {
+    filter: DiscoveryFilter,
+    effective_roots: Vec<PathBuf>,
+    /// Each listed directory's entries, `true` for a regular file.
+    listings: HashMap<PathBuf, HashMap<PathBuf, bool>>,
+}
+
+impl ListedKinds {
+    pub fn new(roots: &[PathBuf], config: &WorkspaceConfig) -> Self {
+        Self {
+            filter: DiscoveryFilter::from_config(config),
+            effective_roots: effective_roots(roots, config),
+            listings: HashMap::new(),
+        }
     }
-    let kind = filter.classify(relative)?;
-    let parent = path.parent()?;
-    // Ignore rules for an ancestor directory hide the whole parent; walking
-    // from the root to it would re-list the tree, so check the directories
-    // between the root and the parent one level at a time.
-    let mut directory = effective_root.clone();
-    let remaining = parent.strip_prefix(&effective_root).ok()?.components();
-    for next in remaining {
-        let child = directory.join(next);
-        if !walker(&directory, Some(1), None).flatten().any(|entry| entry.path() == child) {
+
+    /// How `path` would be listed; see [`listed_kind`].
+    pub fn kind(&mut self, path: &Path) -> Option<ListedKind> {
+        let effective_root = self.effective_roots.iter().find(|root| path.starts_with(root))?.clone();
+        let relative = path.strip_prefix(&effective_root).ok()?;
+        if relative.components().any(|component| component.as_os_str() == ".git") {
             return None;
         }
-        directory = child;
+        let kind = self.filter.classify(relative)?;
+        let parent = path.parent()?;
+        // Ignore rules for an ancestor directory hide the whole parent; walking
+        // from the root to it would re-list the tree, so check the directories
+        // between the root and the parent one level at a time.
+        let mut directory = effective_root.clone();
+        for next in parent.strip_prefix(&effective_root).ok()?.components() {
+            let child = directory.join(next);
+            if !self.listing(&directory).contains_key(&child) {
+                return None;
+            }
+            directory = child;
+        }
+        (self.listing(parent).get(path) == Some(&true)).then_some(kind)
     }
-    walker(parent, Some(1), None)
-        .flatten()
-        .any(|entry| entry.path() == path && entry.file_type().is_some_and(|kind| kind.is_file()))
-        .then_some(kind)
+
+    fn listing(&mut self, directory: &Path) -> &HashMap<PathBuf, bool> {
+        self.listings.entry(directory.to_path_buf()).or_insert_with(|| {
+            walker(directory, Some(1), None)
+                .flatten()
+                .map(|entry| {
+                    let is_file = entry.file_type().is_some_and(|kind| kind.is_file());
+                    (entry.into_path(), is_file)
+                })
+                .collect()
+        })
+    }
 }
 
 /// Builds a `GlobSet` from patterns, skipping (and logging) invalid ones.

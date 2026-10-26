@@ -64,9 +64,8 @@ install *args="":
 # biscuit-terminal-cli, darkmatter, worktree-cli, sniff-cli — so the
 # no-feature build is a configuration nobody ships.
 #
-# NOT `--all-features`: the `serde` feature's test module does not compile
-# (its `renderable::tree::graphics::horizontal_rule_svg` calls are one
-# argument behind that function's signature), and `clap` gates no tests.
+# The optional `serde` and `clap` features are not required by this rendering
+# configuration; `clap` gates no tests.
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:

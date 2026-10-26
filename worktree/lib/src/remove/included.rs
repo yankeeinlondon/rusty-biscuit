@@ -1,9 +1,8 @@
-//! Consent assessment for ignored files selected by `.worktreeinclude`.
+//! Which ignored files selected by `.worktreeinclude` differ from their
+//! baseline, so removing the worktree would lose them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
 
 use crate::compare::{self, Comparison, FilesystemReader, Policy};
 use crate::copy_record::{self, LoadedRecord};
@@ -13,19 +12,11 @@ use crate::git::git_from;
 use crate::include::{EntryKind, IncludeRules, guarded_kind, relative_path, resolve_include_set};
 use crate::worktree::{CopySource, copy_source, parse_worktree_list};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The effective `.worktreeinclude`: the worktree's own, else the base's.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulesBinding {
     pub location: Option<PathBuf>,
     pub presence: String,
-    pub content_digest: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BaselineBinding {
-    Record { identity: String, content_digest: String },
-    NoRecord { source: PathBuf, per_file_results: Vec<(String, String)>, untrusted_record_digest: Option<String> },
-    Unavailable { untrusted_record_digest: Option<String> },
-    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +39,6 @@ impl Mark {
 pub struct IncludedAssessment {
     pub needs_consent: Vec<(PathBuf, Mark)>,
     pub rules: RulesBinding,
-    pub baseline: BaselineBinding,
     pub selected: Vec<(PathBuf, Mark)>,
     pub warnings: Vec<String>,
 }
@@ -56,13 +46,9 @@ pub struct IncludedAssessment {
 impl Default for IncludedAssessment {
     fn default() -> Self {
         Self { needs_consent: Vec::new(), rules: RulesBinding {
-            location: None, presence: "missing".into(), content_digest: None,
-        }, baseline: BaselineBinding::None, selected: Vec::new(), warnings: Vec::new() }
+            location: None, presence: "missing".into(),
+        }, selected: Vec::new(), warnings: Vec::new() }
     }
-}
-
-fn digest(bytes: &[u8]) -> String {
-    copy_record::path_hex(&biscuit_hash::blake3_hash_bytes(bytes))
 }
 
 fn source_for(base: &Path, worktree: &Path, branch: Option<&str>) -> Option<PathBuf> {
@@ -92,8 +78,7 @@ pub fn classify_included(base: &Path, worktree: &Path, branch: Option<&str>)
         IncludeRules::Empty | IncludeRules::Present(_) => {
             let bytes = fs::read(&location).map_err(|e| WorktreeError::IncludeSetDiscovery(e.to_string()))?;
             assessment.rules = RulesBinding { location: Some(location.clone()),
-                presence: if bytes.is_empty() { "empty" } else { "present" }.into(),
-                content_digest: Some(digest(&bytes)) };
+                presence: if bytes.is_empty() { "empty" } else { "present" }.into() };
         }
     }
     let set = resolve_include_set(base, worktree, &location)?;
@@ -104,22 +89,8 @@ pub fn classify_included(base: &Path, worktree: &Path, branch: Option<&str>)
         assessment.warnings.push(format!("copy record is untrusted: {reason}"));
     }
     let source = if matches!(loaded, LoadedRecord::Trusted(_)) { None } else { source_for(base, worktree, branch) };
-    let record_digest = copy_record::record_path(base, worktree).ok()
-        .and_then(|path| fs::read(path).ok()).map(|bytes| digest(&bytes));
-    assessment.baseline = match &loaded {
-        LoadedRecord::Trusted(record) => {
-            BaselineBinding::Record { identity: record.registration.clone(),
-                content_digest: record_digest.clone().unwrap_or_default() }
-        }
-        LoadedRecord::Absent | LoadedRecord::Untrusted(_) => match &source {
-            Some(path) => BaselineBinding::NoRecord { source: path.clone(),
-                per_file_results: Vec::new(), untrusted_record_digest: record_digest.clone() },
-            None => BaselineBinding::Unavailable { untrusted_record_digest: record_digest.clone() },
-        },
-    };
     for entry in set.entries {
         let path = relative_path(&entry.path).map_err(|e| WorktreeError::IncludeSetDiscovery(e.to_string()))?;
-        let mut source_observation = String::new();
         let mark = match &loaded {
             LoadedRecord::Trusted(record) => {
                 let key = copy_record::path_hex(&entry.path);
@@ -132,22 +103,13 @@ pub fn classify_included(base: &Path, worktree: &Path, branch: Option<&str>)
             LoadedRecord::Absent | LoadedRecord::Untrusted(_) => match &source {
                 Some(source) => match guarded_kind(source, &path) {
                     Ok(Some(EntryKind::File | EntryKind::Symlink)) => match compare::observe(&source.join(&path), &FilesystemReader) {
-                    Ok(baseline) => {
-                        source_observation = digest(&serde_json::to_vec(&baseline)?);
-                        from_comparison(compare::compare(&baseline,
-                            &worktree.join(&path), Policy::Included, &FilesystemReader))
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        source_observation = "missing".into(); Mark::New
-                    }
-                    Err(error) => {
-                        source_observation = error.to_string(); Mark::Unknown(error.to_string())
-                    }
+                    Ok(baseline) => from_comparison(compare::compare(&baseline,
+                        &worktree.join(&path), Policy::Included, &FilesystemReader)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Mark::New,
+                    Err(error) => Mark::Unknown(error.to_string()),
                     },
                     Ok(None) => match fs::symlink_metadata(source.join(&path)) {
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            source_observation = "missing".into(); Mark::New
-                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Mark::New,
                         _ => Mark::Unknown("source path cannot be safely inspected".into()),
                     },
                     Ok(Some(EntryKind::Other)) => Mark::Unknown("source has unsupported file kind".into()),
@@ -156,9 +118,6 @@ pub fn classify_included(base: &Path, worktree: &Path, branch: Option<&str>)
                 None => Mark::Unknown("no distinct copy source".into()),
             },
         };
-        if let BaselineBinding::NoRecord { per_file_results, .. } = &mut assessment.baseline {
-            per_file_results.push((copy_record::path_hex(&entry.path), source_observation));
-        }
         if mark.needs_consent() { assessment.needs_consent.push((path.clone(), mark.clone())); }
         assessment.selected.push((path, mark));
     }

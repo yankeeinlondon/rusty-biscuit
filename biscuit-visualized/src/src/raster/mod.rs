@@ -1,40 +1,37 @@
 pub mod png;
 pub use png::{rasterize_svg, rasterize_svg_to_png, rasterize_svg_to_png_bytes, RasterError};
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 
-use resvg::usvg::fontdb::Database;
+use resvg::usvg;
 
-fn system_font_database() -> &'static Database {
-    static DB: OnceLock<Database> = OnceLock::new();
+use crate::fonts::{FontChain, FontQuery, default_chain};
 
-    DB.get_or_init(|| {
-        let mut db = Database::new();
-        db.load_system_fonts();
-        db
-    })
-}
-
-/// Returns a sorted, deduplicated list of available system font family names.
+/// Returns the sorted, deduplicated font family names the rasterizer can
+/// draw by name: every installed family plus the bundled `Inter`.
 ///
-/// Uses the same fontdb that resvg uses for rasterization, so the returned
-/// names are guaranteed to be renderable.
+/// Reads the same font database the rasterizer draws with, so every
+/// returned name is renderable. The bundled Noto Emoji (Linux builds) is a
+/// fallback face only and is not listed.
 pub fn available_font_families() -> Vec<String> {
-    use std::collections::BTreeSet;
-
-    let families: BTreeSet<String> = system_font_database()
-        .faces()
-        .flat_map(|face| {
-            face.families
-                .iter()
-                .map(|(name, _lang)| name.clone())
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    families.into_iter().collect()
+    default_chain().family_names()
 }
 
-pub(crate) fn cloned_system_font_database() -> Database {
-    system_font_database().clone()
+/// usvg options whose font database is `chain`'s and whose `FontResolver`
+/// asks `chain`, so every `<text>` is drawn in the face the chain resolves
+/// and missing characters fall back in the chain's order.
+pub(crate) fn usvg_options(chain: &Arc<FontChain>) -> usvg::Options<'static> {
+    let mut options = usvg::Options {
+        fontdb: chain.drawing_database(),
+        ..usvg::Options::default()
+    };
+    let select_chain = Arc::clone(chain);
+    let fallback_chain = Arc::clone(chain);
+    options.font_resolver = usvg::FontResolver {
+        select_font: Box::new(move |font, _db| select_chain.resolve(&FontQuery::from_usvg(font))),
+        select_fallback: Box::new(move |c, already_tried, _db| {
+            fallback_chain.fallback(c, already_tried)
+        }),
+    };
+    options
 }

@@ -195,14 +195,9 @@ fn authored_text(text: &Expr) -> String {
 
 /// Resolve an early phrase exactly as lifecycle playback would.
 fn resolve(text: &Expr, (view, globals): Bindings, inputs: &PrewarmInputs) -> Classification {
-    let frontmatter: HashMap<String, Value> = inputs
-        .frontmatter
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
     let (DocumentContext::Captured(context) | DocumentContext::Pending(context)) = &inputs.context;
     let Ok(state) = EffectiveStateBuilder::new()
-        .with_frontmatter(frontmatter)
+        .with_frontmatter(inputs.frontmatter.clone())
         .with_context(context.clone())
         .with_allow_ctx_override(true)
         .build()

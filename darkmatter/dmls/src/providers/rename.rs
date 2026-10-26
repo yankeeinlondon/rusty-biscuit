@@ -178,10 +178,10 @@ fn rewrite_heading_reference(
     let Some(record) = env.graph.document(node.document) else {
         return;
     };
-    let Some((text, map)) = document_source(env, &record.path) else {
+    let Some((text, map)) = document_source(env, record.path) else {
         return;
     };
-    let Some(uri) = file_path_to_uri(&record.path) else {
+    let Some(uri) = file_path_to_uri(record.path) else {
         return;
     };
 
@@ -373,10 +373,10 @@ fn push_target_edit(
     let Some(record) = env.graph.document(document) else {
         return true;
     };
-    let Some((_, map)) = document_source(env, &record.path) else {
+    let Some((_, map)) = document_source(env, record.path) else {
         return true;
     };
-    let Some(uri) = file_path_to_uri(&record.path) else {
+    let Some(uri) = file_path_to_uri(record.path) else {
         return true;
     };
     match map.byte_range_to_lsp(target_span.clone()) {
@@ -428,10 +428,10 @@ fn rewrite_markdown_links_to(
         // Replace only the path portion of the raw target (preserve any
         // `#fragment`).
         let old_path_portion = payload.raw_target.split('#').next().unwrap_or(&payload.raw_target);
-        let Some((text, map)) = document_source(env, &record.path) else {
+        let Some((text, map)) = document_source(env, record.path) else {
             continue;
         };
-        let Some(uri) = file_path_to_uri(&record.path) else {
+        let Some(uri) = file_path_to_uri(record.path) else {
             continue;
         };
         let slice = &text[node.span.clone()];

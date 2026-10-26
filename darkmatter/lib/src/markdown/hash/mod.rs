@@ -38,7 +38,7 @@ pub use write::{
 use crate::markdown::Markdown;
 use crate::markdown::FrontmatterMap;
 use biscuit_file::serde_yaml_ng;
-use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
+use biscuit_hash::{HashVariant, canonical_json, xx_hash, xx_hash_variant};
 
 impl Markdown {
     /// Hash a markdown document's frontmatter and/or body.
@@ -80,10 +80,15 @@ pub(super) fn hex(value: u64) -> String {
 ///
 /// ## Notes
 ///
-/// Non-strict canonicalization sorts keys and renders each entry as
-/// `key:<json-value>` joined with a literal `\n` two-char sequence. This is the
-/// historical shape and must stay stable so the default `md hash` output does
-/// not drift for documents that carry no ignored keys.
+/// Non-strict canonicalization sorts top-level keys and renders each entry as
+/// `key:<canonical-json-value>` joined with a literal `\n` two-char sequence.
+/// Values render through [`biscuit_hash::canonical_json`], so object key order
+/// is ignored at every depth while array order stays significant. The entry
+/// shape is historical and must stay stable so the default `md hash` output
+/// does not drift for documents that carry no ignored keys.
+///
+/// Strict hashes the YAML of the map in the author's key order, so reordering
+/// keys at any depth changes a strict hash.
 pub(super) fn hash_frontmatter_map(map: &FrontmatterMap, strict: bool) -> u64 {
     if map.is_empty() {
         return xx_hash("");
@@ -98,7 +103,7 @@ pub(super) fn hash_frontmatter_map(map: &FrontmatterMap, strict: bool) -> u64 {
             .iter()
             .map(|k| {
                 let v = &map[*k];
-                format!("{}:{}", k, serde_json::to_string(v).unwrap_or_default())
+                format!("{}:{}", k, canonical_json(v))
             })
             .collect::<Vec<_>>()
             .join("\\n");

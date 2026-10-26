@@ -137,14 +137,14 @@ fn plain_startup_scans(workspace: &LspWorkspace, folders: &[&Path]) -> usize {
 fn the_file_list_installs_while_the_initial_phase_is_held_and_the_discovered_phase_follows_both() {
     let logs = CapturedLogs::global();
     let (workspace, folder) = folder_of_repositories();
-    let mut fixture = LspFixture::start_with_startup_probe_gate(&workspace);
+    let mut fixture = LspFixture::start_with_file_list_and_startup_probe_gates(&workspace);
     fixture.initialize_unlisted(params(&[&folder]));
 
-    // Discovery may finish before or after the first probe reaches its hold.
+    // Discovery runs only once the initial phase has listed its probes, so
+    // the repositories it finds are left to the discovered-scopes phase.
     let mut listed = fixture.startup_events_until(is_probe(StartupPhase::Initial));
-    if !listed.contains(&StartupEvent::FileListInstalled) {
-        listed.extend(fixture.startup_events_until(|event| *event == StartupEvent::FileListInstalled));
-    }
+    fixture.release_file_list();
+    listed.extend(fixture.startup_events_until(|event| *event == StartupEvent::FileListInstalled));
     assert!(
         !listed.iter().any(|event| matches!(
             event,
@@ -337,14 +337,18 @@ fn shutdown_during_the_initial_phase_releases_waiters_and_startup() {
 #[test]
 fn shutdown_during_the_discovered_phase_releases_startup() {
     let (workspace, folder) = folder_of_repositories();
-    let mut fixture = LspFixture::start_with_startup_probe_gate(&workspace);
+    let mut fixture = LspFixture::start_with_file_list_and_startup_probe_gates(&workspace);
     fixture.initialize_unlisted(params(&[&folder]));
+    // Discovery runs only once the initial phase has listed its probes, so
+    // the repositories it finds are left to the discovered-scopes phase.
+    fixture.startup_events_until(is_probe(StartupPhase::Initial));
+    fixture.release_file_list();
     loop {
+        fixture.release_startup_probe();
         let events = fixture.startup_events_until(|event| matches!(event, StartupEvent::StartupProbePreparing(_)));
         if events.last() == Some(&StartupEvent::StartupProbePreparing(StartupPhase::Discovered)) {
             break;
         }
-        fixture.release_startup_probe();
     }
 
     fixture.send_request_with_id(RequestId::from(602), "shutdown", Value::Null);

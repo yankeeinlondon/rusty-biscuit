@@ -1,10 +1,9 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 253
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "config": {
@@ -13,6 +12,7 @@ expression: convert_yaml(yaml)
           "type": "null"
         },
         {
+          "type": "object",
           "additionalProperties": false,
           "properties": {
             "host": {
@@ -32,11 +32,10 @@ expression: convert_yaml(yaml)
           },
           "required": [
             "host"
-          ],
-          "type": "object"
+          ]
         }
       ]
     }
   },
-  "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

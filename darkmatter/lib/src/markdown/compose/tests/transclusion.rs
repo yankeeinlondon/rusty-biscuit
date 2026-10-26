@@ -2005,6 +2005,7 @@ mod file_links_compose {
             dim_mode: DimMode::Always,
             max_width: Some(100),
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),

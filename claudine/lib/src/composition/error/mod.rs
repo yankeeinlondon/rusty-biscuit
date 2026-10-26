@@ -488,6 +488,32 @@ pub enum CompositionError {
     #[error("malformed stored `hash` property: {0}")]
     InlineHashMalformed(#[source] MarkdownError),
 
+    /// The inline closure could not edit the document's captured baseline, so
+    /// inline composition refused to start.
+    ///
+    /// Raised by inline preparation before the prompt is composed (so before
+    /// any frontmatter `$(…)` runs) and before the guardrail file is written.
+    /// It reports only that the baseline itself is unusable; a document that
+    /// passes can still become uneditable through later agent or external
+    /// edits, which the closure reports as its own errors.
+    ///
+    /// The cause is boxed because `MarkdownError` already sits at the
+    /// `clippy::result_large_err` floor, so the chain carries
+    /// `Box<MarkdownError>`.
+    #[error(
+        "inline-compose cannot start: the frontmatter of {} cannot be edited by the inline \
+         closure: {source}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineBaselineUnstampable {
+        /// The active document whose baseline was rehearsed.
+        path: PathBuf,
+        /// Darkmatter's typed refusal, usually `FrontmatterTextEdit` or
+        /// `MalformedStoredHash`.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
     /// Atomic file write failed during inline composition.
     ///
     /// Carries the file path and the unboxed [`std::io::Error`] that
@@ -3819,6 +3845,14 @@ impl CompositionError {
             CompositionError::InlineHashMalformed(_) => {
                 Some(FrontmatterHighlight::Property("hash".to_string()))
             }
+            // A refused baseline names a property only when its stored hash was
+            // the problem; an indentation or shape refusal has no single line.
+            CompositionError::InlineBaselineUnstampable { source, .. } => match source.as_ref() {
+                MarkdownError::MalformedStoredHash { property, .. } => {
+                    Some(FrontmatterHighlight::Property(property.clone()))
+                }
+                _ => None,
+            },
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
                 Some(FrontmatterHighlight::SchemaProperties(vec![property.clone()]))
             }

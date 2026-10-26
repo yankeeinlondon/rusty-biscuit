@@ -586,7 +586,7 @@ struct Loader<'a> {
     source_contexts: HashMap<PathBuf, SourceContext>,
     /// The frontmatter the current step's early-binding state was built
     /// from, kept on each approval so a task can re-resolve it.
-    step_frontmatter: Arc<HashMap<String, Value>>,
+    step_frontmatter: Arc<Map<String, Value>>,
     /// The keys of [`Self::step_frontmatter`] whose value reads a late root,
     /// directly or through another such key.
     step_derived: HashSet<String>,
@@ -735,9 +735,9 @@ impl<'a> Loader<'a> {
     /// This is exactly the state a shell command sees at its turn, minus the
     /// runtime mutation layer — which is why a later task's command is
     /// approved only as a template, read again when it runs.
-    fn step_frontmatter(&self, plan: &SequencePlan, index: usize) -> HashMap<String, Value> {
+    fn step_frontmatter(&self, plan: &SequencePlan, index: usize) -> Map<String, Value> {
         let overlay = super::build_step_overlay(plan, index);
-        let mut frontmatter: HashMap<String, Value> = self
+        let mut frontmatter: Map<String, Value> = self
             .source
             .markdown
             .frontmatter()
@@ -989,7 +989,7 @@ impl<'a> Loader<'a> {
         // properties under the invocation's supplied values, exactly what
         // they read when it runs; the caller's frontmatter is not their base.
         let enclosing = frontmatter.as_ref().map(|authored| {
-            let mut values: HashMap<String, Value> = authored.iter()
+            let mut values: Map<String, Value> = authored.iter()
                 .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
             values.extend(self.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
             let derived = derived_deferred_keys(values.iter(), &sequence_deferred_roots(), &HashSet::new());
@@ -2030,7 +2030,7 @@ impl<'a> Loader<'a> {
             caller_setters: &self.caller_setters,
             sequence_path: &self.source.resolved_path,
         };
-        let mut evaluate = |value: &Value, values: &HashMap<String, Value>| {
+        let mut evaluate = |value: &Value, values: &Map<String, Value>| {
             let state = reapproval::early_binding_state(values, context.clone())?;
             Ok(reapproval::compose_approval_value(value, document, &state, &context, &file_resolution_context)?
                 .map_err(|error| crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into())))

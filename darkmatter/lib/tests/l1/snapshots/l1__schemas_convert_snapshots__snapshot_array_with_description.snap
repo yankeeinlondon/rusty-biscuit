@@ -1,10 +1,9 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 180
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"string[] -> A list of tags\")"
 ---
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "field": {
@@ -13,14 +12,14 @@ expression: "convert_atom(\"string[] -> A list of tags\")"
           "type": "null"
         },
         {
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
+          }
         }
       ],
       "description": "A list of tags"
     }
   },
-  "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

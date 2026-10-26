@@ -300,7 +300,11 @@ mod platform {
     pub(super) fn classify(stage: Stage, code: i32) -> RenameFailure {
         let code = code as u32;
         match (stage, code) {
-            (Stage::Open, ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION) => RenameFailure::Permission,
+            (Stage::Open, ERROR_ACCESS_DENIED) => RenameFailure::Permission,
+            // Another process holds the directory itself without delete
+            // sharing (a program standing in it, for one): temporary, like a
+            // held entry inside the tree.
+            (Stage::Open, ERROR_SHARING_VIOLATION) => RenameFailure::Sharing,
             // The `DELETE` open succeeded, so the denial comes from something
             // inside the tree being in use.
             (Stage::Rename, ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION) => RenameFailure::Sharing,

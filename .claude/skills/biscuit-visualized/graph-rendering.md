@@ -35,7 +35,7 @@ let graph = GraphDiagram::from_expression("a -> b")?
 ```rust
 use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
 
-let artifact = graph.render(RenderRequest::new(OutputFormat::Svg))?;
+let artifact = graph.render(&RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() })?;
 // artifact.path, artifact.format, artifact.cache_hit, artifact.alt_text
 ```
 
@@ -163,7 +163,7 @@ let graph = GraphBuilder::directed()
     .with_orientation(GraphOrientation::TopToBottom)
     .build()?;
 
-let artifact = graph.render(RenderRequest::new(OutputFormat::Svg))?;
+let artifact = graph.render(&RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() })?;
 ```
 
 For undirected graphs:
@@ -208,14 +208,15 @@ Auto-detection logic: if the input starts with `digraph`, `graph`, or `strict`, 
 
 ## Resolution tuning for terminal display
 
-`biscuit-terminal::GraphExpression` is *terminal-display aware*. Before rendering, it computes the exact pixel width of the display target — `cells × cell_pixel_width` — and passes that to the rasterizer via `RenderRequest::target_width`. The PNG comes out at exactly the display resolution, with text glyphs rasterised fresh at that size by `resvg`. No oversampling, no downstream downscaling.
+`biscuit_visualized::components::GraphExpression` is *terminal-display aware*. Before rendering, it resolves its width to columns once (margins included) and computes the display target in pixels — `columns × cell width`, with `row_height = cell height` (measured cell size, else the 8x16 `CellSize::FALLBACK`; never zero; helpers in `components/display.rs`). The PNG comes out at exactly the display resolution, with text glyphs rasterised fresh at that size by `resvg`, and its height padded to whole cell rows. No oversampling, no downstream downscaling. The bytes are then handed to `biscuit-terminal` unchanged (`EncodedPng` + `TerminalImage::from_encoded_png`, `ImageWidth::Characters(columns)`), so Kitty and iTerm2 show them 1:1 in exactly the rows reserved. Size is measured on every render; a resize yields a new cache key.
 
-This works because `RenderRequest` carries two complementary sizing knobs:
+This works because `RenderRequest` carries complementary sizing knobs:
 
 | Field | Effect |
 |-------|--------|
 | `target_width: Some(px)` | Render the SVG at exactly `px` pixels wide; aspect ratio preserved. Used by `GraphExpression` / `MermaidDiagram` when laying out for a known display. |
 | `scale: N` (with `target_width = None`) | Legacy HiDPI multiplier: PNG is `svg_native × N`. Use for fixed-DPI exports without a known display. |
+| `row_height: Some(px)` | Pad the PNG height to a multiple of `px` (padding below the drawing; transparent, or the `Solid` color). Ignored for SVG. |
 
 When `target_width` is `Some`, `scale` is ignored.
 
@@ -249,7 +250,7 @@ After `layout-rs` generates the raw SVG:
 1. **Padding trim**: Removes excess canvas padding from layout-rs output
 2. **Font application**: Applies the theme's font family to all text elements
 3. **Color application**: Sets node fill, edge stroke, and text colors from the theme
-4. **Background**: Adds a background rectangle with the surface color (or transparent)
+4. **Background**: Adds a `<rect width="100%" height="100%">` per `RenderRequest::background`: theme surface color (`Theme`, default; white without a color theme), the hex color (`Solid`), or nothing (`Transparent`)
 
 ## GraphError
 

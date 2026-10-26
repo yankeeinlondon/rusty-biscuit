@@ -14,7 +14,7 @@ $schema:
 yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
@@ -47,6 +47,10 @@ initialize:
 
                 {{ as_ordered_list(frontmatter(plan, 'open_questions')) }}
           - error: "the plan `{{parent_dir(plan)}}` has unresolved `open_questions`; implementation will not start until they are resolved"
+    - when: "total_phases && phase > total_phases"
+      then:
+          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"
+          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
 
 start:
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
@@ -69,6 +73,10 @@ success:
       then:
         - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
         - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
+    # Persisted before the commit so a rerun resumes after this phase; the
+    # loop's counter lives only in memory. Not a `shell` action: those resolve
+    # at pre-flight from the plan on disk, not this iteration's `phase`.
+    - set_frontmatter: ["{{plan}}", "phase", "{{phase + 1}}"]
     - when: "ctx.dirty_files && !commit_message"
       then:
         - message: |-
@@ -84,10 +92,7 @@ success:
 
             {{ as_unordered_list(ctx.dirty_files) }}
         - shell: git add ..
-        # Pre-flight resolves every branch's command, so an absent
-        # `commit_message` needs a present fallback even though this branch
-        # only runs when it is set.
-        - shell: git commit -m "{{ commit_message || '' }}"
+        - shell: git commit -m "{{commit_message}}"
     - when: "!ctx.dirty_files"
       then:
           - message: phase {{phase}} of the plan made no file changes!
@@ -99,36 +104,8 @@ failure:
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
+    until: "phase >= total_phases"
     action: "increment(phase)"
-    # The gate runs before `until` is checked, so this explains a pause that
-    # would otherwise look like the loop silently giving up.
-    gate:
-        - when: "phase >= total_phases && !is_empty(frontmatter(log, 'decisions_for_review'))"
-          then:
-              - info: "the implementation made **{{ length(frontmatter(log, 'decisions_for_review')) }}** decision(s) that the spec and plan left open; review them under `decisions_for_review` in {{link(log)}}"
-        - when: "frontmatter(log, 'human_review') == true"
-          then:
-              - warn: "⏸️  implementation **paused for human review** after phase **{{phase}}** (_of {{total_phases}}_) of `{{parent_dir(plan)}}`"
-              - stderr: |-
-                    The phase {{phase}} agent raised **{{ length(frontmatter(log, 'human_review_items') || []) }}** item(s) that need your decision. Each one lists its options and a recommendation under `human_review_items` in {{link(log)}}.
-              - when: "phase < total_phases"
-                then:
-                    - stderr: |-
-                          To continue with phase {{phase + 1}}:
-
-                          1. answer the items in {{link(log)}} (or pass your answer on through its `message_to_agent`)
-                          2. set `human_review: false` in {{link(log)}}
-                          3. set `start_phase: {{phase + 1}}` in {{link(plan)}} so phase {{phase}} is not repeated
-                          4. rerun the same `compose` command
-                    - message: "⏸️  implementation of `{{parent_dir(plan)}}` paused after phase **{{phase}}** (_of {{total_phases}}_): human review needed before phase {{phase + 1}} — see `{{log}}`"
-                else:
-                    - stderr: "This was the final phase; resolve the items in {{link(log)}} before treating the implementation as complete."
-                    - message: "⏸️  implementation of `{{parent_dir(plan)}}` finished its final phase but needs human review — see `{{log}}`"
-              - say: "The implementation paused after phase {{phase}} because it needs your review"
-              # A pause must exit non-zero so a chained command (`&& just fix …`)
-              # does not run against a partly implemented plan.
-              - error: "implementation of `{{parent_dir(plan)}}` paused for human review after phase {{phase}} (of {{total_phases}})"
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
@@ -278,36 +255,34 @@ earlier phase is committed when it succeeds.
         ::end-block
     ::end-block
 
+### Decisions Are Yours; the Human Reviews After Implementation
+
+There is **no human in the loop between phases**. Every phase runs straight
+into the next, and a human first looks at this work in the review that follows
+the final phase. Never stop, pause, or wait for a sign-off, approval, or
+ruling, even if the plan calls a step a "human gate" or a "sign-off": produce
+the artifact, keep going, and let the review pick it up.
+
+- when you meet a choice the plan does not settle, or find the plan or spec is
+  wrong, choose the best option yourself, implement it, and keep going
+- record each such choice by appending an item to the `decisions_for_review`
+  list on the implementation log ({{log}}); keep the items earlier phases
+  added. The first review reads this list. Each item is a YAML `|-` block,
+  written without repo jargon, that states:
+    - what you decided and what the plan or spec said
+    - the alternatives and their trade-offs
+    - what would need redoing if the reviewer picks another option
+- if later work depends on a decision a human might reverse, build it on your
+  decision anyway; redoing it after review costs less than a stalled run
+- the only reason to stop is that the phase **cannot be completed at all**
+  (for example, a required credential or host is unavailable). Then fail the
+  phase: say exactly what is blocked in your final output and in the log, and
+  exit with an error, so the pipeline does not treat the run as finished
+
 ### Handoff to the Next Phase
 
-Set these properties on the implementation log ({{log}}), never on the spec or plan:
+Set this property on the implementation log ({{log}}), never on the spec or plan:
 
-This plan runs unattended; key decisions were made in the spec and its review, and setting `human_review` to `true` stops the whole run. Treat as already decided -- never as a question for the author:
-
-- anything the spec decides, including a stated fallback such as "when X is not available, do Y"
-- the plan's planning decisions, and any ruling in the plan that carries a proposal or recommendation: follow it, even when it is worded "confirm or amend"
-
-When this phase raises a question neither answers, make the decision the spec's goals best support, prefer the choice that is easiest to reverse, carry on, and record it in `decisions_for_review`: a list on the implementation log where each item uses YAML's `|-` and states what you decided, the alternatives, and why. Add to the list; do not replace earlier phases' entries. These are reviewed after the run and never stop it.
-
-Set `human_review` to `true` only when one of these holds; otherwise set it to `false`:
-
-- continuing would contradict the spec or a planning decision, for example because this phase's evidence shows one of the spec's assumptions is wrong
-- an escalation trigger named in the plan has fired
-- the next phase cannot be done without something only the author can provide (access, credentials, a fact about their environment) and no reasonable default exists
-- the next phase would take a step that is costly to undo -- an external or published action, deleting data -- that neither the spec nor the plan authorizes
-
-If you would describe an item as "not blocking", it belongs in `decisions_for_review`, not `human_review_items`.
-
-- when `human_review` is set to `true` you must also set `human_review_items`:
-    - a list of things which the human is expected to weigh in on
-    - each item should use the YAML `|-` operator so that the text description is more easily read by a human
-    - don't use jargon and don't assume the human knows this repo or the details of this plan
-    - each list item should describe:
-        - why this decision is critical to be made _before_ the next phase is implemented
-        - bullet point out various options/solutions to choose from
-        - each option/solution should have a clear description and relative pros and cons
-        - you must recommend one of these options and explain why you're recommending it
-    - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
     - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
 

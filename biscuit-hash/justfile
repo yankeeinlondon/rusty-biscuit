@@ -72,9 +72,12 @@ test-browser:
 test-real:
     @echo "test-real: not applicable for biscuit-hash"
 
-# Lint both the library and CLI
+# Lint both the library and CLI. `--all-features` for the same reason as
+# `test`: the shared `_lint` checks only the default set, which leaves the
+# `blake3`, `argon2id`, and `json` modules unlinted.
 lint:
-    @just _lint biscuit-hash
+    @echo -e "Linting {{ BOLD }}biscuit-hash{{ RESET }} (--all-features)"
+    @cargo clippy -p biscuit-hash --all-features --all-targets -- -D warnings
     @just _lint biscuit-hash-cli
 
 # Criterion benches for biscuit-hash hashing algorithms.

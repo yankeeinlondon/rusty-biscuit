@@ -1601,7 +1601,7 @@ impl<'a> TransclusionEngine<'a> {
                 let replaced = if effective_map.is_empty() {
                     raw
                 } else {
-                    let mut frontmatter = HashMap::new();
+                    let mut frontmatter = Map::new();
                     frontmatter.insert("replace".to_string(), Value::Object(effective_map.clone()));
                     let temp_state = EffectiveStateBuilder::new()
                         .with_frontmatter(frontmatter)
@@ -1700,19 +1700,21 @@ pub(crate) fn apply_directive_set_overlay(
 /// every authored value once.
 pub(crate) fn markdown_child_options(
     parent: &crate::markdown::compose::ComposeRequest,
-    parent_data: &HashMap<String, Value>,
+    parent_data: &Map<String, Value>,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
 ) -> crate::markdown::compose::ComposeRequest {
-    let mut inherited: Map<String, Value> = parent_data.clone().into_iter().collect();
+    let mut inherited = parent_data.clone();
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
     // parent's merged runtime context must not leak into children (it would
     // appear as a document-defined ctx and trigger false collision warnings).
-    inherited.remove("prologue");
-    inherited.remove("epilogue");
-    inherited.remove("ctx");
+    // `shift_remove`, not `remove` (a swap-remove under `preserve_order`), so
+    // the inherited keys keep the parent's order.
+    inherited.shift_remove("prologue");
+    inherited.shift_remove("epilogue");
+    inherited.shift_remove("ctx");
 
     let one_off = match &directive_options.replace {
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),

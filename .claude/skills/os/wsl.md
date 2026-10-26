@@ -183,7 +183,7 @@ overlaid sources with the guest clock (or clean that package in the private
 target) before building the archive, and compare the expected test names with
 the PASS listing. `--extract-to` needs an existing destination directory.
 
-## drvfs volumes reject `RENAME_NOREPLACE`; inotify instances are scarce
+## drvfs volumes reject `RENAME_NOREPLACE` and ignore mode bits; inotify instances are scarce
 
 Measured 2026-10-11 on the WSL guest:
 
@@ -193,6 +193,15 @@ Measured 2026-10-11 on the WSL guest:
   `EEXIST` does not prove support, and a drvfs permission failure also returns
   `EINVAL`. Code that must move without replacing treats `EINVAL` as
   "unsupported here" and refuses before changing anything.
+- **drvfs mode bits are made up and `chmod` does nothing** (re-measured
+  2026-10-23 on `/mnt/c`, mounted `9p` with `aname=drvfs;…;uid=1000;gid=1000`
+  and no `metadata` option): every file and directory reads `0o777`, owned
+  by the WSL user, before and after `chmod 700`/`600`, and `mkdir` with mode
+  `0o700` still gives `0o777`. A Unix "owner-only, no group/other bits"
+  check can therefore never pass there; `wt remove`'s recovery store failed
+  with "other users can access it" until it skipped the bit check on drvfs
+  (access there is NTFS ACLs, as on native Windows). Check ownership, not
+  bits, and recognize drvfs from the mount table (`9p` with `aname=drvfs`).
 - **`max_user_instances` is 128** (`max_user_watches` 524288,
   `max_queued_events` 16384; `BUILD_LINUX` allows 65536 instances). Each inotify instance counts, so
   many concurrent watchers hit `EMFILE` there long before they would on

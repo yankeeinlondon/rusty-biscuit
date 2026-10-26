@@ -36,3 +36,14 @@ supplied global CLI style claims so command handlers can merge them with
 frontmatter without mistaking defaults for user intent. Keep parsing in
 `cli/src/args`, command execution in `cli/src/commands`, and output in shared
 renderable components.
+
+`--feature` (`args::Feature`, top level and on `render`, lists combined) is
+lowered in one place, `render::apply_features`, for both HTML and terminal
+output (`render::terminal_page` mirrors `html_page`, so tests drive the real
+lowering in-process). Names: `embed-mermaid-font`, the three shared Mermaid
+fallback names (mapped onto `biscuit_visualized::components::MermaidFallbackFeature`
+by `Feature::mermaid_fallback()` and folded into
+`DarkmatterPage::with_mermaid_fallback_policy`; inert without `--mermaid`), and
+`no-mermaid-rendering` (lowers to `MermaidMode::Text`, beating `--mermaid`
+and `embed-mermaid-font`). `--mermaid` itself selects `MermaidMode::Automatic`.
+Convention: the `cli` skill; user docs: `darkmatter/docs/cli/render.md#features`.

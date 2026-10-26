@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "kind": "design",
+  "design": {
+    "tokens": {
+      "bg": {
+        "type": "color",
+        "value": "#1a1b26",
+        "label": "Background"
+      },
+      "fg": {
+        "type": "color",
+        "value": "#c0caf5",
+        "label": "Foreground"
+      }
+    },
+    "canvas": {
+      "base": {
+        "kind": "solid",
+        "color": {
+          "ref": "bg"
+        }
+      }
+    },
+    "styles": {
+      "node": {
+        "stroke": {
+          "paint": "#414868",
+          "width": 1.5
+        }
+      },
+      "node-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "edge": {
+        "stroke": {
+          "paint": "#757b98",
+          "width": 1.5
+        }
+      },
+      "edge-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "edge-label-background": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "bg"
+          }
+        }
+      },
+      "cluster": {
+        "fill": "#313443",
+        "stroke": {
+          "paint": "#414868"
+        }
+      },
+      "cluster-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "text": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "title": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "actor": {
+        "fill": "#272937",
+        "stroke": {
+          "paint": "#7aa2f7"
+        }
+      },
+      "actor-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "lifeline": {
+        "stroke": {
+          "paint": "#414868"
+        }
+      },
+      "message": {
+        "stroke": {
+          "paint": "#757b98"
+        }
+      },
+      "message-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "note": {
+        "fill": "#423933",
+        "stroke": {
+          "paint": "#e0af68"
+        }
+      },
+      "note-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "activation": {
+        "fill": "#313443",
+        "stroke": {
+          "paint": "#bb9af7"
+        }
+      },
+      "loop": {
+        "stroke": {
+          "paint": "#7dcfff"
+        }
+      },
+      "loop-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "loop-label-background": {
+        "fill": "#313443"
+      }
+    },
+    "rules": [],
+    "palettes": {
+      "node": [
+        "#4b2f3d",
+        "#374235",
+        "#463c35",
+        "#2f3954",
+        "#3d3754",
+        "#304356"
+      ]
+    },
+    "mermaid": {
+      "theme": "base",
+      "dark_mode": true,
+      "variables": {
+        "background": "#1a1b26",
+        "primaryColor": "#272937",
+        "primaryTextColor": "#c0caf5",
+        "primaryBorderColor": "#414868",
+        "lineColor": "#757b98",
+        "textColor": "#c0caf5",
+        "mainBkg": "#272937",
+        "clusterBkg": "#313443",
+        "titleColor": "#c0caf5",
+        "commitLabelColor": "#c0caf5",
+        "commitLabelBackground": "#313443",
+        "tagLabelColor": "#1a1b26",
+        "tagLabelBackground": "#e0af68",
+        "tagLabelBorder": "#e0af68",
+        "git0": "#f7768e",
+        "gitBranchLabel0": "#1a1b26",
+        "git1": "#9ece6a",
+        "gitBranchLabel1": "#1a1b26",
+        "git2": "#e0af68",
+        "gitBranchLabel2": "#1a1b26",
+        "git3": "#7aa2f7",
+        "gitBranchLabel3": "#1a1b26",
+        "git4": "#bb9af7",
+        "gitBranchLabel4": "#1a1b26",
+        "git5": "#7dcfff",
+        "gitBranchLabel5": "#1a1b26",
+        "git6": "#f7768e",
+        "gitBranchLabel6": "#1a1b26",
+        "git7": "#9ece6a",
+        "gitBranchLabel7": "#1a1b26"
+      }
+    }
+  }
+}

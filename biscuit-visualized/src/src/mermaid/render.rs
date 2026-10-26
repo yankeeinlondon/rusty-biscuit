@@ -1,18 +1,125 @@
-use crate::artifact::{OutputFormat, RenderRequest, RenderedArtifact};
+//! Mermaid rendering through Merman.
+//!
+//! One diagram goes through these steps (the spec's rendering pipeline):
+//!
+//! 1. The font-resolution chain ([`default_chain`]) and the styling: the
+//!    diagram's [`Palette`] compiled into one Merman theme for its family
+//!    ([`design`](super::design)), and the site config handed to Merman
+//!    (Mermaid's `base` theme with the font stack, merged with
+//!    [`MermaidConfig`]'s `quadrantChart` and `themeVariables`). A source
+//!    whose `%%{init}%%` or frontmatter sets theme keys gets no compiled
+//!    theme; the palette reaches Merman as `base` theme variables instead, so
+//!    the author's keys win (D54).
+//! 2. Source rewrites (step 3b): the `\n` → `<br/>` label rewrite, then, for a
+//!    gitGraph whose tags collide, a `commitSpacing` directive. The gitGraph
+//!    measurement is a Merman `layout_json` call, the only Merman call before
+//!    the cache check.
+//! 3. The cache check (step 4), keyed on the backend id, the rewritten source,
+//!    the output format, a hash of the site config and the compiled design
+//!    (so every palette color, R-P6), the font chain's cache
+//!    identity for the theme's font stacks, the request's geometry, and the
+//!    title.
+//! 4. On a miss, Merman's resvg-safe SVG, measured with our measurer, under a
+//!    time budget (steps 5–7); then the post-process, the
+//!    [accents](super::accents), and the [contrast pass](super::contrast),
+//!    the background, and,
+//!    for PNG, rasterization (steps 8–9). An SVG for the
+//!    [`MermaidTarget::HtmlStatic`] target also gets the HTML static edits
+//!    (step 10′); PNG never does.
+//! 5. With the [embedded-font opt-in](MermaidDiagram::with_embedded_font)
+//!    (HTML static SVG only), labels are measured in the face the page will
+//!    embed for their family, as the embedded file draws them (plain glyph
+//!    advances from a subset, normal shaping from a face embedded whole), and
+//!    the code points each family draws are kept beside the SVG in the cache.
+//!    A diagram that draws a weight whose face may not be embedded is laid
+//!    out again with that family in Inter, under the first layout's key.
+//!
+//! Every failure, a time budget exceeded included, is a
+//! [`MermaidError::RenderFailed`]; callers show the source as a code block
+//! ([`MermaidDiagram::fallback_code_block`]).
+
+use std::borrow::Cow;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use merman::svg::{
+    MeasurementProfileId, SvgEnvironment, SvgPipeline, TextMeasurementPolicy,
+    TextMeasurementProfile, TextMeasurementProfileIdentity, TextMeasurer, TextStyle,
+};
+use merman::{Engine, OperationControl, RenderError, RenderOutput, Renderer, SvgRequest};
+
+use crate::artifact::{Background, OutputFormat, RenderRequest, RenderedArtifact};
 use crate::cache::file_cache::MERMAID_BACKEND;
 use crate::cache::{FileCache, VisualizationKind};
-use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
+use crate::fonts::{FontChain, FontQuery, LabelMeasurer, default_chain};
+use crate::raster::png::rasterize_svg_for_request_with;
 
+use super::accents::apply_accents;
 use super::config::{MermaidConfig, MermaidTheme};
+use super::contrast::{author_text_colors, parse_css_color, readable_text};
+use super::design;
+use super::embed::glyphs::{UsedGlyphs, collect_used_glyphs};
+use super::embed::faces::forced_inter;
+use super::embed::page::{DiagramFont, FontRecord};
 use super::error::MermaidError;
-use super::gitgraph::{self, GitGraphGeometry};
+use super::gitgraph::{GitGraphGeometry, TAG_GAP_EM};
+use super::gitgraph_layout::{self, TagLabels};
+use super::newline::rewrite_label_newlines;
+use super::palette::Palette;
+use super::postprocess::{html_static, postprocess};
+use super::text::{TextEligibility, text_eligibility};
+#[cfg(feature = "terminal")]
+use super::text::{self, TextOptions, TextRender, TextSource};
 
-/// A parsed diagram and the layout drawn from it.
-struct LaidOut {
-    graph: mermaid_rs_renderer::Graph,
-    layout: mermaid_rs_renderer::Layout,
-    theme: mermaid_rs_renderer::Theme,
-    config: mermaid_rs_renderer::LayoutConfig,
+/// The font stack the site config sets: Mermaid.js 12.2.0's themes'
+/// `themeVariables.fontFamily`. It ends in `sans-serif` (R-T9). Setting it
+/// explicitly also keeps Merman from drawing in a family its measurement
+/// does not ask about.
+const THEME_FONT_STACK: &str = r#""trebuchet ms", verdana, arial, sans-serif"#;
+
+/// Mermaid's `themeVariables.fontSize`, in px: one em of tag gap unless the
+/// source overrides it.
+const THEME_FONT_SIZE: f32 = 16.0;
+
+/// Mermaid's `themeVariables.tagLabelFontSize`, in px.
+const TAG_LABEL_FONT_SIZE: f64 = 10.0;
+
+/// The measurement profile Merman records for our measurer.
+const MEASUREMENT_PROFILE: &str = "biscuit-visualized";
+
+/// The suffix of the [`FontRecord`] kept beside an embedded-font SVG.
+const FONT_RECORD_SUFFIX: &str = "font.json";
+
+/// Who the SVG output is for. The default, [`RasterSafe`](Self::RasterSafe),
+/// is drawn by this crate's rasterizer; [`HtmlStatic`](Self::HtmlStatic) is
+/// embedded in an HTML page and drawn by the reader's browser.
+///
+/// A target only shapes SVG output: a PNG is always rasterized from the
+/// raster-safe SVG, whatever the target.
+///
+/// ## Examples
+///
+/// ```rust,no_run
+/// use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
+/// use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTarget};
+///
+/// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+///     .with_target(MermaidTarget::HtmlStatic);
+/// let request = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
+/// let artifact = diagram.render(&request)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MermaidTarget {
+    /// The SVG this crate rasterizes, unchanged by any browser concern.
+    #[default]
+    RasterSafe,
+    /// A static SVG for an HTML page. Every `font-family` starts with the
+    /// family of the face the label was measured in, followed by the original
+    /// stack, and label viewports let text overflow, because the reader's
+    /// fonts are unknowable and a wider face must not be clipped.
+    HtmlStatic,
 }
 
 /// A diagram's natural size in SVG user units (1 unit = 1 px at scale 1.0).
@@ -25,7 +132,9 @@ pub struct NaturalSize {
 /// A Mermaid diagram for rendering.
 ///
 /// This struct handles rendering Mermaid diagrams to SVG or PNG format with
-/// support for caching and customization.
+/// support for caching and customization. Rendering is done by Merman with
+/// this crate's text measurer and font chain, so labels are measured in the
+/// faces they are drawn in.
 ///
 /// ## Examples
 ///
@@ -48,33 +157,46 @@ pub struct NaturalSize {
 ///
 /// ## Supported Diagram Types
 ///
-/// - Flowcharts (`flowchart` / `graph`)
-/// - Sequence Diagrams (`sequenceDiagram`)
-/// - Class Diagrams (`classDiagram`)
-/// - State Diagrams (`stateDiagram-v2`)
-/// - ER Diagrams (`erDiagram`)
-/// - Pie Charts (`pie`)
-/// - XY Charts (`xychart`)
-/// - Quadrant Charts (`quadrantChart`)
-/// - Gantt (`gantt`)
-/// - Timeline (`timeline`)
-/// - Journey (`journey`)
-/// - Mindmap (`mindmap`)
-/// - Git Graph (`gitGraph`)
+/// Every family Merman renders, among them flowchart (`flowchart` /
+/// `graph`), sequence, class, state, ER, pie, XY chart, quadrant chart,
+/// gantt, timeline, journey, mindmap, gitGraph, requirement, C4, block,
+/// kanban, architecture, packet, radar, sankey, and treemap.
+///
+/// ## Notes
+///
+/// ZenUML, math labels (`$$…$$`, Merman's math support is not built in), a
+/// parse error, and an unknown diagram type are render failures, as is a
+/// render whose Merman share exceeds the [time budget](Self::with_time_budget).
 #[derive(Debug, Clone)]
 pub struct MermaidDiagram {
     instructions: String,
     title: Option<String>,
     theme: MermaidTheme,
+    palette: Option<Palette>,
     config: MermaidConfig,
+    time_budget: Duration,
+    target: MermaidTarget,
+    embed_font: bool,
+}
+
+/// What every Merman call for one diagram shares: the source after step 3b,
+/// the site config, and the compiled design for the diagram's family.
+struct Prepared {
+    source: String,
+    site_config: serde_json::Value,
+    /// Merman's family id (`flowchart`, `gitGraph`, …), when it detects one.
+    family: Option<String>,
+    /// The design compiled for this render; `None` when the author's
+    /// `%%{init}%%` or frontmatter owns the theme, or no family was detected.
+    design: Option<serde_json::Value>,
 }
 
 impl MermaidDiagram {
+    /// The time budget a diagram gets unless
+    /// [`with_time_budget`](Self::with_time_budget) sets another.
+    pub const DEFAULT_TIME_BUDGET: Duration = Duration::from_secs(2);
+
     /// Creates a new Mermaid diagram with default settings.
-    ///
-    /// ## Arguments
-    ///
-    /// * `instructions` - The Mermaid diagram syntax
     ///
     /// ## Examples
     ///
@@ -88,14 +210,44 @@ impl MermaidDiagram {
             instructions: instructions.into(),
             title: None,
             theme: MermaidTheme::default(),
+            palette: None,
             config: MermaidConfig::default(),
+            time_budget: Self::DEFAULT_TIME_BUDGET,
+            target: MermaidTarget::default(),
+            embed_font: false,
         }
     }
 
-    /// Sets the theme for the diagram.
+    /// Styles the diagram with `theme`'s fixed palette ([`Palette::fixed`]),
+    /// replacing a palette set by [`with_palette`](Self::with_palette).
     pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
         self.theme = theme;
+        self.palette = None;
         self
+    }
+
+    /// Styles the diagram with `palette`, for example one built from the
+    /// terminal's colors ([`Palette::for_terminal`]).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::{MermaidDiagram, Palette, Rgb, TerminalColors};
+    ///
+    /// let colors = TerminalColors { background: Rgb::from_hex("#002b36"), ..TerminalColors::default() };
+    /// let palette = Palette::for_terminal(&colors, true);
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B").with_palette(palette);
+    /// assert_eq!(diagram.palette(), palette);
+    /// ```
+    pub fn with_palette(mut self, palette: Palette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
+    /// The palette the diagram is styled with: the one set by
+    /// [`with_palette`](Self::with_palette), else the theme's fixed palette.
+    pub fn palette(&self) -> Palette {
+        self.palette.unwrap_or_else(|| Palette::fixed(self.theme))
     }
 
     /// Sets the title for the diagram.
@@ -104,10 +256,103 @@ impl MermaidDiagram {
         self
     }
 
+    /// The title set by [`with_title`](Self::with_title).
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
     /// Sets the configuration for the diagram.
     pub fn with_config(mut self, config: MermaidConfig) -> Self {
         self.config = config;
         self
+    }
+
+    /// Sets how long Merman may work on each request for this diagram
+    /// (default [`DEFAULT_TIME_BUDGET`](Self::DEFAULT_TIME_BUDGET), 2 s).
+    ///
+    /// The budget is a deadline Merman checks at its own checkpoints during
+    /// parsing, layout, and SVG output, for SVG renders and gitGraph layout
+    /// requests alike. Our post-processing and PNG rasterization run outside
+    /// it, so a render can finish later than the budget without failing.
+    /// A request that exceeds it fails with [`MermaidError::RenderFailed`]
+    /// and logs a warning.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// use biscuit_visualized::mermaid::MermaidDiagram;
+    ///
+    /// let diagram = MermaidDiagram::new("graph LR; A-->B")
+    ///     .with_time_budget(Duration::from_millis(500));
+    /// assert_eq!(diagram.time_budget(), Duration::from_millis(500));
+    /// ```
+    pub fn with_time_budget(mut self, budget: Duration) -> Self {
+        self.time_budget = budget;
+        self
+    }
+
+    /// The time budget of each Merman request (see
+    /// [`with_time_budget`](Self::with_time_budget)).
+    pub fn time_budget(&self) -> Duration {
+        self.time_budget
+    }
+
+    /// Selects who the SVG output is for (default
+    /// [`MermaidTarget::RasterSafe`]). PNG output ignores it.
+    pub fn with_target(mut self, target: MermaidTarget) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// The target of SVG output (see [`with_target`](Self::with_target)).
+    pub fn target(&self) -> MermaidTarget {
+        self.target
+    }
+
+    /// Turns on the embedded-font opt-in (default off), which acts only on
+    /// SVG output for [`MermaidTarget::HtmlStatic`]; other output is
+    /// unchanged.
+    ///
+    /// With it on, each requested font family is measured in the face the
+    /// HTML page will embed for it: the face the font chain resolves when the
+    /// `OS/2` `fsType` of every weight the diagram draws permits embedding,
+    /// else the bundled Inter for the whole family. Those weights are known
+    /// only after layout, so a diagram that draws a refused weight is laid
+    /// out a second time in Inter. Labels are
+    /// measured as the embedded file draws them: plain glyph advances for a
+    /// subset, which carries no layout tables, and normal shaping (kerning
+    /// included) for a face whose `fsType` forbids subsetting, which is
+    /// embedded whole. Every label's `font-family` leads with that face's
+    /// family.
+    /// [`render_with_font`](Self::render_with_font) returns, beside the
+    /// artifact, the [`DiagramFont`] the page builds its `@font-face` rules
+    /// from ([`page_font`](super::page_font)). The output has its own cache
+    /// entries.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust,no_run
+    /// use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
+    /// use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTarget, page_font};
+    ///
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+    ///     .with_target(MermaidTarget::HtmlStatic)
+    ///     .with_embedded_font(true);
+    /// let request = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
+    /// let (artifact, font) = diagram.render_with_font(&request)?;
+    /// let markup = page_font(font.as_ref())?.markup();
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn with_embedded_font(mut self, embed: bool) -> Self {
+        self.embed_font = embed;
+        self
+    }
+
+    /// Whether the embedded-font opt-in is on (see
+    /// [`with_embedded_font`](Self::with_embedded_font)).
+    pub fn embedded_font(&self) -> bool {
+        self.embed_font
     }
 
     /// Returns the diagram instructions.
@@ -117,26 +362,17 @@ impl MermaidDiagram {
 
     /// Renders the diagram to SVG or PNG format.
     ///
-    /// This method:
-    /// 1. Checks the cache for a previously rendered artifact
-    /// 2. If not cached, renders the diagram using mermaid-rs-renderer
-    /// 3. If PNG is requested, rasterizes the SVG
-    /// 4. Stores the result in the cache
-    /// 5. Returns a `RenderedArtifact` with the path to the rendered file
-    ///
-    /// ## Arguments
-    ///
-    /// * `request` - Rendering parameters (format, scale, etc.)
-    ///
-    /// ## Returns
-    ///
-    /// A `RenderedArtifact` containing the path to the rendered file and metadata.
+    /// A cached artifact for the same rewritten source, design, fonts, and
+    /// request is returned without calling Merman's SVG renderer; otherwise
+    /// the diagram is rendered, post-processed, rasterized when PNG is
+    /// requested, and stored.
     ///
     /// ## Errors
     ///
     /// Returns an error if:
-    /// - The diagram syntax is invalid
-    /// - SVG rendering fails
+    /// - The diagram does not parse, its type is unknown or ZenUML, or it has
+    ///   a math label
+    /// - Merman exceeds the time budget
     /// - PNG rasterization fails (when PNG format is requested)
     /// - File I/O operations fail
     ///
@@ -158,26 +394,97 @@ impl MermaidDiagram {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn render(&self, request: &RenderRequest) -> Result<RenderedArtifact, MermaidError> {
-        let options_json = self.render_options_json(request);
-        let cache_key = FileCache::cache_key(
-            VisualizationKind::Mermaid,
-            &self.instructions,
-            &options_json,
-            MERMAID_BACKEND,
-            request.format,
-        );
+        self.render_in(default_chain(), request)
+    }
+
+    /// [`render`](Self::render), also returning the diagram's
+    /// [`DiagramFont`] when the output carries the embedded-font opt-in (see
+    /// [`with_embedded_font`](Self::with_embedded_font)); `None` otherwise.
+    ///
+    /// ## Errors
+    ///
+    /// The errors of [`render`](Self::render).
+    pub fn render_with_font(
+        &self,
+        request: &RenderRequest,
+    ) -> Result<(RenderedArtifact, Option<DiagramFont>), MermaidError> {
+        self.render_with_font_in(default_chain(), request)
+    }
+
+    /// [`render`](Self::render) with `chain` measuring and drawing every
+    /// label. The golden tests pass a chain of the bundled faces only, so no
+    /// installed font reaches their output.
+    pub(crate) fn render_in(
+        &self,
+        chain: &Arc<FontChain>,
+        request: &RenderRequest,
+    ) -> Result<RenderedArtifact, MermaidError> {
+        self.render_with_font_in(chain, request).map(|(artifact, _)| artifact)
+    }
+
+    /// [`render_with_font`](Self::render_with_font) over `chain`.
+    pub(crate) fn render_with_font_in(
+        &self,
+        chain: &Arc<FontChain>,
+        request: &RenderRequest,
+    ) -> Result<(RenderedArtifact, Option<DiagramFont>), MermaidError> {
+        let embed = self.embeds_font(request.format);
+        let prepared = self.prepare(chain, embed.then_some(NONE_FORCED))?;
+        // A second opt-in pass (below) is stored under this first key, which
+        // is the key a later render's hit path computes.
+        let cache_key = self.cache_key_for(&prepared, chain, request);
 
         let cache = FileCache::new();
         if let Some(path) = cache.get(VisualizationKind::Mermaid, &cache_key, request.format) {
-            return Ok(RenderedArtifact {
-                path,
-                format: request.format,
-                cache_hit: true,
-                alt_text: self.alt_text(),
-            });
+            // An embedded-font SVG is served only with its record; without
+            // one (an interrupted store) it is rendered again.
+            let font = embed.then(|| read_font_record(&cache, &cache_key, chain));
+            if let None | Some(Some(_)) = font {
+                let artifact = RenderedArtifact {
+                    path,
+                    format: request.format,
+                    cache_hit: true,
+                    alt_text: self.alt_text(),
+                };
+                return Ok((artifact, font.flatten()));
+            }
         }
 
-        let svg = self.render_svg(request)?;
+        let target = self.output_target(request.format);
+        let measurer = label_measurer(chain, embed.then_some(NONE_FORCED));
+        let mut svg = with_background(
+            &self.render_svg(&prepared, chain, &measurer, &cache_key, target)?,
+            self.background_color(request.background),
+        );
+        let font = match measurer.embedded_faces() {
+            Some(mut faces) => {
+                let mut glyphs = used_glyphs(&svg);
+                // The weights a diagram draws are known only now: a family
+                // that draws a refused weight is laid out again as Inter.
+                let forced = forced_inter(&faces, &glyphs);
+                if !forced.is_empty() {
+                    let prepared = self.prepare(chain, Some(&forced))?;
+                    let forced_measurer = label_measurer(chain, Some(&forced));
+                    svg = with_background(
+                        &self.render_svg(&prepared, chain, &forced_measurer, &cache_key, target)?,
+                        self.background_color(request.background),
+                    );
+                    faces = forced_measurer.embedded_faces().unwrap_or(faces);
+                    glyphs = used_glyphs(&svg);
+                    debug_assert!(forced_inter(&faces, &glyphs).is_empty(), "the bundled Inter is always embeddable");
+                }
+                let record = FontRecord::new(&faces, &forced, &glyphs);
+                let json = serde_json::to_vec(&record).map_err(|error| MermaidError::RenderFailed(error.to_string()))?;
+                // Stored before the SVG, so a stored SVG always has its record.
+                cache.store_sidecar(VisualizationKind::Mermaid, &cache_key, OutputFormat::Svg, FONT_RECORD_SUFFIX, &json)?;
+                Some(DiagramFont {
+                    faces,
+                    glyphs,
+                    chain: Arc::clone(chain),
+                })
+            }
+            None => None,
+        };
         let path = match request.format {
             OutputFormat::Svg => cache.store(
                 VisualizationKind::Mermaid,
@@ -186,10 +493,8 @@ impl MermaidDiagram {
                 svg.as_bytes(),
             )?,
             OutputFormat::Png => {
-                let png_data = match request.target_width {
-                    Some(width) => rasterize_svg_to_png(&svg, width)?,
-                    None => rasterize_svg_to_png_bytes(&svg, request.scale)?,
-                };
+                record_rasterized_svg(&svg);
+                let png_data = rasterize_svg_for_request_with(&svg, request, chain)?;
                 cache.store(
                     VisualizationKind::Mermaid,
                     &cache_key,
@@ -199,165 +504,601 @@ impl MermaidDiagram {
             }
         };
 
-        Ok(RenderedArtifact {
+        let artifact = RenderedArtifact {
             path,
             format: request.format,
             cache_hit: false,
             alt_text: self.alt_text(),
-        })
+        };
+        Ok((artifact, font))
     }
 
-    /// The cache key's options. The gitGraph merge repair and tag spacing add
-    /// no input here: both are derived from the instructions and the theme,
-    /// which the key already covers, so changing either algorithm bumps
-    /// `MERMAID_BACKEND` instead.
-    fn render_options_json(&self, request: &RenderRequest) -> String {
-        let config_value = self
-            .config
-            .to_json()
-            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-
-        serde_json::to_string(&serde_json::json!({
-            "theme": self.theme.as_str(),
-            "title": self.title,
-            "config": config_value,
-            "scale": request.scale.max(1),
-            "target_width": request.target_width,
-            "transparent_background": request.transparent_background,
-        }))
-        .unwrap_or_else(|_| "{}".to_string())
-    }
-
-    /// Measures the diagram's natural size in SVG user units without rendering it.
+    /// The diagram's natural size in SVG user units: the root `viewBox` of
+    /// the SVG [`render`](Self::render) draws, which is what the rasterizer
+    /// scales from.
     ///
-    /// The width is the root `viewBox` width, which is what the rasterizer
-    /// scales from (see `rasterize_svg_to_png`). Layout depends on the theme's
-    /// font size, so this measures with the same theme and `%%{init}%%`
-    /// overrides that [`render`](Self::render) uses.
+    /// Renders (or reads from the cache) the diagram's SVG artifact.
     ///
     /// ## Errors
     ///
-    /// Returns `MermaidError::RenderFailed` when the instructions do not parse.
+    /// The errors of [`render`](Self::render), and
+    /// `MermaidError::RenderFailed` when the SVG has no usable `viewBox`.
     pub fn natural_size(&self) -> Result<NaturalSize, MermaidError> {
-        let laid_out = self.compute_layout(false)?;
-        let dimensions = mermaid_rs_renderer::measure_svg_dimensions(&laid_out.layout, &laid_out.config, None);
-        Ok(NaturalSize {
-            width: dimensions.viewbox_width,
-            height: dimensions.viewbox_height,
-        })
+        let request = RenderRequest {
+            format: OutputFormat::Svg,
+            ..RenderRequest::default()
+        };
+        let artifact = self.render(&request)?;
+        let svg = std::fs::read_to_string(&artifact.path)?;
+        let (_, _, width, height) = root_view_box(&svg).ok_or_else(|| {
+            MermaidError::RenderFailed("Merman's SVG has no usable root viewBox".to_string())
+        })?;
+        Ok(NaturalSize { width, height })
     }
 
     /// The gitGraph layout that [`render`](Self::render) draws, as commit
-    /// parents, lanes, and tag bounds. Test support for callers that must prove
-    /// label placement without inspecting pixels; not a stable API.
+    /// parents, lanes, and tag bounds, built from Merman's layout data for
+    /// the source after step 3b (so `commit_step` is the written
+    /// `commitSpacing` when tags collided). Test support for callers that
+    /// must prove label placement without inspecting pixels; not a stable
+    /// API.
     ///
-    /// `Ok(None)` for any other diagram type.
+    /// `Ok(None)` for any other diagram type. The layout request is bounded
+    /// by the [time budget](Self::with_time_budget).
     ///
     /// ## Errors
     ///
-    /// The same as [`natural_size`](Self::natural_size).
+    /// `MermaidError::RenderFailed` when the diagram does not parse, Merman
+    /// exceeds the time budget, or the layout data is not of the shape this
+    /// crate reads.
     #[doc(hidden)]
     pub fn gitgraph_geometry(&self) -> Result<Option<GitGraphGeometry>, MermaidError> {
-        let laid_out = self.compute_layout(false)?;
-        Ok(GitGraphGeometry::from_layout(&laid_out.graph, &laid_out.layout, &laid_out.config, &laid_out.theme))
+        let chain = default_chain();
+        let prepared = self.prepare(chain, None)?;
+        let measurer = LabelMeasurer::text_measurer(chain);
+        let Some(json) = self.layout_json(&prepared.source, &prepared, &measurer)? else {
+            return Ok(None);
+        };
+        if !json.contains("\"GitGraphDiagram\"") {
+            return Ok(None);
+        }
+        let (style, tag_gap) = tag_metrics(&json);
+        let labels = TagLabels {
+            measurer: measurer.as_ref(),
+            style: &style,
+        };
+        let geometry = gitgraph_layout::geometry_from_layout_json(&json, &labels, tag_gap)?;
+        Ok(Some(geometry))
     }
 
-    /// The one path from instructions to layout that measurement and rendering
-    /// share, gitGraph corrections included (see the `gitgraph` module).
-    fn compute_layout(&self, transparent_background: bool) -> Result<LaidOut, MermaidError> {
-        let mut parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
-            .map_err(|err| MermaidError::RenderFailed(err.to_string()))?;
-        gitgraph::repair_gitgraph_merges(&mut parsed.graph)?;
-
-        let mut theme = self.build_theme(transparent_background);
-
-        // Apply %%{init: {'themeVariables': {'pie1': '#xxx', ...}}}%% overrides
-        if let Some(ref init) = parsed.init_config {
-            apply_init_theme_overrides(&mut theme, init);
+    /// Pipeline steps 1–3b: the site config, then the source rewrites. A
+    /// gitGraph's tags are measured as the render measures them, so with
+    /// `embed` (the requested families forced to Inter) in the faces of the
+    /// embedded-font opt-in.
+    fn prepare(&self, chain: &Arc<FontChain>, embed: Option<&[String]>) -> Result<Prepared, MermaidError> {
+        if is_zenuml(&self.instructions) {
+            return Err(MermaidError::RenderFailed(
+                "ZenUML diagrams are not rendered; showing the source".to_string(),
+            ));
         }
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let source_theme = source_theme(&source)?;
+        let palette = self.palette();
+        let design = match (&source_theme.family, source_theme.author_theme) {
+            (Some(family), AuthorTheme::None) => Some(design::design_json(&palette, family)),
+            _ => None,
+        };
+        let site_palette = match (&source_theme.family, &design) {
+            (Some(family), Some(design)) => design::wants_site_palette(family, design),
+            _ => source_theme.author_theme == AuthorTheme::Variables,
+        };
+        let mut site_config = self.site_config(&palette, site_palette, source_theme.author_variables.as_ref());
+        if let (Some(family), Some(_)) = (&source_theme.family, &design) {
+            for (key, value) in design::family_site_variables(family, &palette) {
+                site_config["themeVariables"][key] = value;
+            }
+            // Merman lets site config win over the source's own, so a key the
+            // author set in the source is left out.
+            for (section, values) in design::family_site_config(family, &palette) {
+                let serde_json::Value::Object(values) = values else { continue };
+                for (key, value) in values {
+                    if source_theme.author_config.pointer(&format!("/{section}/{key}")).is_none() {
+                        site_config[&section][key] = value;
+                    }
+                }
+            }
+        }
+        let mut prepared = Prepared {
+            site_config,
+            source,
+            family: source_theme.family,
+            design,
+        };
+        // A source without tags needs no spacing and gets no Merman call.
+        if is_gitgraph(&prepared.source) && prepared.source.contains("tag:") {
+            let measurer = label_measurer(chain, embed).into_text_measurer();
+            let json = self
+                .layout_json(&prepared.source, &prepared, &measurer)?
+                .ok_or_else(|| MermaidError::RenderFailed("no Mermaid diagram detected".to_string()))?;
+            let (style, tag_gap) = tag_metrics(&json);
+            let labels = TagLabels {
+                measurer: measurer.as_ref(),
+                style: &style,
+            };
+            let spacing = gitgraph_layout::commit_spacing_for(&prepared.source, &labels, tag_gap, |_| Ok(json))?;
+            if let Some(spacing) = spacing {
+                prepared.source = gitgraph_layout::with_commit_spacing(&prepared.source, spacing);
+            }
+        }
+        Ok(prepared)
+    }
 
-        let (layout, config) = gitgraph::layout(&parsed.graph, &theme);
-        Ok(LaidOut {
-            graph: parsed.graph,
-            layout,
-            theme,
-            config,
+    /// The site config handed to Merman: Mermaid's `base` theme with the font
+    /// stack, merged with [`MermaidConfig`]'s Mermaid-shaped JSON, plus the
+    /// palette as `base` theme variables when `with_palette`.
+    ///
+    /// `with_palette` is decided per family ([`design::wants_site_palette`]):
+    /// Merman lets explicit site variables win over compiled styles, so they
+    /// go only where they cannot erase the design. When the author sets theme
+    /// variables, the palette goes there too, beneath the author's keys
+    /// (Merman reads the source's own config over the site's); when the author
+    /// names a theme, it is left to that theme.
+    fn site_config(
+        &self,
+        palette: &Palette,
+        with_palette: bool,
+        author_variables: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
+        let mut config = self
+            .config
+            .to_json()
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .filter(serde_json::Value::is_object)
+            .unwrap_or_else(|| serde_json::json!({}));
+        config["theme"] = serde_json::Value::String("base".to_string());
+        if !config["themeVariables"].is_object() {
+            config["themeVariables"] = serde_json::json!({});
+        }
+        let variables = &mut config["themeVariables"];
+        variables["fontFamily"] = serde_json::Value::String(THEME_FONT_STACK.to_string());
+        if with_palette {
+            for (key, color) in base_theme_variables(palette) {
+                if variables.get(key).is_none() {
+                    variables[key] = serde_json::Value::String(color.to_string());
+                }
+            }
+            variables["darkMode"] = serde_json::Value::Bool(palette.is_dark());
+        }
+        // Merman lets site variables win over the source's own, the reverse
+        // of Mermaid.js; copying the author's on top keeps theirs winning.
+        if let Some(serde_json::Value::Object(author)) = author_variables {
+            for (key, value) in author {
+                variables[key] = value.clone();
+            }
+        }
+        config
+    }
+
+    /// Whether `format`'s output carries the embedded-font opt-in: HTML
+    /// static SVG only.
+    fn embeds_font(&self, format: OutputFormat) -> bool {
+        self.embed_font && self.output_target(format) == MermaidTarget::HtmlStatic
+    }
+
+    /// The target `format`'s output is made for: PNG is always rasterized
+    /// from the raster-safe SVG.
+    fn output_target(&self, format: OutputFormat) -> MermaidTarget {
+        match format {
+            OutputFormat::Svg => self.target,
+            OutputFormat::Png => MermaidTarget::RasterSafe,
+        }
+    }
+
+    /// The cache key for `request` (pipeline step 4).
+    fn cache_key_for(&self, prepared: &Prepared, chain: &FontChain, request: &RenderRequest) -> String {
+        let design = prepared.design.as_ref().map(serde_json::Value::to_string).unwrap_or_default();
+        // Every palette color, not only the design: the accent post-process
+        // and the contrast pass read colors the design may round away (R-P6).
+        let mut options = serde_json::json!({
+            "design": biscuit_hash::xx_hash(&format!("{}|{design}|{:?}", prepared.site_config, self.palette())),
+            "fonts": chain.cache_identity(&theme_font_stacks()),
+            "title": self.title,
+            "request": request.cache_identity(),
+        });
+        // Only a target that changes the bytes joins the key, so raster-safe
+        // keys, and the artifacts already cached under them, stay as they were.
+        // The embedded-font opt-in is an output format of its own; the faces
+        // it substitutes follow from the resolved faces `fonts` identifies.
+        if self.embeds_font(request.format) {
+            options["target"] = serde_json::Value::String("html-static+embedded-font".to_string());
+        } else if self.output_target(request.format) == MermaidTarget::HtmlStatic {
+            options["target"] = serde_json::Value::String("html-static".to_string());
+        }
+        let options_json = serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
+        FileCache::cache_key(
+            VisualizationKind::Mermaid,
+            &prepared.source,
+            &options_json,
+            MERMAID_BACKEND,
+            request.format,
+        )
+    }
+
+    /// The cache key [`render`](Self::render) checks for `request`, with the
+    /// fonts of `chain`.
+    #[cfg(test)]
+    pub(crate) fn cache_key_with(
+        &self,
+        chain: &Arc<FontChain>,
+        request: &RenderRequest,
+    ) -> Result<String, MermaidError> {
+        let prepared = self.prepare(chain, self.embeds_font(request.format).then_some(NONE_FORCED))?;
+        Ok(self.cache_key_for(&prepared, chain, request))
+    }
+
+    /// The site config [`render`](Self::render) hands Merman.
+    #[cfg(test)]
+    pub(crate) fn prepared_site_config(&self) -> serde_json::Value {
+        self.prepare(default_chain(), None).map(|prepared| prepared.site_config).unwrap_or_default()
+    }
+
+    /// The compiled design's JSON [`render`](Self::render) applies, `None`
+    /// when the author's theme keys own the styling.
+    #[cfg(test)]
+    pub(crate) fn prepared_design(&self) -> Option<serde_json::Value> {
+        self.prepare(default_chain(), None).ok().and_then(|prepared| prepared.design)
+    }
+
+    /// Merman's theme evidence for the SVG [`render`](Self::render) draws:
+    /// the evidence status (its `Debug` name) and every diagnostic as
+    /// `code:subject:target`.
+    #[cfg(test)]
+    pub(crate) fn theme_evidence(&self) -> Result<(String, Vec<String>), MermaidError> {
+        let chain = default_chain();
+        let prepared = self.prepare(chain, None)?;
+        let measurer = LabelMeasurer::text_measurer(chain);
+        let request = svg_request(measurer, "bv-evidence")?;
+        let control = self.control();
+        let theme = prepared.design.as_ref().map(design::compile).transpose()?;
+        let output = self.call_merman(|| {
+            let mut request = merman::RenderRequest::svg(&prepared.source, control.clone(), request);
+            if let Some(theme) = theme {
+                request = request.with_theme(theme);
+            }
+            renderer(&prepared).render(request)
+        })?;
+        let RenderOutput::Svg(Some(svg)) = output else {
+            return Err(MermaidError::RenderFailed("no Mermaid diagram detected".to_string()));
+        };
+        let evidence = svg.evidence();
+        let diagnostics = evidence
+            .theme_diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                let target = diagnostic.target().map_or("-", |target| target.id());
+                format!("{}:{}:{target}", diagnostic.code(), diagnostic.subject())
+            })
+            .collect();
+        Ok((format!("{:?}", evidence.theme_evidence().status()), diagnostics))
+    }
+
+    /// The source after pipeline step 3b, as Merman receives it.
+    #[cfg(test)]
+    pub(crate) fn rewritten_source(&self) -> Result<String, MermaidError> {
+        Ok(self.prepare(default_chain(), None)?.source)
+    }
+
+    /// Merman's resvg-safe SVG for the prepared source, measured by
+    /// `label_measurer` and post-processed for `target`.
+    fn render_svg(
+        &self,
+        prepared: &Prepared,
+        chain: &Arc<FontChain>,
+        label_measurer: &Arc<LabelMeasurer>,
+        cache_key: &str,
+        target: MermaidTarget,
+    ) -> Result<String, MermaidError> {
+        // The HTML static edits ask this same measurer which face each stack
+        // was measured in.
+        let measurer = Arc::clone(label_measurer).into_text_measurer();
+        // Content-addressed: different diagrams always get different ids, and
+        // two identical diagrams render identical CSS, so sharing one id is
+        // harmless. Keeping ids unique per HTML document (an ordinal) is the
+        // HTML caller's concern.
+        let diagram_id = format!("bv-{:016x}", biscuit_hash::xx_hash(cache_key));
+        let control = self.control();
+        let request = svg_request(measurer, &diagram_id)?;
+        let theme = prepared.design.as_ref().map(design::compile).transpose()?;
+        let output = self.call_merman(|| {
+            let mut request = merman::RenderRequest::svg(&prepared.source, control.clone(), request);
+            if let Some(theme) = theme {
+                request = request.with_theme(theme);
+            }
+            renderer(prepared).render(request)
+        })?;
+        match output {
+            RenderOutput::Svg(Some(svg)) => {
+                let fixed = postprocess(svg.svg());
+                let palette = self.palette();
+                let accented = match (&prepared.design, &prepared.family) {
+                    (Some(_), Some(family)) => apply_accents(&fixed, &palette, family),
+                    _ => Cow::Borrowed(fixed.as_ref()),
+                };
+                // With or without a design: an author color displaces the
+                // design, not the library's choice of text color.
+                let fixed = readable_text(&accented, &palette, &author_text_colors(&prepared.source), chain).into_owned();
+                Ok(match target {
+                    MermaidTarget::RasterSafe => fixed,
+                    MermaidTarget::HtmlStatic => html_static(&fixed, label_measurer).into_owned(),
+                })
+            }
+            RenderOutput::Svg(None) => Err(MermaidError::RenderFailed("no Mermaid diagram detected".to_string())),
+            other => Err(MermaidError::RenderFailed(format!("unexpected Merman output: {other:?}"))),
+        }
+    }
+
+    /// Merman's layout document for `source`, or `None` when Merman detects
+    /// no diagram.
+    fn layout_json(
+        &self,
+        source: &str,
+        prepared: &Prepared,
+        measurer: &Arc<dyn TextMeasurer + Send + Sync>,
+    ) -> Result<Option<String>, MermaidError> {
+        let id = format!("bv-{:016x}", biscuit_hash::xx_hash(source));
+        let request = svg_request(Arc::clone(measurer), &id)?;
+        let control = self.control();
+        let written = self.call_merman(|| {
+            let output =
+                renderer(prepared).render(merman::RenderRequest::layout_json(source, control.clone(), request))?;
+            let RenderOutput::LayoutJson(Some(layout)) = output else {
+                return Ok(None);
+            };
+            let mut bytes = Vec::new();
+            let written = layout.layout().write_json_controlled(&mut bytes, &control)?;
+            Ok(Some(written.map(|()| bytes)))
+        })?;
+        written
+            .transpose()
+            .map_err(|error| MermaidError::RenderFailed(format!("gitGraph layout data: {error}")))?
+            .map(|bytes| String::from_utf8(bytes).map_err(|error| MermaidError::RenderFailed(error.to_string())))
+            .transpose()
+    }
+
+    fn control(&self) -> OperationControl {
+        OperationControl::new().with_deadline(self.time_budget)
+    }
+
+    /// Runs one Merman request, recording its elapsed time and mapping its
+    /// error; a cancelled request is the time budget exceeded, logged as a
+    /// warning.
+    fn call_merman<T>(&self, call: impl FnOnce() -> Result<T, RenderError>) -> Result<T, MermaidError> {
+        let started = Instant::now();
+        let result = call();
+        let elapsed = started.elapsed();
+        record_merman_call(elapsed);
+        result.map_err(|error| match error {
+            RenderError::Cancelled(cancelled) => {
+                tracing::warn!(
+                    budget_ms = self.time_budget.as_millis() as u64,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    "Mermaid render exceeded its time budget; showing the source instead"
+                );
+                MermaidError::RenderFailed(format!(
+                    "Mermaid render exceeded its time budget of {:?}: {cancelled}",
+                    self.time_budget
+                ))
+            }
+            other => MermaidError::RenderFailed(other.to_string()),
         })
     }
 
-    fn render_svg(&self, request: &RenderRequest) -> Result<String, MermaidError> {
-        let LaidOut {
-            layout, theme, config, ..
-        } = self.compute_layout(request.transparent_background)?;
-        let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &config);
-
-        Ok(self.apply_svg_overrides(svg))
-    }
-
-    fn build_theme(&self, transparent_background: bool) -> mermaid_rs_renderer::Theme {
-        let mut theme = match self.theme {
-            MermaidTheme::Default => mermaid_rs_renderer::Theme::mermaid_default(),
-            MermaidTheme::Dark => dark_theme(),
-            MermaidTheme::Forest => forest_theme(),
-            MermaidTheme::Neutral => neutral_theme(),
-        };
-
-        if let Some(size) = self.config.point_label_font_size {
-            theme.font_size = size as f32;
+    /// The color painted behind the diagram, or `None` for no background.
+    fn background_color(&self, background: Background) -> Option<String> {
+        match background {
+            Background::Theme => Some(self.palette().background().to_string()),
+            Background::Transparent => None,
+            Background::Solid { .. } => background.solid_hex(),
         }
-
-        // HIGHLIGHT git-graph nodes (e.g. the "+N" elision marker) take each
-        // branch's *inverse* hue from `git_inv_colors`, which renders as an
-        // unrelated color — a blue square on a yellow branch. Mirror the branch
-        // palette so every node on a branch shares one color.
-        theme.git_inv_colors = theme.git_colors.clone();
-
-        if transparent_background {
-            theme.background = "none".to_string();
-            theme.edge_label_background = "none".to_string();
-        }
-
-        theme
-    }
-
-    fn apply_svg_overrides(&self, svg: String) -> String {
-        let mut output = svg;
-
-        if let Some(fill) = &self.config.quadrant1_fill {
-            output = replace_quadrant_fill(&output, "#ECECFF", fill);
-        }
-        if let Some(fill) = &self.config.quadrant2_fill {
-            output = replace_quadrant_fill(&output, "#f1f1ff", fill);
-        }
-        if let Some(fill) = &self.config.quadrant3_fill {
-            output = replace_quadrant_fill(&output, "#f6f6ff", fill);
-        }
-        if let Some(fill) = &self.config.quadrant4_fill {
-            output = replace_quadrant_fill(&output, "#fbfbff", fill);
-        }
-        if let Some(radius) = self.config.point_radius {
-            output = replace_circle_radius(&output, radius);
-        }
-
-        // Fix legend text vertical alignment: mermaid-rs-renderer positions legend
-        // text at the vertical center of the color rect but uses the default
-        // alphabetic baseline, causing misalignment. Add dominant-baseline="central"
-        // to legend text elements (those following legend rect markers).
-        output = fix_legend_text_baseline(&output);
-
-        // Fix pie chart text contrast: mermaid-rs-renderer uses a single text color
-        // for all slice labels. When a slice is light (e.g. white), light text is
-        // unreadable. Adjust each label's fill based on its slice's luminance.
-        output = fix_pie_text_contrast(&output);
-
-        output
     }
 
     fn alt_text(&self) -> String {
         self.title
             .clone()
             .unwrap_or_else(|| "Mermaid diagram".to_string())
+    }
+
+    /// The diagram's text eligibility: `Some` when its family's text drawing
+    /// may replace the source ([`text_eligibility`]), from Merman's own
+    /// preprocessing and type detection of the source, so a comment or
+    /// directive is never taken for the header. `None` also for a source
+    /// Merman cannot preprocess or detect a diagram type in; a caller that
+    /// must report a source that cannot be drawn renders it instead
+    /// ([`render_text`](Self::render_text) fails for such a source).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::MermaidDiagram;
+    ///
+    /// let flowchart = MermaidDiagram::new("%% mindmap\nflowchart LR\n    A --> B");
+    /// assert_eq!(flowchart.text_eligibility().map(|e| e.family()), Some("flowchart"));
+    /// assert!(MermaidDiagram::new("pie\n    \"A\" : 1").text_eligibility().is_none());
+    /// ```
+    pub fn text_eligibility(&self) -> Option<TextEligibility> {
+        self.try_text_eligibility().ok().flatten()
+    }
+
+    /// [`text_eligibility`](Self::text_eligibility) for a fallible caller: a
+    /// source Merman cannot preprocess (malformed frontmatter or directive)
+    /// or detect a diagram type in (a header typo) is that error, never a
+    /// family that is not drawn as text. A detected family with no text
+    /// capability (pie, ZenUML) is `Ok(None)`.
+    pub(crate) fn try_text_eligibility(&self) -> Result<Option<TextEligibility>, MermaidError> {
+        let source = rewrite_label_newlines(&self.instructions);
+        Ok(source_theme(&source)?.text_diagram_type()?.and_then(text_eligibility))
+    }
+
+    /// Checks that the source parses, as [`render`](Self::render) would read
+    /// it, without drawing it: one Merman parse bounded by the
+    /// [time budget](Self::with_time_budget), with no layout, no fonts, and
+    /// no artifact. For a caller that shows the source and still has to
+    /// report a source that cannot be drawn.
+    ///
+    /// Only the parse is checked: a source that parses but needs a render
+    /// capability that is not built in (a math label) passes here and still
+    /// fails [`render`](Self::render).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::MermaidDiagram;
+    ///
+    /// assert!(MermaidDiagram::new("pie\n    \"A\" : 1").validate().is_ok());
+    /// assert!(MermaidDiagram::new("flowchart LR\n    A[unclosed --> B").validate().is_err());
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// `MermaidError::RenderFailed` when the source does not preprocess or
+    /// parse, has no known diagram type or is ZenUML, or the parse exceeds
+    /// the time budget.
+    pub fn validate(&self) -> Result<(), MermaidError> {
+        let (source, engine) = self.validation_input()?;
+        let control = self.control();
+        self.call_merman(|| {
+            engine
+                .parse_diagram_for_render_model_controlled_sync(&source, merman::ParseOptions::strict(), &control)??
+                .ok_or(RenderError::NoDiagram)
+                .map(drop)
+        })
+    }
+
+    /// [`validate`](Self::validate) for a fallible caller that shows the
+    /// source in place of a drawing: the source must also need no render
+    /// capability that is not built in (math for a `$$…$$` label, a layout
+    /// engine), which [`render`](Self::render) would refuse with the same
+    /// error. One Merman request bounded by the
+    /// [time budget](Self::with_time_budget), stopping at Merman's capability
+    /// plan for the parsed model: no layout, no fonts, and no artifact.
+    ///
+    /// ## Errors
+    ///
+    /// [`validate`](Self::validate)'s, and `MermaidError::RenderFailed` naming
+    /// the first missing capability.
+    pub(crate) fn validate_renderable(&self) -> Result<(), MermaidError> {
+        let (source, engine) = self.validation_input()?;
+        let renderer = Renderer::new().with_engine(engine);
+        let control = self.control();
+        self.call_merman(|| {
+            let output = renderer.render(merman::RenderRequest::svg_plan(&source, control.clone(), SvgRequest::default()))?;
+            let RenderOutput::SvgPlan(Some(plan)) = output else {
+                return Err(RenderError::NoDiagram);
+            };
+            match plan.missing_capabilities().first() {
+                None => Ok(()),
+                Some(&capability) => Err(RenderError::from(merman::svg::RenderError::MissingCapability {
+                    capability,
+                    diagram_type: plan.diagram_type().to_string(),
+                })),
+            }
+        })
+    }
+
+    /// The rewritten source and the engine [`render`](Self::render) would
+    /// parse it with; ZenUML, which is never handed to Merman, is an error.
+    fn validation_input(&self) -> Result<(String, Engine), MermaidError> {
+        if is_zenuml(&self.instructions) {
+            return Err(MermaidError::RenderFailed(
+                "ZenUML diagrams are not rendered; showing the source".to_string(),
+            ));
+        }
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let author_variables = source_theme(&source)?.author_variables;
+        let site_config = self.site_config(&self.palette(), false, author_variables.as_ref());
+        let engine = Engine::new().with_site_config(merman::MermaidConfig::from_value(site_config));
+        Ok((source, engine))
+    }
+
+    /// Draws the diagram as text for a terminal that cannot show images.
+    ///
+    /// At most one Merman request, bounded by the
+    /// [time budget](Self::with_time_budget), and none when the source does
+    /// not preprocess, has no detectable type, or the family is not
+    /// eligible ([`text_eligibility`](Self::text_eligibility)) or `options`
+    /// has no columns. A family that admits Merman's `auto` layout is
+    /// requested with it (canonical, then compact once when canonical is too
+    /// wide); every other family is requested canonically. The source goes
+    /// through the same rewrites and site config as [`render`](Self::render);
+    /// no SVG is drawn, no font is loaded, and no artifact is written.
+    ///
+    /// ## Returns
+    ///
+    /// [`TextRender::Drawing`] when Merman drew the diagram and every row fits
+    /// `options.max_columns()` terminal cells; otherwise
+    /// [`TextRender::Source`] with the reason. A drawing is never clipped or
+    /// wrapped to fit.
+    ///
+    /// ## Errors
+    ///
+    /// `MermaidError::RenderFailed` when the source does not preprocess
+    /// (malformed frontmatter or directive) or has no detectable diagram type
+    /// (no request is made for either), does not parse,
+    /// Merman fails, exceeds the time budget (logged as a warning), or
+    /// reaches a resource limit. Nothing is retried.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_visualized::mermaid::{MermaidDiagram, TextOptions, TextRender};
+    ///
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+    /// let TextRender::Drawing(drawing) = diagram.render_text(TextOptions::new(80))? else {
+    ///     panic!("a two-node flowchart fits 80 columns");
+    /// };
+    /// assert!(drawing.text().contains('A'));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[cfg(feature = "terminal")]
+    pub fn render_text(&self, options: TextOptions) -> Result<TextRender, MermaidError> {
+        self.render_text_with(options, merman::ascii::AsciiResourcePolicy::default())
+    }
+
+    /// [`render_text`](Self::render_text) under Merman resource limits
+    /// `resources`, so a test can reach a limit without a huge diagram.
+    #[cfg(feature = "terminal")]
+    pub(crate) fn render_text_with(
+        &self,
+        options: TextOptions,
+        resources: merman::ascii::AsciiResourcePolicy,
+    ) -> Result<TextRender, MermaidError> {
+        let source = rewrite_label_newlines(&self.instructions).into_owned();
+        let source_theme = source_theme(&source)?;
+        let Some(eligibility) = source_theme.text_diagram_type()?.and_then(text_eligibility) else {
+            return Ok(TextRender::Source(TextSource::Ineligible));
+        };
+        if options.max_columns() == 0 {
+            return Ok(TextRender::Source(TextSource::NoColumns));
+        }
+        // The text target reads no palette or fonts: only the site config
+        // (the caller's `MermaidConfig`, and the author's variables over it).
+        let prepared = Prepared {
+            site_config: self.site_config(&self.palette(), false, source_theme.author_variables.as_ref()),
+            source,
+            family: source_theme.family,
+            design: None,
+        };
+        let request = text::ascii_request(eligibility, options, resources);
+        let control = self.control();
+        record_text_request();
+        let output = self.call_merman(|| {
+            renderer(&prepared).render(merman::RenderRequest::ascii(&prepared.source, control.clone(), request))
+        })?;
+        match output {
+            RenderOutput::Ascii(Some(output)) => Ok(text::judge(&output, eligibility, options)),
+            RenderOutput::Ascii(None) => Err(MermaidError::RenderFailed("no Mermaid diagram detected".to_string())),
+            other => Err(MermaidError::RenderFailed(format!("unexpected Merman output: {other:?}"))),
+        }
     }
 
     /// Returns a fallback code block representation of the diagram.
@@ -380,408 +1121,395 @@ impl MermaidDiagram {
     }
 }
 
-/// Fixes vertical alignment of legend text relative to color marker rectangles.
-///
-/// The mermaid-rs-renderer positions legend text at the vertical center of the
-/// marker rect (`rect_y + marker_size / 2`) but renders with SVG's default
-/// alphabetic baseline. This makes text appear too high relative to the marker.
-/// Adding `dominant-baseline="central"` centers the text vertically.
-///
-/// Targets `<text>` elements that immediately follow legend-style `<rect>` elements
-/// (identified by having equal `fill` and `stroke` attributes with small dimensions).
-fn fix_legend_text_baseline(svg: &str) -> String {
-    let mut output = String::with_capacity(svg.len() + 200);
-    let mut remaining = svg;
-
-    // Legend rects have matching fill/stroke and are followed by <text> elements.
-    // Pattern: <rect ... fill="X" stroke="X" .../><text ...>
-    while let Some(rect_start) = remaining.find("<rect ") {
-        let (before, from_rect) = remaining.split_at(rect_start);
-        output.push_str(before);
-
-        // Find end of rect tag
-        let Some(rect_end) = from_rect.find("/>") else {
-            output.push_str(from_rect);
-            remaining = "";
-            break;
-        };
-
-        let rect_tag = &from_rect[..rect_end + 2];
-        let after_rect = &from_rect[rect_end + 2..];
-        output.push_str(rect_tag);
-
-        // Check if this is a legend marker rect (matching fill and stroke)
-        if is_legend_rect(rect_tag) {
-            // Look for an immediately following <text> element
-            let trimmed = after_rect.trim_start();
-            if trimmed.starts_with("<text ") {
-                let skipped = after_rect.len() - trimmed.len();
-                output.push_str(&after_rect[..skipped]);
-
-                // Find the closing > of the <text ...> opening tag
-                if let Some(gt_pos) = trimmed.find('>') {
-                    let text_open = &trimmed[..gt_pos];
-                    if !text_open.contains("dominant-baseline") {
-                        output.push_str(text_open);
-                        output.push_str(" dominant-baseline=\"central\">");
-                        remaining = &trimmed[gt_pos + 1..];
-                        continue;
-                    }
-                }
-                remaining = &after_rect[skipped..];
-                continue;
-            }
-        }
-
-        remaining = after_rect;
-    }
-
-    output.push_str(remaining);
-    output
+/// The measurer for one render: with `embed`, the embedded-font opt-in's,
+/// with those requested families forced to Inter.
+fn label_measurer(chain: &Arc<FontChain>, embed: Option<&[String]>) -> Arc<LabelMeasurer> {
+    Arc::new(match embed {
+        Some(forced_inter) => LabelMeasurer::embedding_forcing(chain, forced_inter),
+        None => LabelMeasurer::new(chain),
+    })
 }
 
-/// Checks if a `<rect>` tag looks like a legend color marker.
+/// The opt-in's first pass forces no family to Inter.
+const NONE_FORCED: &[String] = &[];
+
+/// The code points `svg` draws, or none (logged) when it cannot be read.
+fn used_glyphs(svg: &str) -> UsedGlyphs {
+    collect_used_glyphs(svg).unwrap_or_else(|error| {
+        tracing::warn!(%error, "the embedded font's characters could not be read from the SVG; it embeds none");
+        UsedGlyphs::default()
+    })
+}
+
+/// The [`DiagramFont`] kept beside the cached SVG `key`, or `None` when the
+/// record is missing or unreadable.
+fn read_font_record(cache: &FileCache, key: &str, chain: &Arc<FontChain>) -> Option<DiagramFont> {
+    let path = cache.sidecar_path(VisualizationKind::Mermaid, key, OutputFormat::Svg, FONT_RECORD_SUFFIX);
+    let bytes = std::fs::read(path).ok()?;
+    let record: FontRecord = serde_json::from_slice(&bytes)
+        .inspect_err(|error| tracing::debug!(%error, "unreadable embedded-font record; rendering again"))
+        .ok()?;
+    Some(record.into_diagram_font(chain))
+}
+
+/// The theme's font stacks as the chain is asked for them: regular and bold.
+fn theme_font_stacks() -> [FontQuery; 2] {
+    [
+        FontQuery::from_css(THEME_FONT_STACK, 400, false),
+        FontQuery::from_css(THEME_FONT_STACK, 700, false),
+    ]
+}
+
+/// The tag label style Merman laid a gitGraph out with and the gap colliding
+/// tags get ([`TAG_GAP_EM`] of the font size), read from the layout
+/// document's effective config: `themeVariables.fontFamily`,
+/// `tagLabelFontSize`, and `fontSize`, so an author's `%%{init}%%` override
+/// is measured as Merman draws it. Both sizes follow Merman's own reading
+/// (see [`base_font_size`] and [`tag_font_size`]); the layout itself is read
+/// strictly by `gitgraph_layout`.
+fn tag_metrics(json: &str) -> (TextStyle, f32) {
+    let document = serde_json::from_str::<serde_json::Value>(json).ok();
+    let variables = document
+        .as_ref()
+        .and_then(|document| document.pointer("/meta/effective_config/themeVariables"));
+    let variable = |name: &str| variables.and_then(|variables| variables.get(name));
+    let font_size = base_font_size(variable("fontSize"));
+    let family = variable("fontFamily")
+        .and_then(serde_json::Value::as_str)
+        .filter(|family| !family.trim().is_empty());
+    let style = TextStyle {
+        font_family: Some(family.unwrap_or(THEME_FONT_STACK).to_string()),
+        font_size: tag_font_size(variable("tagLabelFontSize"), font_size),
+        font_weight: None,
+        font_style: None,
+    };
+    let gap = TAG_GAP_EM * font_size as f32;
+    (style, gap)
+}
+
+/// The gitGraph base font size as Merman reads `themeVariables.fontSize`: a
+/// number, or a string holding a number with an optional `px`; anything else
+/// is the themes' 16 px. Merman clamps it to at least 1 px.
+fn base_font_size(value: Option<&serde_json::Value>) -> f64 {
+    let parsed = value.and_then(|value| {
+        value.as_f64().or_else(|| {
+            let text = value.as_str()?.trim();
+            text.strip_suffix("px").unwrap_or(text).trim().parse::<f64>().ok()
+        })
+    });
+    parsed
+        .filter(|size| size.is_finite())
+        .unwrap_or(f64::from(THEME_FONT_SIZE))
+        .max(1.0)
+}
+
+/// The tag font size as Merman draws it from `themeVariables.tagLabelFontSize`.
+/// Merman reads only a string: `px`, `em` and `%` (of the base size),
+/// `inherit` and `unset` (the base size), or `0`. A JSON number, a unitless
+/// string other than `0`, or anything else draws at the 10 px default, so it
+/// is measured at 10 px too.
+fn tag_font_size(value: Option<&serde_json::Value>, base: f64) -> f64 {
+    let Some(text) = value.and_then(serde_json::Value::as_str).map(str::trim) else {
+        return TAG_LABEL_FONT_SIZE;
+    };
+    let unit = |unit: &str| {
+        text.strip_suffix(unit)?
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|size| size.is_finite() && *size >= 0.0)
+    };
+    if text.eq_ignore_ascii_case("inherit") || text.eq_ignore_ascii_case("unset") {
+        base
+    } else if let Some(size) = unit("px") {
+        size
+    } else if let Some(size) = unit("em") {
+        size * base
+    } else if let Some(size) = unit("%") {
+        size * base / 100.0
+    } else if text.parse::<f64>().is_ok_and(|size| size == 0.0) {
+        0.0
+    } else {
+        TAG_LABEL_FONT_SIZE
+    }
+}
+
+/// Whether the source's own `%%{init}%%` or frontmatter config styles the
+/// diagram (D54).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthorTheme {
+    /// No theme keys: the compiled design applies.
+    None,
+    /// `themeVariables` with a color but no `theme`: the palette as `base`
+    /// variables, beneath the author's.
+    Variables,
+    /// A named `theme`: the author's theme alone.
+    Named,
+}
+
+/// What the source says about its own styling, read before rendering.
+struct SourceTheme {
+    family: Option<String>,
+    /// Merman's metadata id for the detected type (`flowchart`, `gitgraph`,
+    /// …), the key of its text capabilities. Unlike `family`, which is
+    /// `gitGraph` for a gitGraph.
+    diagram_type: Option<&'static str>,
+    author_theme: AuthorTheme,
+    /// The author's `themeVariables` when they set a color
+    /// ([`AuthorTheme::Variables`]).
+    author_variables: Option<serde_json::Value>,
+    /// The source's whole `%%{init}%%`/frontmatter config.
+    author_config: serde_json::Value,
+    /// Merman's error when it detected no diagram type. The image route
+    /// ignores it (its render fails with Merman's own error); the text route
+    /// reports it ([`SourceTheme::text_diagram_type`]).
+    detect_error: Option<String>,
+}
+
+impl SourceTheme {
+    /// The detected type for the text route: a source whose type Merman
+    /// cannot detect is that error, never a family that is not drawn as
+    /// text. A detected type with no metadata id or text capability is
+    /// `Ok`; ZenUML is one (Merman detects it and has no text output for it).
+    fn text_diagram_type(&self) -> Result<Option<&'static str>, MermaidError> {
+        match &self.detect_error {
+            Some(error) => Err(MermaidError::RenderFailed(error.clone())),
+            None => Ok(self.diagram_type),
+        }
+    }
+}
+
+/// The source's diagram family and author theme keys, from Merman's own
+/// preprocessing (directives and frontmatter) and type detection.
 ///
-/// Legend markers have matching `fill` and `stroke` attributes.
-fn is_legend_rect(rect_tag: &str) -> bool {
-    let fill = extract_attr(rect_tag, "fill");
-    let stroke = extract_attr(rect_tag, "stroke");
-    match (fill, stroke) {
-        (Some(f), Some(s)) => f == s,
+/// ## Errors
+///
+/// `MermaidError::RenderFailed` when Merman cannot preprocess the source
+/// (malformed frontmatter or directive), the same strict preprocessing every
+/// Merman request makes. A source with no detectable type is not an error
+/// here: it has no family and records the detection error
+/// ([`SourceTheme::text_diagram_type`]); an image render fails later with
+/// Merman's own error.
+fn source_theme(source: &str) -> Result<SourceTheme, MermaidError> {
+    let engine = Engine::new();
+    let preprocessed = merman::preprocess_diagram(source, engine.registry())
+        .map_err(|error| MermaidError::RenderFailed(error.to_string()))?;
+    let author = preprocessed.config.as_value();
+    let author_theme = if author.get("theme").is_some() {
+        AuthorTheme::Named
+    } else if author.get("themeVariables").is_some_and(sets_a_color) {
+        AuthorTheme::Variables
+    } else {
+        AuthorTheme::None
+    };
+    let mut config = preprocessed.config.clone();
+    let (detected, detect_error) = match engine.registry().detect_type(preprocessed.source.text(), &mut config) {
+        Ok(detected) => (Some(detected), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    let family = detected
+        .and_then(merman::diagram_type_family_id)
+        .map(|family| family.as_str().to_string());
+    let diagram_type = detected.and_then(merman::diagram_type_metadata_id);
+    let author_variables = (author_theme == AuthorTheme::Variables).then(|| author["themeVariables"].clone());
+    let author_config = author.clone();
+    Ok(SourceTheme { family, diagram_type, author_theme, author_variables, author_config, detect_error })
+}
+
+/// Whether an author's `themeVariables` set a color anywhere (a string, or a
+/// comma-separated list, that parses as one). Our designs set colors only, so
+/// a size or flag (`pieOuterStrokeWidth`, `darkMode`) cannot conflict with
+/// them and keeps the compiled theme.
+fn sets_a_color(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => text.split(',').any(|part| parse_css_color(part).is_some()),
+        serde_json::Value::Object(map) => map.values().any(sets_a_color),
+        serde_json::Value::Array(items) => items.iter().any(sets_a_color),
         _ => false,
     }
 }
 
-/// Extracts the value of an attribute from an XML tag string.
-fn extract_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
-    let pattern = format!("{}=\"", attr);
-    let start = tag.find(&pattern)? + pattern.len();
-    let end = start + tag[start..].find('"')?;
-    Some(&tag[start..end])
+/// The palette as Mermaid `base` theme variables. Only the root variables
+/// the `base` theme derives the rest from: a derived one set here (`mainBkg`,
+/// `nodeBorder`) would beat the author's root key (`primaryColor`) it derives
+/// from.
+fn base_theme_variables(palette: &Palette) -> Vec<(&'static str, super::Rgb)> {
+    let [_, _, yellow, ..] = palette.accents();
+    vec![
+        ("background", palette.background()),
+        ("primaryColor", palette.surface()),
+        ("primaryTextColor", palette.text()),
+        ("primaryBorderColor", palette.border()),
+        ("secondaryColor", palette.surface_alt()),
+        ("tertiaryColor", palette.surface_alt()),
+        ("lineColor", palette.line()),
+        ("textColor", palette.text()),
+        ("titleColor", palette.text()),
+        ("noteBkgColor", palette.tints()[2]),
+        ("noteBorderColor", yellow),
+        ("noteTextColor", palette.text()),
+    ]
 }
 
-/// Applies `%%{init: {'themeVariables': {...}}}%%` overrides to the theme.
-///
-/// This handles pie slice colors (`pie1`..`pie12`) and other theme variables
-/// that `mermaid-rs-renderer`'s parser extracts but only the CLI applies.
-fn apply_init_theme_overrides(theme: &mut mermaid_rs_renderer::Theme, init: &serde_json::Value) {
-    if let Some(vars) = init.get("themeVariables") {
-        // Apply pie slice colors (pie1 through pie12)
-        for i in 0..12 {
-            let key = format!("pie{}", i + 1);
-            if let Some(color) = vars.get(&key).and_then(|v| v.as_str()) {
-                theme.pie_colors[i] = color.to_string();
-            }
-        }
-
-        // Apply other commonly used theme variables
-        if let Some(val) = vars.get("primaryColor").and_then(|v| v.as_str()) {
-            theme.primary_color = val.to_string();
-        }
-        if let Some(val) = vars.get("primaryTextColor").and_then(|v| v.as_str()) {
-            theme.primary_text_color = val.to_string();
-        }
-        if let Some(val) = vars.get("primaryBorderColor").and_then(|v| v.as_str()) {
-            theme.primary_border_color = val.to_string();
-        }
-        if let Some(val) = vars.get("lineColor").and_then(|v| v.as_str()) {
-            theme.line_color = val.to_string();
-        }
-        if let Some(val) = vars.get("secondaryColor").and_then(|v| v.as_str()) {
-            theme.secondary_color = val.to_string();
-        }
-        if let Some(val) = vars.get("tertiaryColor").and_then(|v| v.as_str()) {
-            theme.tertiary_color = val.to_string();
-        }
-        if let Some(val) = vars.get("textColor").and_then(|v| v.as_str()) {
-            theme.text_color = val.to_string();
-        }
-        if let Some(val) = vars.get("background").and_then(|v| v.as_str()) {
-            theme.background = val.to_string();
-        }
-        if let Some(val) = vars.get("fontFamily").and_then(|v| v.as_str()) {
-            theme.font_family = val.to_string();
-        }
-        if let Some(val) = vars.get("fontSize").and_then(|v| v.as_f64()) {
-            theme.font_size = val as f32;
-        }
-        // Pie-specific text colors
-        if let Some(val) = vars.get("pieTitleTextColor").and_then(|v| v.as_str()) {
-            theme.pie_title_text_color = val.to_string();
-        }
-        if let Some(val) = vars.get("pieSectionTextColor").and_then(|v| v.as_str()) {
-            theme.pie_section_text_color = val.to_string();
-        }
-        if let Some(val) = vars.get("pieLegendTextColor").and_then(|v| v.as_str()) {
-            theme.pie_legend_text_color = val.to_string();
-        }
-        if let Some(val) = vars.get("pieStrokeColor").and_then(|v| v.as_str()) {
-            theme.pie_stroke_color = val.to_string();
-        }
-        if let Some(val) = vars.get("pieOuterStrokeColor").and_then(|v| v.as_str()) {
-            theme.pie_outer_stroke_color = val.to_string();
-        }
-    }
-}
-
-fn replace_quadrant_fill(svg: &str, current_fill: &str, replacement_fill: &str) -> String {
-    svg.replacen(
-        &format!("fill=\"{}\"", current_fill),
-        &format!("fill=\"{}\"", replacement_fill),
-        1,
+fn renderer(prepared: &Prepared) -> Renderer {
+    Renderer::new().with_engine(
+        Engine::new().with_site_config(merman::MermaidConfig::from_value(prepared.site_config.clone())),
     )
 }
 
-fn replace_circle_radius(svg: &str, radius: u32) -> String {
-    let replacement = format!(" r=\"{}\"", radius.max(1));
-    let mut output = String::with_capacity(svg.len());
-    let mut remaining = svg;
-
-    while let Some(circle_start) = remaining.find("<circle") {
-        let (before_circle, circle_and_after) = remaining.split_at(circle_start);
-        output.push_str(before_circle);
-
-        if let Some(tag_end) = circle_and_after.find('>') {
-            let (circle_tag, after_circle) = circle_and_after.split_at(tag_end + 1);
-            output.push_str(&circle_tag.replacen(" r=\"5\"", &replacement, 1));
-            remaining = after_circle;
-        } else {
-            output.push_str(circle_and_after);
-            remaining = "";
-        }
-    }
-
-    output.push_str(remaining);
-    output
+fn svg_request(
+    measurer: Arc<dyn TextMeasurer + Send + Sync>,
+    diagram_id: &str,
+) -> Result<SvgRequest, MermaidError> {
+    let failed = |error: &dyn std::fmt::Display| MermaidError::RenderFailed(error.to_string());
+    let profile = MeasurementProfileId::new(MEASUREMENT_PROFILE).map_err(|error| failed(&error))?;
+    let identity = TextMeasurementProfileIdentity::new(profile, "1").map_err(|error| failed(&error))?;
+    let mut request = SvgRequest {
+        environment: SvgEnvironment::deterministic().with_text_measurement_policy(
+            TextMeasurementPolicy::uniform(TextMeasurementProfile::new(identity, measurer)),
+        ),
+        ..SvgRequest::default()
+    };
+    request.options.diagram_id = Some(diagram_id.to_string());
+    request.pipeline = Some(SvgPipeline::resvg_safe());
+    Ok(request)
 }
 
-/// Fixes pie chart percentage label contrast by adjusting text color per slice.
-///
-/// The mermaid-rs-renderer uses a single `pie_section_text_color` for all slice
-/// labels, which can produce unreadable text on light-colored slices. This
-/// post-processes the SVG to give each label the text color with the higher WCAG
-/// contrast ratio against its slice.
-fn fix_pie_text_contrast(svg: &str) -> String {
-    // Collect pie slice fill colors from <path> elements (in order)
-    let slice_fills: Vec<&str> = svg
-        .match_indices("<path ")
-        .filter_map(|(start, _)| {
-            let rest = &svg[start..];
-            let tag_end = rest.find('>')?;
-            let tag = &rest[..tag_end];
-            // Pie slice paths have opacity="0.850" — use this to distinguish
-            // from other paths (arrows, borders)
-            if !tag.contains("opacity=\"0.850\"") {
-                return None;
-            }
-            extract_attr(tag, "fill")
-        })
-        .collect();
-
-    if slice_fills.is_empty() {
-        return svg.to_string();
-    }
-
-    // Collect percentage text elements: <text> with dominant-baseline="middle"
-    // (as opposed to legend text which uses dominant-baseline="central")
-    let text_positions: Vec<usize> = svg
-        .match_indices("<text ")
-        .filter_map(|(start, _)| {
-            let rest = &svg[start..];
-            let tag_end = rest.find('>')?;
-            let tag = &rest[..tag_end];
-            if tag.contains("dominant-baseline=\"middle\"") {
-                Some(start)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Must have matching counts to pair them
-    if text_positions.len() != slice_fills.len() {
-        return svg.to_string();
-    }
-
-    let mut output = svg.to_string();
-    // Process in reverse order so earlier positions stay valid
-    for (i, &pos) in text_positions.iter().enumerate().rev() {
-        let rest = &output[pos..];
-        let Some(tag_end) = rest.find('>') else {
+/// The diagram header: the first word of the first line that is not blank,
+/// a `%%` comment or directive, or YAML frontmatter.
+fn header_keyword(source: &str) -> Option<&str> {
+    let mut in_frontmatter = false;
+    let mut in_directive = false;
+    let mut first = true;
+    for line in source.lines().map(str::trim) {
+        let at_start = std::mem::replace(&mut first, false);
+        if in_frontmatter {
+            in_frontmatter = line != "---";
             continue;
-        };
-        let tag = &rest[..tag_end];
-
-        let desired_fill = if is_light_color(slice_fills[i]) {
-            PIE_TEXT_DARK
-        } else {
-            PIE_TEXT_LIGHT
-        };
-
-        // Replace the fill attribute in this text tag
-        if let Some(fill_start) = tag.find("fill=\"") {
-            let abs_fill_start = pos + fill_start + 6; // after fill="
-            let fill_rest = &output[abs_fill_start..];
-            if let Some(fill_end) = fill_rest.find('"') {
-                output.replace_range(abs_fill_start..abs_fill_start + fill_end, desired_fill);
-            }
         }
-    }
-
-    output
-}
-
-/// Label colors for pie slices; each label takes whichever has the higher
-/// WCAG contrast ratio against its slice.
-const PIE_TEXT_DARK: &str = "#1a1a1a";
-const PIE_TEXT_LIGHT: &str = "#e2e8f0";
-
-/// Returns true if dark label text contrasts better than light text on `color`.
-///
-/// Unparseable colors return false, keeping the renderer's light text.
-fn is_light_color(color: &str) -> bool {
-    let Some(slice) = parse_css_color(color).map(relative_luminance) else {
-        return false;
-    };
-    let contrast = |text: &str| {
-        let text = parse_css_color(text).map_or(0.0, relative_luminance);
-        (slice.max(text) + 0.05) / (slice.min(text) + 0.05)
-    };
-    contrast(PIE_TEXT_DARK) > contrast(PIE_TEXT_LIGHT)
-}
-
-/// Parses `#rgb`, `#rrggbb`, and `hsl(h, s%, l%)` into sRGB channels in `0.0..=1.0`.
-///
-/// mermaid-rs-renderer 0.3 derives its default pie palette as `hsl()`.
-fn parse_css_color(color: &str) -> Option<(f64, f64, f64)> {
-    let color = color.trim();
-    if let Some(hex) = color.strip_prefix('#') {
-        let channel = |digits: &str| u8::from_str_radix(digits, 16).ok().map(f64::from);
-        let (r, g, b) = match hex.len() {
-            6 => (channel(&hex[0..2])?, channel(&hex[2..4])?, channel(&hex[4..6])?),
-            3 => (
-                channel(&hex[0..1])? * 17.0,
-                channel(&hex[1..2])? * 17.0,
-                channel(&hex[2..3])? * 17.0,
-            ),
-            _ => return None,
-        };
-        return Some((r / 255.0, g / 255.0, b / 255.0));
-    }
-
-    let args = color.strip_prefix("hsl(")?.strip_suffix(')')?;
-    let mut parts = args.split(',').map(str::trim);
-    let hue: f64 = parts.next()?.trim_end_matches("deg").parse().ok()?;
-    let saturation: f64 = parts.next()?.strip_suffix('%')?.parse().ok()?;
-    let lightness: f64 = parts.next()?.strip_suffix('%')?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some(hsl_to_rgb(hue, saturation / 100.0, lightness / 100.0))
-}
-
-fn hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (f64, f64, f64) {
-    let saturation = saturation.clamp(0.0, 1.0);
-    let lightness = lightness.clamp(0.0, 1.0);
-    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
-    let sector = hue.rem_euclid(360.0) / 60.0;
-    let second = chroma * (1.0 - (sector % 2.0 - 1.0).abs());
-    let (r, g, b) = match sector as u32 {
-        0 => (chroma, second, 0.0),
-        1 => (second, chroma, 0.0),
-        2 => (0.0, chroma, second),
-        3 => (0.0, second, chroma),
-        4 => (second, 0.0, chroma),
-        _ => (chroma, 0.0, second),
-    };
-    let offset = lightness - chroma / 2.0;
-    (r + offset, g + offset, b + offset)
-}
-
-/// WCAG relative luminance of an sRGB color.
-fn relative_luminance((r, g, b): (f64, f64, f64)) -> f64 {
-    let to_linear = |c: f64| -> f64 {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
+        if in_directive {
+            in_directive = !line.contains("}%%");
+            continue;
         }
+        if line.is_empty() {
+            first = at_start;
+            continue;
+        }
+        if at_start && line == "---" {
+            in_frontmatter = true;
+            continue;
+        }
+        if line.starts_with("%%{") {
+            in_directive = !line.contains("}%%");
+            continue;
+        }
+        if line.starts_with("%%") {
+            continue;
+        }
+        return line.split(|c: char| c.is_whitespace() || c == ':' || c == ';').next();
+    }
+    None
+}
+
+fn is_zenuml(source: &str) -> bool {
+    header_keyword(source).is_some_and(|keyword| keyword.eq_ignore_ascii_case("zenuml"))
+}
+
+fn is_gitgraph(source: &str) -> bool {
+    header_keyword(source) == Some("gitGraph")
+}
+
+/// The root `<svg>` element's `viewBox` as `(min_x, min_y, width, height)`,
+/// when it has four numbers and a positive size.
+fn root_view_box(svg: &str) -> Option<(f32, f32, f32, f32)> {
+    let start = svg.find("<svg")?;
+    let tag = &svg[start..start + svg[start..].find('>')?];
+    let value_start = tag.find("viewBox=\"")? + "viewBox=\"".len();
+    let value = &tag[value_start..value_start + tag[value_start..].find('"')?];
+    let numbers: Vec<f32> = value
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|part| !part.is_empty())
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    match numbers.as_slice() {
+        &[x, y, width, height] if width > 0.0 && height > 0.0 => Some((x, y, width, height)),
+        _ => None,
+    }
+}
+
+/// `svg` with a rectangle of `color` covering its root `viewBox`, painted
+/// first; unchanged for `None` or an SVG without a usable `viewBox`.
+fn with_background(svg: &str, color: Option<String>) -> String {
+    let (Some(color), Some((x, y, width, height))) = (color, root_view_box(svg)) else {
+        return svg.to_string();
     };
-    0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b)
+    let Some(open_end) = svg.find("<svg").and_then(|start| svg[start..].find('>').map(|end| start + end + 1)) else {
+        return svg.to_string();
+    };
+    // An inline style, so no family stylesheet rule for `rect` repaints it.
+    let rect = format!(
+        r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="{color}" style="fill:{color};stroke:none"/>"#
+    );
+    let mut out = String::with_capacity(svg.len() + rect.len());
+    out.push_str(&svg[..open_end]);
+    out.push_str(&rect);
+    out.push_str(&svg[open_end..]);
+    out
 }
 
-fn dark_theme() -> mermaid_rs_renderer::Theme {
-    let mut theme = mermaid_rs_renderer::Theme::modern();
-    theme.primary_color = "#1e293b".to_string();
-    theme.primary_text_color = "#e2e8f0".to_string();
-    theme.primary_border_color = "#64748b".to_string();
-    theme.line_color = "#94a3b8".to_string();
-    theme.secondary_color = "#334155".to_string();
-    theme.tertiary_color = "#0f172a".to_string();
-    theme.edge_label_background = "rgba(15,23,42,0.92)".to_string();
-    theme.cluster_background = "#111827".to_string();
-    theme.cluster_border = "#475569".to_string();
-    theme.background = "#020617".to_string();
-    theme.sequence_actor_fill = "#0f172a".to_string();
-    theme.sequence_actor_border = "#64748b".to_string();
-    theme.sequence_actor_line = "#94a3b8".to_string();
-    theme.sequence_note_fill = "#422006".to_string();
-    theme.sequence_note_border = "#f59e0b".to_string();
-    theme.sequence_activation_fill = "#1e293b".to_string();
-    theme.sequence_activation_border = "#64748b".to_string();
-    theme.text_color = "#e2e8f0".to_string();
-    theme.pie_title_text_color = "#e2e8f0".to_string();
-    theme.pie_section_text_color = "#e2e8f0".to_string();
-    theme.pie_legend_text_color = "#e2e8f0".to_string();
-    theme.pie_stroke_color = "#cbd5e1".to_string();
-    theme.pie_outer_stroke_color = "#64748b".to_string();
-    theme
+#[cfg(test)]
+thread_local! {
+    static MERMAN_CALLS: std::cell::RefCell<Vec<Duration>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn forest_theme() -> mermaid_rs_renderer::Theme {
-    let mut theme = mermaid_rs_renderer::Theme::mermaid_default();
-    theme.primary_color = "#dcfce7".to_string();
-    theme.primary_text_color = "#14532d".to_string();
-    theme.primary_border_color = "#16a34a".to_string();
-    theme.line_color = "#166534".to_string();
-    theme.secondary_color = "#bbf7d0".to_string();
-    theme.tertiary_color = "#ecfdf5".to_string();
-    theme.edge_label_background = "#f7fee7".to_string();
-    theme.cluster_background = "#d1fae5".to_string();
-    theme.cluster_border = "#34d399".to_string();
-    theme.background = "#f0fdf4".to_string();
-    theme.sequence_actor_fill = "#dcfce7".to_string();
-    theme.sequence_actor_border = "#16a34a".to_string();
-    theme.sequence_actor_line = "#166534".to_string();
-    theme.sequence_note_fill = "#fef3c7".to_string();
-    theme.sequence_note_border = "#d97706".to_string();
-    theme.sequence_activation_fill = "#bbf7d0".to_string();
-    theme.sequence_activation_border = "#16a34a".to_string();
-    theme.text_color = "#14532d".to_string();
-    theme
+#[cfg_attr(not(test), allow(unused_variables))]
+fn record_merman_call(elapsed: Duration) {
+    #[cfg(test)]
+    MERMAN_CALLS.with(|calls| calls.borrow_mut().push(elapsed));
 }
 
-fn neutral_theme() -> mermaid_rs_renderer::Theme {
-    let mut theme = mermaid_rs_renderer::Theme::modern();
-    theme.primary_color = "#f5f5f5".to_string();
-    theme.primary_text_color = "#262626".to_string();
-    theme.primary_border_color = "#737373".to_string();
-    theme.line_color = "#525252".to_string();
-    theme.secondary_color = "#e5e5e5".to_string();
-    theme.tertiary_color = "#ffffff".to_string();
-    theme.edge_label_background = "#fafafa".to_string();
-    theme.cluster_background = "#ededed".to_string();
-    theme.cluster_border = "#a3a3a3".to_string();
-    theme.background = "#fafafa".to_string();
-    theme.sequence_actor_fill = "#f5f5f5".to_string();
-    theme.sequence_actor_border = "#737373".to_string();
-    theme.sequence_actor_line = "#525252".to_string();
-    theme.sequence_note_fill = "#f5f5f4".to_string();
-    theme.sequence_note_border = "#a8a29e".to_string();
-    theme.sequence_activation_fill = "#e7e5e4".to_string();
-    theme.sequence_activation_border = "#737373".to_string();
-    theme.text_color = "#171717".to_string();
-    theme
+#[cfg(test)]
+thread_local! {
+    static TEXT_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "terminal")]
+fn record_text_request() {
+    #[cfg(test)]
+    TEXT_REQUESTS.with(|requests| requests.set(requests.get() + 1));
+}
+
+/// How many Merman text requests this thread made since the last call, and
+/// resets the count.
+#[cfg(test)]
+pub(crate) fn take_text_requests() -> usize {
+    TEXT_REQUESTS.with(|requests| requests.replace(0))
+}
+
+#[cfg(test)]
+thread_local! {
+    static RASTERIZED_SVGS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg_attr(not(test), allow(unused_variables))]
+fn record_rasterized_svg(svg: &str) {
+    #[cfg(test)]
+    RASTERIZED_SVGS.with(|svgs| svgs.borrow_mut().push(svg.to_string()));
+}
+
+/// Every SVG this thread handed the rasterizer for a PNG render since the
+/// last call, oldest first, and clears the record.
+#[cfg(test)]
+pub(crate) fn take_rasterized_svgs() -> Vec<String> {
+    RASTERIZED_SVGS.with(|svgs| std::mem::take(&mut *svgs.borrow_mut()))
+}
+
+/// The elapsed time of every Merman request this thread made since the last
+/// call, oldest first, and clears the record.
+#[cfg(test)]
+pub(crate) fn take_merman_calls() -> Vec<Duration> {
+    MERMAN_CALLS.with(|calls| std::mem::take(&mut *calls.borrow_mut()))
 }
 
 #[cfg(test)]
@@ -789,33 +1517,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_hex_and_hsl_colors() {
-        assert_eq!(parse_css_color("#FFFFFF"), Some((1.0, 1.0, 1.0)));
-        assert_eq!(parse_css_color("#000"), Some((0.0, 0.0, 0.0)));
-        let gray = parse_css_color("hsl(0.0000000000, 0.0000000000%, 60.0000000000%)").unwrap();
-        assert!((gray.0 - 0.6).abs() < 1e-9 && gray == (gray.0, gray.0, gray.0));
-        let (r, g, b) = parse_css_color("hsl(240, 100%, 50%)").unwrap();
-        assert!(r.abs() < 1e-9 && g.abs() < 1e-9 && (b - 1.0).abs() < 1e-9);
-        let (r, g, b) = parse_css_color("hsl(-60deg, 100%, 50%)").unwrap();
-        assert!((r - 1.0).abs() < 1e-9 && g.abs() < 1e-9 && (b - 1.0).abs() < 1e-9);
+    fn header_keyword_skips_comments_directives_and_frontmatter() {
+        assert_eq!(header_keyword("zenuml\n A.b()"), Some("zenuml"));
+        assert_eq!(header_keyword("\n%% c\n%%{init: {}}%%\ngitGraph\n"), Some("gitGraph"));
+        assert_eq!(header_keyword("---\ntitle: x\n---\ngitGraph LR:\n"), Some("gitGraph"));
+        assert_eq!(header_keyword("%%{init:\n {}\n}%%\nzenuml\n"), Some("zenuml"));
+        assert_eq!(header_keyword("graph LR; A-->B"), Some("graph"));
+        assert_eq!(header_keyword(""), None);
     }
 
     #[test]
-    fn rejects_malformed_colors() {
-        for color in ["", "#12", "#GGGGGG", "hsl(1, 2, 3)", "hsl(1, 2%)", "hsl(1, 2%, 3%, 4%)", "rgb(0,0,0)"] {
-            assert_eq!(parse_css_color(color), None, "{color}");
-            assert!(!is_light_color(color), "{color}");
-        }
+    fn root_view_box_reads_the_root_element_only() {
+        let svg = r#"<svg id="a" viewBox="0 0 370 64"><svg viewBox="0 0 1 1"/></svg>"#;
+        assert_eq!(root_view_box(svg), Some((0.0, 0.0, 370.0, 64.0)));
+        assert_eq!(root_view_box(r#"<svg viewBox="0 0 0 5"/>"#), None);
+        assert_eq!(root_view_box("<svg/>"), None);
     }
 
     #[test]
-    fn label_color_follows_the_higher_contrast_ratio() {
-        // White and the 0.3 renderer's default mid-gray third slice take dark text.
-        assert!(is_light_color("#FFFFFF"));
-        assert!(is_light_color("hsl(0.0000000000, 0.0000000000%, 60.0000000000%)"));
-        // Saturated dark slices keep light text.
-        assert!(!is_light_color("#A72145"));
-        assert!(!is_light_color("hsl(240, 100%, 25%)"));
-        assert!(!is_light_color("#000000"));
+    fn with_background_paints_the_view_box_first() {
+        let svg = r#"<svg viewBox="-1 2 30 40"><style/><g/></svg>"#;
+        let painted = with_background(svg, Some("#123456".to_string()));
+        assert_eq!(
+            painted,
+            r##"<svg viewBox="-1 2 30 40"><rect x="-1" y="2" width="30" height="40" fill="#123456" style="fill:#123456;stroke:none"/><style/><g/></svg>"##
+        );
+        assert_eq!(with_background(svg, None), svg);
     }
 }

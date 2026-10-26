@@ -10,6 +10,7 @@ mod locate;
 mod multi_document;
 mod normalization;
 mod reserved_indicator;
+mod root_indentation;
 mod scan;
 mod tab_indentation;
 mod whitespace;

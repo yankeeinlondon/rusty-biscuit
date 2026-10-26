@@ -1,0 +1,24 @@
+# Spike S0: can our palette be expressed as a Merman compiled theme?
+#
+# Standalone, NOT a member of the rusty-biscuit workspace (empty `[workspace]`).
+# Build with CARGO_TARGET_DIR outside the repository, for example:
+#   CARGO_TARGET_DIR=/tmp/s0-target cargo run --release
+[package]
+name = "s0-compiled-theme"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Pinned to an exact commit on Merman's `main`; the compiled-theme API is unreleased.
+merman = { git = "https://github.com/Latias94/merman.git", rev = "482fcde7faffb05a466f198085d615e604075d97", default-features = false, features = [
+    "svg",
+    "diagram-flowchart",
+    "diagram-sequence",
+    "diagram-git-graph",
+] }
+# The version biscuit-visualized rasterizes with today.
+resvg = "0.45"
+serde_json = "1"

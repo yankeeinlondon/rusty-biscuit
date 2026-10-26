@@ -92,6 +92,12 @@ original values (for example an exact non-UTF-8 path) intact. `--json` wins
 over `--plain`. With `--perf`, the object gains a `performance` field holding
 timings and work counters, and a rendered summary goes to stderr.
 
+The object carries `schema_version: 2` and `index_provenance`. A live query
+always walks the target, so the command writes `walked`; the text view adds a
+`Tree index:` line only when a replayed report says `supplied` or `unknown`.
+See [Serialized form](../topics/filesystem-query.md#serialized-form) for the
+field rules and how a version 1 report reads.
+
 A failure that leaves no report prints this on stdout, with a diagnostic on
 stderr:
 

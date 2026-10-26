@@ -52,9 +52,8 @@
 //! use darkmatter::markdown::compose::interpolation::{parse, Evaluator, EvalResult};
 //! use darkmatter::markdown::compose::EffectiveStateBuilder;
 //! use serde_json::json;
-//! use std::collections::HashMap;
 //!
-//! let mut fm = HashMap::new();
+//! let mut fm = serde_json::Map::new();
 //! fm.insert("name".to_string(), json!("Alice"));
 //!
 //! let state = EffectiveStateBuilder::new()
@@ -538,9 +537,9 @@ mod tests {
     }
 
     fn create_test_state(data: serde_json::Value) -> EffectiveState {
-        let fm: HashMap<String, serde_json::Value> = match data {
+        let fm: serde_json::Map<String, serde_json::Value> = match data {
             serde_json::Value::Object(obj) => obj.into_iter().collect(),
-            _ => HashMap::new(),
+            _ => serde_json::Map::new(),
         };
 
         EffectiveStateBuilder::new()
@@ -909,7 +908,7 @@ mod tests {
             ctx.env_mut()
                 .insert("HOME".to_string(), "/home/user".to_string());
 
-            let fm = HashMap::new();
+            let fm = serde_json::Map::new();
             let state = EffectiveStateBuilder::new()
                 .with_frontmatter(fm)
                 .with_context(ctx)

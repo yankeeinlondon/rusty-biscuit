@@ -18,6 +18,7 @@ pub mod languages;
 pub mod path_kind;
 pub mod query;
 pub mod repo;
+pub mod space;
 mod system_view;
 
 pub use docs::{

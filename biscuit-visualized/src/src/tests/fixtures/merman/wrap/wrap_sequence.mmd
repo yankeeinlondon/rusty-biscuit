@@ -1,0 +1,7 @@
+sequenceDiagram
+  participant A as Alice the very long participant name
+  participant B as Bob
+  A->>B: A message that is long enough that it would be wrapped if wrapping were on
+  B-->>A: explicit<br/>break in a message
+  Note over A,B: A note spanning both participants with quite a long text inside it
+  A->>B: wrap: this message asks Mermaid to wrap it explicitly because it is long

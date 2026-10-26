@@ -373,7 +373,7 @@ fn parse_instance(yaml_source: &str) -> Option<Value> {
     }
     let mut value: Value = serde_yaml_ng::from_str(yaml_source).ok()?;
     if let Value::Object(map) = &mut value {
-        map.remove("$schema");
+        map.shift_remove("$schema");
     }
     Some(value)
 }

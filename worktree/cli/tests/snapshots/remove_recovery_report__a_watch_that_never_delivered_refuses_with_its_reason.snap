@@ -1,9 +1,0 @@
----
-source: worktree/cli/tests/remove_recovery_report.rs
-expression: "rendered.join(\"\\n---\\n\")"
----
-Nothing was removed. wt stopped before moving worktree fix-path-spelling: the watch did not start delivering changes: delivery of earlier changes on the checkout could not be confirmed: nothing arrived for 5.0 s.
-  Run wt remove fix/path-spelling again; nothing was changed. macOS's file-change service, fseventsd, may be delayed. wt does not restart it; see the troubleshooting section of the wt remove documentation.
----
-Nothing was removed. wt stopped before moving worktree fix-path-spelling: the watch did not start delivering changes: the system dropped change notifications (its queue overflowed).
-  wt removes a checkout only while it can watch it for changes. Remove it from another system, or with git worktree remove once nothing uses it.

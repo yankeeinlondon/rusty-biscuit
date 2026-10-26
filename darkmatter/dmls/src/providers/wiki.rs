@@ -299,7 +299,7 @@ fn file_completions(
         return Vec::new();
     };
     let mut out = Vec::new();
-    for (index, record) in ctx.graph.documents().iter().enumerate() {
+    for (index, record) in ctx.graph.documents().enumerate() {
         if index == doc_id.0 as usize || record.dependency {
             continue;
         }

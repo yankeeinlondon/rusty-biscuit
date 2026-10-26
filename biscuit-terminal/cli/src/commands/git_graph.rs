@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
@@ -35,6 +35,9 @@ pub struct GitGraphArgs {
     #[command(flatten)]
     pub layout: LayoutArgs,
 
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
+
     #[arg(long, short = 'e')]
     pub example: bool,
 
@@ -61,11 +64,10 @@ impl Run for GitGraphArgs {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let instructions = if let Some(title) = &self.title {
-            format!("---\ntitle: {}\n---\ngitGraph\n{}", title, body)
-        } else {
-            format!("gitGraph\n{}", body)
-        };
+        let instructions = crate::commands::mermaid::with_mermaid_frontmatter_title(
+            &format!("gitGraph\n{}", body),
+            self.title.as_deref(),
+        );
 
         if ctx.json {
             let output = serde_json::json!({
@@ -82,9 +84,11 @@ impl Run for GitGraphArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            self.title.as_deref(),
             self.inverse,
             width_str.as_deref(),
             &self.layout,
+            &self.features,
         )?;
         let terminal = terminal_for_render(ctx.plain);
         display_mermaid(

@@ -181,6 +181,12 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (CRT `_wopen`, editors, scanners) blocks both with error 5, as does an open
   file inside a directory being renamed. Prefer `std::fs::rename` plus the
   bounded retry above.
+- **Don't mix `tempfile`'s `TempPath` with your own rename.** After
+  `std::fs::rename(&temp_path, dest)`, `TempPath::keep()` fails with os
+  error 2 on Windows only: it clears the temporary attribute on the old path,
+  which is gone. Stage under a unique name with plain `std::fs` instead; a
+  content-addressed store can treat a refused replace as success when the
+  destination already exists (`biscuit-visualized` `FileCache::store`).
 - **A named pipe's name briefly outlives its dropped server.** The kernel
   cancels the pending `ConnectNamedPipe` asynchronously, so a client opening
   the name just after shutdown can connect and then fail mid-RPC with
@@ -215,8 +221,11 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   template-mode commands resolve a native executable, and `echo` has none on
   a hermetic fixture `PATH`, so `shell: 'echo {{ value }}'` fails on Windows
   while macOS finds `/bin/echo`. Use the `claudine-argv-recorder` binary
-  (copied as `argv-recorder.exe`) and assert its recorded argv; literal shell
-  commands may still use builtins. Do not add an interpreter fallback.
+  (copied as `argv-recorder.exe`) and assert its recorded argv. A literal
+  frontmatter `$(mkdir ran)` run by the `claudine` binary fails the same way
+  (`ShellExpansionError: command not found`) even though the same command
+  passed in-process with `pre_approved_commands`. Use the recorder for a CLI
+  sentinel command too. Do not add an interpreter fallback.
 
 ## Current-directory locks
 
@@ -268,11 +277,21 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   replacement, an existing destination gives 183 and a cross-volume move 17;
   `std::fs::rename` instead **replaces** an existing empty directory or file.
 
+## Removing a link without touching its target
+
+- **A junction or directory symlink is not `is_dir()`.** `symlink_metadata`
+  reports it as a symlink, so code that picks `remove_file` versus
+  `remove_dir` from `is_dir()` calls `remove_file`, which fails with
+  `ERROR_ACCESS_DENIED` (5) and looks like a permission problem. Check
+  `MetadataExt::file_attributes() & FILE_ATTRIBUTE_DIRECTORY` (0x10) and use
+  `remove_dir`, which removes the link entry and never its target
+  (`worktree/lib/src/remove/lifecycle.rs`, `remove_link`). macOS and Linux
+  pass either way, so only the Windows cross-check catches it.
+
 ## Directory change notifications
 
-Measured with `wt remove`'s own `ReadDirectoryChangesW` adapter
-(`worktree/lib/src/remove/observation/read_directory_changes.rs`) on
-`build-win-native`:
+Measured with `wt remove`'s former `ReadDirectoryChangesW` adapter (removed
+2026-10-23 with the rest of its activity watcher) on `build-win-native`:
 
 - **Overflow is a zero-byte completion, not an error.** Treat it and
   `ERROR_NOTIFY_ENUM_DIR` as lost coverage, and any other completion error
@@ -449,17 +468,17 @@ yourself and ask the kernel who holds it.
 - **`SearchProtocolHost.exe` briefly opens fresh `%TEMP%` files** even though
   the index scope excludes `AppData`: 40–112 of 216 files in a full
   `worktree-cli` run, first seen 47 ms–1.34 s after creation, each hold
-  ~10–17 ms. `attrib +I` on the fixture root did not help. A `wt remove`
-  usage query landing in a hold pauses the removal (exit 3); it is rare (2 in
+  ~10–17 ms. `attrib +I` on the fixture root did not help. `wt remove`'s
+  one usage query (before the question) can land in a hold: Search then
+  appears as a program using the worktree, which is a warning, so a
+  non-interactive run without `--force` refuses (exit 3). It is rare (2 in
   ~300 runs) but hits users too. `cross-check --os windows` runs from an
   archive under `%TEMP%`, so every test path is exposed there.
-- **`wt remove` rechecks once:** when every holder is `SearchProtocolHost.exe`,
-  `SearchFilterHost.exe`, or `SearchIndexer.exe` by full image path in
-  `GetSystemDirectoryW`'s directory (compare case-insensitively), it waits
-  500 ms and queries once more; any other holder refuses at once. See the
-  worktree skill's `lifecycle.md`. Do not add test retries, `#[cfg]` skips,
-  or slow markers for it; a refusal naming it after the recheck is a new
-  finding.
+- **There is no Search recheck any more** (removed 2026-10-23 with the
+  refusal it softened). A deletion that meets a Search hold waits it out
+  like any held file. Do not add test retries, `#[cfg]` skips, or slow
+  markers for a hold; a test that must not see one passes `--force`, and a
+  recurring refusal naming Search is a new finding.
 - Before blaming such a holder for a rename that fails with 5, rule out the
   process itself: the query never lists the caller's PID, so an empty list
   points at an in-process handle (see

@@ -1,0 +1,17 @@
+gitGraph
+    commit id: "d1d1d1d"
+    branch lane/a
+    checkout lane/a
+    commit id: "a1a1a1a"
+    checkout main
+    branch lane/s
+    checkout lane/s
+    commit id: "s1s1s1s"
+    merge lane/a id: "s2s2s2s"
+    checkout lane/a
+    commit id: "a2a2a2a"
+    checkout lane/s
+    commit id: "s3s3s3s"
+    checkout main
+    commit id: "p1p1p1p"
+    merge lane/s id: "c1c1c1c"

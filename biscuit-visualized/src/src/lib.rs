@@ -1,5 +1,9 @@
 pub mod artifact;
 pub mod cache;
+#[cfg(feature = "terminal")]
+pub mod components;
+#[cfg(feature = "image")]
+mod fonts;
 #[cfg(feature = "image")]
 pub mod graph;
 #[cfg(feature = "image")]

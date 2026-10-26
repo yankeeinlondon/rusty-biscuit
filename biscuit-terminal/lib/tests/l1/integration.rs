@@ -26,7 +26,7 @@ fn test_terminal_struct_populates_all_fields() {
     let _is_ci = term.is_ci;
     let _color_depth = &term.color_depth;
     let _supports_italic = term.supports_italic;
-    let _image_support = &term.image_support;
+    let _image_support = &term.image_support();
     let _underline_support = &term.underline_support;
     let _osc_link_support = term.osc_link_support;
 }

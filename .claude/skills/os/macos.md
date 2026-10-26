@@ -111,6 +111,16 @@ per-batch loop on macOS without measuring it.
     `~/.cache/<scratch>/{src,target}`. Docker's file sharing rejects bind
     mounts from `/Volumes/…` and `/tmp` (`/private`) with
     `mkdir …: read-only file system`.
+  - A file rewritten under the same name on a bind mount can reach the
+    container stale and truncated to the old file's length. A headless
+    Chromium `--dump-dom` of a regenerated page silently lacked its last
+    50 KB, script included. Give each container run a freshly named copy.
+  - For a Linux browser, `debian:bookworm-slim` plus
+    `apt-get install --no-install-recommends chromium fonts-dejavu-core`
+    runs `chromium --headless=new --no-sandbox --dump-dom`. Its
+    `--virtual-time-budget` dumps before pending promises (font loads)
+    settle unless a timer is pending, so keep a `setInterval` alive until
+    the page's script finishes.
   - Keep `CARGO_TARGET_DIR` on a host mount (`-v …:/t -e CARGO_TARGET_DIR=/t`),
     because the VM overlay is small. A whole-package build OOM-kills the
     linker in the default VM, so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and
@@ -163,8 +173,8 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   IDs after a later marker (about 1 drain in 15). `wt remove` repeats marker
   rounds (create a marker, flush until it arrives) until a round delivers no
   watched-path event, and treats anything later as arriving in a later drain
-  (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
-  idle, up to ~650 ms under suite load.
+  (`wt remove`'s former watcher did this; it was removed 2026-10-23). A round
+  costs ~11 ms idle, up to ~650 ms under suite load.
 - **Wait without the blocking flush, but keep flushing.** `FlushSync` blocks
   for as long as fseventsd takes, so a wait cannot check a deadline or Ctrl-C
   while inside it. `FSEventStreamFlushAsync` returns at once and may be called
@@ -180,8 +190,9 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   children and renaming or removing it.
 - **fseventsd serializes stream registration:** ~20 ms alone, up to 5 s each
   with ~15 test processes starting together. Run FSEvents tests in a nextest
-  group with `max-threads = 1` (`fsevents-l1`). Events also lag 100–600 ms
-  under load, past any fixed wait.
+  group with `max-threads = 1` (the repository had one, `fsevents-l1`, for
+  `wt remove`'s former watcher). Events also lag 100–600 ms under load, past
+  any fixed wait.
 - **History flags are cumulative.** A created-then-deleted (or renamed) path
   can report `Create` with `Remove` or the rename flag. Match "the
   history includes the expected flag" plus the path's current state, never
@@ -227,8 +238,8 @@ administrator can restart it with `sudo killall fseventsd`; launchd restarts
 it at once. **That is system-wide:** every FSEvents client (Spotlight, Time
 Machine, editors, file watchers, build tools) may miss events from around the
 restart or rescan. It is a manual troubleshooting step only: never script it,
-never run it from a test or recipe, and never have `wt` do it. The user-facing
-version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
+never run it from a test or recipe, and never have `wt` do it. `wt remove`
+no longer watches files, so its user docs no longer describe fseventsd.
 
 ### Reading other processes' descriptors and cwd
 
@@ -285,6 +296,15 @@ version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
   - An exported `CDPATH` also makes `cd` print the path, so `$(cd … && pwd)`
     captures it twice. Run `.githooks/tests/test-pre-push.sh` as
     `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
+  - `CDPATH` also lists `~/coding/personal`, which holds unrelated
+    repositories (for example `~/coding/personal/repo`). A scratch script
+    that runs `cd repo` and then `git init`/`git add`/`git commit` there
+    commits into a real repository of the user's; it has happened at least
+    three times (2026-10-04, 2026-10-12, 2026-10-22). Build scratch
+    fixtures under `mktemp -d` and `cd` to that absolute path.
+  - In the agent's own shell `cd` may also be wrapped by zoxide (`zoxide: no
+    match found` is the sign), which can jump to a remembered directory.
+    Prefer absolute paths, `git -C`, and `--manifest-path` to `cd`.
 - **Signing fails or opens pinentry because Claudine shadows `HOME`.** An agent
   session can inherit `HOME=~/.claudine` (Claudine's directory), while the
   OpenPGP keyring lives under the login home. Run commit, verify, and push with
@@ -359,6 +379,34 @@ version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
   6 together 4.6 s each, with under 0.2 s of CPU apiece. Tests that enumerate
   audio devices slow down by their count, not core count; keep them few
   (sniff's `testing.md`).
+- **CoreText's first font enumeration lists the executable's directory.**
+  `CTFontCollection` (fontique's system-font scan, so every Mermaid
+  measurement in `biscuit-visualized`) registers the main bundle's fonts, and
+  for an unbundled executable the bundle is the directory the executable is
+  in. A test binary's is `target/debug/deps`: 175,820 entries in this
+  repository's shared target made that call 1.0-1.6 s per process (0.2 s for
+  the same binary elsewhere), and the listings serialize, so 16 test processes
+  together took about 11 s each. It scales with that directory, not with the
+  code. `CFProcessPath=<a binary elsewhere>` proves it (2.4 s to 0.35 s); a
+  `sample` of the process shows `_CFBundleReadDirectory` under
+  `TLocalFontRegistry::RegisterBundleFonts`. An installed `wt` lists its
+  own small directory, such as `~/.cargo/bin`.
+  - Most of those entries are `*.rcgu.o` files: macOS keeps debug info in the
+    object files (`split-debuginfo = "unpacked"`), and every incremental
+    rebuild of a workspace crate leaves a new set beside the old. They are
+    hours old, not weeks, so `just sweep`'s 14-day pass never reaches them;
+    206,034 of 221,677 entries were such objects, 153,006 referenced by no
+    executable (`nm -ap <exe> | grep ' OSO '` lists the ones a binary uses).
+    Deleting the unreferenced ones halved `deps`, and the tests were still
+    over budget, and the directory refills in hours. Don't treat cleanup as
+    the fix.
+  - The fix is per test: a nextest setup script that writes
+    `CFProcessPath=/usr/bin/true` to `$NEXTEST_ENV` for the font-measuring
+    tests (`.config/nextest.toml`, `coretext-small-bundle`, macOS hosts
+    only). At 111,080 entries and load 46 it took the eleven `wt list`
+    graph tests from 7.8-15 s each to 1.0-2.5 s, all running together. A
+    package with font-measuring tests that overrun on macOS adds its tests
+    to that script's filter.
 - **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
   network-interface probes, and tree-hugger's corpus tests, can exceed the
   30 s L1 budget when they run beside Clippy, other compiles, or other suites
@@ -417,3 +465,15 @@ codes before you match libtest output. lldb refuses Apple-signed platform
 binaries but attaches to ones you built. Pick the binary with the same `-p`
 selection the recipe uses; feature unification can otherwise give you a
 different artifact.
+
+## Zellij in tests: long `$TMPDIR` rejects every session name
+
+Zellij 0.45.1 on macOS derives its socket directory from `$TMPDIR`
+(`/var/folders/…/T/zellij-<uid>/…`) and then rejects any `--session` name
+with "session name must be less than 0 characters" (measured 2026-10-21).
+Give a test session a short `ZELLIJ_SOCKET_DIR` (a temp dir under `/tmp`),
+and pass the same variable to `kill-session` and `delete-session`. A fresh
+socket directory also means first-run state, so Zellij shows its "About
+Zellij" tips popup over the pane; start it with a `--config` file holding
+`show_startup_tips false` and `show_release_notes false`. See
+`biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs`.

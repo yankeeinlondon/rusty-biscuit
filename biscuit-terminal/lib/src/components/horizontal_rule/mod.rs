@@ -390,7 +390,7 @@ impl HorizontalRule {
     /// Tier 1 activates only when the terminal satisfies both:
     ///
     /// - `term.is_tty == true`
-    /// - `term.image_support` is one of [`ImageSupport::Kitty`] or
+    /// - `term.image_support()` is one of [`ImageSupport::Kitty`] or
     ///   [`ImageSupport::ITerm`]
     ///
     /// Both branches currently route through
@@ -418,7 +418,7 @@ impl HorizontalRule {
     pub(crate) fn render_image_tier(&self, term: &Terminal) -> Option<String> {
         if !term.is_tty
             || !matches!(
-                term.image_support,
+                term.image_support(),
                 ImageSupport::Kitty | ImageSupport::ITerm
             )
         {
@@ -922,7 +922,7 @@ mod tests {
     fn text_terminal_with_width_and_color_depth(width: u32, color_depth: ColorDepth) -> Terminal {
         let mut term = Terminal::new_optimistic(width);
         term.is_tty = false;
-        term.image_support = ImageSupport::None;
+        term.graphics_route = ImageSupport::None.into();
         term.color_depth = color_depth;
         term.supports_unicode = crate::discovery::locale::env_says_utf8().unwrap_or(true);
         term
@@ -986,7 +986,17 @@ mod tests {
             .build();
 
         let result = hr.render(&term);
-        assert!(result.contains("\x1b_G"), "{result:?}");
+        let params = result
+            .split("\x1b_G")
+            .nth(1)
+            .and_then(|chunk| chunk.split(';').next())
+            .unwrap_or_else(|| panic!("a Kitty upload: {result:?}"));
+        let id: u32 = params
+            .strip_prefix("q=2,i=")
+            .and_then(|rest| rest.split(',').next())
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_else(|| panic!("quiet, with an image ID: {params:?}"));
+        assert_ne!(id, 0, "{params:?}");
     }
 
     #[test]
@@ -2802,7 +2812,8 @@ mod tests {
 
     #[cfg(feature = "serde")]
     mod serde_roundtrip {
-        use super::super::{RuleAlignment, RuleStyle, RuleWeight};
+        use super::*;
+        use renderable::tree::{HrKind, HrWeight};
 
         #[test]
         fn test_rule_style_serde_roundtrip() {
@@ -2869,7 +2880,7 @@ mod tests {
             let rule = HorizontalRule::new();
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                None, None, None, None, "0", "0",
+                None, None, None, None, None, "0", "0",
             );
             assert_eq!(
                 actual, expected,
@@ -2885,8 +2896,9 @@ mod tests {
                 .color("blue");
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("waves"),
-                Some("thick"),
+                Some(HrKind::Waves),
+                Some(HrWeight::Thick),
+                None,
                 None,
                 Some("blue"),
                 "0",
@@ -2906,8 +2918,9 @@ mod tests {
                 .width("50%");
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("dots"),
-                Some("thin"),
+                Some(HrKind::Dots),
+                Some(HrWeight::Thin),
+                None,
                 Some("50%"),
                 None,
                 "0",
@@ -2924,7 +2937,8 @@ mod tests {
             let rule = HorizontalRule::new().style(RuleStyle::LineStar);
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("line-star"),
+                Some(HrKind::LineStar),
+                None,
                 None,
                 None,
                 None,
@@ -2942,7 +2956,8 @@ mod tests {
             let rule = HorizontalRule::new().style(RuleStyle::LineCircle);
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("line-circle"),
+                Some(HrKind::LineCircle),
+                None,
                 None,
                 None,
                 None,
@@ -2960,7 +2975,8 @@ mod tests {
             let rule = HorizontalRule::new().style(RuleStyle::InsetLine);
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("inset-line"),
+                Some(HrKind::InsetLine),
+                None,
                 None,
                 None,
                 None,
@@ -2978,7 +2994,8 @@ mod tests {
             let rule = HorizontalRule::new().style(RuleStyle::CurtainRod);
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("curtain-rod"),
+                Some(HrKind::CurtainRod),
+                None,
                 None,
                 None,
                 None,
@@ -3013,7 +3030,7 @@ mod tests {
                 });
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
-                None, None, None, None, "2ch", "1ch",
+                None, None, None, None, None, "2ch", "1ch",
             );
             assert_eq!(
                 actual, expected,

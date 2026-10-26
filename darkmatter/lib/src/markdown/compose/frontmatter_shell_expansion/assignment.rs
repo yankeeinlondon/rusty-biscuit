@@ -14,7 +14,6 @@
 //! is read when the value executes, from the state the caller supplies then,
 //! and fills exactly one argument; its resolved bytes never run.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use biscuit_terminal::errors::SourceContext;
@@ -124,7 +123,7 @@ impl ResolvedShellValue {
         key: &str,
         authored: &str,
         resolved: &str,
-        state: HashMap<String, Value>,
+        state: serde_json::Map<String, Value>,
         context: &ComposeContext,
         resolution: ResolutionContext,
     ) -> Result<Self, ShellExpansionError> {
@@ -282,7 +281,7 @@ impl ResolvedShellValue {
 /// or, for a value without a result suffix, a non-zero exit.
 pub fn execute_resolved_shell_values(
     values: &[&ResolvedShellValue],
-    state: HashMap<String, Value>,
+    state: serde_json::Map<String, Value>,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
     execute_shell_values_with(values, state, request, None)
@@ -304,7 +303,7 @@ pub fn execute_resolved_shell_values(
 /// suppressed by a result suffix.
 pub fn execute_shell_values_with(
     values: &[&ResolvedShellValue],
-    state: HashMap<String, Value>,
+    state: serde_json::Map<String, Value>,
     request: &crate::markdown::compose::ComposeRequest,
     holes: Option<&dyn HoleEvaluator>,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {

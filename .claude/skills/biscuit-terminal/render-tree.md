@@ -26,7 +26,7 @@ See the `renderable` skill's *Tree Module* topic for the tree model itself
   (`Option<Rc<dyn CodeRenderer>>`).
 - **`TerminalRenderContext`** — the terminal-capability snapshot the renderer
   consults: `width`, `available_width`, `current_indent`, `color_depth`,
-  `color_mode`, `hyperlinks`, `image_support`, `supports_unicode`, `layout`,
+  `color_mode`, `hyperlinks`, `supports_unicode`, `layout`,
   `terminal`, `active_layout`. Built via `from_terminal` / `fallback`.
   Fork helpers — `for_child(indent_delta, width_delta)`, `with_width`,
   `with_layout` — narrow width and accumulate indent for nested content.

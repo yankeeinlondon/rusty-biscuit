@@ -358,8 +358,9 @@ pub struct MarkdownToc {
     /// Hashes the raw text to detect formatting/ordering changes.
     pub frontmatter_hash: u64,
 
-    /// An xxHash of the frontmatter after serializing to canonical form.
-    /// Ignores key ordering and whitespace differences.
+    /// An xxHash of the frontmatter's canonical JSON. Ignores object key order
+    /// at every depth (including objects inside arrays) and whitespace, but
+    /// not array element order. `0` when the frontmatter is empty.
     pub frontmatter_hash_normalized: u64,
 
     // ─────────────────────────────────────────────────────────────

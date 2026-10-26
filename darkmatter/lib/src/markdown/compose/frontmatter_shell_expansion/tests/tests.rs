@@ -37,7 +37,7 @@ fn ternary_condition_uses_read_side_functions_with_context() {
     std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
     let rc = super::super::expression::ResolutionContext::at(dir.path().to_path_buf());
     let state = FrontmatterSeedState::new(
-        std::collections::HashMap::new(),
+        serde_json::Map::new(),
         ComposeContext::fixed_for_testing(),
     )
     .with_resolution_context(Some(rc));
@@ -57,7 +57,7 @@ fn ternary_condition_without_context_fails_loudly() {
     // silently selecting a branch.
     use crate::markdown::compose::ComposeContext;
     let state = FrontmatterSeedState::new(
-        std::collections::HashMap::new(),
+        serde_json::Map::new(),
         ComposeContext::fixed_for_testing(),
     );
     assert!(

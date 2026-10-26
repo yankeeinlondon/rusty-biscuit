@@ -737,3 +737,116 @@ fn test_clean_fenced_yaml_body_block_produces_no_diagnostics() {
         "body fences must not reach the analyzer, got:\n{stderr}"
     );
 }
+
+/// An indented frontmatter root (the inline-compose reproduction): text
+/// editors refuse it with a fix-it reason and write nothing, `md clean --save`
+/// moves the keys to column 0, and the same edit then succeeds. Every step is
+/// a persisted read/write/read round trip through the real binary.
+#[test]
+fn test_indented_root_is_refused_by_hash_save_until_clean_save_dedents_it() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-indented-root-is-refused-by-hash-save-until-clean-save-dedents-it",
+    );
+    let indented = concat!(
+        "---\n",
+        "    # Inline prompt\n",
+        "    prompt: |-\n",
+        "        Your task is to summarize.\n",
+        "\n",
+        "        Keep it short.\n",
+        "    options:\n",
+        "        retries: 2 # bounded\n",
+        "---\n",
+        "\n",
+        "# Body\n",
+        "\n",
+        "Text.\n",
+    );
+    let (_dir, path) = doc(indented);
+    let frontmatter = |document: &str| -> serde_yaml_ng::Value {
+        let yaml = document
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.split_once("\n---\n"))
+            .map(|(yaml, _)| yaml)
+            .expect("an LF frontmatter block");
+        serde_yaml_ng::from_str(yaml).expect("frontmatter parses")
+    };
+    let mut expected = frontmatter(indented);
+
+    let refused = fixture
+        .command()
+        .args(["hash", "--save"])
+        .arg(&path)
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(refused.get_output().stderr.clone()).unwrap();
+    // The error block renders the reason's code span as styling, so the
+    // backticks do not reach the terminal; wrapping moves the spaces.
+    let squeeze = |text: &str| text.split_whitespace().collect::<String>().replace('`', "");
+    let reason = "frontmatter root mapping is indented by 4 spaces; text-preserving edits \
+                  require top-level keys at column 0 (run `md clean --save <file>` to fix)";
+    assert!(
+        squeeze(&common::unwrapped(&stderr)).contains(&squeeze(reason)),
+        "stderr names the indentation and the fix:\n{stderr}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), indented.as_bytes(), "a refused save writes nothing");
+
+    fixture
+        .command()
+        .args(["clean", "--save"])
+        .arg(&path)
+        .assert()
+        .success();
+    let cleaned = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        cleaned,
+        concat!(
+            "---\n",
+            "# Inline prompt\n",
+            "prompt: |-\n",
+            "    Your task is to summarize.\n",
+            "\n",
+            "    Keep it short.\n",
+            "options:\n",
+            "    retries: 2 # bounded\n",
+            "---\n",
+            "\n",
+            "# Body\n",
+            "\n",
+            "Text.\n",
+        )
+    );
+    assert_eq!(frontmatter(&cleaned), expected);
+
+    fixture
+        .command()
+        .args(["hash", "--save"])
+        .arg(&path)
+        .assert()
+        .success();
+    let stamped = fs::read_to_string(&path).unwrap();
+    let hash_line = stamped
+        .lines()
+        .find(|line| line.trim_start().starts_with("hash:"))
+        .expect("a stored hash");
+    let stored = hash_line.strip_prefix("hash: ").expect("the hash is a column-0 key");
+    assert!(
+        predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}$").unwrap().eval(stored),
+        "a simple stored hash: {hash_line:?}"
+    );
+    let mut stamped_value = frontmatter(&stamped);
+    let mapping = stamped_value.as_mapping_mut().expect("a mapping root");
+    assert!(mapping.remove("hash").is_some());
+    // A first baseline may also stamp the date; neither is authored data.
+    mapping.remove("last_updated");
+    expected.as_mapping_mut().unwrap().remove("last_updated");
+    assert_eq!(stamped_value, expected, "only managed properties were added");
+    assert!(stamped.ends_with("---\n\n# Body\n\nText.\n"), "body kept:\n{stamped}");
+
+    fixture
+        .command()
+        .args(["hash", "--diff"])
+        .arg(&path)
+        .assert()
+        .success();
+}

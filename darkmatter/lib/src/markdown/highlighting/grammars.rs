@@ -4,8 +4,15 @@
 //! including support for extended language grammars.
 
 use lazy_static::lazy_static;
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxDefinition, SyntaxSet, SyntaxSetBuilder};
 use two_face::syntax::extra_newlines as extra_syntax_set;
+
+use crate::markdown::language_grammar::LanguageGrammar;
+
+/// The vendored, flattened Mermaid syntax (MIT). `assets/syntaxes/mermaid/SOURCE.md`
+/// records its upstream commit and how it differs from upstream.
+pub(crate) const MERMAID_SYNTAX: &str =
+    include_str!("../../../assets/syntaxes/mermaid/Mermaid.sublime-syntax");
 
 lazy_static! {
     /// Lazily loaded syntax set from two-face with extended grammars.
@@ -13,6 +20,37 @@ lazy_static! {
     /// This includes all default syntect grammars plus additional languages
     /// from the bat project (TypeScript, TOML, Dockerfile, etc.).
     static ref SYNTAX_SET: SyntaxSet = extra_syntax_set();
+
+    /// The vendored Mermaid syntax and plain text, in a set of their own.
+    ///
+    /// Adding Mermaid to two-face's set would relink every two-face syntax,
+    /// which forces all of their lazily serialized contexts to load: about
+    /// 0.5 s per process in a debug build against 25 ms for the set alone.
+    /// The Mermaid syntax references no other syntax, so a separate set
+    /// highlights it identically for about a millisecond.
+    static ref MERMAID_SYNTAX_SET: SyntaxSet = build_mermaid_syntax_set();
+}
+
+fn build_mermaid_syntax_set() -> SyntaxSet {
+    let mermaid = SyntaxDefinition::load_from_str(MERMAID_SYNTAX, true, Some("Mermaid"))
+        .expect("the vendored Mermaid syntax parses; a test guards it");
+    let mut builder = SyntaxSetBuilder::new();
+    builder.add_plain_text_syntax();
+    builder.add(mermaid);
+    builder.build()
+}
+
+/// Returns the syntax set that carries `grammar`'s syntax.
+///
+/// A [`syntect::parsing::SyntaxReference`] only highlights against the set
+/// it was resolved from, so callers resolve and highlight against this one
+/// set.
+pub(crate) fn syntax_set_for(grammar: &LanguageGrammar) -> &'static SyntaxSet {
+    if matches!(grammar, LanguageGrammar::Mermaid) {
+        &MERMAID_SYNTAX_SET
+    } else {
+        &SYNTAX_SET
+    }
 }
 
 /// Loads the syntax set with extended grammars.

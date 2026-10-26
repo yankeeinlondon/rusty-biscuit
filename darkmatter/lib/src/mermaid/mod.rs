@@ -268,8 +268,8 @@ impl Mermaid {
     /// Renders the diagram to the terminal using the local mmdc CLI.
     ///
     /// This method executes the `mmdc` CLI tool to render the diagram as a PNG,
-    /// then displays it in the terminal using viuer. On error, it falls back to
-    /// printing the diagram as a code block.
+    /// then displays it in the terminal using biscuit-terminal. On error, it
+    /// falls back to printing the diagram as a code block.
     ///
     /// ## Icon Pack Support
     ///

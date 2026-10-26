@@ -147,6 +147,36 @@ fn raw_line<'a>(frame: &'a CapturedFrame, needle: &str) -> Option<&'a str> {
         .and_then(|i| raw_lines.get(i).copied())
 }
 
+/// The pane's scrollback from the report's `Performance` headline down, so
+/// earlier output in a shared pane is never read as part of the report.
+fn report_scrollback<H: ScrollbackCapture>(harness: &mut H) -> CapturedFrame {
+    let frame = harness.capture_scrollback(200).expect("capture complete perf report");
+    let plain: Vec<&str> = frame.plain.lines().collect();
+    let start = plain
+        .iter()
+        .rposition(|line| line.trim_start_matches(['▌', ' ']).starts_with("Performance"))
+        .unwrap_or_else(|| panic!("no Performance headline in scrollback:\n{}", frame.plain));
+    let raw: Vec<&str> = frame.raw.lines().collect();
+    CapturedFrame::from_raw(raw[start..].join("\n"))
+}
+
+/// The two harnesses' scrollback captures, which share no trait.
+trait ScrollbackCapture {
+    fn capture_scrollback(&mut self, lines: u32) -> std::io::Result<CapturedFrame>;
+}
+
+impl ScrollbackCapture for TmuxHarness {
+    fn capture_scrollback(&mut self, lines: u32) -> std::io::Result<CapturedFrame> {
+        TmuxHarness::capture_scrollback(self, lines)
+    }
+}
+
+impl ScrollbackCapture for WezTermHarness {
+    fn capture_scrollback(&mut self, lines: u32) -> std::io::Result<CapturedFrame> {
+        WezTermHarness::capture_scrollback(self, lines)
+    }
+}
+
 /// Whether `line` carries the bold attribute (SGR `1`).
 ///
 /// Decodes CSI `m` sequences accepting both `;` and ITU `:` separators (terminal
@@ -197,8 +227,8 @@ fn has_bold(line: &str) -> bool {
 /// The full report is taller than the harness's 40-row pane, so the
 /// `Performance … 100%` headline scrolls above the captured viewport — its
 /// correctness is locked by the L1 snapshot test (`render_perf_report_snapshot_…`)
-/// instead. WezTerm includes history because host load can put HOT above that
-/// viewport. The shared structural assertions cover the
+/// instead. Callers capture with scrollback because host load can put HOT above
+/// that viewport. The shared structural assertions cover the
 /// connector hierarchy, the unit-aligned value column, the percent column, the
 /// unique `HOT` marker, the shell directive, and the dry-run placeholder.
 fn assert_tree_structure(frame: &CapturedFrame) {
@@ -285,7 +315,9 @@ fn level2_perf_tree_renders_styled_in_tmux() {
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
     // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
     clear_no_color(&mut harness);
-    let capture = run_perf_compose(&mut harness);
+    let mut capture = run_perf_compose(&mut harness);
+    // Host load can put HOT on an early leaf above the visible viewport.
+    capture.frame = report_scrollback(&mut harness);
     assert_tree_structure(&capture.frame);
 
     // The `▇ HOT` marker is emitted bold (`<b>…</b>` → SGR 1).
@@ -323,7 +355,7 @@ fn level2_perf_tree_renders_styled_in_wezterm() {
     clear_no_color(&mut harness);
     let mut capture = run_perf_compose(&mut harness);
     // Host load can put HOT on an early leaf above the visible viewport.
-    capture.frame = harness.capture_scrollback(200).expect("capture complete perf report");
+    capture.frame = report_scrollback(&mut harness);
     assert_tree_structure(&capture.frame);
 
     let hot = raw_line(&capture.frame, "▇ HOT")
@@ -352,7 +384,8 @@ fn level2_perf_capture_excludes_previous_pane_duration_text() {
         assert!(std::time::Instant::now() < deadline, "seed output did not appear");
         std::thread::sleep(Duration::from_millis(40));
     }
-    let capture = run_perf_compose(&mut harness);
+    let mut capture = run_perf_compose(&mut harness);
+    capture.frame = report_scrollback(&mut harness);
     assert!(!capture.frame.plain.contains("STALE_PERF_CAPTURE"), "{}", capture.frame.plain);
     assert_tree_structure(&capture.frame);
 }

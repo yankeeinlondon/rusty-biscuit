@@ -113,7 +113,8 @@ impl Run for QuoteArgs {
         // Default: render for the terminal through the canonical render tree.
         let term = terminal_for_render(ctx.plain);
         let root = RenderNode::root(vec![quote.render_tree()]);
-        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+            .with_code_renderer(crate::commands::shared::darkmatter_code_renderer(&term));
         let rendered = render_terminal_node(&root, &opts)
             .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
 

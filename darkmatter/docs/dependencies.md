@@ -126,6 +126,39 @@ features their tier requires.
   is the only thing that detaches the controlling terminal; a new process group
   alone does not. One syscall, so the raw binding rather than a wrapper crate.
 
+## Mermaid Diagram Components
+
+- `biscuit-visualized` with the `terminal` feature supplies the
+  `MermaidDiagram` component (`mermaid::render_terminal`, SVG for
+  `render_tree::code_renderer`) and `TerminalDiagramRenderer`, the diagram
+  hook the render-tree terminal path installs. `biscuit-terminal` no longer
+  carries diagrams, so darkmatter depends on `biscuit-visualized` directly; it
+  was already in the build through `biscuit-terminal`'s former `image` feature.
+- The CLI depends on `biscuit-visualized` with its `clap` feature for
+  `MermaidFallbackFeature`, the shared value enum behind `md --feature`'s three
+  Mermaid fallback names, and `MermaidFallbackPolicy::from_features`, the fold
+  that combines them.
+
+## Vendored Mermaid Syntax
+
+`lib/assets/syntaxes/mermaid/Mermaid.sublime-syntax` is the Mermaid syntax
+definition from [SublimeText/Mermaid](https://github.com/SublimeText/Mermaid)
+at commit `a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859`, flattened into one
+self-contained syntax that syntect loads (`SOURCE.md` beside it lists every
+change from upstream). It is embedded with `include_str!` and highlights
+`mermaid` and `mmd` code blocks in terminal and HTML output. It adds no crate.
+
+- **License:** MIT, Copyright (c) 2017 Peng Wang. The full text is
+  `lib/assets/syntaxes/mermaid/LICENSE`.
+- **Why vendored:** neither syntect nor two-face ships a Mermaid syntax, and
+  the upstream package's `extends`-based files do not load in syntect as
+  shipped.
+- **Why a separate syntax set:** the syntax lives in a small set of its own
+  rather than in two-face's set. Adding it to two-face's set relinks every
+  syntax, which loads all of their lazily stored contexts: about 0.5 s per
+  process in a debug build, against about 25 ms for two-face's set alone and
+  about 6 ms for the Mermaid set.
+
 ## DMLS (`darkmatter/dmls`)
 
 The Darkmatter Language Server keeps its dependency surface small and

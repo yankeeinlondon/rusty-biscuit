@@ -1,0 +1,129 @@
+{
+  "call": 0,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "509951e",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "09624cf",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "509951e"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "fd97127",
+      "index": 2,
+      "lane": "main",
+      "parents": [
+        "09624cf"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "a10f6b2",
+      "index": 3,
+      "lane": "main",
+      "parents": [
+        "fd97127"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "68ec971",
+      "index": 4,
+      "lane": "child",
+      "parents": [
+        "a10f6b2"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "f3174d7",
+      "index": 5,
+      "lane": "child",
+      "parents": [
+        "68ec971"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "e8aff7e",
+      "index": 6,
+      "lane": "main",
+      "parents": [
+        "a10f6b2"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "dd907e6",
+      "index": 7,
+      "lane": "main",
+      "parents": [
+        "e8aff7e",
+        "f3174d7"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 281.56494140625,
+          "x2": 315.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 302.0
+    },
+    {
+      "id": "4113674",
+      "index": 8,
+      "lane": "parent",
+      "parents": [
+        "dd907e6"
+      ],
+      "tags": [],
+      "x": 344.0
+    },
+    {
+      "id": "aae4b8f",
+      "index": 9,
+      "lane": "parent",
+      "parents": [
+        "4113674"
+      ],
+      "tags": [],
+      "x": 386.0
+    },
+    {
+      "id": "3c38f51",
+      "index": 10,
+      "lane": "parent",
+      "parents": [
+        "aae4b8f"
+      ],
+      "tags": [],
+      "x": 428.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 233.71676635742188,
+  "mermaid": "gitGraph\n    commit id: \"509951e\"\n    commit id: \"09624cf\"\n    commit id: \"fd97127\"\n    commit id: \"a10f6b2\"\n    branch child\n    checkout child\n    commit id: \"68ec971\"\n    commit id: \"f3174d7\"\n    checkout main\n    commit id: \"e8aff7e\"\n    merge child id: \"dd907e6\" tag: \"main\"\n    branch parent\n    checkout parent\n    commit id: \"4113674\"\n    commit id: \"aae4b8f\"\n    commit id: \"3c38f51\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__a_deferred_direct_merge_with_a_drawn_fork_is_complete",
+  "width": 564.3515625
+}
