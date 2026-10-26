@@ -25,6 +25,34 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - dmls
+source_files_during_phase_2:
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/benches/pipeline_work_a3.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # DMLS frontmatter typing allocation implementation plan
@@ -95,19 +123,19 @@ Prerequisite: Phase 1 baseline is saved. This phase owns `overlay/` cache integr
 
 ### Wave 2: Snapshot and resolver foundation
 
-- [ ] **Own analysis snapshot**
+- [x] **Own analysis snapshot**
   - Add a focused overlay analysis module holding immutable source/schema owners, root state, node identities, shared-view/item caches, and the lazy inventory interface. Avoid eagerly expanding or traversing all named definitions.
   - Install/reuse its shared handle in `OverlayCache` and attach it to every relevant `DocumentOverlay` construction path, including no schema, schema failure, standalone documents, and malformed-buffer fallback. Preserve existing eligibility on each path.
   - Thread buffer revision from the existing document lifecycle into overlay preparation where necessary. Match exact buffer identity and tree provenance as well as the prepared semantic inputs listed in Decisions; reuse existing schema dependency checks for imports, including failed-assembly recovery.
   - Evict on edit and `forget`, and replace after configuration, registry, context, effective-schema, or named-definition changes. An old request's retained handle must never become the current handle again.
 
-- [ ] **Share path definitions**
+- [x] **Share path definitions**
   - Implement the owner-retaining schema/property handles and source-node identities; retain canonical named-definition identity across recursive re-entry and distinguish equally named properties with different metadata.
   - Replace instance-path shape ownership in `ShapeMemo`/`descend`. Perform authored discriminant selection at each instance using the existing shared selector; cache only the resulting shared view using node/mode/arm identity. Cache failed resolutions without conflating typed literal values.
   - Assemble `known_shape` once per snapshot. Share existing nested shapes; memoize genuine merged shapes and `array_item_def` synthesis by source identity and crossing mode. Update `def_at_path_ctx` to return a retained definition without cloning a nested leaf.
   - Migrate compilation-facing consumers to handle access, removing `into_owned`/shape clones where they only inspect a definition. Review affected docs/comments, especially `ShapeMemo`, `def_at_path_ctx`, and array-item semantics.
 
-- [ ] **Count actual work**
+- [x] **Count actual work**
   - Extend `work_counters.rs` with separately observable root assemblies, merged-shape constructions, item-definition syntheses, scalar classifications, full typing walks, and whole-document stack-expression walks. Keep descent attempts separate if retained.
   - Replace the misleading test-only `SHAPE_MATERIALIZATIONS` meaning and update its existing assertions. Increment at construction/classification sites, not lookup attempts; avoid serializing or cloning cache keys for instrumentation.
   - If extending `WorkCounts`, update its snapshot/delta methods and explicit benchmark struct initializers/formatters so the existing benchmark still compiles and retains its measurement protocol.
@@ -120,12 +148,12 @@ Prerequisite: Phase 2 shared handles and classifier interface are available. Wav
 
 ### Wave 3: Extraction and inventory
 
-- [ ] **Extract scalar expressions**
+- [x] **Extract scalar expressions**
   - In `overlay/event_views.rs` and the scalar projection helper surface, add lifecycle extraction for one indexed scalar. Reuse existing interpolation parsing, guard detection, event scope, dialect, skip rules, and source projection.
   - Make `stack_expressions` delegate to the same scalar extraction semantics while retaining document order and current behavior for diagnostics. This path may enumerate the document; point extraction may not call `frontmatter_interpolations` for the whole document.
   - Add focused parity tests for a typed expression being skipped, multiple spans in one scalar, unwrapped guards, interpolation-containing guards, and non-stack values. Preserve plain/quoted/block/tagged scalar behavior.
 
-- [ ] **Cache scalar inventory**
+- [x] **Cache scalar inventory**
   - In the new analysis module, implement scalar classification by entry index using shared schema state. Store expression, non-expression, and unresolved outcomes, including undecodable/no-projection results, so misses are not retried.
   - Point classification resolves only that entry's path. The document API walks scalar entries once on first demand, reuses prior point classifications, and publishes a complete document-ordered inventory with stored decoded text/projections and shared definition owners.
   - Later document consumers reuse the initialized inventory. Expose a noninitializing inventory lookup for point consumers; no accessor used by hover/completion may trigger its lazy full walk.
@@ -133,12 +161,12 @@ Prerequisite: Phase 2 shared handles and classifier interface are available. Wav
 
 ### Wave 4: Provider integration
 
-- [ ] **Route point requests**
+- [x] **Route point requests**
   - In `providers/frontmatter.rs`, locate the cursor entry once and share its classification between `expression_hover` and `stack_expression_hover`. The fallback invokes only the scalar extractor from Wave 3, maintaining existing hover precedence and key-versus-value behavior.
   - Route completion and schema hover through shared root/definition handles. Additional properties actually referenced by a hovered expression may be resolved; unrelated scalars may not be typed.
   - Split `definition` from the full `nav_targets` scan: preserve named-type and `$schema` reference handling, then classify/resolve only the scalar containing the offset. Keep existing file-reference resolution authority and target/range behavior.
 
-- [ ] **Route document consumers**
+- [x] **Route document consumers**
   - After point routing edits in the same file are complete, adapt `expression_values` to the shared inventory and wire `diagnostics/frontmatter.rs` to reuse it, preserving mixed-expression-union validation, diagnostic ordering, and range projection.
   - Retain the whole-document stack-expression collector for diagnostics; a hover after diagnostics must never invoke it. Other existing diagnostic walks are permitted and are not counted as full typing walks.
   - Let document links consume the same typed scalar inventory for file-type decisions while keeping target resolution outside the cache. Eliminate repeated membership scans where the stored per-entry classification already supplies the answer.
