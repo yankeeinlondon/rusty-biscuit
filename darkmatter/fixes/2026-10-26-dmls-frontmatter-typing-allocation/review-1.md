@@ -13,7 +13,8 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: false
 created: "2026-10-26T14:47:44-07:00"
 spec: 2026-10-26-dmls-frontmatter-typing-allocation/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
 description: "A **fix** review of `2026-10-26-dmls-frontmatter-typing-allocation/spec.md`"
 fix: 2026-10-26-dmls-frontmatter-typing-allocation/review-1.md
 ---
