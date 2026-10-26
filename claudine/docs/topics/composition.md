@@ -815,6 +815,12 @@ prepare emit non-fatal did-you-mean warnings to stderr, suppressed by `--silent`
 String literals and code fences do not trigger the `ctx.*` diagnostic because it
 is parsed from the interpolation AST, not a raw text scan.
 
+A schema trigger skipped as invalid is reported the same way: one
+`warning: [schema_validation] ignoring invalid schema trigger <path>: <reason>`
+row per trigger, once per invocation even though loops, retries, and repeated
+schema checks discover it again, and also suppressed by `--silent`. See
+[When a trigger is invalid](schemas.md#when-a-trigger-is-invalid).
+
 ## Provider Selection
 
 Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
@@ -1043,6 +1049,16 @@ The rules:
   `RemovedGrammar` with its replacement, not a bare schema mismatch.
 - **Fresh reads use the same verdict.** Retries, resumes, proxy targets, and
   sequence steps re-read their document through it.
+- **An invalid trigger file is skipped, not fatal.** A discovered trigger that
+  cannot be used (a bad envelope, or a payload or import that fails to load)
+  contributes nothing to the effective schema; the valid triggers still
+  apply. Claudine records it before the authored `$schema` resolves, so every
+  preliminary check and the launch carry it, and prints one
+  `warning: [schema_validation] ignoring invalid schema trigger …` row per
+  trigger per invocation, before an unrelated error if the launch then fails.
+  It is never a composition error. A `$schema` naming a trigger file still
+  fails (see
+  [When a trigger is invalid](schemas.md#when-a-trigger-is-invalid)).
 - **The schema is frozen at launch.** The inline completion verdict judges the
   effective schema resolved at launch, trigger payloads included. An edit to
   `$schema` or to a schema file during the run takes effect on the next run.

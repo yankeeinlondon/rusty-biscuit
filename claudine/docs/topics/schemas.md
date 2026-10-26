@@ -948,8 +948,9 @@ flowchart TD
     S -- no --> M
     N --> M{"claudine CLI: is a trigger name<br/>missing from every location?"}
     M -- yes --> E["add the embedded copy of that trigger"]
-    M -- no --> P
-    E --> P["merge the payloads of the triggers that match"]
+    M -- no --> I
+    E --> I["skip each invalid trigger with one warning;<br/>it still shadows later files of its name"]
+    I --> P["merge the payloads of the valid triggers that match"]
     P --> A["apply the authored $schema last;<br/>a redeclared property replaces the trigger's"]
     A --> V{"phase verdict<br/>(launch, or completion)"}
     V -- valid --> L["launch permitted"]
@@ -1000,13 +1001,48 @@ bundle. The embedded copy is the **last** location:
 
 - An embedded trigger is added only for a name no disk location holds. A disk
   `claudine.yaml` always wins, even one that does not match the document.
-- A malformed disk trigger fails the launch visibly; the embedded copy never
-  stands in for it.
+- A malformed disk trigger is skipped with a warning (see
+  [When a trigger is invalid](#when-a-trigger-is-invalid)); the embedded copy
+  never stands in for it.
 - Each winning file resolves its imports from its own origin: a disk trigger
   imports from disk, never from the embedded files.
 
 `md` and DMLS register no embedded bundle. They see Claudine's schemas only
 when a disk bundle is reachable.
+
+### When a trigger is invalid
+
+A trigger file that cannot be used, such as an unfinished
+`~/schemas/memory.yaml` with unsupported envelope keys or an empty `match:`,
+or one whose payload or import fails to load, does not stop the launch. The
+CLI skips that one trigger, applies the valid ones as usual, and prints one
+warning for it before the provider starts:
+
+```text
+warning: [schema_validation] ignoring invalid schema trigger /home/me/schemas/memory.yaml: invalid schema-trigger: found unknown keys: name, description
+```
+
+- **One warning per trigger per invocation.** Claudine loads a document's
+  schema several times before a launch (pre-validation, dropping invalid
+  optionals, the launch verdict, interactive re-runs) and again on every loop
+  iteration and retry. The same trigger is reported once, with the first
+  reason seen, in discovery order. A trigger only a transcluded document
+  discovers is reported the same way.
+- **Shown even when the run fails.** If the prompt is then rejected for an
+  unrelated reason, the warning is printed before the error, and the error is
+  never blamed on the skipped trigger.
+- **Each invocation reports again.** A new `claudine` run, and a `prep`
+  target (which runs as an invocation of its own), print the warning again
+  while the file stays broken. `--silent` hides it.
+- **A skipped file still shadows.** An invalid disk `claudine.yaml` still
+  hides the embedded `claudine.yaml`, so Claudine's control schema is absent
+  until the file is fixed or removed; nothing falls back to the embedded copy.
+- **A reference is still an error.** A `$schema` that names a trigger file
+  fails whether or not the trigger is valid, and so does an
+  authored `$schema` that cannot load.
+
+`md` and DMLS skip an invalid trigger the same way; see
+[Schemas Applied by Triggers](../../../darkmatter/docs/topics/schemas/schema-triggers.md).
 
 ### In the editor
 

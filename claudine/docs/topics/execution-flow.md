@@ -242,8 +242,16 @@ schemas and any other matching trigger, under the authored `$schema` (see
    *Claudine control* (a property whose winning declaration is a Claudine
    trigger) is never dropped: an invalid one is a hard `SchemaValidation`
    abort, like a required value.
-5. **`$schema` or a discovered trigger schema unresolvable / uncompilable** —
-   return `CompositionError::SchemaLoad`.
+5. **Authored `$schema` unresolvable / uncompilable** (including a `$schema`
+   that names a trigger file) — return `CompositionError::SchemaLoad`.
+6. **A discovered trigger schema is invalid** (bad envelope, or a payload or
+   import that fails to load) — skip that trigger and continue with the valid
+   ones. The skip is recorded in the invocation's `TriggerFindings`
+   (`InvocationContext::trigger_findings()`) before the authored `$schema`
+   resolves, so it survives cases 2–5; it is never a `CompositionError`. The
+   CLI prints each trigger once per invocation, before the launch, or before
+   the error when the run fails (see
+   [When a trigger is invalid](schemas.md#when-a-trigger-is-invalid)).
 
 This stage runs before provider/model selection so a schema failure aborts
 without launching anything.
@@ -254,6 +262,7 @@ without launching anything.
 |------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
 | Claudine controls (lifecycle events, `loop`, `agent`, `model`, …) | Select Claudine's trigger schemas, which type them even without a `$schema`; an invalid one aborts |
+| Schema trigger files               | A matching valid trigger adds its payload; an invalid one is skipped with one warning per invocation    |
 | `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
 | Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
 | `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
@@ -514,7 +523,8 @@ guard, the same typed translation as direct compose applies — `SchemaLoad`,
 `SchemaValidation`, `MissingProperties`, and automatic drop-and-retry for
 invalid optional values of the authored `$schema`, against the same effective
 schema (Claudine's trigger schemas under the authored `$schema`). An invalid
-Claudine control fails the launch instead of being dropped. The original
+Claudine control fails the launch instead of being dropped, while an invalid
+trigger file is skipped with the same once-per-invocation warning. The original
 `$schema` declaration is preserved byte-for-byte by
 the inline rewrite, and interactive values collected during the run are never
 persisted to the source file.

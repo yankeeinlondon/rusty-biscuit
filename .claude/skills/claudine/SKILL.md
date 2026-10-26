@@ -92,7 +92,14 @@ globals `seq`, `loop`, and `group` are declared once in the host catalog
 globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
 `darkmatter/schemas/darkmatter.yaml`, whose resolved `fm` is the built-in
 baseline. Trigger files are `kind: schema-trigger`; a top-level `match:` list
-is AND and `group:` is OR. Every
+is AND and `group:` is OR. A discovered trigger that fails to load (envelope,
+payload, or import) is skipped with Darkmatter's `InvalidTriggerFinding` and
+the valid ones still apply; `load_effective_schema` records it in
+`InvocationContext::trigger_findings()` (`composition/schema/findings.rs`)
+before the authored `$schema` resolves, so every preliminary check carries it,
+and the CLI prints one `[schema_validation]` warning per trigger per
+invocation, ahead of any unrelated error. It is never a `CompositionError`; a
+`$schema` naming a trigger is still `SchemaLoad`. Every
 recovery verdict, refusal route, `blocked`-vs-`failure` choice, and hop budget
 is decided by `darkmatter::lifecycle::policy` (`SubjectKind` carries the
 document/root-sequence/sequence/group differences); a driver calls it and maps
@@ -388,7 +395,9 @@ leg mutations in declaration order. Body-only steps mask source lifecycle keys
 through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
-Darkmatter's docs tree. Action shapes are Darkmatter's: `action.yaml`'s
+Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
+warning and still shadows the embedded copy; there is no fallback to it
+(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the
