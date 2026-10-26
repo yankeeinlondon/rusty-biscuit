@@ -89,7 +89,7 @@ var duck = "suck"
 
 Code blocks are so good that people have decided to abuse them. Yes you heard me right, that code block you were just were looking at might be an imposter, a hack, maybe something far worse. Don't worry fair ladies and gentleman as these scary hacks are almost all a good thing!
 
-The exemplar "hack" is Mermaid. When you specify the language `mermaid` you will not see the Mermaid DSL color coded in full glory. Oh no, it will instead _render_ the diagram you've described with the DSL. Well that's nice! I mean it will only work if you have a render that knows about the dark secrets Mermaid holds. Fortunately for you Darkmatter carries a lot of secrets including Mermaid's.
+The exemplar "hack" is Mermaid. When you specify the language `mermaid` you will not see the Mermaid DSL color coded in full glory. Oh no, it will instead _render_ the diagram you've described with the DSL. Well that's nice! I mean it will only work if you have a render that knows about the dark secrets Mermaid holds. Fortunately for you Darkmatter carries a lot of secrets including Mermaid's. Where a fence stays a code block (the default terminal output, `md --feature no-mermaid-rendering`, or a diagram the terminal cannot draw), the DSL _is_ color coded: Darkmatter ships a [Mermaid syntax](../rendering/mermaid.md#syntax-highlighting) for `mermaid` and `mmd` blocks.
 
 To find out more about special renderers that Darkmatter supports choose any of the following links:
 

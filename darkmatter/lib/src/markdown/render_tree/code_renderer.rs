@@ -17,13 +17,15 @@
 
 use std::cell::{OnceCell, RefCell};
 
-use biscuit_visualized::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::{DiagramFont, MermaidDiagram, MermaidTarget};
 use biscuit_terminal::terminal::Terminal;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{
     ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
 };
 use renderable::tree::{CodeRenderer, HintNamespace, NodeAttrs};
+
+use super::mermaid_font::{PAGE_FONT_PLACEHOLDER, page_font_markup};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
@@ -102,6 +104,11 @@ pub struct TerminalCodeRenderer {
     /// (`html_options`, `theme_override`, the environment snapshot) are fixed
     /// for the renderer's lifetime and need no key.
     browser_surface: OnceCell<BrowserSurface>,
+    /// The font of every static diagram this render embedded a font for
+    /// ([`HtmlOptions::embed_mermaid_font`]), in page order; the entry point
+    /// builds the page's `@font-face` rules from them once the page is
+    /// rendered ([`take_page_font`](Self::take_page_font)).
+    page_fonts: RefCell<Vec<DiagramFont>>,
 }
 
 /// The [`TerminalCodeContext`] inputs a [`CodeSurface`] resolution depends on.
@@ -169,6 +176,7 @@ impl TerminalCodeRenderer {
             env_code_theme: code_theme_from_env(),
             terminal_surface: RefCell::new(None),
             browser_surface: OnceCell::new(),
+            page_fonts: RefCell::new(Vec::new()),
         }
     }
 
@@ -191,6 +199,15 @@ impl TerminalCodeRenderer {
         self.html_options = Some(options);
         self.invalidate_surfaces();
         self
+    }
+
+    /// The page's embedded-font markup, once every diagram is rendered:
+    /// `None` when no diagram embedded a font (the page then carries no
+    /// placeholder), else the markup to put in place of
+    /// [`PAGE_FONT_PLACEHOLDER`] (empty when the font could not be built).
+    pub(crate) fn take_page_font(&self) -> Option<String> {
+        let fonts = self.page_fonts.take();
+        (!fonts.is_empty()).then(|| page_font_markup(&fonts))
     }
 
     /// Drops any memoized surface after a builder changes a resolution input.
@@ -522,6 +539,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             dim_mode: DimMode::Auto,
             max_width: None,
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Auto,
             hr_defaults: None,
             code_block_mode: self.code_block_mode,
@@ -607,13 +625,28 @@ impl CodeRenderer for TerminalCodeRenderer {
         // `None` on failure is the contract: it surfaces the promotion failure
         // to the render tree so strictness can reject or diagnose it, rather
         // than silently degrading to a code block here.
-        let svg = MermaidDiagram::new(value).render_to_svg().ok()?;
+        // The HTML-static target leads each label font with the face it was
+        // measured with and lets labels overflow: the reader's fonts are
+        // unknowable, so a wider face must spill rather than clip.
+        let embed_font = self.html_options.as_ref().is_some_and(|options| options.embed_mermaid_font);
+        let (svg, font) = MermaidDiagram::new(value)
+            .with_target(MermaidTarget::HtmlStatic)
+            .with_embedded_font(embed_font)
+            .render_to_svg_with_font()
+            .ok()?;
         // The SVG is emitted unescaped as raw HTML, so it must pass an explicit
         // allowlist sanitizer first — the render tree must not depend on the
         // upstream renderer (or any future string override) staying safe. A
         // sanitizer that cannot parse the SVG returns `None`, which the renderer
         // treats as a promotion failure rather than emitting unsafe markup.
-        let safe = super::svg_sanitizer::sanitize_svg(&svg)?;
+        let mut safe = super::svg_sanitizer::sanitize_svg(&svg)?;
+        if let Some(font) = font {
+            let mut fonts = self.page_fonts.borrow_mut();
+            if fonts.is_empty() {
+                safe.insert_str(0, PAGE_FONT_PLACEHOLDER);
+            }
+            fonts.push(font);
+        }
         Some(BrowserFragment::new().define_as_raw_html(safe).finalize())
     }
 }
@@ -1522,8 +1555,8 @@ last: 4
                 );
             }
             None => {
-                // Host lacks the Mermaid toolchain: a `None` is the correct
-                // failure signal — the renderer degrades per strictness.
+                // A failed render: a `None` is the correct failure signal —
+                // the renderer degrades per strictness.
             }
         }
     }

@@ -91,33 +91,18 @@ Outside a repository, `wt` explains where to run it and exits with code 1.
 
     > **Note:** the shell completions for `wt` are dynamic: they offer `base`, the base checkout's branch, and each worktree's branch name and directory name
 
-- `wt remove <name> [--force-worktree] [--force-branch] [--force-remote]`
+- `wt remove <name> [--force] [--force-branch] [--force-remote]`
 
-    Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work? See [`docs/cli/remove.md`](./docs/cli/remove.md) for the full rules and examples.
+    Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. See [`docs/cli/remove.md`](./docs/cli/remove.md) for the full rules and examples.
 
-    - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
-    - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent and are omitted from the report.
-    - **the local branch**, by where its last commit is found:
-        - *Safe*: on the default branch (local or `origin/<default>`), or the exact head of an open or merged PR from this repository; deleted
-        - *Pretty safe*: on another local branch, a tag, or an `origin/*` branch whose live head `wt` checked with `git ls-remote` (3 s deadline, never prompting for credentials); deleted, and the report names where the commits still live
-        - *Not safe*: nowhere else, or it could not be checked; an interactive run lists the commits and offers "keep" (default) or "delete"; a non-interactive run keeps it with a warning and still exits 0. `--force-branch` deletes it anyway (`git branch -D`)
-    - **the branch on origin**: deleted only with `--force-remote` (which also closes any open PR), under a lease on the head the report showed, so a push made in between fails the deletion instead of losing commits. The report, the live check, and the deletion all use origin's push URL, and a move-first removal refuses if that URL changed before the second run; an origin with several push URLs, or whose push URL git would not take literally (a `url.<base>.insteadOf`/`pushInsteadOf` rule would rewrite it again, or it is also the name of a configured remote, as a relative path like `approved` can be), is refused before anything is removed. The tiers then ignore the branch's own origin copy, even when its upstream is the default branch on origin, and its open PR. If origin cannot be reached, the local removal still happens and `wt` exits 1 with the `git push origin --delete <branch>` that finishes the job
-    - `--force-branch` on a worktree with files but without `--force-worktree` is a conflict (exit 3 when non-interactive)
-    - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks everything, then moves your shell to the fork parent's worktree (or the base repo) and the wrapper finishes the removal from there, keeping your subdirectory when it exists there. If protected files, include rules, the copy record, or other approved work changes between the two steps (including files inside a nested repository, which git lists as one directory), or the handoff is over a minute old, nothing is removed; a file it cannot read stops it too (exit 4). Without the wrapper `wt remove` refuses (exit 4)
-        - the second step asks the network only for what the approved actions still need: keeping the branch or deleting it by explicit choice needs no PR lookup or live check, and a branch deleted because it was safe needs none when a local default branch, another local branch, or a tag still holds its commits. A branch proved safe only by a PR or an `origin/*` copy is checked live again, and nothing is removed if that proof is gone or cannot be checked. With `--force-remote`, the branch on origin is checked again before anything is removed, and a change, deletion, or unreachable origin stops the removal. Every dirty file is still read in full
-    - **a folder other programs are using**: after the report and the questions, `wt remove` checks whether another process is using the worktree (standing in it, holding a file open, watching it, or running a program from it; your own shell is exempt) and pauses with exit 3, naming each process, before anything moves. No flag overrides it; the one exception is on Windows, where a check that finds only Windows Search's own processes is repeated once after 500 ms, and that second check decides. Otherwise the worktree is moved to a hidden sibling and deleted there while both paths are watched; a write that appears stops the removal with exit 1, keeps what is left and the branches, and prints both locations and the saved report. Run the same `wt remove <name>` again to continue it with fresh questions ([details](docs/cli/remove.md#background-programs-writing-into-the-worktree))
-        - a retry runs from outside the moved checkout (for example the base checkout), finds the stopped removal by the same name even after Git stopped listing it, and refuses with exit 3 while something new is at the original path. Each removal's record and full report are kept in `<git-common-dir>/wt-removal/<operation-id>/` ([details](docs/cli/remove.md#recovery-records-and-retry))
-        - Ctrl-C (or `SIGTERM`) while it checks, moves, or deletes does not kill `wt`: it stops at the next safe point with exit 1, moving nothing if the move had not happened yet, and otherwise printing the same stop report so the same `wt remove <name>` continues it ([details](docs/cli/remove.md#interrupting-a-removal))
-        - some checkouts are refused before anything moves: submodules, a locked worktree, a FIFO, device, nested mount, or unsupported reparse point inside (exit 3), and a filesystem that cannot move a directory without risking replacement, such as a WSL checkout under `/mnt/<drive>` (exit 4)
-    - the main checkout cannot be removed (use plain `git` for that), whether it is named `base` or by its branch
-    - **a worktree Git can't read** (`✕` in `wt list`) is prepared before the report, never by deleting anything:
-        - *directory gone*: the index Git kept for it is compared with its last commit; staged changes need the usual consent (`--force-worktree` in a script), an index that can't be read, or that changed after it was checked (including the `sharedindex.*` file a split index depends on), refuses (exit 3), and only that worktree's record is removed (`git worktree remove <path>`, never `prune`), then its branch is handled as usual
-        - *directory present, `.git` file gone*: `wt` runs `git worktree repair <path>` from the base checkout **before asking anything**, verifies the restored link itself (never trusting Git's exit status), says in the report that its `.git` file was missing, and continues as for any worktree. If you decline or a later check refuses, the restored link is left in place and the message says so. Git's repair can also restore other worktrees' broken links
-        - *a link that can't be verified, or anything else* (a file or link at the path, an unreadable path, a `.git` Git can't use): refused with exit 3 and the condition found. No working files, branches, or records are removed, but a repair attempt may have changed Git metadata, and the message says so
-        - **no `--force-*` flag allows deleting a directory whose files could not be checked**
-    - **a worktree whose path is itself a link** (a symbolic link, or on Windows any reparse point such as a junction, standing where the checkout was) is refused with exit 3 whatever the flags, even though Git reads the checkout through it and does not mark it `prunable`: removing it would delete the files the link leads to. The path is checked before anything else, after a repair, in both runs of a handoff, and immediately before deletion. A link among the parent directories (macOS `/tmp`) is fine
-        - run it from outside a worktree whose `.git` is gone: from inside, `wt` can't find the repository
-    - an interactive run needs stdin and stderr to be terminals and `CI` to be unset or empty
+    - **one question**: it first prints everything that makes the removal risky (a `git worktree lock`, programs using the worktree, uncommitted files, changed included files, links, mounts, submodule work) and the branch's safety tier, then asks once, default No. Yes deletes the checkout in that run, including files created while it runs; the final line says how many entries went and names uncommitted files that changed after you answered
+    - **scripts**: a non-interactive run (stdin or stderr not a terminal, or `CI` set) removes a worktree with no warnings without asking, and refuses with exit 3 when there is anything to warn about. `--force` answers yes; it never implies `--force-branch` or `--force-remote`
+    - **the local branch** is deleted when it is *Safe* (on the default branch, or the head of an open or merged PR) or *Pretty safe* (on another branch, a tag, or a live `origin/*` copy); a *Not safe* branch is offered for deletion interactively (default keep), kept with a warning otherwise, and deleted by `--force-branch`. A branch that moved after it was checked is kept and the run exits 1
+    - **the branch on origin** is deleted only with `--force-remote` (which also closes any open PR), through origin's push URL and under a lease on the head the report showed
+    - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks, then moves your shell out and the wrapper finishes the removal; without it, macOS and Linux warn and delete, and Windows refuses (exit 4)
+    - **a file in use** on Windows (or a folder a program keeps refilling) is waited on in the same run, naming the program, until it is released or you press Ctrl-C; a read-only disk or a permission `wt` cannot change ends the run with exit 1 and one sentence naming the path
+    - **an interrupted removal** (Ctrl-C, a crash, a file that could not be deleted) is finished by the next `wt remove <name>` without asking again
+    - the main checkout is never removed, even with `--force`
 
 - `wt help`
 
@@ -134,13 +119,13 @@ Patterns use Git's `.gitignore` syntax: comments, blank lines, `/` anchoring, `*
 
 `wt create` copies selected files, preserving link targets and Unix permissions. It tries copy-on-write cloning where the filesystem supports it, then falls back to a byte copy. The new worktree and source can be edited independently. Copy failures warn and leave the new worktree in place. No `.worktreeinclude` means no files are copied.
 
-At removal, the target worktree's own `.worktreeinclude` decides which ignored files are protected. If it is missing, `wt` uses the base checkout's rules against the target's ignored files. An empty file selects nothing and suppresses that fallback. Changing or deleting patterns can make previously protected files disposable. An unreadable rules file stops removal before deletion.
+At removal, the target worktree's own `.worktreeinclude` decides which ignored files are protected. If it is missing, `wt` uses the base checkout's rules against the target's ignored files. An empty file selects nothing and suppresses that fallback. Changing or deleting patterns can make previously protected files disposable. Rules that can't be read are a warning in the removal question.
 
-| Included file at removal | Consent |
+| Included file at removal | Warning |
 |---|---|
-| New, changed since copying, or impossible to compare | Required; default No interactively, or `--force-worktree` in a script |
-| Unchanged since copying | Not required |
-| Other ignored file, such as `target/` | Not required |
+| New, changed since copying, or impossible to compare | Yes; a non-interactive run needs `--force` |
+| Unchanged since copying | No |
+| Other ignored file, such as `target/` | No |
 
 `wt` keeps a per-worktree copy record in the user cache. A size difference proves a change without reading the file; every same-size included file is compared by its full content, regardless of size or modification time. Links are compared by kind and target. Without a trusted record, `wt` compares with a distinct copy source; if that cannot be determined or read, consent is required. The cache holds no file contents and is not a backup. An unchanged copy is removed without a question even if it has become the last copy of its original contents because the source was later edited or deleted.
 
@@ -172,10 +157,10 @@ cmd.exe has no wrapper.
 | Code | Meaning |
 |---|---|
 | 0 | Done, including a prompt the caller cancelled |
-| 1 | Something failed, including a `wt remove` that stopped after moving the checkout (what is left is kept, and the report names both locations) |
+| 1 | Something failed, including a `wt remove` that could not finish (a file that could not be deleted, a mount still mounted, a branch that was kept); the next `wt remove` of that name finishes it |
 | 2 | Invalid arguments (clap) |
-| 3 | Refused to avoid losing work (for example, another process is using the worktree); nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
-| 4 | Blocked by the environment (for example, no shell wrapper, change watching that cannot start, or on Windows a file held open that blocks the move); nothing was removed |
+| 3 | Refused to avoid losing work (for example, `wt remove` without a terminal and without `--force` when there is something to warn about); nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
+| 4 | Blocked by the environment (for example, `wt go` without the shell wrapper, or on Windows `wt remove` of the worktree the shell stands in); nothing was removed |
 
 > Important: always try to use `biscuit-terminal` renderable components to produce a nice looking output. `Prose` is the most commonly used component but `UnorderedList`, `BlockQuote`, or `Table` can also be very helpful.
 

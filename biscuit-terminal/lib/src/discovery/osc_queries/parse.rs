@@ -73,6 +73,87 @@ pub(super) fn convert_16bit_to_8bit(val: u16) -> u8 {
     ((val as u32 * 255 + 32767) / 65535) as u8
 }
 
+/// The ANSI palette slots 0–15 found in `bytes`, each `None` when no usable
+/// reply for it is present.
+///
+/// `bytes` is whatever one exchange read: OSC 4 replies
+/// (`ESC ] 4 ; <index> ; <color>` ended by BEL or `ESC \`) in any order,
+/// mixed with other replies (OSC 10/11, DA1) and stray input. A reply that is
+/// truncated, names an index outside 0–15, or carries a color that does not
+/// parse is skipped, never an error. When one index is answered twice, the
+/// first usable reply wins.
+pub(crate) fn parse_osc4_palette(bytes: &[u8]) -> [Option<RgbValue>; 16] {
+    const INTRO: &[u8] = b"\x1b]4;";
+    let mut palette = [None; 16];
+    let mut from = 0;
+    while let Some(rel) = bytes[from..].windows(INTRO.len()).position(|w| w == INTRO) {
+        let body_start = from + rel + INTRO.len();
+        // The body runs to BEL or ESC. An ESC that is not `ESC \` starts the
+        // next sequence, so the reply before it was cut short.
+        let Some(end_rel) = bytes[body_start..]
+            .iter()
+            .position(|&b| b == 0x07 || b == 0x1b)
+        else {
+            break;
+        };
+        let end = body_start + end_rel;
+        let terminated = bytes[end] == 0x07 || bytes.get(end + 1) == Some(&b'\\');
+        if terminated
+            && let Some((index, color)) = parse_osc4_body(&bytes[body_start..end])
+            && palette[index].is_none()
+        {
+            palette[index] = Some(color);
+        }
+        from = end;
+    }
+    palette
+}
+
+/// `<index>;<color>` for an index in 0–15.
+fn parse_osc4_body(body: &[u8]) -> Option<(usize, RgbValue)> {
+    let body = std::str::from_utf8(body).ok()?;
+    let (index, color) = body.split_once(';')?;
+    if index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let index: usize = index.parse().ok()?;
+    if index >= 16 {
+        return None;
+    }
+    Some((index, parse_color_spec(color)?))
+}
+
+/// An X11 color specification as terminals report it: `rgb:R/G/B` with 1–4
+/// hex digits per component (each scaled from its own width, so `rgb:ff/…`
+/// and `rgb:ffff/…` are both 255), or `#rrggbb`.
+fn parse_color_spec(spec: &str) -> Option<RgbValue> {
+    if let Some(hex) = spec.strip_prefix('#') {
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+        return Some(RgbValue::new(channel(0)?, channel(2)?, channel(4)?));
+    }
+    let mut parts = spec.strip_prefix("rgb:")?.split('/');
+    let r = scaled_component(parts.next()?)?;
+    let g = scaled_component(parts.next()?)?;
+    let b = scaled_component(parts.next()?)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(RgbValue::new(r, g, b))
+}
+
+/// One `rgb:` component of 1–4 hex digits, rounded to 8 bits.
+fn scaled_component(hex: &str) -> Option<u8> {
+    if hex.is_empty() || hex.len() > 4 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let value = u32::from_str_radix(hex, 16).ok()?;
+    let max = (1u32 << (4 * hex.len())) - 1;
+    Some(((value * 255 + max / 2) / max) as u8)
+}
+
 /// Parse the `COLORFGBG` environment variable.
 ///
 /// Format: `"fg_index;bg_index"` where indices are ANSI color numbers (0-15).
@@ -341,5 +422,167 @@ mod tests {
                 result
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod osc4_tests {
+    use super::*;
+
+    const UNKNOWN: [Option<RgbValue>; 16] = [None; 16];
+
+    /// A palette with `known` set and every other slot unknown.
+    fn palette_with(known: &[(usize, RgbValue)]) -> [Option<RgbValue>; 16] {
+        let mut palette = UNKNOWN;
+        for &(index, color) in known {
+            palette[index] = Some(color);
+        }
+        palette
+    }
+
+    #[test]
+    fn four_digit_rgb_reply_with_bel() {
+        let palette = parse_osc4_palette(b"\x1b]4;1;rgb:cdcd/3131/3131\x07");
+        assert_eq!(palette, palette_with(&[(1, RgbValue::new(205, 49, 49))]));
+    }
+
+    #[test]
+    fn two_digit_rgb_reply_with_st() {
+        let palette = parse_osc4_palette(b"\x1b]4;2;rgb:0d/bc/79\x1b\\");
+        assert_eq!(palette, palette_with(&[(2, RgbValue::new(13, 188, 121))]));
+    }
+
+    #[test]
+    fn one_and_three_digit_components_scale_from_their_width() {
+        let palette = parse_osc4_palette(b"\x1b]4;3;rgb:f/800/0\x07");
+        assert_eq!(palette, palette_with(&[(3, RgbValue::new(255, 128, 0))]));
+    }
+
+    #[test]
+    fn hash_rrggbb_reply_with_either_terminator() {
+        let palette = parse_osc4_palette(b"\x1b]4;4;#2472c8\x07\x1b]4;12;#3B8EEA\x1b\\");
+        assert_eq!(
+            palette,
+            palette_with(&[
+                (4, RgbValue::new(36, 114, 200)),
+                (12, RgbValue::new(59, 142, 234)),
+            ])
+        );
+    }
+
+    #[test]
+    fn sixteen_concatenated_replies_fill_every_slot() {
+        let mut bytes = Vec::new();
+        for index in 0..16u8 {
+            let red = index * 16;
+            bytes.extend_from_slice(
+                format!("\x1b]4;{index};rgb:{red:02x}{red:02x}/0000/ffff\x1b\\").as_bytes(),
+            );
+        }
+        let palette = parse_osc4_palette(&bytes);
+        for (index, slot) in palette.iter().enumerate() {
+            assert_eq!(
+                *slot,
+                Some(RgbValue::new(index as u8 * 16, 0, 255)),
+                "slot {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn replies_out_of_order_land_in_their_own_slots() {
+        let palette = parse_osc4_palette(
+            b"\x1b]4;15;rgb:ff/ff/ff\x07\x1b]4;0;rgb:00/00/00\x07\x1b]4;7;rgb:e5/e5/e5\x07",
+        );
+        assert_eq!(
+            palette,
+            palette_with(&[
+                (0, RgbValue::new(0, 0, 0)),
+                (7, RgbValue::new(229, 229, 229)),
+                (15, RgbValue::new(255, 255, 255)),
+            ])
+        );
+    }
+
+    #[test]
+    fn replies_interleaved_with_osc_10_11_and_da1_are_found() {
+        let bytes = b"\x1b]10;rgb:e5e5/e5e5/e5e5\x07\x1b]4;1;rgb:ff/00/00\x07\
+            \x1b]11;rgb:1e1e/1e1e/1e1e\x07\x1b[?62;22c\x1b]4;9;rgb:f1/4c/4c\x07";
+        assert_eq!(
+            parse_osc4_palette(bytes),
+            palette_with(&[
+                (1, RgbValue::new(255, 0, 0)),
+                (9, RgbValue::new(241, 76, 76)),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_truncated_last_reply_leaves_its_slot_unknown() {
+        let palette = parse_osc4_palette(b"\x1b]4;5;rgb:bc/3f/bc\x07\x1b]4;6;rgb:11/a8");
+        assert_eq!(palette, palette_with(&[(5, RgbValue::new(188, 63, 188))]));
+    }
+
+    #[test]
+    fn a_reply_cut_short_by_the_next_sequence_is_skipped() {
+        let palette =
+            parse_osc4_palette(b"\x1b]4;6;rgb:11/a8/cd\x1b[?62c\x1b]4;8;rgb:66/66/66\x07");
+        assert_eq!(palette, palette_with(&[(8, RgbValue::new(102, 102, 102))]));
+    }
+
+    #[test]
+    fn malformed_colors_leave_their_slots_unknown() {
+        let bytes = b"\x1b]4;0;rgb:gg/00/00\x07\
+            \x1b]4;1;rgb:ff/00\x07\
+            \x1b]4;2;rgb:ff/00/00/00\x07\
+            \x1b]4;3;rgb:fffff/0/0\x07\
+            \x1b]4;4;#12345\x07\
+            \x1b]4;5;red\x07\
+            \x1b]4;6;?\x07\
+            \x1b]4;7;rgb://\x07\
+            \x1b]4;10;rgb:23/d1/8b\x07";
+        assert_eq!(
+            parse_osc4_palette(bytes),
+            palette_with(&[(10, RgbValue::new(35, 209, 139))])
+        );
+    }
+
+    #[test]
+    fn indices_outside_0_to_15_are_ignored() {
+        let bytes = b"\x1b]4;16;rgb:ff/ff/ff\x07\x1b]4;255;rgb:ff/ff/ff\x07\
+            \x1b]4;99999999999;rgb:ff/ff/ff\x07\x1b]4;-1;rgb:ff/ff/ff\x07\
+            \x1b]4;;rgb:ff/ff/ff\x07\x1b]4;11;rgb:f5/f5/43\x07";
+        assert_eq!(
+            parse_osc4_palette(bytes),
+            palette_with(&[(11, RgbValue::new(245, 245, 67))])
+        );
+    }
+
+    #[test]
+    fn garbage_around_replies_is_ignored() {
+        let bytes = b"typed keys\x04\xff\xfe\x1b]4;13;rgb:d6/70/d6\x07more\x1b]4;\
+            \x1b]4;14;#29b8db\x1b\\tail";
+        assert_eq!(
+            parse_osc4_palette(bytes),
+            palette_with(&[
+                (13, RgbValue::new(214, 112, 214)),
+                (14, RgbValue::new(41, 184, 219)),
+            ])
+        );
+    }
+
+    #[test]
+    fn the_first_usable_reply_for_an_index_wins() {
+        let palette = parse_osc4_palette(
+            b"\x1b]4;1;bad\x07\x1b]4;1;rgb:01/02/03\x07\x1b]4;1;rgb:ff/ff/ff\x07",
+        );
+        assert_eq!(palette, palette_with(&[(1, RgbValue::new(1, 2, 3))]));
+    }
+
+    #[test]
+    fn empty_input_and_queries_alone_are_all_unknown() {
+        assert_eq!(parse_osc4_palette(b""), UNKNOWN);
+        assert_eq!(parse_osc4_palette(b"\x1b[?62;22c"), UNKNOWN);
+        assert_eq!(parse_osc4_palette(b"\x1b]4;0;?\x07\x1b]4;1;?\x07"), UNKNOWN);
     }
 }

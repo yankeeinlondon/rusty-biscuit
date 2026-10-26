@@ -28,6 +28,7 @@ mod level1_clipboard;
 mod level1_cursor;
 mod level1_graphics_probe;
 mod level1_mode_2027;
+mod level1_osc4_palette;
 #[cfg(unix)]
 mod level1_osc_queries;
 mod level1_query_budget;

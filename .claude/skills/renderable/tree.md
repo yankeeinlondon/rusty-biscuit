@@ -235,18 +235,31 @@ the built-in plain renderer.
 
 ```rust
 pub trait CodeRenderer {
-    fn render_terminal_code(&self, lang: Option<&str>, value: &str,
-                            attrs: &NodeAttrs, width: u32) -> Option<String>;
-    fn render_browser_code(&self, lang: Option<&str>, value: &str,
+    fn render_terminal_code(&self, lang: Option<&str>, value: &str, meta: Option<&str>,
+                            attrs: &NodeAttrs, context: TerminalCodeContext) -> Option<String>;
+    fn render_browser_code(&self, lang: Option<&str>, value: &str, meta: Option<&str>,
                            attrs: &NodeAttrs) -> Option<BrowserFragment<Ready>>;
 }
 ```
 
-> `render_terminal_code` takes a primitive `width: u32` rather than
-> `TerminalRenderContext` because `renderable` cannot depend on
-> `biscuit-terminal`. Widening it to carry color depth / color mode is
-> specified in `renderable/features/2026-05-16-color-decisions/` as a
-> precursor to the darkmatter tree migration.
+`TerminalCodeContext` (in `renderable::color`) carries width, color depth,
+color mode, page colors, code theme and line numbers, because `renderable`
+cannot depend on `biscuit-terminal`'s render context.
+
+Diagram fallbacks reach the code renderer too: biscuit-terminal's diagram hook
+may answer with render-tree code nodes (`txt` for a text drawing, `mermaid` for
+the source), and those go through the installed `CodeRenderer` like any fence.
+
+## Terminal Mermaid modes
+
+`TerminalMermaidMode` is the opt-in for promoting a `mermaid` fence; `GraphicsMode`
+is the ceiling. `Code` (default) never promotes; `Image` offers the fence to the
+diagram hook at `Rich`; `Automatic` offers it at `Rich` and `Vector` (image when
+allowed, else an eligible text drawing, else code). There is no exhaustive
+`match` on it in the workspace (the terminal renderer tests the
+`(mode, ceiling)` pair with `matches!`), so a new variant compiles silently:
+pin its behavior with a test. Details: `renderable/docs/tree-rendering.md`
+("Terminal Mermaid promotion and the diagram hook").
 
 ## Diagnostics and Validation
 

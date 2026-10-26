@@ -119,6 +119,26 @@ pub const ALLOWED: &[AllowEntry] = &[
         reason: "same, for the manually-run `emit-catalog` bin: it writes generated source back \
                  into the checkout it was launched from",
     },
+    AllowEntry {
+        file: "biscuit-visualized/bench/src/baseline.rs",
+        reason: "non-member `biscuit-visualized-bench` crate (its own `[workspace]`), built and \
+                 run only by `just bench` from the checkout, never archived or run in CI",
+    },
+    AllowEntry {
+        file: "biscuit-visualized/bench/src/corpus.rs",
+        reason: "non-member `biscuit-visualized-bench` crate (its own `[workspace]`), built and \
+                 run only by `just bench` from the checkout, never archived or run in CI",
+    },
+    AllowEntry {
+        file: "biscuit-visualized/bench/src/main.rs",
+        reason: "non-member `biscuit-visualized-bench` crate (its own `[workspace]`), built and \
+                 run only by `just bench` from the checkout, never archived or run in CI",
+    },
+    AllowEntry {
+        file: "biscuit-visualized/bench/tests/wiring.rs",
+        reason: "non-member `biscuit-visualized-bench` crate (its own `[workspace]`), built and \
+                 run only by `just bench` from the checkout, never archived or run in CI",
+    },
 ];
 
 /// Directories that are never archive-executed, and why.

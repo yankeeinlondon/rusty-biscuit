@@ -134,6 +134,15 @@ pub(crate) fn color_query_wanted() -> bool {
         && detect_multiplexer().is_none()
 }
 
+/// Whether the OSC 4 palette query may be sent: exactly when the colors may
+/// be ([`color_query_wanted`]), on every platform. On native Windows it rides
+/// the same console query backend as OSC 10/11; a terminal that does not
+/// answer leaves the palette unknown, and diagrams use background-derived
+/// accents.
+pub(crate) fn palette_query_wanted() -> bool {
+    color_query_wanted()
+}
+
 /// The fallback chain without a live query, for a terminal constructed with
 /// probing off. Always an estimate.
 pub(crate) fn heuristic_color(code: u8) -> Option<RgbValue> {

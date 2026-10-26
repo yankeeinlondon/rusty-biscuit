@@ -481,7 +481,7 @@ fn dedup_locations(locations: Vec<Location>) -> Vec<Location> {
 pub(crate) fn completion_heading_target(ctx: &DocumentContext, offset: usize) -> Option<std::path::PathBuf> {
     let document = completion::heading_target(ctx, offset).or_else(|| wiki::heading_target(ctx, offset));
     match document {
-        Some(document) => ctx.graph.document(document).map(|record| record.path.clone()),
+        Some(document) => ctx.graph.document(document).map(|record| record.path.to_path_buf()),
         None => completion::heading_target_file(ctx, offset),
     }
 }
@@ -510,7 +510,7 @@ pub fn reference_target_at(
             graph.outgoing(id, kind).find_map(|edge| match &edge.target {
                 EdgeTarget::Node(node) => {
                     let target = graph.node(*node)?;
-                    graph.document(target.document).map(|record| record.path.clone())
+                    graph.document(target.document).map(|record| record.path.to_path_buf())
                 }
                 EdgeTarget::File(file) => crate::graph::is_markdown_path(file).then(|| file.clone()),
                 EdgeTarget::Unresolved(_) => None,

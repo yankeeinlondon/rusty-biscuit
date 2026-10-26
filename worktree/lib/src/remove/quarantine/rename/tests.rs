@@ -286,7 +286,7 @@ fn windows_error_codes_classify_by_stage() {
     const SHARING_VIOLATION: i32 = 32;
     let cases = [
         (Stage::Open, ACCESS_DENIED, RenameFailure::Permission),
-        (Stage::Open, SHARING_VIOLATION, RenameFailure::Permission),
+        (Stage::Open, SHARING_VIOLATION, RenameFailure::Sharing),
         (Stage::Rename, ACCESS_DENIED, RenameFailure::Sharing),
         (Stage::Rename, SHARING_VIOLATION, RenameFailure::Sharing),
         (Stage::Rename, 183, RenameFailure::Collision),

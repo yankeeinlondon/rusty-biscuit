@@ -1,0 +1,20 @@
+classDiagram
+  class 用户 {
+    +String 名前
+    +login() 登录
+  }
+  class حساب {
+    +int رصيد
+    +withdraw(amount) ✓
+  }
+  class חשבון {
+    +שם String
+  }
+  class Emoji {
+    +🙂 smile
+    +∑ total → result
+    +Zoë Ångström
+  }
+  用户 --> حساب : 拥有 →
+  حساب --> חשבון
+  Emoji --> 用户 : ✓ ok

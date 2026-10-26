@@ -487,3 +487,132 @@ fn test_get_requires_at_least_one_prop() {
         .assert()
         .failure();
 }
+
+/// Hand-authored frontmatter whose formatting a re-serialization would change:
+/// four-space list indentation, a comment, quoting, and a block scalar.
+const AUTHORED_DOC: &str = "---\ntotal_phases: 7\nphase: 1  # first phase\ntitle: 'Quoted Title'\nfiles:\n    - a.rs\n    - b.rs\nnote: |-\n  line one\n  line two\n---\n# Body\n";
+
+fn authored_file() -> tempfile::NamedTempFile {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    tmp.write_all(AUTHORED_DOC.as_bytes()).unwrap();
+    tmp
+}
+
+#[test]
+fn test_set_save_new_property_keeps_every_other_byte() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-save-new-property-keeps-bytes");
+    let tmp = authored_file();
+
+    fixture
+        .command()
+        .arg("set")
+        .arg(tmp.path())
+        .args(["start_phase", "6", "--save"])
+        .assert()
+        .success();
+
+    let expected = AUTHORED_DOC.replace("---\n# Body", "start_phase: 6\n---\n# Body");
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), expected);
+}
+
+#[test]
+fn test_set_save_existing_property_keeps_position_and_other_bytes() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-save-existing-property-keeps-bytes");
+    let tmp = authored_file();
+
+    fixture
+        .command()
+        .arg("set")
+        .arg(tmp.path())
+        .args(["total_phases", "8", "--save"])
+        .assert()
+        .success();
+
+    let expected = AUTHORED_DOC.replace("total_phases: 7", "total_phases: 8");
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), expected);
+}
+
+#[test]
+fn test_set_stdout_keeps_every_other_byte() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-stdout-keeps-bytes");
+    let expected = AUTHORED_DOC.replace("---\n# Body", "start_phase: 6\n---\n# Body");
+
+    fixture
+        .command()
+        .args(["set", "-", "start_phase", "6"])
+        .write_stdin(AUTHORED_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::eq(expected));
+}
+
+#[test]
+fn test_rm_keeps_every_other_byte() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-rm-keeps-bytes");
+    let tmp = authored_file();
+
+    fixture
+        .command()
+        .arg("rm")
+        .arg(tmp.path())
+        .args(["title", "note"])
+        .assert()
+        .success();
+
+    let expected = AUTHORED_DOC
+        .replace("title: 'Quoted Title'\n", "")
+        .replace("note: |-\n  line one\n  line two\n", "");
+    assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), expected);
+}
+
+#[test]
+fn test_set_then_rm_round_trip_restores_original_bytes() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-rm-round-trip");
+    let tmp = authored_file();
+
+    for _ in 0..2 {
+        fixture
+            .command()
+            .arg("set")
+            .arg(tmp.path())
+            .args(["start_phase", "6", "--save"])
+            .assert()
+            .success();
+        fixture
+            .command()
+            .args(["get", "--raw"])
+            .arg(tmp.path())
+            .arg("start_phase")
+            .assert()
+            .success()
+            .stdout("6\n");
+        fixture
+            .command()
+            .arg("rm")
+            .arg(tmp.path())
+            .arg("start_phase")
+            .assert()
+            .success();
+        assert_eq!(std::fs::read_to_string(tmp.path()).unwrap(), AUTHORED_DOC);
+    }
+}
+
+#[test]
+fn test_set_save_indented_root_falls_back_to_reserializing() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-save-indented-root-falls-back");
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "---\n  title: Indented\n---\n# Content\n").unwrap();
+
+    fixture
+        .command()
+        .arg("set")
+        .arg(tmp.path())
+        .args(["count", "3", "--save"])
+        .assert()
+        .success();
+
+    let updated = std::fs::read_to_string(tmp.path()).unwrap();
+    assert!(updated.contains("title: Indented"));
+    assert!(updated.contains("count: 3"));
+    assert!(updated.contains("# Content"));
+}

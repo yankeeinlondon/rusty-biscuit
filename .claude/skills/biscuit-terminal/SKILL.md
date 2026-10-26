@@ -46,7 +46,9 @@ library, and renders `renderable::tree` nodes to terminal output.
 6. Know nothing about diagrams. `MermaidDiagram`, `GraphExpression`, and
    `GitGraph` live in `biscuit-visualized` (`terminal` feature), which depends
    on this crate; Mermaid fences reach them only through the render-tree
-   diagram hook (`diagrams.md`).
+   diagram hook (`diagrams.md`). Likewise know nothing about syntax
+   highlighting: a program fills the `code_renderer` slot. The `bt` CLI (not
+   the library) depends on darkmatter for that (`diagrams.md`).
 
 ## Common Entry Points
 

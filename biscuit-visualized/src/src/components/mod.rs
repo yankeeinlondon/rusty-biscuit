@@ -12,6 +12,7 @@
 //! `biscuit-terminal`'s tree renderer draw Mermaid code fences.
 
 mod display;
+mod fallback_policy;
 pub mod git_graph;
 pub mod graph_expression;
 pub mod mermaid;
@@ -21,8 +22,13 @@ pub use git_graph::{
     GitGraph, GitGraphPlan, GraphLine, GraphPullRequest, GraphViewport, LaneEntry, LaneMerge,
 };
 pub use graph_expression::{GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError};
+#[cfg(feature = "clap")]
+pub use fallback_policy::MermaidFallbackFeature;
+pub use fallback_policy::{
+    MERMAID_FALLBACK_ENV, MermaidFallbackPolicy, ResolvedFallbackPolicy, TextFallback,
+};
 pub use mermaid::{
-    MermaidConfig, MermaidDiagram, MermaidRenderError, MermaidRenderResult, MermaidTheme,
-    QuadrantTheme,
+    MermaidConfig, MermaidDiagram, MermaidPresentation, MermaidRenderError, MermaidRenderResult,
+    MermaidTheme, QuadrantTheme, PARTIAL_NOTE_ID, TEXT_BLOCK_CHROME_COLUMNS, partial_note,
 };
 pub use render_hook::TerminalDiagramRenderer;

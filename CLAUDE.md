@@ -221,6 +221,8 @@ Update alongside code changes:
   Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
 - **Rule 4** — Goal-Driven Execution.
   Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
+- **Rule 5** — "Should I?" means yes.
+  When the only open question is whether to do something in reach (fix a defect you found, add the missing test, update the drifted doc), do it and report it. Ask only when choosing between alternatives with different outcomes.
 
 ## Features and Fixes
 
@@ -229,6 +231,7 @@ Update alongside code changes:
     - **fixes** are primarily focused on fixing existing functionality
 - we have two lifecycle directories `_unscheduled` and `_completed` which can be found as subdirectories of features/fixes
     - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
+    - **never create anything under `_unscheduled` unless the author explicitly asks**; new work, including follow-ups an implementation could not finish, goes in a dated active directory, and an implementation fixes what it finds rather than filing it
     - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
         - the files in a feature/fix can vary but almost always will be the `spec.md` file
     - the **author** moves a feature/fix into `_completed`, and only after the

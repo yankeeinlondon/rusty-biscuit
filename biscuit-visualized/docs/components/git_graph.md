@@ -1,6 +1,6 @@
 # GitGraph
 
-Draws git branch topology as a Mermaid `gitGraph`, rendered through [MermaidDiagram](./mermaid_diagram.md). The caller gathers the git facts and hands them over typed; the component runs no git commands. It decides which refs get lanes and which become tags, orders the lanes, draws merges, marks elided commits, works around `mermaid-rs-renderer`'s parser, and fits the graph to the terminal by trimming commits and lanes rather than shrinking it. It never draws something at a commit other than the one it was given: what it cannot draw is reported as incomplete history.
+[`GitGraph`](../../src/src/components/git_graph.rs) draws git branch topology as a Mermaid `gitGraph` (Mermaid's diagram of commits on branch lanes), rendered by [Merman](../merman.md) through [MermaidDiagram](./mermaid_diagram.md). The caller gathers the git facts and hands them over typed; the component runs no git commands. It decides which refs get lanes and which become tags, orders the lanes, draws merges, marks elided commits, follows Mermaid's gitGraph emission rules, and fits the graph to the terminal by trimming commits and lanes rather than shrinking it. It never draws something at a commit other than the one it was given: what it cannot draw is reported as incomplete history.
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`. `wt list` is its main caller; [the `wt list` graph](../../../worktree/docs/git-graph.md) shows how a caller gathers the facts.
 
@@ -45,17 +45,18 @@ print!("{}", graph.render(&Terminal::new()));
 
 | Type | Meaning |
 |------|---------|
-| `LaneEntry::Commit(sha)` | A commit, by **full** SHA. The component shortens it for the label. |
+| [`LaneEntry`](../../src/src/components/git_graph.rs)`::Commit(sha)` | A commit, by **full** SHA. The component shortens it for the label. |
 | `LaneEntry::Elided(n)` | `n` commits left out, drawn as one `+n` square. |
-| `GraphLine` | A branch and the commits it has that its parent lacks, oldest first; its parent (`None` is the default branch), fork commit, tip, ordered merge edges, creation time, and tip time. |
+| [`GraphLine`](../../src/src/components/git_graph.rs) | A branch and the commits it has that its parent lacks, oldest first; its parent (`None` is the default branch), fork commit, tip, ordered merge edges, creation time, and tip time. |
 | `GraphLine::forked_at(sha)` | The commit the lane hangs from. Unset means the connection is unknown: the lane is drawn unconnected. |
 | `GraphLine::with_tip(sha)` | The branch's own tip. A line without commits is labeled here; a line with commits defaults to its newest drawn commit. The fork commit is never used as a tip. |
 | `GraphLine::with_merge(source, destination)` | Appends a `LaneMerge`: the commit `source` on this line was merged by the merge commit `destination` on another lane. The destination's lane is found by where that commit is drawn. Append oldest first; a line merged at its tip passes its tip as `source`. |
 | `with_ref(name, sha)` | A ref tip: local branch, remote branch, or tag. |
-| `GraphPullRequest` | An open PR: number, source branch, and target branch. |
+| [`GraphPullRequest`](../../src/src/components/git_graph.rs) | An open PR: number, source branch, and target branch. |
 | `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**; otherwise a **focused view** draws `origin/<default>`, the current branch and its chain of non-default parents, and any lane whose drawn commits hold the fork of a lane already in view. |
 | `with_incomplete_history()` | The caller could not establish some of the history it passed; the graph shows the incomplete-history notice. |
 | `with_max_rows(u32)` | Caps the base view's height at this many rows instead of half the terminal's; lanes past it are left out as usual. |
+| `with_theme(MermaidTheme)` | One of the fixed palettes ([`MermaidTheme`](../../src/src/mermaid/config.rs)) instead of the terminal's (see [Colors](#colors)). |
 
 ### Lanes and tags
 
@@ -80,7 +81,7 @@ gitGraph
     commit id: "3333333" tag: "main"
 ```
 
-After `biscuit-visualized`'s repair, `mmmmmmm`'s parents are `2222222` and `bbbbbbb`.
+Merman, like Mermaid.js, gives the labeled merge `mmmmmmm` both parents: `2222222` and `bbbbbbb`.
 
 ### A lane merged from its middle
 
@@ -111,7 +112,7 @@ gitGraph
     commit id: "m2m2m2m"
 ```
 
-`c1c1c1c`'s parents are `p1p1p1p` and `b1b1b1b`, and `n1n1n1n`'s parent is `b1b1b1b`: the renderer leaves a merged lane's head at the commit it merged from, so the resumed commit (or a `+N` square) follows the source.
+`c1c1c1c`'s parents are `p1p1p1p` and `b1b1b1b`, and `n1n1n1n`'s parent is `b1b1b1b`: Mermaid leaves a merged lane's head at the commit it merged from, so the resumed commit (or a `+N` square) follows the source.
 
 ```mermaid
 flowchart TD
@@ -142,7 +143,7 @@ The component never draws something at a commit other than the one it was given:
 | a ref, a label-only line's tip, a PR's source tip | its commit is not drawn | The tag is left out |
 | a line's merge | its source is not drawn on that line, its destination is not drawn or is on the same line, the destination would still be emitted before the source after its lane waits for it (a lane that reaches a destination first waits before it until the source is drawn), the destination already merges another source, or two lanes' merges depend on each other (only the first is drawn) | A plain `commit`, no merge |
 
-Each of these is recorded in `GitGraphPlan::omissions` as a `GraphOmission` (`UnconnectedLane { branch, fork }`, `Merge { branch, destination }`, or `Tag(name)`), so a caller can say what is missing. Each, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
+Each of these is recorded in [`GitGraphPlan`](../../src/src/components/git_graph.rs)`::omissions` (the plan is the fitted Mermaid text plus what was left out) as a [`GraphOmission`](../../src/src/components/git_graph.rs) (`UnconnectedLane { branch, fork }`, `Merge { branch, destination }`, or `Tag(name)`), so a caller can say what is missing. Each, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
 
 A caller that lists its own notes (as `wt list` does) calls `render_without_notes(&term)` instead of `render`: it returns the same drawing without either note, together with the `GitGraphPlan` it was drawn from, so the caller can report `hidden_lanes` and `incomplete` in its own words.
 
@@ -153,7 +154,7 @@ A caller that lists its own notes (as `wt list` does) calls `render_without_note
 | `with_scale(f32)` | Scale relative to terminal text; the default is `DEFAULT_GIT_GRAPH_SCALE` (1.25). |
 | `with_width(ImageWidth)` | Overrides the scale-derived width. `ImageWidth::Scale` replaces the scale; any other width is used as given and is never trimmed to. |
 | `plan(GraphViewport)` | The fitted Mermaid text plus its columns, rows, hidden lanes, trimmed commits, and `incomplete`. |
-| `GraphViewport::for_terminal(term, layout)` | Available columns after margins, terminal rows, and cell size. |
+| [`GraphViewport`](../../src/src/components/git_graph.rs)`::for_terminal(term, layout)` | Available columns after margins, terminal rows, and cell size. |
 | `mermaid()` | The untrimmed Mermaid text. |
 
 The image is sized with `ImageWidth::Scale` (see [TerminalImage](../../../biscuit-terminal/docs/components/terminal_image.md)): at 125%, gitGraph's 10-unit commit IDs and 14–16-unit branch labels read comfortably. Fitting works in two steps:
@@ -161,22 +162,30 @@ The image is sized with `ImageWidth::Scale` (see [TerminalImage](../../../biscui
 1. **Height (base view only).** Past half the terminal's rows, or the `with_max_rows(rows)` a caller set instead, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. Lanes whose tips share a second are equally recent: when one of them does not fit, the others are tried before stopping, so a tie never hides a lane that fits behind one that does not. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
 2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge sources and destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
-`biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
+`biscuit-visualized` keeps neighboring tags from overlapping (see [Mermaid gitGraph tag spacing](../mermaid-gitgraph.md)). It writes a wider `commitSpacing` only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
 
-Text measurement uses the host's fonts, so exact sizes differ slightly by OS.
+Text is measured and drawn in the host's fonts, so exact sizes differ slightly by OS; `MERMAID_FONT=Inter` gives the same layout everywhere (see [Merman rendering](../merman.md#choosing-a-font-mermaid_font)).
+
+### Colors
+
+Unless `with_theme` is set, the terminal graph uses the terminal's own palette, as [MermaidDiagram](./mermaid_diagram.md#themes-and-palettes) does: lane `i` takes accent `i mod 6`, so on a terminal that reports its ANSI colors the default lane is the theme's red, the next green, then yellow, blue, magenta, and cyan. Branch, tag, and commit labels are colored to stay readable on their lane color (see [Readable text](../merman.md#readable-text)).
+
+```rust
+let pinned = graph.with_theme(MermaidTheme::Neutral); // grays, whatever the terminal
+```
 
 ### Rendering
 
-- **Terminal:** the fitted graph as an inline image. Without image support, the Mermaid code block. The hidden-lanes note and the incomplete-history notice follow either one.
+- **Terminal:** the fitted graph as an inline image. Without image support, or when the diagram cannot be drawn (for example when Merman exceeds its [time budget](../merman.md#time-budget)), the Mermaid code block. The hidden-lanes note and the incomplete-history notice follow either one. `try_render(&term)` returns the error instead of the code block.
 - **Tree:** the untrimmed graph as `MermaidDiagram` projects it (an image node whose alt text is the Mermaid source).
-- **Browser:** the untrimmed graph's SVG as a raw-HTML island, in the default theme unless one is set. If rendering fails, the Mermaid source in a code block.
+- **Browser:** the untrimmed graph's SVG as a raw-HTML island, in the `MermaidTheme::Default` fixed palette (dark text on white) unless `with_theme` sets one. If rendering fails, the Mermaid source in a code block.
 
-### Renderer workarounds
+### Emission rules
 
-`mermaid-rs-renderer` 0.3.1 reads everything after `branch` or `merge` as the branch name, attributes included:
+The emitted Mermaid follows the gitGraph rules Merman and Mermaid.js share:
 
 - `branch` statements carry no attributes.
-- `merge` statements carry their `id:` and `tag:`, which costs the merge its second parent in the parser. `biscuit-visualized` restores it before layout, so the component emits labeled merges and the drawn edge is exact.
-- The parser drops a labeled `merge` into a lane that has no commit yet, so a merge is emitted only where its destination lane already has one. A merge that would be the default lane's first commit is therefore drawn as a plain commit; pass at least one default-lane commit below it (`wt list` passes the merge's first parent).
+- `merge` statements carry their `id:` and `tag:`; the merge keeps both parents, so the drawn edge is exact.
+- Mermaid rejects a merge into a lane that has no commit yet, so a merge is emitted only where its destination lane already has one. A merge that would be the default lane's first commit is therefore drawn as a plain commit; pass at least one default-lane commit below it (`wt list` passes the merge's first parent).
 
-Its parser also always names the first lane `main`: the default branch is that lane, and its real name appears as a tag when you pass its ref. A non-default branch named `main` is drawn as `main~` (`~` cannot occur in a git branch name). Commit IDs are labels, and parents are looked up by ID, so repeated IDs are made unique. Lane order is the order of the `branch` statements.
+The first lane is always Mermaid's default branch, `main`: the default branch is that lane, and its real name appears as a tag when you pass its ref. A non-default branch named `main` is drawn as `main~` (`~` cannot occur in a git branch name). Commit IDs are labels, and parents are looked up by ID, so repeated IDs are made unique. Lane order is the order of the `branch` statements.

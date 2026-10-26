@@ -1,0 +1,6 @@
+erDiagram
+  CUSTOMER_ACCOUNT_WITH_A_LONG_ENTITY_NAME ||--o{ ORDER : "places many orders over a long time"
+  ORDER {
+    string order_identifier_that_is_long PK "the primary key of the order record"
+    date created_at "when it was created<br/>and stored"
+  }

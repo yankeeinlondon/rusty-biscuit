@@ -1004,6 +1004,27 @@ mod live {
     }
 
     #[test]
+    fn a_controlled_child_reports_this_test_process_as_its_verified_parent() {
+        let scene = scene();
+        let root = &scene.root;
+        let (child, _, _) = spawn_child(&[root.join("file.txt")], &root.join("sub"), std::slice::from_ref(root));
+        let child_pid = child.0.id();
+        let report = live_query(root, PathUsageOptions::default());
+        let record = report
+            .processes
+            .iter()
+            .find(|p| p.pid == child_pid)
+            .unwrap_or_else(|| panic!("child missing: {:#?}", report.processes));
+        let own = std::process::id();
+        assert_eq!(record.parent_pid, Some(own), "{record:#?}");
+        assert_eq!(record.ancestors.first().map(|a| a.pid), Some(own), "{record:#?}");
+        assert!(record.ancestors.len() <= MAX_ANCESTORS);
+        assert_eq!(record.app_name, None, "Linux has no application name");
+        assert!(record.ancestors.iter().all(|a| a.app_name.is_none()));
+        drop(child);
+    }
+
+    #[test]
     fn the_querying_process_is_listed_once_and_its_threads_are_not_processes() {
         let scene = scene();
         let file = scene.root.join("file.txt");

@@ -167,11 +167,24 @@
 
 - [biscuit-visualized](../../biscuit-visualized) _v0.1.0_ (CLI only; features: `clap`, `terminal`)
 
-    _The diagram components behind the `bt` diagram commands (`mermaid`,
-    `flowchart`, `graph-expression`, `git-graph`, ...). The library does not
-    depend on it: `biscuit-visualized` depends on the library._
+    _The diagram components behind the `bt` diagram commands (`flowchart`,
+    `pie-chart`, `graph-expression`, `git-graph`, ...), and the `--feature`
+    names of the Mermaid commands (`clap`). The library does not depend on
+    it: `biscuit-visualized` depends on the library._
 
     _Tags: workspace, visualization_
+
+- [darkmatter](../../darkmatter/lib) _v0.1.0_ (CLI only; no default features to disable)
+
+    _Syntax-highlighted code blocks: `bt` installs darkmatter's code renderer
+    (syntect with two-face themes, plus its Mermaid syntax) for every command
+    that renders code blocks, so Mermaid text and source fallbacks and fenced
+    code in `quote` look exactly as `md` shows them. This lengthens the CLI's
+    build and enlarges its binary. No cycle: darkmatter depends on
+    `biscuit-visualized` and on this library, and neither of those depends on
+    darkmatter or syntect._
+
+    _Tags: workspace, highlighting_
 
 - [sniff](../../sniff/lib) _v0.1.0_
 
@@ -250,11 +263,11 @@ recipes and CI feature policy.
 
 ### Image Rasterization
 
-- [resvg](https://github.com/linebender/resvg) _v0.45_ (feature: `image`)
+- [resvg](https://github.com/linebender/resvg) _v0.47_ (feature: `image`)
 
     _Rasterizes SVG images for `TerminalImage` and the graphical horizontal
     rules. It is the whole of the `image` feature: diagram rendering
-    (`mermaid-rs-renderer`, the diagram components) lives in
+    (Merman, the diagram components) lives in
     `biscuit-visualized`, which depends on this library and is never one of
     its dependencies._
 

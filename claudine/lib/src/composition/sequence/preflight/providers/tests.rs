@@ -236,7 +236,7 @@ fn prediction_calls_the_evaluator_only_for_an_evaluable_template() {
             caller_setters: &empty,
             sequence_path: Path::new("/seq.md"),
         };
-        let mut evaluate = |_: &Value, _: &std::collections::HashMap<String, Value>| -> Result<
+        let mut evaluate = |_: &Value, _: &serde_json::Map<String, Value>| -> Result<
             Result<Value, crate::composition::lifecycle_context::LifecycleCause>,
             crate::composition::CompositionError,
         > { panic!("`{key}` must not be evaluated at preflight") };

@@ -46,6 +46,7 @@ use renderable::tree::{
 use renderable::tree::{NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
+use super::mermaid_font::place_page_font;
 use super::pipeline::PipelineResult;
 use crate::markdown::Markdown;
 use crate::markdown::inline::HorizontalRuleAttrs;
@@ -202,8 +203,11 @@ pub(crate) fn render_tree_html_with_context(
     // consumes: a malformed code-block directive is a hard error, not a silent
     // degrade. Runs on the single fold — no second traversal of the source.
     validate_code_directives(&doc.root)?;
-    let browser_opts = browser_options_from_html_options(options);
-    let rendered = render_browser_document_html(&doc, &browser_opts)?;
+    let (browser_opts, code_renderer) = browser_options_from_html_options(options);
+    let mut rendered = render_browser_document_html(&doc, &browser_opts)?;
+    if let Some(font) = code_renderer.take_page_font() {
+        rendered.output = place_page_font(&rendered.output, &font);
+    }
     Ok(PipelineResult::new(
         rendered.output,
         fold_diagnostics,
@@ -251,8 +255,10 @@ pub(crate) struct BrowserPageRender {
 ///
 /// 1. **Interactive Mermaid is the default.** A bare `mermaid` fence lowers to
 ///    the interactive `<pre class="mermaid">` container (requesting
-///    [`PageFeature::MermaidDiagram`]); [`MermaidMode::Image`] stays an explicit
-///    static-SVG opt-in and [`MermaidMode::Text`] an explicit code opt-in. The
+///    [`PageFeature::MermaidDiagram`]); [`MermaidMode::Image`] (and
+///    [`MermaidMode::Automatic`], its terminal-only refinement) stays an
+///    explicit static-SVG opt-in and [`MermaidMode::Text`] an explicit code
+///    opt-in. The
 ///    supplied `graphics_mode` still caps the result — [`GraphicsMode::Off`]
 ///    renders code and [`GraphicsMode::Vector`] caps Interactive to static SVG —
 ///    so a caller who disables graphics keeps the side-effect-free code form.
@@ -286,12 +292,13 @@ pub(crate) fn render_tree_html_page_body(
     let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     validate_code_directives(&doc.root)?;
 
-    let mut browser_opts = browser_options_from_html_options(options);
+    let (mut browser_opts, code_renderer) = browser_options_from_html_options(options);
     // Darkmatter's full-page browser default is interactive Mermaid; explicit
     // Image / Text choices keep their static-SVG / code opt-in shapes.
     browser_opts.mermaid_mode = match options.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Interactive,
-        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+        crate::markdown::output::terminal::MermaidMode::Image
+        | crate::markdown::output::terminal::MermaidMode::Automatic => BrowserMermaidMode::StaticSvg,
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
     };
     browser_opts.graphics_mode = graphics_mode;
@@ -301,7 +308,11 @@ pub(crate) fn render_tree_html_page_body(
     // requests without resolving/injecting them into `<head>`.
     browser_opts.defer_feature_injection = true;
 
-    let rendered = render_browser_document_body(&doc, &browser_opts)?;
+    let mut rendered = render_browser_document_body(&doc, &browser_opts)?;
+    if let Some(font) = code_renderer.take_page_font() {
+        rendered.output.document = place_page_font(&rendered.output.document, &font);
+        rendered.output.body = place_page_font(&rendered.output.body, &font);
+    }
     Ok(PipelineResult::new(
         BrowserPageRender {
             document: rendered.output.document,
@@ -431,8 +442,8 @@ pub(crate) fn render_tree_terminal_with_context(
 /// encoding both through [`TerminalOptions::max_width`].
 ///
 /// `max_width` selects the optimistic pre-render [`Terminal`] — carrying both a
-/// width *and* a full capability profile (TrueColor, OSC8). The page splits the
-/// two concerns:
+/// width *and* an optimistic styling profile (TrueColor, OSC8; image support
+/// stays with the detected graphics route). The page splits the two concerns:
 ///
 ///   * `optimistic_capabilities` selects the capability profile. The page sets
 ///     it for *deliberate frame geometry only* — never a matched component
@@ -581,19 +592,24 @@ pub fn render_tree_markdown_dialect(
 /// tree browser path honors the same Mermaid opt-in contract as the legacy
 /// renderer.
 ///
-/// Legacy `MermaidMode::Image` maps to [`BrowserMermaidMode::StaticSvg`]: the
+/// Legacy `MermaidMode::Image` (like `MermaidMode::Automatic`, whose text
+/// drawing is terminal-only) maps to [`BrowserMermaidMode::StaticSvg`]: the
 /// spec's promoted browser form is a pre-rendered static `<svg>`. The
 /// client-side mermaid.js path ([`BrowserMermaidMode::Interactive`]) is an
 /// orthogonal, default-off browser opt-in and is not reachable from the legacy
 /// enum.
-fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions {
+///
+/// Also returns the installed code renderer, which collects the page's
+/// embedded Mermaid font ([`TerminalCodeRenderer::take_page_font`]).
+fn browser_options_from_html_options(opts: &HtmlOptions) -> (BrowserRenderOptions, Rc<TerminalCodeRenderer>) {
     use renderable::browser::PageOptions;
     use renderable::tree::BrowserMermaidMode;
 
     let mermaid_mode = match opts.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Code,
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
-        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+        crate::markdown::output::terminal::MermaidMode::Image
+        | crate::markdown::output::terminal::MermaidMode::Automatic => BrowserMermaidMode::StaticSvg,
     };
 
     let stylesheet = opts.include_styles.then(|| code_block_stylesheet(opts));
@@ -604,8 +620,11 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         ..PageOptions::default()
     });
 
-    BrowserRenderOptions {
+    let code_renderer = Rc::new(TerminalCodeRenderer::new().with_html_options(opts.clone()));
+    let browser_opts = BrowserRenderOptions {
         strictness: RenderStrictness::Warn,
+        // The embedded-font placeholder relies on this: no author HTML reaches
+        // the page unescaped (see `mermaid_font::PAGE_FONT_PLACEHOLDER`).
         raw_html: RawHtmlPolicy::Escape,
         page,
         // Carry the caller's resolved `HtmlOptions` (code theme, page color
@@ -613,12 +632,11 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         // highlighted markup uses the same mode/theme policy as the page frame
         // and the `.code-block` stylesheet, rather than `HtmlOptions::default()`
         // (review-1 finding 2).
-        code_renderer: Some(Rc::new(
-            TerminalCodeRenderer::new().with_html_options(opts.clone()),
-        )),
+        code_renderer: Some(Rc::clone(&code_renderer) as Rc<dyn renderable::tree::CodeRenderer>),
         mermaid_mode,
         ..Default::default()
-    }
+    };
+    (browser_opts, code_renderer)
 }
 
 /// Builds the `.code-block` panel-background stylesheet for the browser path.
@@ -643,10 +661,39 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
     sheet
 }
 
+/// The terminal the tree renderer folds against, given the `detected` one and
+/// the caller's pinned width.
+///
+/// Without a width this is `detected`. On a TTY a width only fixes the column
+/// count. On a non-TTY stdout a width also selects the optimistic styling
+/// profile (TrueColor, OSC8 links, italics, TTY), but image availability stays
+/// with `detected`: its graphics route (pixel format, multiplexer transport,
+/// confidence), its app (which chooses the encoder), and its cached cell size.
+/// A width is layout; it must not grant pixels the effective route denied,
+/// such as under `BISCUIT_GRAPHICS=none`.
+fn capability_terminal(detected: Terminal, max_width: Option<u16>) -> Terminal {
+    let Some(width) = max_width.map(u32::from) else {
+        return detected;
+    };
+    if detected.is_tty {
+        return Terminal {
+            fixed_width: Some(width),
+            ..detected
+        };
+    }
+    Terminal {
+        app: detected.app,
+        graphics_route: detected.graphics_route,
+        cell_size: detected.cell_size,
+        ..Terminal::new_optimistic(width)
+    }
+}
+
 /// Maps [`TerminalOptions`] to [`TerminalRenderOptions`].
 ///
-/// Uses an optimistic [`Terminal`] when `max_width` is pinned; otherwise
-/// falls back to detection. `opts.color_depth`, when set, overrides the
+/// Starts from the detected [`Terminal`]; a pinned `max_width` selects the
+/// width and, on a non-TTY stdout, the optimistic styling profile (see
+/// [`capability_terminal`]), never image support. `opts.color_depth`, when set, overrides the
 /// terminal's resolved color depth so callers can pin the tree renderer to
 /// `ColorDepth::None` (matching the legacy renderer's no-color contract)
 /// without depending on host capability detection. `image_mode` and
@@ -681,14 +728,7 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
 /// [`LayoutContext::from_page`](crate::layout::context::LayoutContext::from_page))
 /// but no longer overrides the terminal here.
 fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
-    let mut term = Terminal::default();
-    if let Some(width) = opts.max_width {
-        if term.is_tty {
-            term.fixed_width = Some(u32::from(width));
-        } else {
-            term = Terminal::new_optimistic(u32::from(width));
-        }
-    }
+    let mut term = capability_terminal(Terminal::default(), opts.max_width);
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
@@ -704,11 +744,13 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     };
 
     // Map the legacy Mermaid opt-in onto the terminal Mermaid promotion mode.
-    // `GraphicsMode` is only the ceiling: a fence is promoted to a raster image
-    // solely when the caller opted in via `MermaidMode::Image`. `Off` / `Text`
+    // `GraphicsMode` is only the ceiling: a fence is promoted solely when the
+    // caller opted in via `MermaidMode::Image` (raster image) or
+    // `MermaidMode::Automatic` (image, else text drawing). `Off` / `Text`
     // keep Mermaid as code, preserving the public default.
     let mermaid_mode = match opts.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Image => TerminalMermaidMode::Image,
+        crate::markdown::output::terminal::MermaidMode::Automatic => TerminalMermaidMode::Automatic,
         crate::markdown::output::terminal::MermaidMode::Off
         | crate::markdown::output::terminal::MermaidMode::Text => TerminalMermaidMode::Code,
     };
@@ -771,7 +813,9 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
             opts.code_block_mode,
         ))),
         // Consulted only when `mermaid_mode` above promotes a fence.
-        diagram_renderer: Some(Rc::new(TerminalDiagramRenderer)),
+        diagram_renderer: Some(Rc::new(
+            TerminalDiagramRenderer::default().with_fallback_policy(opts.mermaid_fallback_policy),
+        )),
     }
 }
 
@@ -964,27 +1008,34 @@ mod tests {
 
     /// biscuit-terminal draws no diagrams itself: a `MermaidMode::Image` fence
     /// becomes an image only because this entry point installs
-    /// biscuit-visualized's diagram hook. `Force` makes the snapshot a Kitty
-    /// TTY whatever the host, so the image escape is deterministic.
+    /// biscuit-visualized's diagram hook. The adapter's capability snapshot is
+    /// replaced with a Kitty TTY so the image escape is deterministic whatever
+    /// the host; a pinned width alone never grants pixels.
     #[test]
     fn render_tree_terminal_draws_mermaid_through_the_installed_hook() {
-        use crate::markdown::output::terminal::{MermaidMode, TerminalImageMode};
+        use crate::markdown::output::terminal::MermaidMode;
 
         let md: Markdown = "```mermaid\nflowchart LR\n    A --> B\n```\n".into();
-        let options = |mermaid_mode| TerminalOptions {
-            mermaid_mode,
-            image_mode: TerminalImageMode::Force,
-            max_width: Some(80),
-            ..TerminalOptions::default()
+        let (doc, _) = to_render_document(&md).expect("build");
+        let render = |mermaid_mode| {
+            let options = TerminalOptions {
+                mermaid_mode,
+                ..TerminalOptions::default()
+            };
+            let mut term_opts = terminal_options_from_terminal_options(&options);
+            term_opts.context.terminal = Terminal::new_optimistic(80);
+            render_terminal_document(&doc, &term_opts).expect("render").output
         };
 
-        let drawn = render_tree_terminal(&md, &options(MermaidMode::Image)).expect("render");
-        assert!(drawn.output.contains("\x1b_G"), "a Kitty image: {:?}", drawn.output);
-        assert!(!drawn.output.contains("A --> B"), "not the fence source: {:?}", drawn.output);
+        let drawn = render(MermaidMode::Image);
+        assert!(drawn.contains("\x1b_G"), "a Kitty image: {drawn:?}");
+        assert!(!drawn.contains("A --> B"), "not the fence source: {drawn:?}");
 
-        let as_code = render_tree_terminal(&md, &options(MermaidMode::Text)).expect("render");
-        assert!(!as_code.output.contains("\x1b_G"), "{:?}", as_code.output);
-        assert!(as_code.output.contains("A --> B"), "{:?}", as_code.output);
+        let as_code = render(MermaidMode::Text);
+        assert!(!as_code.contains("\x1b_G"), "{as_code:?}");
+        // The Mermaid syntax colors `A`, `-->`, and `B` separately.
+        let as_code_text = crate::testing::strip_ansi_codes(&as_code);
+        assert!(as_code_text.contains("A --> B"), "{as_code:?}");
     }
 
     #[test]
@@ -1410,7 +1461,7 @@ mod tests {
     /// even when the rendered-bytes tests above don't run.
     #[test]
     fn render_browser_options_mapping_defaults_raw_html_to_escape() {
-        let opts = browser_options_from_html_options(&HtmlOptions::default());
+        let opts = browser_options_from_html_options(&HtmlOptions::default()).0;
         assert_eq!(opts.raw_html, RawHtmlPolicy::Escape);
     }
 
@@ -1462,7 +1513,7 @@ mod tests {
             hr_css_variables: vars,
             ..HtmlOptions::default()
         };
-        let browser = browser_options_from_html_options(&opts);
+        let browser = browser_options_from_html_options(&opts).0;
         let page = browser
             .page
             .expect("a page must be built to carry the HR override");
@@ -1645,7 +1696,7 @@ mod tests {
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             ..Default::default()
         };
-        let browser_opts = browser_options_from_html_options(&opts);
+        let browser_opts = browser_options_from_html_options(&opts).0;
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Code);
     }
 
@@ -1661,7 +1712,7 @@ mod tests {
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
             ..Default::default()
         };
-        let browser_opts = browser_options_from_html_options(&opts);
+        let browser_opts = browser_options_from_html_options(&opts).0;
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
     }
 
@@ -1701,6 +1752,72 @@ mod tests {
             !out.contains("<svg"),
             "MermaidMode::Off must not promote to SVG; raw output:\n{out}",
         );
+    }
+
+    /// A detected non-TTY terminal whose graphics route the caller controls;
+    /// every other capability is off, as on a pipe.
+    fn piped_terminal(support: biscuit_terminal::discovery::detection::ImageSupport) -> Terminal {
+        use biscuit_terminal::discovery::detection::{GraphicsRoute, TerminalApp};
+
+        let mut term = Terminal::new_optimistic(100);
+        term.app = TerminalApp::Wezterm;
+        term.graphics_route = GraphicsRoute::from(support);
+        term.is_tty = false;
+        term.color_depth = TerminalColorDepth::None;
+        term.osc_link_support = false;
+        term.supports_italic = false;
+        term.fixed_width = None;
+        term
+    }
+
+    /// A pinned width on a pipe selects optimistic styling but keeps the
+    /// detected route: no pixels stay no pixels.
+    #[test]
+    fn capability_terminal_width_keeps_a_route_without_pixels() {
+        use biscuit_terminal::components::terminal_image::TerminalImage;
+        use biscuit_terminal::discovery::detection::ImageSupport;
+
+        let term = capability_terminal(piped_terminal(ImageSupport::None), Some(60));
+
+        assert!(!term.graphics_route.has_pixels());
+        assert!(!TerminalImage::route_has_pixels(&term));
+        assert_eq!(term.fixed_width, Some(60));
+        assert_eq!(term.color_depth, TerminalColorDepth::TrueColor);
+        assert!(term.osc_link_support && term.supports_italic && term.is_tty);
+    }
+
+    /// The positive control: a detected pixel route survives the width, with
+    /// the app that chooses its encoder.
+    #[test]
+    fn capability_terminal_width_keeps_a_route_with_pixels() {
+        use biscuit_terminal::components::terminal_image::TerminalImage;
+        use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
+
+        let detected = piped_terminal(ImageSupport::Sixel);
+        let route = detected.graphics_route.clone();
+        let term = capability_terminal(detected, Some(60));
+
+        assert_eq!(term.graphics_route, route);
+        assert!(TerminalImage::route_has_pixels(&term));
+        assert!(matches!(term.app, TerminalApp::Wezterm));
+    }
+
+    /// Without a width the detected terminal is used as is; on a TTY a width
+    /// fixes only the column count.
+    #[test]
+    fn capability_terminal_without_width_or_on_a_tty_keeps_detection() {
+        use biscuit_terminal::discovery::detection::ImageSupport;
+
+        let unchanged = capability_terminal(piped_terminal(ImageSupport::None), None);
+        assert_eq!(unchanged.color_depth, TerminalColorDepth::None);
+        assert_eq!(unchanged.fixed_width, None);
+
+        let mut tty = piped_terminal(ImageSupport::None);
+        tty.is_tty = true;
+        let fixed = capability_terminal(tty, Some(60));
+        assert_eq!(fixed.fixed_width, Some(60));
+        assert_eq!(fixed.color_depth, TerminalColorDepth::None);
+        assert!(!fixed.graphics_route.has_pixels());
     }
 
     /// The terminal entry point must map `TerminalImageMode::Never` to

@@ -1,0 +1,15 @@
+gitGraph
+    commit id: "init"
+    branch feature
+    checkout feature
+    commit id: "f1"
+    commit id: "f2"
+    checkout main
+    commit id: "m1"
+    branch hotfix
+    checkout hotfix
+    commit id: "h1"
+    checkout main
+    merge hotfix id: "MH" tag: "v1.0.1"
+    merge feature id: "MF" tag: "v1.1.0" type: HIGHLIGHT
+    commit id: "m2"

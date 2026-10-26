@@ -2910,3 +2910,102 @@ async fn browser_mermaid_real_engine_renders_and_themes() {
          must differ; dark={dark_fill:?} light={light_fill:?}",
     );
 }
+
+/// Measures, in the page, how each label of the static diagrams is drawn.
+/// Each `@font-face` file is loaded a second time as a probe family; a label
+/// drawn in the page family as wide as in its probe uses the embedded face,
+/// and a probe as wide with a monospace as with a serif fallback has every
+/// glyph of the label in the subset. The control text is in no subset.
+const EMBEDDED_FONT_PROBE: &str = r#"(async () => {
+  const faces = [];
+  for (const sheet of document.styleSheets) {
+    for (const rule of sheet.cssRules) {
+      if (!(rule instanceof CSSFontFaceRule)) continue;
+      const family = rule.style.getPropertyValue('font-family').replace(/^['"]|['"]$/g, '');
+      const weight = rule.style.getPropertyValue('font-weight');
+      const url = rule.style.getPropertyValue('src').match(/url\("?([^")]+)"?\)/)[1];
+      const probe = new FontFace('bv-probe-' + faces.length, 'url(' + url + ')', { weight });
+      await probe.load();
+      document.fonts.add(probe);
+      faces.push({ family, weight, probe: probe.family });
+    }
+  }
+  await document.fonts.ready;
+  const context = document.createElement('canvas').getContext('2d');
+  const width = (font, text) => { context.font = font; return context.measureText(text).width; };
+  const labels = [];
+  for (const el of document.querySelectorAll('svg text, svg tspan')) {
+    const text = el.textContent.trim();
+    if (el.children.length || !text) continue;
+    const style = getComputedStyle(el);
+    const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+    const weight = parseInt(style.fontWeight, 10) >= 600 ? '700' : '400';
+    const face = faces.find((f) => f.family === family && f.weight === weight);
+    const label = { text, family, weight, face: !!face };
+    if (face) {
+      await document.fonts.load(`${weight} 100px "${family}"`, text);
+      label.page = width(`${weight} 100px "${family}", monospace`, text);
+      label.mono = width(`${weight} 100px "${face.probe}", monospace`, text);
+      label.serif = width(`${weight} 100px "${face.probe}", serif`, text);
+    }
+    labels.push(label);
+  }
+  const control = faces.length
+    ? [width(`100px "${faces[0].probe}", monospace`, 'ЖΩ€'), width(`100px "${faces[0].probe}", serif`, 'ЖΩ€')]
+    : [];
+  const status = [...document.fonts].filter((f) => !f.family.startsWith('bv-probe')).map((f) => f.status);
+  const fontRequests = performance.getEntriesByType('resource')
+    .filter((e) => /\.(ttf|otf|woff2?)(\?|$)/i.test(e.name) || e.initiatorType === 'css').length;
+  return JSON.stringify({ faces, labels, control, status, fontRequests });
+})()"#;
+
+/// The embedded Mermaid font loads from its `data:` URLs in a real browser,
+/// with no font request, and every label of every diagram is drawn in the
+/// embedded face with all its glyphs in the subset.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_embedded_mermaid_font_draws_every_label() {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+    use darkmatter::markdown::output::MermaidMode;
+
+    if !require_browser() {
+        return;
+    }
+    let md: Markdown = "# Fonts\n\n```mermaid\nflowchart LR\n    A[Start here] --> B{Is it?}\n    B -->|Yes| C[Store]\n```\n\n```mermaid\nclassDiagram\n    class Animal {\n        +String name\n        +eat() void\n    }\n```\n".into();
+    let term = Terminal::new_optimistic(100);
+    let fragment = DarkmatterPage::new(&term)
+        .with_mermaid_mode(MermaidMode::Image)
+        .with_embed_mermaid_font(true)
+        .render_to_browser(&md)
+        .expect("render_to_browser");
+    assert!(fragment.contains("@font-face"), "control: the page embeds a font");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&wrap_fragment(&fragment, "#ffffff")).await.expect("render html");
+    let report = harness.evaluate(EMBEDDED_FONT_PROBE).await.expect("probe");
+    harness.shutdown().await;
+
+    let report: serde_json::Value = serde_json::from_str(&report).expect("probe json");
+    let faces = report["faces"].as_array().expect("faces");
+    let weights: Vec<&str> = faces.iter().filter_map(|face| face["weight"].as_str()).collect();
+    assert!(weights.contains(&"400") && weights.contains(&"700"), "{report}");
+    let status = report["status"].as_array().expect("status");
+    assert!(!status.is_empty() && status.iter().all(|s| s == "loaded"), "{report}");
+    assert_eq!(report["fontRequests"], 0, "{report}");
+
+    let labels = report["labels"].as_array().expect("labels");
+    for expected in ["Start here", "Is it?", "Store", "Animal"] {
+        assert!(labels.iter().any(|label| label["text"] == expected), "{expected:?}: {report}");
+    }
+    for label in labels {
+        assert_eq!(label["face"], true, "a label without an embedded face: {label}");
+        let width = |key: &str| label[key].as_f64().expect("width");
+        assert!((width("page") - width("mono")).abs() < 0.01, "not drawn in the embedded face: {label}");
+        assert!((width("mono") - width("serif")).abs() < 0.01, "a glyph missing from the subset: {label}");
+    }
+    // Control: text outside the subset falls back, so the coverage check bites.
+    let control = report["control"].as_array().expect("control");
+    assert!((control[0].as_f64().unwrap() - control[1].as_f64().unwrap()).abs() > 1.0, "{report}");
+}

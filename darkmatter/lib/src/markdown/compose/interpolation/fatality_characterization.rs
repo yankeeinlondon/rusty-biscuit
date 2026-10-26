@@ -59,7 +59,6 @@ use crate::markdown::compose::expression::ResolutionContext;
 use crate::markdown::compose::{
     ComposeContext, EffectiveState, EffectiveStateBuilder, ResolvingLookup,
 };
-use std::collections::HashMap;
 
 /// The two interpolation surfaces the matrix distinguishes.
 ///
@@ -163,7 +162,7 @@ fn empty_state(kind: &str) -> EffectiveState {
         _ => ComposeContext::fixed_for_testing(),
     };
     EffectiveStateBuilder::new()
-        .with_frontmatter(HashMap::new())
+        .with_frontmatter(serde_json::Map::new())
         .with_context(context)
         .build()
         .unwrap()

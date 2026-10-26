@@ -339,7 +339,7 @@ md README.md --code-block same      # match the terminal's mode
 # Line numbers in code blocks
 md README.md --line-numbers
 
-# Render mermaid diagrams as images
+# Render mermaid diagrams as images, or as text where the terminal shows none
 md README.md --mermaid
 ```
 

@@ -1,0 +1,14 @@
+[package]
+name = "s1-subset"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Throwaway spike, not a workspace member.
+[workspace]
+
+[dependencies]
+allsorts = { version = "0.17.0", default-features = false, features = ["flate2_rust"] }
+rustybuzz = "0.20.1"
+ttf-parser = "0.25.1"
+base64 = "0.22"

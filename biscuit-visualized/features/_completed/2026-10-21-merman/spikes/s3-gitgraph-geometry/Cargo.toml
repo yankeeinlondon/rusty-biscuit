@@ -1,0 +1,27 @@
+# Spike S3: can `GitGraphGeometry` be built from Merman's layout data, and do
+# the geometry assertions in `worktree`'s git graph tests hold on it (R-S8, AC-S6)?
+#
+# Standalone, NOT a member of the rusty-biscuit workspace (empty `[workspace]`).
+# `Cargo.lock` was seeded from the workspace lock before the first build.
+# Build with CARGO_TARGET_DIR outside the repository:
+#   CARGO_TARGET_DIR=/tmp/s3-target cargo run --release
+[package]
+name = "s3-gitgraph-geometry"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# The same pinned commit as spikes S0-S2 (D10); the feature set of ruling 14.
+merman = { git = "https://github.com/Latias94/merman.git", rev = "482fcde7faffb05a466f198085d615e604075d97", default-features = false, features = [
+    "svg",
+    "all-diagrams",
+    "layout-cytoscape",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+debug = false

@@ -19,6 +19,62 @@
   package; `schematic/schema/Cargo.lock` gains `num-bigint` and
   `num-integer`. See
   `schematic/docs/dependencies.md`.
+- `darkmatter/lib` vendors the MIT-licensed SublimeText/Mermaid syntax
+  (2026-10-24, commit `a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859`, Copyright
+  (c) 2017 Peng Wang) as one flattened syntax under
+  `darkmatter/lib/assets/syntaxes/mermaid/`, with its `LICENSE`; no crate is
+  added. `darkmatter/cli` adds a path dependency on `biscuit-visualized` with
+  its `clap` feature (2026-10-24) for the shared Mermaid fallback `--feature`
+  names; `biscuit-visualized` was already in its graph through darkmatter, and
+  `clap` already a dependency.
+- `biscuit-visualized` adds, under its `image` feature (2026-10-24),
+  `allsorts` 0.17.0 (Apache-2.0; `default-features = false`, feature
+  `flate2_rust`, so no C zlib) to subset the font its Mermaid embedded-font
+  opt-in puts into HTML pages, plus `roxmltree` 0.21.1 and `simplecss` 0.2.2
+  (the versions `usvg` uses, already in the graph) and `base64` 0.22 (already
+  in the graph; formerly a development dependency there). `allsorts` brings
+  ten new crates into the lockfile: `aliasable` 0.1.3, `bitreader` 0.3.11,
+  `glyph-names` 0.2.0, `ouroboros` and `ouroboros_macro` 0.18.5,
+  `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6,
+  `proc-macro2-diagnostics` 0.10.1, `unicode-canonical-combining-class` 1.0.0,
+  and `unicode-joining-type` 1.0.0.
+- `biscuit-hash` adds an optional `json` feature (2026-10-23) that enables
+  optional `serde` 1 and `serde_json` 1 for canonical (key-sorted) JSON
+  rendering and hashing. Both crates were already in the workspace graph; no
+  version changed. `json` does not request serde_json's `preserve_order`; the
+  crate's dev-dependency on `serde_json` does, so its own tests can build maps
+  with explicit insertion order.
+- `biscuit-visualized` drops `mermaid-rs-renderer` (2026-10-22): Merman,
+  already in the graph under its `image` feature, is now its only Mermaid
+  backend. `merman` is a git dependency on Ken's fork
+  (`yankeeinlondon/merman`, rev `6e6b1e6554e8`, branch
+  `gitgraph-commit-spacing`, which adds the gitGraph `commitSpacing` key),
+  with `default-features = false` and features `svg`, `all-diagrams`, and
+  `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off. The
+  lockfile drops `mermaid-rs-renderer`; no other package used it.
+- `resvg`/`usvg` move from 0.45 to 0.47 repo-wide (2026-10-22), in
+  `biscuit-terminal` and `biscuit-visualized` (both feature `image`). With
+  them `tiny-skia` moves to 0.12, which encodes with `png` 0.18, so
+  `biscuit-visualized`'s own `png` dependency moves to 0.18 as well (`ico`
+  and `tauri-codegen` keep a separate `png` 0.17). The lockfile keeps one
+  copy each of `resvg`, `usvg`, `fontdb` (0.23), `tiny-skia` (0.12),
+  `rustybuzz` (0.20.1), and `ttf-parser` (0.25.1). `serde_json` resolves to
+  1.0.154.
+- `biscuit-visualized` adds, under its `image` feature (2026-10-22),
+  `rustybuzz` 0.20.1 and `ttf-parser` 0.25.1 (the versions `usvg` uses, so no
+  second copy), `unicode-bidi` 0.3 and `unicode-script` 0.5 (already in the
+  graph through `usvg`), and `fontique` 0.12.0 (`default-features = false`,
+  features `system` and `fontconfig-dlopen`) for the OS's generic font
+  family. `fontique` brings `read-fonts` 0.41, `font-types` 0.12,
+  `parlance`, `linebender_resource_handle`, and, on Linux and FreeBSD,
+  `yeslogic-fontconfig-sys` 6, which with `fontconfig-dlopen` loads
+  `libfontconfig` at run time, so builds need no fontconfig development
+  package and a host without the library skips the OS step. On macOS and Windows it
+  uses `objc2-core-text` and `windows` 0.62, both already in the graph.
+- `biscuit-visualized` compiles in two font assets (2026-10-22): Inter 4.1
+  Regular and Bold (SIL OFL 1.1, about 0.8 MB, every OS) and Noto Emoji
+  (SIL OFL 1.1, variable `wght`, about 2.0 MB, Linux builds only). Sources and
+  checksums are in `biscuit-visualized/src/assets/fonts/*/README.md`.
 - `biscuit-terminal` adds `icy_sixel` 0.7 (2026-10-21) as a normal
   dependency, with no cargo feature, for the Sixel graphics route. It brings
   `quantette` (with `kmeans`) and `palette` into the lockfile, plus second
@@ -33,7 +89,7 @@
   `worktree-cli`) depend on `biscuit-visualized` with `terminal` directly;
   `worktree-cli`'s former `biscuit-visualized` development dependency is now
   that normal dependency. Packages that depend only on `biscuit-terminal` no
-  longer compile `mermaid-rs-renderer`. No crate enters or leaves the lockfile.
+  longer compile a Mermaid renderer. No crate enters or leaves the lockfile.
 - Generated REST clients send through `schematic-runtime` (2026-10-12):
   the regenerated `schematic-schema` depends on `schematic-runtime` and no
   longer on `reqwest`, and re-exports the runtime, so its dependents need no
@@ -106,16 +162,6 @@
   graph. It streams, so peak memory stays flat for large lockfiles.
   `json-five`, already present through `biscuit-file`, was rejected because it
   builds a full AST. See `sniff/docs/dependencies.md`.
-- `biscuit-visualized` moves `mermaid-rs-renderer` from 0.2 (locked 0.2.1) to
-  0.3.1 (2026-09-24, worktree `2026-09-24-ux-improvements`), for 0.3's
-  `measure_svg_dimensions` (the natural SVG size that scale-based image widths
-  need) and its layout and theme fixes. The edge now sets
-  `default-features = false`: the crate's `png` feature pulled a second
-  `resvg`/`usvg` (0.46 under 0.2, 0.47 under 0.3) and `cli` pulled `clap`, and
-  biscuit rasterizes with its own `resvg` 0.45. The lockfile drops `resvg` 0.46,
-  `usvg` 0.46, `kurbo` 0.13, `svgtypes` 0.16, `roxmltree` 0.21, and `imagesize`
-  0.14. 0.3 derives its default pie palette as `hsl()`, which biscuit's
-  pie-label contrast fix now parses.
 
 - Every `reqwest` edge in the workspace sets `default-features = false` and
   re-lists `default-tls`, `charset`, and `http2`. The one default this drops is
@@ -314,9 +360,10 @@
   SHAs (target and branch). The fork-origin records
   (`<repo hash>.fork-origins.json`) share that directory and key, as do
   `wt list`'s 60-second open-PR store (`<repo hash>.prs.json`, fetched through
-  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s one-minute handoff
-  records (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
-  `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
+  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s ten-minute handoff
+  records (`<repo hash>.handoff-<token>.json`, which name the saved removal's
+  operation id). The handoff token is 128 bits from `getrandom` 0.4, and the
+  removal store's per-worktree lock file name is BLAKE3 through
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
   and uses `biscuit-file` (no default features, `file-reference` only) for
@@ -329,30 +376,28 @@
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
   `wt remove`'s recovery store (`<common-git-dir>/wt-removal/`) reuses `fs4`
   for its per-worktree operation lock, `getrandom` for its operation IDs, and
-  `sniff`'s `NativeString`, `FileIdentity`, and `PathUsageReport` for lossless
-  paths, native identities, and the saved discovery report. On Unix it adds a
+  `sniff`'s `NativeString` and `FileIdentity` for lossless paths and native
+  identities (and `PathUsageReport` to read an earlier `wt`'s record when it
+  is migrated). On Unix it adds a
   direct `libc` 0.2 dependency (already in the workspace graph) for `geteuid`
   in the store's owner check, `O_NOFOLLOW` when reading a record, and plain
   `fsync` on Apple platforms, where std's `sync_all` issues the much slower
   `F_FULLFSYNC`. The same `libc` supplies the quarantine move's
   no-replacement renames, `renameat2(RENAME_NOREPLACE)` on Linux and
   `renamex_np(RENAME_EXCL)` on macOS. On Windows the move uses `windows-sys`
-  0.61 (the workspace's version; `Win32_Foundation` and
-  `Win32_Storage_FileSystem`) for `SetFileInformationByHandle(FileRenameInfo)`
-  without replacement and `FileIdInfo` directory identities.
-  `std::fs::rename` is not used for it because it may replace an existing
-  destination.
-  `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
-  features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
-  FSEvents and Core Foundation declarations, including
-  `FSEventStreamFlushSync`) on macOS only; both are the crates `notify` builds
-  on. On Windows it calls `ReadDirectoryChangesW` through the same
-  `windows-sys`, adding `Win32_Security`, `Win32_System_IO`, and
-  `Win32_System_Threading` for overlapped reads and their events. The usage
-  check adds `Win32_System_SystemInformation` for `GetSystemDirectoryW`, the
-  directory Windows Search's processes must run from for its one recheck. `notify` itself is not used: it hides overflow and lost watches on
-  Windows, drops the watch on a directory `wt` moves on Linux, and offers no
-  flush on macOS, so it cannot report lost coverage.
+  0.61 (the workspace's version; `Win32_Foundation`,
+  `Win32_Storage_FileSystem`, and `Win32_Security`, which `CreateFileW`
+  needs) for `SetFileInformationByHandle(FileRenameInfo)` without
+  replacement and `FileIdInfo` directory identities; the same features serve
+  the deletion engine's handle-relative deletes and the mount table's volume
+  enumeration. `std::fs::rename` is not used for the move because it may
+  replace an existing destination. `wt remove` watches no filesystem
+  activity, so it depends on no watcher crate (`notify`, `inotify`,
+  `fsevent-sys`).
+- `worktree/lib` uses `chrono` 0.4 (no default features; `clock` and `std`,
+  as `worktree/cli` already builds it) to show a process's start time in local
+  time in `wt remove`'s warnings (`remove::facts`). Sniff reports the time as a
+  `chrono` UTC value; no crate was added to the lockfile.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
   `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
   read repository metadata in-process: `origin`'s URL, the default branch,
@@ -376,7 +421,10 @@
   and `claudine-cli` uses it the same way for a typed Ctrl+C test.
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
-  `sniff` already builds the same version. The workspace's own
+  `sniff` already builds the same version. On Windows it is also a normal
+  dependency: `wt remove` reads its own parent process (PID and name),
+  which std exposes only on Unix, so the caller's shell is not listed as a
+  program using the worktree and is named when it blocks the removal. The workspace's own
   `biscuit-visualized` (`terminal` feature, a normal dependency for the
   `GitGraph` component) also gives the graph tests
   `MermaidDiagram::gitgraph_geometry`, the laid-out graph the image is drawn
@@ -419,6 +467,13 @@
 - `biscuit-terminal/cli` adds a path dependency on `sniff/lib` for
   `bt about [APP]` install detection. The library remains sniff-free; this
   dependency is CLI-only._
+- `biscuit-terminal/cli` adds a path dependency on `darkmatter/lib` (which has
+  no default features) and installs its syntax-highlighting code renderer in
+  every command that renders code blocks, so `bt` and `md` highlight
+  identically. Neither `biscuit-terminal/lib` nor `biscuit-visualized` depends
+  on darkmatter or syntect (`cargo tree -p biscuit-visualized -p
+  biscuit-terminal` lists neither), so the chain `bt` → darkmatter →
+  biscuit-visualized → biscuit-terminal has no cycle.
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
@@ -479,7 +534,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
-- `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
+- `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`) (darkmatter for code highlighting)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
 - `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
@@ -950,7 +1005,8 @@ This is a Rust workspace with the following modules:
 - [plist](https://github.com/ebarnard/rust-plist) _v1_ [📄](https://docs.rs/plist)
 
     _Apple property-list (XML and binary) reader/writer. Used by biscuit-terminal's
-    app-metadata value extractor to read iTerm2 / Apple Terminal config settings._
+    app-metadata value extractor to read iTerm2 / Apple Terminal config settings,
+    and (macOS only) by sniff's path-usage query to read an app bundle's name._
 
     _Tags: configuration, plist, macos, parsing_
 
@@ -992,7 +1048,7 @@ This is a Rust workspace with the following modules:
 
 - [base64](https://github.com/marshallpierce/rust-base64) _v0.22_ [📄](https://docs.rs/base64)
 
-    _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants._
+    _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants. `biscuit-visualized` (feature `image`) encodes its embedded Mermaid font with it._
 
     _Tags: encoding, base64, data_
 
@@ -1112,11 +1168,53 @@ This is a Rust workspace with the following modules:
 
 ### Image Processing
 
-- [mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) _v0.3.1_ [📄](https://docs.rs/mermaid-rs-renderer)
+- [resvg](https://github.com/linebender/resvg) _v0.47_ [📄](https://docs.rs/resvg)
 
-    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` with `default-features = false` (SVG only; biscuit rasterizes with its own `resvg`)._
+    _SVG rendering and rasterization (with its `usvg` 0.47 parser, `fontdb` 0.23, and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
+
+    _Tags: image, svg, rasterization_
+
+- [rustybuzz](https://github.com/harfbuzz/rustybuzz) _v0.20.1_ [📄](https://docs.rs/rustybuzz)
+
+    _Pure-Rust HarfBuzz port for text shaping. `biscuit-visualized` (feature `image`) shapes diagram labels with it, on the version `usvg` uses._
+
+    _Tags: fonts, text, shaping_
+
+- [ttf-parser](https://github.com/harfbuzz/ttf-parser) _v0.25.1_ [📄](https://docs.rs/ttf-parser)
+
+    _Zero-allocation TrueType/OpenType font parser. `biscuit-visualized` (feature `image`) reads font names and tables with it, on the version `usvg` uses._
+
+    _Tags: fonts, parsing_
+
+- [fontique](https://github.com/linebender/parley) _v0.12.0_ [📄](https://docs.rs/fontique)
+
+    _System font enumeration and generic-family fallback through fontconfig, CoreText, or DirectWrite. Used by `biscuit-visualized` (feature `image`) with `default-features = false` and features `system` and `fontconfig-dlopen` (loads `libfontconfig` at run time)._
+
+    _Tags: fonts, system_
+
+- [merman](https://github.com/yankeeinlondon/merman) _v0.9.1, git rev `6e6b1e6554e8`_
+
+    _Pure-Rust Mermaid parser, layout engine, and SVG renderer modeling Mermaid.js 12.2.0 (MIT OR Apache-2.0). Used by `biscuit-visualized` (feature `image`) as a git dependency on Ken's fork of [Latias94/merman](https://github.com/Latias94/merman), pinned to rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace` on branch `gitgraph-commit-spacing`, with `default-features = false` and features `svg`, `ascii` (the text target drawn when a terminal cannot show images), `all-diagrams`, and `layout-cytoscape` (no `png`, `native-fonts`, ELK, or `math`: biscuit rasterizes with its own `resvg` and measures with its own font chain). The fork exists because it adds the gitGraph `commitSpacing` setting that `biscuit-visualized`'s tag spacing writes; when upstream Merman merges or releases a commit-spacing setting, the dependency moves back to upstream in its own change, the goldens are re-reviewed, and the fork is no longer referenced. `merman-core` enables `serde_json`'s `preserve_order` and `float_roundtrip` features, which Cargo unifies into every build reaching `biscuit-visualized`'s `image` feature. See [biscuit-visualized dependencies](../biscuit-visualized/docs/dependencies.md)._
 
     _Tags: image, diagrams, svg_
+
+- **Bundled fonts** (not crates): [Inter](https://github.com/rsms/inter) 4.1 Regular and Bold (SIL Open Font License 1.1, every OS) and the monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) (SIL Open Font License 1.1, compiled in on Linux only)
+
+    _Compiled into `biscuit-visualized` (feature `image`) from `biscuit-visualized/src/assets/fonts/`, which holds each font's license text and checksums. Inter is matched only by name (`MERMAID_FONT=Inter` gives the same layout on every host); Noto Emoji is the last fallback face for emoji._
+
+    _Tags: fonts, assets_
+
+- [allsorts](https://github.com/yeslogic/allsorts) _v0.17.0_ [📄](https://docs.rs/allsorts)
+
+    _Pure-Rust font parser, shaper, and subsetter by YesLogic (Apache-2.0). Used by `biscuit-visualized` (feature `image`, `default-features = false` with `flate2_rust`) to subset the face a Mermaid static SVG page embeds, keeping the `cmap`, `OS/2`, and `name` tables. See [biscuit-visualized dependencies](../biscuit-visualized/docs/dependencies.md)._
+
+    _Tags: fonts, subsetting_
+
+- [roxmltree](https://github.com/RazrFalcon/roxmltree) _v0.21.1_ and [simplecss](https://github.com/linebender/simplecss) _v0.2.2_ [📄](https://docs.rs/roxmltree)
+
+    _Read-only XML tree and a small CSS parser, both used by `usvg`. `biscuit-visualized` (feature `image`) uses them, on `usvg`'s versions, to read which characters a static SVG draws in each font family._
+
+    _Tags: xml, css, svg_
 
 - [image](https://github.com/image-rs/image) _v0.25_ [📄](https://docs.rs/image)
 
@@ -1131,6 +1229,12 @@ This is a Rust workspace with the following modules:
     _Guess gender from first names using a Detector struct and name databases._
 
     _Tags: gender, name, prediction_
+
+- [unicode-bidi](https://github.com/servo/unicode-bidi) _v0.3_ [📄](https://docs.rs/unicode-bidi) and [unicode-script](https://github.com/unicode-rs/unicode-script) _v0.5_ [📄](https://docs.rs/unicode-script)
+
+    _Unicode bidirectional runs and script property. `biscuit-visualized` (feature `image`) splits labels into shaping runs with them, as `usvg`'s text layout does._
+
+    _Tags: i18n, unicode, text_
 
 - [unic-langid](https://github.com/zbraniecki/unic-locale) _v0.9.6_ [📄](https://docs.rs/unic-langid)
 
@@ -1262,18 +1366,6 @@ This is a Rust workspace with the following modules:
 
     _Tags: audio, macos, platform_
 
-- [fsevent-sys](https://github.com/octplane/fsevent-rust) _v4.1_ [📄](https://docs.rs/fsevent-sys)
-
-    _Raw FSEvents and Core Foundation declarations. `worktree` uses it (macOS only) for `wt remove`'s activity observer, including `FSEventStreamFlushSync` for its marker-confirmed checks._
-
-    _Tags: ffi, macos, filesystem, watch_
-
-- [inotify](https://github.com/hannobraun/inotify) _v0.11_ [📄](https://docs.rs/inotify)
-
-    _Linux inotify bindings (default features off, so no tokio stream). `worktree` uses it (Linux only) for `wt remove`'s activity observer, one watch per checkout directory._
-
-    _Tags: linux, filesystem, watch_
-
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
     _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`, and for the quarantine move's no-replacement renames (`renameat2`, `renamex_np`)._
@@ -1288,7 +1380,7 @@ This is a Rust workspace with the following modules:
 
 - [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
 
-    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, and its `ReadDirectoryChangesW` activity observer. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, deletion by handle, and its mount table. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
 
     _Tags: ffi, windows, platform_
 
@@ -1404,7 +1496,7 @@ This is a Rust workspace with the following modules:
 
 - [serde_json](https://github.com/serde-rs/json) _v1.0_
 
-    _Fast JSON serialization/deserialization using serde._
+    _Fast JSON serialization/deserialization using serde. Any build that reaches `biscuit-visualized`'s `image` feature also gets `preserve_order` (an insertion-ordered `Map`) and `float_roundtrip`, enabled by `merman-core` and unified by Cargo._
 
     _Tags: json, serialization_
 
@@ -1483,6 +1575,12 @@ This is a Rust workspace with the following modules:
     _Extra syntect syntaxes and themes curated by bat. Includes TOML, TypeScript, Dockerfile, and more._
 
     _Tags: syntax, highlighting, themes_
+
+- [SublimeText/Mermaid](https://github.com/SublimeText/Mermaid) _vendored at `a5c6d45d1b0a`_
+
+    _The Mermaid syntax definition, not a crate: `darkmatter/lib` vendors it, flattened into one self-contained `.sublime-syntax` (`darkmatter/lib/assets/syntaxes/mermaid/`), so `mermaid` and `mmd` code blocks are highlighted. MIT license, Copyright (c) 2017 Peng Wang; the license text and the flattening notes sit beside the file. See [darkmatter dependencies](../darkmatter/docs/dependencies.md#vendored-mermaid-syntax)._
+
+    _Tags: syntax, highlighting, mermaid, vendored_
 
 ### System Information
 

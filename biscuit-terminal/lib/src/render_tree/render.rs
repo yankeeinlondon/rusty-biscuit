@@ -60,7 +60,7 @@ use crate::utils::block_constraint::{
 use crate::utils::layout::{Alignment, WordWrap};
 use crate::utils::word_wrap::truncate;
 
-use super::options::{DiagramRenderRequest, ImagePlaceholder, TerminalRenderOptions};
+use super::options::{DiagramOutcome, DiagramRenderRequest, ImagePlaceholder, TerminalRenderOptions};
 use super::style;
 
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
@@ -1712,13 +1712,13 @@ impl Writer<'_> {
     ///
     /// A `lang="mermaid"` block is handed to the
     /// [`diagram_renderer`](TerminalRenderOptions::diagram_renderer) hook only
-    /// when the Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
-    /// [`TerminalMermaidMode::Image`]) *and* the fidelity ceiling
-    /// ([`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]) both
-    /// permit it. [`GraphicsMode`] alone never promotes a fence — that keeps the
-    /// public default ("Mermaid stays code") intact. With no hook installed, or
-    /// when promotion is not requested, the block degrades through the
-    /// code-render hook and finally to the built-in plain fallback.
+    /// when [`TerminalRenderContext::mermaid_mode`] and the fidelity ceiling
+    /// ([`TerminalRenderContext::graphics_mode`]) both permit it (the table on
+    /// [`DiagramRenderer`]). [`GraphicsMode`] alone never promotes a fence —
+    /// that keeps the public default ("Mermaid stays code") intact. With no
+    /// hook installed, when promotion is not requested, or when the hook
+    /// declines, the block degrades through the code-render hook and finally
+    /// to the built-in plain fallback.
     ///
     /// ## Errors
     ///
@@ -1736,12 +1736,14 @@ impl Writer<'_> {
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
-        // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
-        // rasterizes only at `Rich`, and only when the caller opted in.
-        if is_mermaid
-            && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
-            && self.opts.context.graphics_mode == GraphicsMode::Rich
-        {
+        // Promotion is gated by the opt-in AND the ceiling: `Image` rasterizes
+        // only at `Rich`; `Automatic` may also draw text at `Vector`.
+        let promote = matches!(
+            (self.opts.context.mermaid_mode, self.opts.context.graphics_mode),
+            (TerminalMermaidMode::Image, GraphicsMode::Rich)
+                | (TerminalMermaidMode::Automatic, GraphicsMode::Rich | GraphicsMode::Vector)
+        );
+        if is_mermaid && promote {
             if let Some(diagrams) = &self.opts.diagram_renderer {
                 let term = self.effective_terminal();
                 let request = DiagramRenderRequest {
@@ -1749,9 +1751,17 @@ impl Writer<'_> {
                     attrs,
                     terminal: &term,
                     available_width: self.opts.context.available_width,
+                    graphics_mode: self.opts.context.graphics_mode,
+                    mermaid_mode: self.opts.context.mermaid_mode,
                 };
                 match diagrams.render_terminal_diagram(&request) {
-                    Ok(output) => return Ok(output),
+                    Ok(DiagramOutcome::Rendered(output)) => return Ok(output),
+                    Ok(DiagramOutcome::Nodes(nodes)) => {
+                        if let Some(output) = self.render_diagram_fragment(&nodes)? {
+                            return Ok(output);
+                        }
+                    }
+                    Ok(DiagramOutcome::Declined) => {}
                     Err(e) => match self.opts.strictness {
                         RenderStrictness::Strict => {
                             return Err(RenderError::LossyRejected {
@@ -1792,6 +1802,35 @@ impl Writer<'_> {
             }
         }
         Ok(self.render_code(lang, value))
+    }
+
+    /// Lays out a [`DiagramOutcome::Nodes`] fragment where the fence stood,
+    /// or `None` when a finished row is wider than the fence's columns.
+    ///
+    /// The fragment renders with promotion off, so a `mermaid` code node in it
+    /// (a source fallback) is printed as code instead of reaching the hook
+    /// again. The hook judged its fit before the installed code renderer
+    /// decorated the fragment's code nodes, and that decoration can be wider
+    /// than any fixed allowance (a line-number gutter grows with the row
+    /// count), so the width is checked on the finished output. `None` is the
+    /// hook's decline: the fence renders as its ordinary code block and the
+    /// fragment's diagnostics are dropped with it.
+    fn render_diagram_fragment(&mut self, nodes: &[RenderNode]) -> Result<Option<String>, RenderError> {
+        let mut unpromoted = self.opts.clone();
+        unpromoted.context.mermaid_mode = TerminalMermaidMode::Code;
+        let mut sub = Writer {
+            opts: &unpromoted,
+            diagnostics: Vec::new(),
+            inherited: self.inherited.clone(),
+        };
+        let output = sub.render_blocks(nodes)?;
+        let limit = self.opts.context.available_width;
+        if output.split('\n').any(|row| visible_width(row) > limit) {
+            tracing::debug!(limit, "diagram fragment is wider than its fence; rendering the fence as code");
+            return Ok(None);
+        }
+        self.diagnostics.append(&mut sub.diagnostics);
+        Ok(Some(output))
     }
 
     /// Returns the terminal capability snapshot the graphics paths consult,
@@ -5560,7 +5599,9 @@ mod render_tree_tests {
     /// `biscuit-visualized` covers the same contract with its real hook.
     #[test]
     fn mermaid_promotion_failure_rejects_under_strict() {
-        use crate::render_tree::{DiagramRenderError, DiagramRenderRequest, DiagramRenderer};
+        use crate::render_tree::{
+            DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer,
+        };
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};
 
         struct FailingDiagrams;
@@ -5568,7 +5609,7 @@ mod render_tree_tests {
             fn render_terminal_diagram(
                 &self,
                 _request: &DiagramRenderRequest<'_>,
-            ) -> Result<String, DiagramRenderError> {
+            ) -> Result<DiagramOutcome, DiagramRenderError> {
                 Err(DiagramRenderError::new("no image support"))
             }
         }

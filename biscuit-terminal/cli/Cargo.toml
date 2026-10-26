@@ -19,6 +19,9 @@ biscuit-terminal = { path = "../lib", features = ["clap", "image"] }
 # Diagram components for the diagram commands (`mermaid`, `graph`, `git-graph`, ...).
 biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap", "terminal"] }
 renderable = { path = "../../renderable" }
+# Syntax-highlighted code blocks (the same highlighter `md` uses), installed as
+# the render tree's code renderer. It has no default features to trim.
+darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../../sniff/lib" }
 clap = { version = "4.5", features = ["derive", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

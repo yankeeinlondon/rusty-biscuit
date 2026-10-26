@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
@@ -27,6 +27,9 @@ pub struct TimelineArgs {
 
     #[command(flatten)]
     pub layout: LayoutArgs,
+
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
 
     #[arg(long, short = 's', action = clap::ArgAction::Append)]
     pub section: Vec<String>,
@@ -94,8 +97,10 @@ impl Run for TimelineArgs {
             }
         }
 
-        use crate::commands::mermaid::with_mermaid_frontmatter_title;
-        let instructions = with_mermaid_frontmatter_title(&lines.join("\n"), eff_title);
+        // The `title` statement is the timeline's only title: Mermaid's
+        // timeline draws no frontmatter title, and a second copy there
+        // showed twice in the source fallback.
+        let instructions = lines.join("\n");
 
         if ctx.json {
             let output = serde_json::json!({
@@ -113,9 +118,11 @@ impl Run for TimelineArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            eff_title,
             self.inverse,
             width_str.as_deref(),
             &self.layout,
+            &self.features,
         )?;
         let terminal = terminal_for_render(ctx.plain);
         display_mermaid(

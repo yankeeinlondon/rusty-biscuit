@@ -53,6 +53,9 @@ pub const FS_READ_DIRS: &str = "filesystem.io.read_dirs";
 /// `canonicalize` calls.
 pub const FS_CANONICALIZATIONS: &str = "filesystem.io.canonicalizations";
 
+/// Native available-space readings taken by `filesystem::space`.
+pub const FS_SPACE_READINGS: &str = "filesystem.space.readings";
+
 // ---------------------------------------------------------------------------
 // Filesystem usage queries (`filesystem::query`)
 // ---------------------------------------------------------------------------
@@ -94,6 +97,11 @@ pub const QUERY_IDENTITY_ENRICHMENTS: &str = "filesystem.query.identity_enrichme
 
 /// Identity lookups of a backend-observed path that carried no identity.
 pub const QUERY_PATH_LOOKUPS: &str = "filesystem.query.path_lookups";
+
+/// Per-PID process-context reads: one for each matching process's own parent
+/// and app name, and one per ancestor read. A backend that does not read
+/// parents records none.
+pub const QUERY_PARENT_LOOKUPS: &str = "filesystem.query.parent_lookups";
 
 // ---------------------------------------------------------------------------
 // Repository structure

@@ -42,8 +42,8 @@ pub(crate) fn match_object(
     budget: &Budget,
 ) -> Option<ObjectMatch> {
     if let Some(identity) = object.identity {
-        return index.paths(&identity).map(|paths| ObjectMatch {
-            matched_paths: sorted(paths),
+        return index.paths(&identity, &root.resolved).map(|matched_paths| ObjectMatch {
+            matched_paths,
             basis: MatchBasis::Identity,
             identity,
         });
@@ -57,17 +57,11 @@ pub(crate) fn match_object(
     }
     performance::increment_counter(counters::QUERY_PATH_LOOKUPS, 1);
     let identity = identity::of_path(path, true).ok()?;
-    index.paths(&identity).map(|paths| ObjectMatch {
-        matched_paths: sorted(paths),
+    index.paths(&identity, &root.resolved).map(|matched_paths| ObjectMatch {
+        matched_paths,
         basis: MatchBasis::PathLookup,
         identity,
     })
-}
-
-fn sorted(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let mut paths = paths.to_vec();
-    paths.sort();
-    paths
 }
 
 /// Whether `path` could name `root` or a descendant. Over-inclusive on

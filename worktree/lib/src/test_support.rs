@@ -109,17 +109,6 @@ fn has_branch(origin: &Path, branch: &str) -> bool {
             .is_ok_and(|packed| packed.lines().any(|line| line.split_once(' ').is_some_and(|(_, name)| name == refname)))
 }
 
-/// This package's directory, read at run time so an archived test run on
-/// another host resolves its own copy rather than the producer's path. Only
-/// the FSEvents and ReadDirectoryChangesW tests call it.
-#[cfg(any(target_os = "macos", windows))]
-pub(crate) fn package_dir() -> std::path::PathBuf {
-    use std::path::PathBuf;
-    std::env::var_os("CARGO_MANIFEST_DIR")
-        .filter(|dir| !dir.is_empty())
-        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

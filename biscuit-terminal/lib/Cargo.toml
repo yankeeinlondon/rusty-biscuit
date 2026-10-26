@@ -59,7 +59,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
 
 # SVG rasterization for terminal image rendering
-resvg = { version = "0.45", optional = true }
+resvg = { version = "0.47", optional = true }
 
 # CLI argument parsing (optional, for ValueEnum derive)
 clap = { version = "4", features = ["derive"], optional = true }

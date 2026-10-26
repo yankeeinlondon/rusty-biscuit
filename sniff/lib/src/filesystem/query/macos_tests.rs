@@ -6,7 +6,11 @@
 
 use super::backend::{InspectionContext, InspectionResult, MechanismInspection, UsageBackend};
 use super::budget::Budget;
-use super::macos::{Descriptor, Fault, LibprocBackend, OpenVnode, Source, Task, Vnode};
+use super::backend::LinkError;
+use super::macos::{
+    BundleInfo, Descriptor, Fault, LibprocBackend, OpenVnode, RawLink, Source, Task, Vnode,
+    bundle_name, enclosing_bundle,
+};
 use super::*;
 use crate::performance::counters;
 use crate::performance::testing::measure;
@@ -136,6 +140,10 @@ struct Fake {
     /// Every capacity a descriptor listing was asked for.
     capacities: Vec<usize>,
     cwd_calls: usize,
+    /// Parent links by PID; with none scripted the source reads no parents.
+    links: HashMap<u32, RawLink>,
+    bundles: HashMap<PathBuf, BundleInfo>,
+    bundle_reads: Vec<PathBuf>,
 }
 
 impl Fake {
@@ -189,6 +197,18 @@ impl Source for &mut Fake {
     fn cwd(&mut self, pid: u32) -> Result<Option<Vnode>, Fault> {
         self.cwd_calls += 1;
         self.process(pid)?.cwd.clone()
+    }
+
+    fn link(&mut self, pid: u32) -> Result<RawLink, LinkError> {
+        if self.links.is_empty() {
+            return Err(LinkError::Unsupported);
+        }
+        self.links.get(&pid).cloned().ok_or(LinkError::Gone)
+    }
+
+    fn bundle_info(&mut self, bundle: &Path) -> Option<BundleInfo> {
+        self.bundle_reads.push(bundle.to_path_buf());
+        self.bundles.get(bundle).cloned()
     }
 }
 
@@ -870,8 +890,181 @@ mod live {
         }
     }
 
+    #[test]
+    fn a_controlled_child_reports_this_test_process_as_its_verified_parent() {
+        let scene = scene();
+        let (child, _) = spawn_child(&[scene.root.join("file.txt")], std::slice::from_ref(&scene.root), &scene.root);
+        let child_pid = child.0.id();
+        let (report, counts) = crate::performance::testing::measure(|| {
+            live_query(&scene.root, PathUsageOptions::default())
+        });
+        let record = report
+            .processes
+            .iter()
+            .find(|p| p.pid == child_pid)
+            .unwrap_or_else(|| panic!("child missing: {:#?}", report.processes));
+        let own = std::process::id();
+        assert_eq!(record.parent_pid, Some(own), "{record:#?}");
+        assert_eq!(record.ancestors.first().map(|a| a.pid), Some(own), "{record:#?}");
+        assert!(record.ancestors.len() <= MAX_ANCESTORS);
+        assert_ne!(record.ancestry_end, AncestryEnd::Unsupported);
+        assert_ne!(record.ancestry_end, AncestryEnd::NotRead);
+        assert!(counts.get(counters::QUERY_PARENT_LOOKUPS) >= 2, "{:#?}", counts.all());
+        drop(child);
+    }
+
+    #[test]
+    fn a_bundle_name_is_read_from_an_xml_or_a_binary_info_plist() {
+        let temp = TempDir::new().unwrap();
+        let mut source = super::super::macos::ffi::Libproc;
+        for (bundle, binary) in [("Xml.app", false), ("Binary.app", true)] {
+            let bundle = temp.path().join(bundle);
+            std::fs::create_dir_all(bundle.join("Contents")).unwrap();
+            let mut info = plist::Dictionary::new();
+            info.insert("CFBundleName".into(), "Named App".into());
+            let plist_path = bundle.join("Contents").join("Info.plist");
+            if binary {
+                plist::Value::Dictionary(info).to_file_binary(&plist_path).unwrap();
+            } else {
+                plist::Value::Dictionary(info).to_file_xml(&plist_path).unwrap();
+            }
+            let read = source.bundle_info(&bundle);
+            assert_eq!(read.and_then(|info| info.name).as_deref(), Some("Named App"), "{}", bundle.display());
+        }
+        assert_eq!(source.bundle_info(&temp.path().join("Missing.app")), None);
+    }
+
+    #[test]
+    fn launchd_and_a_root_owned_process_are_read_without_same_user_permission() {
+        let mut source = super::super::macos::ffi::Libproc;
+        let launchd = source.link(1).expect("PID 1 is readable by anyone");
+        assert_eq!(launchd.parent_pid, 0);
+        assert!(launchd.start_micros > 0);
+        let own = source.link(std::process::id()).expect("this process");
+        assert!(own.start_micros >= launchd.start_micros);
+        assert!(own.executable.is_some());
+    }
+
     fn running_as_root() -> bool {
         // SAFETY: `geteuid` has no preconditions.
         unsafe { libc::geteuid() == 0 }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Process context
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_nearest_enclosing_app_bundle_is_found_and_none_outside_a_bundle() {
+    let helper = Path::new(
+        "/Applications/Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper",
+    );
+    assert_eq!(
+        enclosing_bundle(helper),
+        Some(Path::new("/Applications/Code.app/Contents/Frameworks/Code Helper.app"))
+    );
+    assert_eq!(enclosing_bundle(Path::new("/usr/bin/cargo")), None);
+    // An executable named like a bundle is not inside one.
+    assert_eq!(enclosing_bundle(Path::new("/opt/tool.app")), None);
+}
+
+#[test]
+fn a_bundle_name_prefers_cf_bundle_name_then_display_name_then_the_stem() {
+    let bundle = Path::new("/Applications/Visual Studio Code.app");
+    let both = BundleInfo {
+        name: Some("Code".into()),
+        display_name: Some("Visual Studio Code".into()),
+    };
+    assert_eq!(bundle_name(bundle, Some(&both)), Some("Code".into()));
+    let display_only = BundleInfo {
+        name: Some("  ".into()),
+        display_name: Some("Visual Studio Code".into()),
+    };
+    assert_eq!(bundle_name(bundle, Some(&display_only)), Some("Visual Studio Code".into()));
+    assert_eq!(bundle_name(bundle, Some(&BundleInfo::default())), Some("Visual Studio Code".into()));
+    assert_eq!(bundle_name(bundle, None), Some("Visual Studio Code".into()));
+}
+
+fn raw_link(start: u64, parent_pid: u32, executable: &str) -> RawLink {
+    RawLink {
+        start_micros: start,
+        parent_pid,
+        comm: OsString::from("short"),
+        executable: Some(PathBuf::from(executable)),
+    }
+}
+
+#[test]
+fn a_holder_reports_its_parent_chain_with_app_names_read_once_per_bundle() {
+    let scene = scene();
+    let terminal = "/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal";
+    const SHELL: u32 = 4_100_000_010;
+    const TERMINAL: u32 = 4_100_000_011;
+    let mut fake = Fake::default()
+        .with(PID, Scripted::new(START).open(3, &scene.root.join("file.txt"), FREAD))
+        .with(OTHER_PID, Scripted::new(START).open(3, &scene.root.join("file.txt"), FREAD));
+    fake.links = HashMap::from([
+        (PID, raw_link(START, SHELL, "/usr/local/bin/cargo")),
+        (OTHER_PID, raw_link(START, TERMINAL, terminal)),
+        (SHELL, raw_link(START - 5, TERMINAL, "/bin/zsh")),
+        (TERMINAL, raw_link(START - 9, 1, terminal)),
+    ]);
+    fake.bundles.insert(
+        PathBuf::from("/Applications/Utilities/Terminal.app"),
+        BundleInfo {
+            name: Some("Terminal".into()),
+            display_name: None,
+        },
+    );
+    let report = fake.query(&scene.root, &PathUsageOptions::default());
+
+    let cargo = report.processes.iter().find(|p| p.pid == PID).expect("holder");
+    assert_eq!(cargo.parent_pid, Some(SHELL));
+    assert_eq!(cargo.app_name, None, "cargo is not inside a bundle");
+    let chain: Vec<(u32, String, Option<String>)> = cargo
+        .ancestors
+        .iter()
+        .map(|a| {
+            (
+                a.pid,
+                a.name.as_ref().unwrap().display().into_owned(),
+                a.app_name.as_ref().map(|n| n.display().into_owned()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        chain,
+        vec![
+            (SHELL, "zsh".to_string(), None),
+            (TERMINAL, "Terminal".to_string(), Some("Terminal".to_string())),
+        ]
+    );
+    assert_eq!(cargo.ancestry_end, AncestryEnd::Root);
+    let other = report.processes.iter().find(|p| p.pid == OTHER_PID).expect("holder");
+    assert_eq!(other.app_name.as_ref().map(|n| n.display().into_owned()).as_deref(), Some("Terminal"));
+    assert_eq!(fake.bundle_reads.len(), 1, "{:?}", fake.bundle_reads);
+}
+
+#[test]
+fn a_holder_whose_start_time_changed_after_its_link_was_read_gets_no_context() {
+    let scene = scene();
+    let mut process = Scripted::new(START).open(3, &scene.root.join("file.txt"), FREAD);
+    // Enumeration, the inspection check, then the post-link check sees a successor.
+    process.tasks = vec![task(START), task(START), task(START + 1)];
+    let mut fake = Fake::default().with(PID, process);
+    fake.links = HashMap::from([(PID, raw_link(START, OTHER_PID, "/bin/zsh"))]);
+    let report = fake.query(&scene.root, &PathUsageOptions::default());
+    let record = &report.processes[0];
+    assert_eq!(record.parent_pid, None);
+    assert!(record.ancestors.is_empty());
+    assert_eq!(record.ancestry_end, AncestryEnd::NotRead);
+    assert!(
+        report
+            .limitations
+            .iter()
+            .any(|l| l.kind == LimitationKind::ProcessDisappeared),
+        "{:#?}",
+        report.limitations
+    );
 }

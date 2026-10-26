@@ -1,7 +1,7 @@
 use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
-    CliFill, CodeBlockArg, OutputFormat, PageAlignmentArg, PageBackgroundArg,
+    CliFill, CodeBlockArg, Feature, OutputFormat, PageAlignmentArg, PageBackgroundArg,
     complete_markdown_files, complete_theme_names, parse_cli_fill, parse_max_width,
     parse_theme_name, reject_width_flag,
 };
@@ -49,10 +49,22 @@ pub struct Cli {
     #[arg(long)]
     pub save: bool,
 
-    /// Render mermaid diagrams to terminal as images.
-    /// Falls back to code blocks if terminal doesn't support images.
+    /// Render mermaid diagrams to terminal as images, or as text drawings
+    /// where the terminal shows no images; other diagrams stay code blocks.
     #[arg(long)]
     pub mermaid: bool,
+
+    /// Turn on a named feature (repeatable and comma-separated; names are
+    /// case-insensitive)
+    #[arg(
+        long = "feature",
+        value_name = "NAME",
+        value_enum,
+        value_delimiter = ',',
+        ignore_case = true,
+        action = clap::ArgAction::Append
+    )]
+    pub features: Vec<Feature>,
 
     // ── Layout flags (Phase 5) ──────────────────────────────────────────
     /// Margin on all sides (cells)
