@@ -1,19 +1,16 @@
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
-    ApiRequest, ApiResponse, Endpoint, FormField, RestMethod,
+    Endpoint, FormField, RestMethod,
     params::{EndpointParams, QueryParamType},
 };
 
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListVoices".to_string(),
-            method: RestMethod::Get,
-            path: "/v2/voices".to_string(),
-            description: "Lists all available voices".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListVoicesResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_params(vec![
+pub fn all(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("ListVoices", RestMethod::Get, "/v2/voices")
+            .describes("Lists all available voices")
+            .returns_json::<ListVoicesResponse>(ctx)
+            .params(EndpointParams::default().with_query_params(vec![
                 ("page_size", QueryParamType::Integer, false, Some("Voices per page (at most 100)")),
                 (
                     "page_token",
@@ -21,157 +18,74 @@ pub fn all() -> Vec<Endpoint> {
                     false,
                     Some("The previous page's `next_page_token`"),
                 ),
-            ])),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVoice".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/voices/{voice_id}".to_string(),
-            description: "Retrieves a voice by ID".to_string(),
-            request: None,
-            response: ApiResponse::json_type("VoiceResponseModel"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVoice".to_string(),
-            method: RestMethod::Delete,
-            path: "/v1/voices/{voice_id}".to_string(),
-            description: "Deletes a voice".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetDefaultVoiceSettings".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/voices/settings/default".to_string(),
-            description: "Gets default voice settings".to_string(),
-            request: None,
-            response: ApiResponse::json_type("VoiceSettings"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVoiceSettings".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/voices/{voice_id}/settings".to_string(),
-            description: "Gets voice settings for a specific voice".to_string(),
-            request: None,
-            response: ApiResponse::json_type("VoiceSettings"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateVoiceSettings".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/{voice_id}/settings/edit".to_string(),
-            description: "Updates voice settings".to_string(),
-            request: Some(ApiRequest::json_type("VoiceSettings")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVoiceSampleAudio".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/voices/{voice_id}/samples/{sample_id}/audio".to_string(),
-            description: "Gets audio for a voice sample".to_string(),
-            request: None,
-            response: ApiResponse::Binary,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVoiceSample".to_string(),
-            method: RestMethod::Delete,
-            path: "/v1/voices/{voice_id}/samples/{sample_id}".to_string(),
-            description: "Deletes a voice sample".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AddVoiceSample".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/{voice_id}/samples".to_string(),
-            description: "Upload audio sample for voice cloning".to_string(),
-            request: Some(ApiRequest::form_data(vec![
+            ]))
+            .pagination(super::super::voices_collection())
+            .build()?,
+        Endpoint::new("GetVoice", RestMethod::Get, "/v1/voices/{voice_id}")
+            .describes("Retrieves a voice by ID")
+            .returns_json::<VoiceResponseModel>(ctx)
+            .build()?,
+        Endpoint::new("DeleteVoice", RestMethod::Delete, "/v1/voices/{voice_id}")
+            .describes("Deletes a voice")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetDefaultVoiceSettings", RestMethod::Get, "/v1/voices/settings/default")
+            .describes("Gets default voice settings")
+            .returns_json::<VoiceSettings>(ctx)
+            .build()?,
+        Endpoint::new("GetVoiceSettings", RestMethod::Get, "/v1/voices/{voice_id}/settings")
+            .describes("Gets voice settings for a specific voice")
+            .returns_json::<VoiceSettings>(ctx)
+            .build()?,
+        Endpoint::new("UpdateVoiceSettings", RestMethod::Post, "/v1/voices/{voice_id}/settings/edit")
+            .describes("Updates voice settings")
+            .request_json::<VoiceSettings>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetVoiceSampleAudio", RestMethod::Get, "/v1/voices/{voice_id}/samples/{sample_id}/audio")
+            .describes("Gets audio for a voice sample")
+            .returns_binary()
+            .build()?,
+        Endpoint::new("DeleteVoiceSample", RestMethod::Delete, "/v1/voices/{voice_id}/samples/{sample_id}")
+            .describes("Deletes a voice sample")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("AddVoiceSample", RestMethod::Post, "/v1/voices/{voice_id}/samples")
+            .describes("Upload audio sample for voice cloning")
+            .request_form(vec![
                 FormField::file_accept("audio", vec!["audio/*".into()])
                     .with_description("Audio file (mp3, wav, ogg, m4a)"),
                 FormField::text("name")
                     .optional()
                     .with_description("Name for the sample"),
-            ])),
-            response: ApiResponse::json_type("AddSampleResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListSharedVoices".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/shared-voices".to_string(),
-            description: "Lists voices from the public library".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListSharedVoicesResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AddSharedVoice".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/add/{public_user_id}/{voice_id}".to_string(),
-            description: "Adds a shared voice to your library".to_string(),
-            request: Some(ApiRequest::json_type("AddSharedVoiceBody")),
-            response: ApiResponse::json_type("AddSharedVoiceResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreatePvcVoice".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/pvc".to_string(),
-            description: "Creates a professional voice clone".to_string(),
-            request: Some(ApiRequest::json_type("CreatePvcVoiceBody")),
-            response: ApiResponse::json_type("AddSharedVoiceResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdatePvcVoice".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/pvc/{voice_id}".to_string(),
-            description: "Updates a PVC voice".to_string(),
-            request: Some(ApiRequest::json_type("CreatePvcVoiceBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "TrainPvcVoice".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/voices/pvc/{voice_id}/train".to_string(),
-            description: "Starts training a PVC voice".to_string(),
-            request: Some(ApiRequest::json_type("TrainPvcVoiceBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+            ])
+            .returns_json::<AddSampleResponse>(ctx)
+            .build()?,
+        Endpoint::new("ListSharedVoices", RestMethod::Get, "/v1/shared-voices")
+            .describes("Lists voices from the public library")
+            .returns_json::<ListSharedVoicesResponse>(ctx)
+            .pagination(super::super::shared_voices_collection())
+            .build()?,
+        Endpoint::new("AddSharedVoice", RestMethod::Post, "/v1/voices/add/{public_user_id}/{voice_id}")
+            .describes("Adds a shared voice to your library")
+            .request_json::<AddSharedVoiceBody>(ctx)
+            .returns_json::<AddSharedVoiceResponse>(ctx)
+            .build()?,
+        Endpoint::new("CreatePvcVoice", RestMethod::Post, "/v1/voices/pvc")
+            .describes("Creates a professional voice clone")
+            .request_json::<CreatePvcVoiceBody>(ctx)
+            .returns_json::<AddSharedVoiceResponse>(ctx)
+            .build()?,
+        Endpoint::new("UpdatePvcVoice", RestMethod::Post, "/v1/voices/pvc/{voice_id}")
+            .describes("Updates a PVC voice")
+            .request_json::<CreatePvcVoiceBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("TrainPvcVoice", RestMethod::Post, "/v1/voices/pvc/{voice_id}/train")
+            .describes("Starts training a PVC voice")
+            .request_json::<TrainPvcVoiceBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+    ])
+
 }

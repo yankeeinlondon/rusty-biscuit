@@ -14,6 +14,26 @@
       "key": "bearerToken",
       "value": "",
       "description": "Bearer token for Authorization header"
+    },
+    {
+      "key": "path_resource_type",
+      "value": "",
+      "description": "Value of the `resource_type` path parameter"
+    },
+    {
+      "key": "path_resource_id",
+      "value": "",
+      "description": "Value of the `resource_id` path parameter"
+    },
+    {
+      "key": "path_code_set_id",
+      "value": "",
+      "description": "Value of the `code_set_id` path parameter"
+    },
+    {
+      "key": "path_custom_component",
+      "value": "",
+      "description": "Value of the `custom_component` path parameter"
     }
   ],
   "auth": {
@@ -53,7 +73,21 @@
               ]
             },
             "description": "Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"driver_id\": \"string\",\n  \"driver_type\": \"LOCAL\",\n  \"enabled\": false,\n  \"name\": {},\n  \"version\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -78,7 +112,7 @@
               "variable": [
                 {
                   "key": "code_set_id",
-                  "value": "<code_set_id>"
+                  "value": "{{path_code_set_id}}"
                 }
               ]
             },
@@ -92,7 +126,21 @@
               ]
             },
             "description": "Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"added\": 0,\n  \"processed\": 0,\n  \"updated\": 0\n}"
+            }
+          ]
         }
       ]
     },
@@ -115,7 +163,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"password\": \"string\",\n  \"username\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -123,7 +171,21 @@
               }
             },
             "description": "Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "Logout",
@@ -140,7 +202,14 @@
               ]
             },
             "description": "Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools."
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -163,7 +232,7 @@
               "variable": [
                 {
                   "key": "resource_type",
-                  "value": "<resource_type>"
+                  "value": "{{path_resource_type}}"
                 }
               ]
             },
@@ -177,7 +246,21 @@
               ]
             },
             "description": "Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetResource",
@@ -196,16 +279,30 @@
               "variable": [
                 {
                   "key": "resource_type",
-                  "value": "<resource_type>"
+                  "value": "{{path_resource_type}}"
                 },
                 {
                   "key": "resource_id",
-                  "value": "<resource_id>"
+                  "value": "{{path_resource_id}}"
                 }
               ]
             },
             "description": "Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         }
       ]
     },
@@ -226,7 +323,21 @@
               ]
             },
             "description": "Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"hw_revision\": \"string\",\n  \"model_name\": \"string\",\n  \"model_number\": \"string\",\n  \"serial_number\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ExportBackup",
@@ -244,7 +355,21 @@
               ]
             },
             "description": "Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "RestoreBackup",
@@ -271,7 +396,21 @@
               ]
             },
             "description": "Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "InstallCustomComponent",
@@ -290,7 +429,7 @@
               "variable": [
                 {
                   "key": "custom_component",
-                  "value": "<custom_component>"
+                  "value": "{{path_custom_component}}"
                 }
               ]
             },
@@ -304,7 +443,21 @@
               ]
             },
             "description": "Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"active\": false,\n  \"component\": \"ui\",\n  \"installed\": false\n}"
+            }
+          ]
         },
         {
           "name": "QueryLogsText",
@@ -321,7 +474,21 @@
               ]
             },
             "description": "Retrieve system logs as plain text export for diagnostics pipelines and offline inspection."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         }
       ]
     }

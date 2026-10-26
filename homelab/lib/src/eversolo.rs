@@ -108,7 +108,7 @@ impl Eversolo {
 
     /// Seek to a position in the current track.
     pub async fn seek_to(&self, time_ms: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.music_seek_to().time(time_ms).await?)
+        Ok(self.client.music_seek_to(time_ms).await?)
     }
 
     // ── Audio ───────────────────────────────────────────────────────
@@ -120,24 +120,24 @@ impl Eversolo {
 
     /// Set the active audio input.
     pub async fn set_input(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
-        Ok(self.client.music_set_input().tag(tag.to_string()).await?)
+        Ok(self.client.music_set_input(tag).await?)
     }
 
     /// Set the active audio output.
     pub async fn set_output(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
-        Ok(self.client.music_set_output().tag(tag.to_string()).await?)
+        Ok(self.client.music_set_output(tag).await?)
     }
 
     /// Set the absolute volume level.
     pub async fn set_volume(&self, level: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.music_set_volume().volume(level).await?)
+        Ok(self.client.music_set_volume(level).await?)
     }
 
     /// Set or clear mute state.
     #[allow(non_snake_case)]
     pub async fn set_mute(&self, muted: bool) -> Result<StatusResponse, EversoloError> {
         let value = if muted { 1 } else { 0 };
-        Ok(self.client.music_set_mute().is_mute(value).await?)
+        Ok(self.client.music_set_mute(value).await?)
     }
 
     // ── Power ───────────────────────────────────────────────────────
@@ -149,23 +149,19 @@ impl Eversolo {
 
     /// Execute a power action by tag.
     pub async fn set_power_option(&self, tag: &str) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.power_set_option().tag(tag.to_string()).await?)
+        Ok(self.client.power_set_option(tag).await?)
     }
 
     // ── Remote ──────────────────────────────────────────────────────
 
     /// Send a remote control key command.
     pub async fn send_key(&self, key: &str) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.remote_send_key().key(key.to_string()).await?)
+        Ok(self.client.remote_send_key(key).await?)
     }
 
     /// Send text input to the device.
     pub async fn input_text(&self, text: &str) -> Result<StatusResponse, EversoloError> {
-        Ok(self
-            .client
-            .remote_input_text()
-            .text(text.to_string())
-            .await?)
+        Ok(self.client.remote_input_text(text).await?)
     }
 
     // ── Display ─────────────────────────────────────────────────────
@@ -177,11 +173,7 @@ impl Eversolo {
 
     /// Set screen brightness level.
     pub async fn set_screen_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self
-            .client
-            .system_set_screen_brightness()
-            .index(index)
-            .await?)
+        Ok(self.client.system_set_screen_brightness(index).await?)
     }
 
     /// Get current knob LED brightness level.
@@ -191,11 +183,7 @@ impl Eversolo {
 
     /// Set knob LED brightness level.
     pub async fn set_knob_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self
-            .client
-            .system_set_knob_brightness()
-            .index(index)
-            .await?)
+        Ok(self.client.system_set_knob_brightness(index).await?)
     }
 
     /// List available VU meter display modes.
@@ -205,7 +193,7 @@ impl Eversolo {
 
     /// Set the VU meter display mode.
     pub async fn set_vu_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.system_set_vu_mode().index(index).await?)
+        Ok(self.client.system_set_vu_mode(index).await?)
     }
 
     /// List available spectrum display modes.
@@ -216,17 +204,13 @@ impl Eversolo {
     /// Set the spectrum display mode.
     #[allow(non_snake_case)]
     pub async fn set_spectrum_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self.client.system_set_spectrum_mode().index(index).await?)
+        Ok(self.client.system_set_spectrum_mode(index).await?)
     }
 
     /// Toggle VU display open/close.
     #[allow(non_snake_case)]
     pub async fn change_vu_display(&self, open_type: i64) -> Result<StatusResponse, EversoloError> {
-        Ok(self
-            .client
-            .system_change_vu_display()
-            .open_type(open_type)
-            .await?)
+        Ok(self.client.system_change_vu_display(open_type).await?)
     }
 }
 

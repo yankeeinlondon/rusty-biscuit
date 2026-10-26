@@ -56,15 +56,14 @@ impl<T> SchemaObject for T where
 {
 }
 
-/// A schema descriptor for code generation.
+/// A WebSocket message schema, named by Rust type.
 ///
-/// This struct captures type information needed to generate strongly-typed
-/// request and response structs. It stores the type name and optional
-/// module path for proper imports in generated code.
+/// REST JSON bodies do not use this type; they reference schema components
+/// through [`crate::TypeRef`] (see [`crate::SchemaComponent`]).
 ///
 /// ## Examples
 ///
-/// Create a schema with just a type name:
+/// Create a stored WebSocket schema with just a type name:
 ///
 /// ```
 /// use schematic_define::Schema;
@@ -74,7 +73,7 @@ impl<T> SchemaObject for T where
 /// assert_eq!(schema.full_path(), "ListModelsResponse");
 /// ```
 ///
-/// Create a schema with a module path:
+/// Create a stored WebSocket schema with a module path:
 ///
 /// ```
 /// use schematic_define::Schema;
@@ -83,7 +82,7 @@ impl<T> SchemaObject for T where
 /// assert_eq!(schema.full_path(), "crate::types::Model");
 /// ```
 ///
-/// ## Usage Guide
+/// ## WebSocket usage guide
 ///
 /// Use [`Schema::new()`] when:
 /// - The type is defined in the same generated module
@@ -97,7 +96,7 @@ impl<T> SchemaObject for T where
 ///
 /// ## Code Generation Behavior
 ///
-/// The generator uses [`Schema::full_path()`] to produce type references in generated code:
+/// WebSocket generation uses [`Schema::full_path()`] to qualify message types.
 ///
 /// | Constructor | Result | Generated Code |
 /// |-------------|--------|----------------|
@@ -114,7 +113,7 @@ impl<T> SchemaObject for T where
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").
     pub type_name: String,
-    /// Module path where this type is defined (e.g., "crate::models").
+    /// Module path qualifying `type_name`, if any.
     pub module_path: Option<String>,
 }
 

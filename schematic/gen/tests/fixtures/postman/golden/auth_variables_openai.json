@@ -30,7 +30,21 @@
               ],
               "raw": "{{baseUrl}}/models"
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Models"

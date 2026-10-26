@@ -4,6 +4,7 @@
 //! Raw-socket mocks cover what wiremock cannot: a cut-off body, a stalled
 //! head, connection counting, and proxy routing.
 
+use std::future::Future;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
@@ -39,8 +40,8 @@ pub struct ProviderError {
     pub message: String,
 }
 
-impl ErrorBody for ProviderError {
-    fn decode_body(body: &[u8]) -> Option<Self> {
+impl ErrorBody<TestApi> for ProviderError {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
         serde_json::from_slice(body).ok()
     }
 }
@@ -92,7 +93,7 @@ impl<D, E> Clone for Call<D, E> {
 impl<D, E> EndpointSpec for Call<D, E>
 where
     D: Decode,
-    E: ErrorBody,
+    E: ErrorBody<TestApi>,
 {
     type Api = TestApi;
     type Success = D::Output;
@@ -143,6 +144,22 @@ pub async fn read_head(stream: &mut TcpStream) -> String {
 pub async fn write_all(stream: &mut TcpStream, bytes: &[u8]) {
     let _ = stream.write_all(bytes).await;
     let _ = stream.flush().await;
+}
+
+/// Serves each accepted connection with `handle`, one at a time, in accept
+/// order.
+pub async fn serve<F, Fut>(handle: F) -> (String, AbortOnDrop)
+where
+    F: Fn(TcpStream) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let (listener, url) = listener().await;
+    let task = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            handle(stream).await;
+        }
+    });
+    (url, AbortOnDrop(task))
 }
 
 /// Aborts a mock server task when the test ends, however it ends.

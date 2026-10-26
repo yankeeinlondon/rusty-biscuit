@@ -39,12 +39,13 @@ pub struct ImportOptions {
     pub overlay: Option<String>,
     /// Path prefixes whose endpoints are excluded from the import.
     pub exclude_paths: Vec<String>,
-    /// Response header carrying the provider's request id; an OpenAPI
-    /// document does not declare one, so it is supplied here.
+    /// Response header carrying the provider's request id. Standard OpenAPI
+    /// cannot declare one; when set it overrides the document's
+    /// `x-schematic.request_id_header`.
     pub request_id_header: Option<String>,
     /// Print generated code without writing files.
     pub dry_run: bool,
-    /// Fail on any warning-level diagnostic.
+    /// Fail on any WARN or ERROR diagnostic; INFO never fails.
     pub strict: bool,
     /// Print all diagnostics to stderr.
     pub verbose: bool,
@@ -116,7 +117,11 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     }
 
     let mut api = import_result.api;
-    api.request_id_header.clone_from(&options.request_id_header);
+    // The flag overrides the document's `x-schematic.request_id_header`;
+    // without it the imported value stands.
+    if let Some(header) = &options.request_id_header {
+        api.request_id_header = Some(header.clone());
+    }
     let models = import_result.models;
     let mut diagnostics = import_result.diagnostics;
 
@@ -140,6 +145,10 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
         }
     }
 
+    if api.endpoints.is_empty() {
+        return Err(GeneratorError::ConfigError(format!("Imported API {} has no usable endpoints", api.name)));
+    }
+
     let api_name = api.name.clone();
     let endpoint_count = api.endpoints.len();
     let model_count = models.types.len();
@@ -152,17 +161,20 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     match &options.definitions_out {
         Some(definitions_out) => {
             let definitions_dir = Path::new(definitions_out);
-            let module_name = options
-                .module_path
-                .clone()
-                .unwrap_or_else(|| api_name.to_lowercase());
+            let module_name = schematic_definitions::naming::resolve_module_name(&api);
 
+            // A rule neither file can carry fails the import before
+            // either is written.
+            definition_gen::check_alias_bodies(&api, &models)?;
             if has_types {
-                model_gen::generate_models_with(&models, definitions_dir, options.dry_run, true)?;
+                // The components are the imported source schemas, from
+                // which the models rebuild each field's value rules.
+                model_gen::generate_models_with(&models, Some(&api.schemas), definitions_dir, options.dry_run)?;
             }
 
             definition_gen::generate_definition_module(
                 &api,
+                &models,
                 &module_name,
                 &model_type_names(&models),
                 options.overlay.as_deref(),
@@ -178,6 +190,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
             }
 
             // Generate client code using standalone mode (no schematic_definitions imports)
+            with_standalone_rust_paths(&mut api);
             generate_and_write_standalone(&api, output_dir, options.dry_run, has_types)?;
         }
     }
@@ -190,12 +203,25 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     })
 }
 
+/// Spells each imported component's Rust path as its bare name, for the
+/// standalone client.
+///
+/// The import qualifies Rust paths with `--module-path` when one is given,
+/// but the standalone API module glob-imports `crate::types::*`, where every
+/// generated model is reachable by its bare name. Component names are the
+/// generated model names, and the schemas stay the imported source schemas.
+fn with_standalone_rust_paths(api: &mut schematic_define::RestApi) {
+    for component in &mut api.schemas {
+        component.rust_path = Some(component.name.clone());
+    }
+}
+
 /// Collects the names of every model the catalog defines.
 ///
 /// Aliases are included: an endpoint can name one as its body or response type,
-/// and `validate_completeness` requires every such name to be registered. A
-/// combinator alias emits a real enum or struct rather than a `type` item, so
-/// most of them are not aliases in the generated source at all.
+/// and every such name must resolve to a registered model. A combinator alias
+/// emits a real enum or struct rather than a `type` item, so most of them are
+/// not aliases in the generated source at all.
 fn model_type_names(models: &schematic_define::models::ModelCatalog) -> Vec<String> {
     use schematic_define::models::ModelDef;
 
@@ -243,6 +269,19 @@ mod tests {
             verbose: false,
         };
         assert!(format!("{:?}", opts).contains("TestApi"));
+    }
+
+    #[test]
+    fn a_standalone_client_spells_module_qualified_components_by_bare_name() {
+        let yaml = "openapi: '3.0.3'\ninfo: {title: Petstore, version: '1'}\npaths:\n  /pet:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {$ref: '#/components/schemas/Pet'}\ncomponents:\n  schemas:\n    Pet: {type: object, properties: {name: {type: string}}}\n";
+        let mut api = OpenApiImport::new(OpenApiSource::yaml(yaml)).module_path("petstore").build().unwrap().api;
+        let reference = api.endpoints[0].json_references()[0].clone();
+        assert_eq!(api.rust_type(&reference).as_deref(), Some("petstore::Pet"));
+
+        with_standalone_rust_paths(&mut api);
+
+        assert_eq!(api.rust_type(&reference).as_deref(), Some("Pet"));
+        api.validate_references().unwrap();
     }
 
     #[test]

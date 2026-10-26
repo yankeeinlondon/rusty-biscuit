@@ -1,0 +1,224 @@
+{
+  "auth": {
+    "oauth2": [
+      {
+        "key": "grant_type",
+        "value": "authorization_code_with_pkce"
+      },
+      {
+        "key": "authUrl",
+        "value": "https://auth.example.com/authorize"
+      },
+      {
+        "key": "accessTokenUrl",
+        "value": "https://auth.example.com/token"
+      },
+      {
+        "key": "challengeAlgorithm",
+        "value": "S256"
+      },
+      {
+        "key": "scope",
+        "value": "repo read:user"
+      },
+      {
+        "key": "clientId",
+        "value": "{{oauth2ClientId}}"
+      },
+      {
+        "key": "clientSecret",
+        "value": "{{oauth2ClientSecret}}"
+      },
+      {
+        "key": "client_authentication",
+        "value": "body"
+      },
+      {
+        "key": "addTokenTo",
+        "value": "header"
+      }
+    ],
+    "type": "oauth2"
+  },
+  "info": {
+    "description": "OAuthHub test API",
+    "name": "OAuthHub",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "GetAdmin",
+          "request": {
+            "auth": {
+              "oauth2": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://auth.example.com/token"
+                },
+                {
+                  "key": "scope",
+                  "value": "admin"
+                },
+                {
+                  "key": "clientId",
+                  "value": "{{oauth2ClientId_GetAdmin}}"
+                },
+                {
+                  "key": "clientSecret",
+                  "value": "{{oauth2ClientSecret_GetAdmin}}"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "header"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header"
+                }
+              ],
+              "type": "oauth2"
+            },
+            "description": "Service access",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin"
+              ],
+              "raw": "{{baseUrl}}/admin"
+            }
+          },
+          "response": [
+            {
+              "code": 204,
+              "name": "204 No Content",
+              "status": "No Content"
+            }
+          ]
+        }
+      ],
+      "name": "Admin"
+    },
+    {
+      "item": [
+        {
+          "name": "PairDevice",
+          "request": {
+            "auth": {
+              "oauth2": [
+                {
+                  "key": "accessTokenUrl",
+                  "value": "https://auth.example.com/token"
+                },
+                {
+                  "key": "accessToken",
+                  "value": "{{oauth2AccessToken}}"
+                },
+                {
+                  "key": "clientId",
+                  "value": "{{oauth2ClientId}}"
+                },
+                {
+                  "key": "client_authentication",
+                  "value": "body"
+                },
+                {
+                  "key": "addTokenTo",
+                  "value": "header"
+                }
+              ],
+              "type": "oauth2"
+            },
+            "description": "Device sign-in",
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices"
+              ],
+              "raw": "{{baseUrl}}/devices"
+            }
+          },
+          "response": [
+            {
+              "code": 204,
+              "name": "204 No Content",
+              "status": "No Content"
+            }
+          ]
+        }
+      ],
+      "name": "Devices"
+    },
+    {
+      "item": [
+        {
+          "name": "GetUser",
+          "request": {
+            "description": "The signed-in user",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user"
+              ],
+              "raw": "{{baseUrl}}/user"
+            }
+          },
+          "response": [
+            {
+              "code": 204,
+              "name": "204 No Content",
+              "status": "No Content"
+            }
+          ]
+        }
+      ],
+      "name": "User"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for all requests",
+      "key": "baseUrl",
+      "value": "https://api.example.com"
+    },
+    {
+      "description": "OAuth2 client id",
+      "key": "oauth2ClientId",
+      "value": ""
+    },
+    {
+      "description": "OAuth2 client secret",
+      "key": "oauth2ClientSecret",
+      "value": ""
+    },
+    {
+      "description": "OAuth2 client id",
+      "key": "oauth2ClientId_GetAdmin",
+      "value": ""
+    },
+    {
+      "description": "OAuth2 client secret",
+      "key": "oauth2ClientSecret_GetAdmin",
+      "value": ""
+    },
+    {
+      "description": "OAuth2 access token from a device-code sign-in outside Postman",
+      "key": "oauth2AccessToken",
+      "value": ""
+    }
+  ]
+}

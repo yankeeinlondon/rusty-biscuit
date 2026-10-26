@@ -38,157 +38,138 @@ mod types;
 pub use types::*;
 
 use schematic_define::websocket::{
-    ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, MessageDirection, MessageSchema,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints,
 };
-use schematic_define::{AuthStrategy, Schema};
+use schematic_define::{ApiKeyEnv, AuthStrategy, EnvList, EnvMapping, Schema};
 
-#[allow(clippy::vec_init_then_push)]
+const ENV_AUTH: [&str; 2] = ["UCR_CORE_API_KEY", "UNFOLDED_CIRCLE_API_KEY"];
+
+fn client(name: &str, schema: &str, description: &str) -> MessageSchema {
+    MessageSchema::new(name, MessageDirection::Client, Schema::new(schema)).describe(description)
+}
+
+fn server(name: &str, schema: &str, description: &str) -> MessageSchema {
+    MessageSchema::new(name, MessageDirection::Server, Schema::new(schema)).describe(description)
+}
+
+/// The messages every Core channel shares. Selectors are the documented
+/// `kind`/`msg` wire values; an unmatched server frame is a generic response.
 fn common_messages() -> Vec<MessageSchema> {
-    let mut messages = Vec::with_capacity(13);
-    messages.push(MessageSchema {
-        name: "RequestEnvelope".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("CoreWsRequestEnvelope"),
-        description: Some("Generic request envelope `{kind=req,id,msg,msg_data}`.".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "ResponseEnvelope".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsResponseEnvelope"),
-        description: Some(
-            "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.".to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "EventEnvelope".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsEventEnvelope"),
-        description: Some("Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "AuthRequired".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsAuthRequired"),
-        description: Some(
-            "Server challenge for message-based auth (`msg=auth_required`).".to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "Auth".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("CoreWsAuthMessage"),
-        description: Some("Message-based auth request (`msg=auth`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Authentication".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsAuthenticationMessage"),
-        description: Some(
-            "Authentication outcome (`msg=authentication`) returned after auth request."
-                .to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "Ping".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("CoreWsPingMessage"),
-        description: Some("Typed ping request (`msg=ping`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Pong".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsPongMessage"),
-        description: Some("Typed pong response (`msg=pong`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Version".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("CoreWsVersionMessage"),
-        description: Some("Typed version request (`msg=version`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "VersionInfo".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsVersionInfoMessage"),
-        description: Some("Typed version response (`msg=version_info`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "System".to_string(),
-        direction: MessageDirection::Client,
-        schema: Schema::new("CoreWsSystemMessage"),
-        description: Some("Typed system-info request (`msg=system`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "SystemInfo".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsSystemInfoMessage"),
-        description: Some("Typed system-info response (`msg=system_info`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Result".to_string(),
-        direction: MessageDirection::Server,
-        schema: Schema::new("CoreWsResultMessage"),
-        description: Some("Typed generic command result (`msg=result`).".to_string()),
-    });
-    messages
+    vec![
+        client("RequestEnvelope", "CoreWsRequestEnvelope",
+            "Generic request envelope `{kind=req,id,msg,msg_data}`.")
+            .matches("kind", "req")
+            .responds_with("ResponseEnvelope"),
+        server("ResponseEnvelope", "CoreWsResponseEnvelope",
+            "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.")
+            .fallback(),
+        server("EventEnvelope", "CoreWsEventEnvelope",
+            "Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.")
+            .matches("kind", "event"),
+        server("AuthRequired", "CoreWsAuthRequired",
+            "Server challenge for message-based auth (`msg=auth_required`).")
+            .matches("kind", "event")
+            .matches("msg", "auth_required"),
+        client("Auth", "CoreWsAuthMessage", "Message-based auth request (`msg=auth`).")
+            .matches("kind", "req")
+            .matches("msg", "auth")
+            .responds_with("Authentication"),
+        server("Authentication", "CoreWsAuthenticationMessage",
+            "Authentication outcome (`msg=authentication`) returned after auth request.")
+            .matches("kind", "resp")
+            .matches("msg", "authentication"),
+        client("Ping", "CoreWsPingMessage", "Typed ping request (`msg=ping`).")
+            .matches("kind", "req")
+            .matches("msg", "ping")
+            .responds_with("Pong"),
+        server("Pong", "CoreWsPongMessage", "Typed pong response (`msg=pong`).")
+            .matches("kind", "resp")
+            .matches("msg", "pong"),
+        client("Version", "CoreWsVersionMessage", "Typed version request (`msg=version`).")
+            .matches("kind", "req")
+            .matches("msg", "version")
+            .responds_with("VersionInfo"),
+        server("VersionInfo", "CoreWsVersionInfoMessage",
+            "Typed version response (`msg=version_info`).")
+            .matches("kind", "resp")
+            .matches("msg", "version_info"),
+        client("System", "CoreWsSystemMessage", "Typed system-info request (`msg=system`).")
+            .matches("kind", "req")
+            .matches("msg", "system")
+            .responds_with("SystemInfo"),
+        server("SystemInfo", "CoreWsSystemInfoMessage",
+            "Typed system-info response (`msg=system_info`).")
+            .matches("kind", "resp")
+            .matches("msg", "system_info"),
+        server("Result", "CoreWsResultMessage", "Typed generic command result (`msg=result`).")
+            .matches("kind", "resp")
+            .matches("msg", "result"),
+    ]
+}
+
+/// Requests carry `id`; responses echo it as `req_id`. The `auth_required`
+/// challenge is sent only when the handshake carried no `API-KEY` header.
+fn common_hints() -> WebSocketEndpointHints {
+    WebSocketEndpointHints {
+        correlation: Some(CorrelationHints {
+            request_id_field: "id".to_string(),
+            response_id_field: "req_id".to_string(),
+            default_timeout_secs: 30,
+        }),
+        auth_flow: Some(AuthFlowHints {
+            challenge_message: "auth_required".to_string(),
+            auth_request_schema: "CoreWsAuthMessage".to_string(),
+            success_indicator: Some("authentication".to_string()),
+            failure_indicator: None,
+        }),
+        heartbeat: None,
+    }
+}
+
+fn channel(id: &str, path: &str, description: &str) -> WebSocketEndpoint {
+    WebSocketEndpoint {
+        id: id.to_string(),
+        path: path.to_string(),
+        description: description.to_string(),
+        lifecycle: ConnectionLifecycle::default(),
+        messages: common_messages(),
+        runtime: Some(common_hints()),
+        ..WebSocketEndpoint::default()
+    }
 }
 
 /// Build the Unfolded Circle Core WebSocket API definition.
 #[must_use]
-#[allow(clippy::vec_init_then_push)]
 pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
-    let common_messages = common_messages();
-    let mut endpoints = Vec::with_capacity(4);
-    endpoints.push(WebSocketEndpoint {
-        id: "CoreWs".to_string(),
-        path: "/ws".to_string(),
-        description: "Primary command/event channel for Core system control. Use this channel for RPC-style commands and asynchronous events documented in the Core WS docs.".to_string(),
-        connection_params: vec![],
-        lifecycle: ConnectionLifecycle::default(),
-        messages: common_messages.clone(),
-        runtime: None,
-    });
-    endpoints.push(WebSocketEndpoint {
-        id: "CoreIntegrations".to_string(),
-        path: "/intg".to_string(),
-        description: "Integration management channel for discovery, setup, and driver lifecycle events. See Core API integration WebSocket documentation for message semantics.".to_string(),
-        connection_params: vec![],
-        lifecycle: ConnectionLifecycle::default(),
-        messages: common_messages.clone(),
-        runtime: None,
-    });
-    endpoints.push(WebSocketEndpoint {
-        id: "CoreProfiles".to_string(),
-        path: "/profiles".to_string(),
-        description: "Profile-focused channel for querying and tracking profile updates without subscribing to all general events.".to_string(),
-        connection_params: vec![],
-        lifecycle: ConnectionLifecycle::default(),
-        messages: common_messages.clone(),
-        runtime: None,
-    });
-    endpoints.push(WebSocketEndpoint {
-        id: "CoreEvents".to_string(),
-        path: "/events".to_string(),
-        description: "General asynchronous event channel optimized for event consumers and telemetry-style subscribers.".to_string(),
-        connection_params: vec![],
-        lifecycle: ConnectionLifecycle::default(),
-        messages: common_messages,
-        runtime: None,
-    });
+    let endpoints = vec![
+        channel("CoreWs", "/ws", "Primary command/event channel for Core system control. Use this channel for RPC-style commands and asynchronous events documented in the Core WS docs."),
+        channel("CoreIntegrations", "/intg", "Integration management channel for discovery, setup, and driver lifecycle events. See Core API integration WebSocket documentation for message semantics."),
+        channel("CoreProfiles", "/profiles", "Profile-focused channel for querying and tracking profile updates without subscribing to all general events."),
+        channel("CoreEvents", "/events", "General asynchronous event channel optimized for event consumers and telemetry-style subscribers."),
+    ];
 
     WebSocketApi {
         name: "UnfoldedCircleCoreWs".to_string(),
         description: "Unfolded Circle Core WebSocket API".to_string(),
-        base_url: "ws://remote.local/ws".to_string(),
+        // The origin only: each endpoint carries its own documented channel
+        // path, so a base path here would double it (`/ws/ws`).
+        base_url: "ws://remote.local".to_string(),
         docs_url: Some("https://unfoldedcircle.github.io/core-api/ws/".to_string()),
         auth: AuthStrategy::ApiKey {
             header: "API-KEY".to_string(),
             value_prefix: None,
         },
-        env_auth: vec![
-            "UCR_CORE_API_KEY".to_string(),
-            "UNFOLDED_CIRCLE_API_KEY".to_string(),
-        ],
+        auth_policy: None,
+        env_auth: ENV_AUTH.map(str::to_string).to_vec(),
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::from_strs(&ENV_AUTH),
+                header: "API-KEY".to_string(),
+            }),
+            ..EnvMapping::default()
+        }),
+        headers: vec![],
         version: None,
         endpoints,
         runtime: None,
@@ -203,7 +184,7 @@ mod tests {
     fn core_ws_has_expected_endpoints() {
         let api = define_unfolded_circle_core_ws_api();
         assert_eq!(api.name, "UnfoldedCircleCoreWs");
-        assert_eq!(api.base_url, "ws://remote.local/ws");
+        assert_eq!(api.base_url, "ws://remote.local");
         assert_eq!(
             api.docs_url.as_deref(),
             Some("https://unfoldedcircle.github.io/core-api/ws/")
@@ -216,11 +197,21 @@ mod tests {
                 "UNFOLDED_CIRCLE_API_KEY".to_string()
             ]
         );
-        assert_eq!(api.endpoints.len(), 4);
-        assert!(api.endpoints.iter().any(|ep| ep.path == "/ws"));
-        assert!(api.endpoints.iter().any(|ep| ep.path == "/intg"));
-        assert!(api.endpoints.iter().any(|ep| ep.path == "/profiles"));
-        assert!(api.endpoints.iter().any(|ep| ep.path == "/events"));
+        // Channel paths from the Core AsyncAPI (`specs/unfolded-circle/UCR-core-asyncapi.yaml`).
+        let paths: Vec<(&str, &str)> = api
+            .endpoints
+            .iter()
+            .map(|ep| (ep.id.as_str(), ep.path.as_str()))
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                ("CoreWs", "/ws"),
+                ("CoreIntegrations", "/intg"),
+                ("CoreProfiles", "/profiles"),
+                ("CoreEvents", "/events"),
+            ]
+        );
     }
 
     #[test]

@@ -1,0 +1,419 @@
+//! Rules on registered models that sit where a generated client cannot
+//! enforce them.
+//!
+//! A registered model's rules live only in its stored schema component (see
+//! `schematic/docs/typed-registration.md#value-rules-on-registered-models`).
+//! [`unenforceable_rules`] walks a JSON body's schema through those
+//! components and lists the rules beneath a composition other than an
+//! `Option` or a one-member `allOf`, beneath a keyword the generated checks do not enter (a
+//! positional `items` list, `prefixItems`, `contains`, `patternProperties`,
+//! `if`/`then`/`else`, ...), or beside a reference that names no component.
+
+use std::collections::HashSet;
+
+use serde_json::{Map, Value};
+
+use crate::{RestApi, SchemaComponent, TypeRef};
+
+/// The validation keywords a rule can use. Annotations (`title`,
+/// `description`, `format`) are never rules.
+const RULE_KEYWORDS: [&str; 13] = [
+    "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+    "multipleOf", "minItems", "maxItems", "uniqueItems", "enum", "const",
+];
+
+/// Keywords holding subschemas that a generated client's checks do not
+/// enter, so a rule beneath one cannot be enforced. `items` is listed for
+/// its positional (list) form only; an `items` object is walked.
+const UNTRAVERSED_KEYWORDS: [&str; 13] = [
+    "items", "prefixItems", "additionalItems", "contains", "unevaluatedItems", "patternProperties", "propertyNames",
+    "unevaluatedProperties", "dependentSchemas", "dependencies", "if", "then", "else",
+];
+
+/// The [`UNTRAVERSED_KEYWORDS`] whose object value maps names to
+/// subschemas rather than being one.
+const SCHEMA_MAP_KEYWORDS: [&str; 3] = ["patternProperties", "dependentSchemas", "dependencies"];
+
+/// Prefixes of a local reference to a stored component. Schemars writes
+/// `#/components/schemas/` under the repository's settings; the other two
+/// are its draft 2020-12 and draft-07 spellings of the same name.
+const COMPONENT_PREFIXES: [&str; 3] = ["/components/schemas/", "/$defs/", "/definitions/"];
+
+/// One rule of a JSON body's schema that cannot be enforced where it sits.
+///
+/// ## Examples
+///
+/// See [`unenforceable_rules`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnenforceableRule {
+    /// The schema component holding the rule; `None` for the body's own
+    /// wire schema ([`TypeRef::wire_schema`]), which only a container or
+    /// primitive body has.
+    pub component: Option<String>,
+    /// JSON pointer, inside that schema, to the schema object carrying the
+    /// keyword; `""` is the schema's root.
+    pub pointer: String,
+    /// The rule's JSON Schema keyword (`maxLength`, `enum`, ...).
+    pub keyword: &'static str,
+    /// Why it cannot be enforced, naming the composition or reference.
+    pub reason: String,
+    /// The composition the rule sits beneath, when compositions are the
+    /// only reason it is unenforceable. `None` when it sits beside an
+    /// unresolved reference or beneath an untraversed keyword, whether or
+    /// not a composition also encloses it.
+    pub composition: Option<CompositionSite>,
+}
+
+/// Where the composition above an [`UnenforceableRule`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CompositionSite {
+    /// The schema component holding the composition; `None` for the body's
+    /// own wire schema.
+    pub component: Option<String>,
+    /// JSON pointer, inside that schema, to the schema object holding it;
+    /// `""` when the composition is the schema's root, which is how a Rust
+    /// enum's schema appears.
+    pub pointer: String,
+    /// `oneOf`, `anyOf`, `allOf`, or `not`.
+    pub keyword: &'static str,
+}
+
+/// Why the rules found beneath one point of a walk are unenforceable.
+/// `site` is `Some` only while every blocker so far is a composition.
+struct Blocked {
+    reason: String,
+    site: Option<CompositionSite>,
+}
+
+/// Every rule of the JSON body `body` that sits beneath `oneOf`, `not`, an
+/// `allOf` of more than one member, an `anyOf` other than an `Option`, or a
+/// keyword whose subschemas the generated checks do not enter, or beside a
+/// `$ref` that names no component of `api.schemas`, in walk order.
+///
+/// The untraversed keywords are a positional `items` list, `prefixItems`,
+/// `additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`,
+/// `propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema
+/// form of `dependencies`, and `if`/`then`/`else`.
+///
+/// The walk starts at `body`'s wire schema and follows component references
+/// (`#/components/schemas/{name}`, `#/$defs/{name}`, `#/definitions/{name}`,
+/// and a component's `#` to itself), `properties`, an `items` object, and
+/// `additionalProperties`. An `anyOf` is an `Option`, and is walked through,
+/// only when it has exactly two members and one admits only `null`; an
+/// `allOf` with exactly one member is walked through too. Each
+/// component is walked at most once outside a composition and once beneath
+/// one, so a recursive model terminates.
+///
+/// A rule both beneath a composition and beneath an untraversed keyword or
+/// beside an unresolved reference is listed once, with that other reason
+/// and no [`UnenforceableRule::composition`]: an untraversed keyword inside
+/// a composition, or a composition inside one, names the untraversed
+/// keyword, and a component reached both ways is reported as the stricter.
+///
+/// The bounds Schemars writes for a Rust integer width (`minimum: 0` on a
+/// `uint32`, `0..=255` on a `uint8`) are the type's, not authored rules, and
+/// are never listed. A unit enum's `enum` is listed like any other rule.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::constraints::unenforceable_rules;
+/// use schematic_define::{DefinitionContext, Endpoint, RestApi, TypeRef, definition_type};
+/// use schemars::JsonSchema;
+///
+/// definition_type!(#[derive(JsonSchema)] pub struct Tag {
+///     #[schemars(length(min = 1, max = 40))]
+///     pub label: String,
+/// });
+///
+/// let mut ctx = DefinitionContext::types_in("::docs::models");
+/// let create = Endpoint::post("CreateTag", "/tags").describes("Create a tag")
+///     .request_json::<Tag>(&mut ctx).returns_empty().build()?;
+/// let mut api = RestApi::builder(&ctx, "Tags", "https://example.test")
+///     .describes("Tags").no_auth().endpoints([create]).build()?;
+/// let body = TypeRef::Named("Tag".into());
+/// assert!(unenforceable_rules(&api, &body).is_empty());
+///
+/// // The same rule beneath a `oneOf` cannot be enforced.
+/// let label = api.schemas[0].schema["properties"]["label"].take();
+/// api.schemas[0].schema["properties"]["label"] = serde_json::json!({"oneOf": [label, {"type": "integer"}]});
+/// let rules = unenforceable_rules(&api, &body);
+/// assert_eq!(rules.iter().map(|rule| (rule.pointer.as_str(), rule.keyword)).collect::<Vec<_>>(),
+///     [("/properties/label/oneOf/0", "minLength"), ("/properties/label/oneOf/0", "maxLength")]);
+/// # Ok::<(), schematic_define::DefinitionError>(())
+/// ```
+pub fn unenforceable_rules(api: &RestApi, body: &TypeRef) -> Vec<UnenforceableRule> {
+    let mut walk = Walk { api, visited: HashSet::new(), found: Vec::new() };
+    walk.schema(&body.wire_schema(), None, &mut String::new(), None);
+    // A component walked beneath a composition and again beneath another
+    // blocker reports its rules twice; keep the first position, with the
+    // stricter (non-composition) reason.
+    let mut rules: Vec<UnenforceableRule> = Vec::with_capacity(walk.found.len());
+    for rule in walk.found {
+        let same = |kept: &&mut UnenforceableRule| kept.component == rule.component && kept.pointer == rule.pointer && kept.keyword == rule.keyword;
+        match rules.iter_mut().find(same) {
+            Some(kept) if kept.composition.is_some() && rule.composition.is_none() => *kept = rule,
+            Some(_) => {}
+            None => rules.push(rule),
+        }
+    }
+    rules
+}
+
+/// How a component was reached, for [`Walk::visited`]: freely, beneath
+/// compositions only, or beneath another blocker.
+fn blocked_state(blocked: Option<&Blocked>) -> u8 {
+    match blocked {
+        None => 0,
+        Some(Blocked { site: Some(_), .. }) => 1,
+        Some(_) => 2,
+    }
+}
+
+struct Walk<'a> {
+    api: &'a RestApi,
+    /// `(component, blocked_state)` pairs already walked.
+    visited: HashSet<(&'a str, u8)>,
+    found: Vec<UnenforceableRule>,
+}
+
+impl<'a> Walk<'a> {
+    /// Walks the schema `value` of `component` at `pointer`; `blocked` is
+    /// the reason every rule found is unenforceable, once one applies.
+    fn schema(&mut self, value: &Value, component: Option<&'a str>, pointer: &mut String, blocked: Option<&Blocked>) {
+        let Some(object) = value.as_object() else { return };
+        let reference = object.get("$ref");
+        let target = reference.and_then(|reference| self.resolve(reference, component));
+        // An unresolved reference outranks an enclosing composition, so the
+        // rules beside it stay unenforceable for a reason the opt-in for
+        // compositions does not cover.
+        let unresolved = match (reference, target) {
+            (Some(reference), None) => Some(Blocked { reason: format!("beside the unresolved reference {reference}"), site: None }),
+            _ => None,
+        };
+        let own = match (blocked, &unresolved) {
+            (Some(outer), _) if outer.site.is_none() => Some(outer),
+            (_, Some(unresolved)) => Some(unresolved),
+            (outer, None) => outer,
+        };
+        if let Some(own) = own {
+            self.report(object, component, pointer, own);
+        }
+        if let Some(target) = target {
+            self.component(target, blocked);
+        }
+        if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+            for (name, child) in properties {
+                let length = push_token(pointer, "properties");
+                push_token(pointer, name);
+                self.schema(child, component, pointer, blocked);
+                pointer.truncate(length);
+            }
+        }
+        // Only an `items` object is an array's item schema; an `items` list
+        // is positional (draft-07's spelling of `prefixItems`) and is walked
+        // with the untraversed keywords below.
+        for key in ["items", "additionalProperties"] {
+            if let Some(child @ Value::Object(_)) = object.get(key) {
+                let length = push_token(pointer, key);
+                self.schema(child, component, pointer, blocked);
+                pointer.truncate(length);
+            }
+        }
+        for key in UNTRAVERSED_KEYWORDS {
+            let Some(child) = object.get(key) else { continue };
+            if key == "items" && child.is_object() {
+                continue;
+            }
+            let here = Blocked { reason: format!("beneath the `{key}` at {}, which the client does not traverse", place(component, pointer)), site: None };
+            // The outermost untraversed keyword names the reason, but one
+            // inside a composition replaces it: the rule is then not one the
+            // opt-in for compositions covers.
+            let inner = match blocked {
+                Some(outer) if outer.site.is_none() => Some(outer),
+                _ => Some(&here),
+            };
+            let length = push_token(pointer, key);
+            match child {
+                Value::Array(members) => self.members(members, component, pointer, inner),
+                Value::Object(map) if SCHEMA_MAP_KEYWORDS.contains(&key) => {
+                    for (name, member) in map {
+                        let length = push_token(pointer, name);
+                        self.schema(member, component, pointer, inner);
+                        pointer.truncate(length);
+                    }
+                }
+                child => self.schema(child, component, pointer, inner),
+            }
+            pointer.truncate(length);
+        }
+        for key in ["anyOf", "oneOf", "allOf", "not"] {
+            let Some(child) = object.get(key) else { continue };
+            // An `Option`, and the one-member `allOf` Schemars writes for a
+            // `$ref` with sibling keywords, constrain nothing beyond their
+            // member, which the generated checks enter.
+            let transparent = match (key, child.as_array()) {
+                ("anyOf", Some(members)) => members.len() == 2 && members.iter().any(admits_only_null),
+                ("allOf", Some(members)) => members.len() == 1,
+                _ => false,
+            };
+            let here = Blocked {
+                reason: format!("beneath the `{key}` at {}", place(component, pointer)),
+                site: Some(CompositionSite { component: component.map(str::to_owned), pointer: pointer.clone(), keyword: key }),
+            };
+            let inner = if transparent { blocked } else { Some(blocked.unwrap_or(&here)) };
+            let length = push_token(pointer, key);
+            match child {
+                Value::Array(members) => self.members(members, component, pointer, inner),
+                child => self.schema(child, component, pointer, inner),
+            }
+            pointer.truncate(length);
+        }
+    }
+
+    /// Walks each member of a schema list, skipping a member that only
+    /// marks nullability.
+    fn members(&mut self, members: &[Value], component: Option<&'a str>, pointer: &mut String, blocked: Option<&Blocked>) {
+        for (index, member) in members.iter().enumerate().filter(|(_, member)| !admits_only_null(member)) {
+            let length = push_token(pointer, &index.to_string());
+            self.schema(member, component, pointer, blocked);
+            pointer.truncate(length);
+        }
+    }
+
+    fn component(&mut self, target: &'a SchemaComponent, blocked: Option<&Blocked>) {
+        if self.visited.insert((target.name.as_str(), blocked_state(blocked))) {
+            self.schema(&target.schema, Some(&target.name), &mut String::new(), blocked);
+        }
+    }
+
+    fn resolve(&self, reference: &Value, current: Option<&str>) -> Option<&'a SchemaComponent> {
+        referenced_component(self.api, reference.as_str()?, current)
+    }
+
+    fn report(&mut self, object: &Map<String, Value>, component: Option<&str>, pointer: &str, blocked: &Blocked) {
+        for keyword in RULE_KEYWORDS {
+            let Some(value) = object.get(keyword) else { continue };
+            if value == &Value::Bool(false) || implicit_bound(object, keyword, value) { continue }
+            self.found.push(UnenforceableRule {
+                component: component.map(str::to_owned),
+                pointer: pointer.to_owned(),
+                keyword,
+                reason: blocked.reason.clone(),
+                composition: blocked.site.clone(),
+            });
+        }
+    }
+}
+
+/// The component of `api` that the local reference `reference` names, read
+/// from inside the component `current` (`None` for an endpoint's own wire
+/// schema): `#/components/schemas/{name}`, `#/$defs/{name}`,
+/// `#/definitions/{name}`, or `#` for `current` itself. `None` when it
+/// names no component.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::constraints::referenced_component;
+/// # use schematic_define::{DefinitionContext, Endpoint, RestApi, definition_type};
+/// # use schemars::JsonSchema;
+/// # definition_type!(#[derive(JsonSchema)] pub struct Tag { pub label: String });
+/// # let mut ctx = DefinitionContext::types_in("::docs::models");
+/// # let create = Endpoint::post("CreateTag", "/tags").describes("Create a tag")
+/// #     .request_json::<Tag>(&mut ctx).returns_empty().build()?;
+/// # let api = RestApi::builder(&ctx, "Tags", "https://example.test")
+/// #     .describes("Tags").no_auth().endpoints([create]).build()?;
+/// assert_eq!(referenced_component(&api, "#/components/schemas/Tag", None).map(|c| c.name.as_str()), Some("Tag"));
+/// assert_eq!(referenced_component(&api, "#", Some("Tag")).map(|c| c.name.as_str()), Some("Tag"));
+/// assert!(referenced_component(&api, "#/components/schemas/Missing", None).is_none());
+/// # Ok::<(), schematic_define::DefinitionError>(())
+/// ```
+pub fn referenced_component<'a>(api: &'a RestApi, reference: &str, current: Option<&str>) -> Option<&'a SchemaComponent> {
+    let name = if reference == "#" {
+        current?.to_owned()
+    } else {
+        let fragment = percent_decode(reference.strip_prefix('#')?)?;
+        let token = COMPONENT_PREFIXES.iter().find_map(|prefix| fragment.strip_prefix(prefix))?;
+        if token.is_empty() || token.contains('/') { return None }
+        token.replace("~1", "/").replace("~0", "~")
+    };
+    api.component(&name)
+}
+
+/// Whether `object`'s `keyword` is the bound Schemars writes for the Rust
+/// integer width its `format` names (`minimum: 0` on a `uint32`), rather
+/// than an authored rule.
+pub fn is_width_bound(object: &Map<String, Value>, keyword: &str) -> bool {
+    object.get(keyword).is_some_and(|value| implicit_bound(object, keyword, value))
+}
+
+fn place(component: Option<&str>, pointer: &str) -> String {
+    match component {
+        Some(name) => format!("`#{pointer}` of component `{name}`"),
+        None => format!("`#{pointer}` of the request body"),
+    }
+}
+
+/// Whether `member` admits only `null`: `{"type": "null"}` (draft 2020-12)
+/// or `{"enum": [null], "nullable": true}` (OpenAPI 3.0), with nothing but
+/// annotations beside it. An `anyOf` of exactly two members, one of them
+/// this, is how Schemars writes an `Option`.
+pub fn admits_only_null(member: &Value) -> bool {
+    let Some(member) = member.as_object() else { return false };
+    let only_null = |values: &Value| values.as_array().is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_null));
+    let restricted = member.get("enum").is_some_and(only_null) || member.get("const") == Some(&Value::Null);
+    let null_type = member.get("type").is_some_and(|kind| kind == "null");
+    (restricted || null_type)
+        && member.keys().all(|key| matches!(key.as_str(), "type" | "nullable" | "enum" | "const" | "title" | "description" | "default" | "example" | "examples"))
+}
+
+/// Whether `keyword: value` is the bound Schemars writes for the Rust
+/// integer width named by the object's `format`, rather than an authored
+/// rule. A rule equal to that bound adds nothing, so the two need not be
+/// told apart.
+fn implicit_bound(object: &Map<String, Value>, keyword: &str, value: &Value) -> bool {
+    let (minimum, maximum): (i64, Option<i64>) = match object.get("format").and_then(Value::as_str) {
+        Some("int8") => (i8::MIN.into(), Some(i8::MAX.into())),
+        Some("int16") => (i16::MIN.into(), Some(i16::MAX.into())),
+        Some("uint8") => (0, Some(u8::MAX.into())),
+        Some("uint16") => (0, Some(u16::MAX.into())),
+        Some("uint32" | "uint64" | "uint128" | "uint") => (0, None),
+        _ => return false,
+    };
+    match keyword {
+        "minimum" => value.as_i64() == Some(minimum),
+        "maximum" => maximum.is_some() && value.as_i64() == maximum,
+        _ => false,
+    }
+}
+
+/// Appends `token`, escaped, to the JSON pointer `path`; returns the length
+/// to truncate back to.
+fn push_token(path: &mut String, token: &str) -> usize {
+    let length = path.len();
+    path.push('/');
+    path.push_str(&token.replace('~', "~0").replace('/', "~1"));
+    length
+}
+
+/// `text` with `%XX` escapes decoded; `None` for a malformed escape or a
+/// non-UTF-8 result.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}

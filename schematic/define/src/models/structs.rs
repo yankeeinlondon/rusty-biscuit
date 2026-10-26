@@ -22,15 +22,18 @@ use super::type_ref::TypeRef;
 /// assert!(field.required);
 /// assert_eq!(field.serde_rename, Some("userName".to_string()));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FieldDef {
     /// Field name (snake_case for Rust conventions).
     pub name: String,
     /// Optional rename for serde serialization.
     ///
     /// Used when the API field name differs from the Rust field name.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub serde_rename: Option<String>,
     /// Human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub description: Option<String>,
     /// Whether this field is required (non-optional).
     pub required: bool,
@@ -66,11 +69,13 @@ pub struct FieldDef {
 /// assert_eq!(user_struct.name, "User");
 /// assert_eq!(user_struct.fields.len(), 1);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructDef {
     /// Name of the struct (PascalCase recommended).
     pub name: String,
     /// Human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub description: Option<String>,
     /// List of fields in this struct.
     pub fields: Vec<FieldDef>,
@@ -78,6 +83,7 @@ pub struct StructDef {
     ///
     /// When set, the struct accepts arbitrary additional key-value pairs
     /// beyond the defined fields, where values are of the specified type.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub additional_properties: Option<TypeRef>,
 }
 

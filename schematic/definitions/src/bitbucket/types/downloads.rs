@@ -39,6 +39,13 @@ pub struct Download {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for Download {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Download");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Download {
     /// Returns the download URL if available.
     pub fn download_url(&self) -> Option<&str> {

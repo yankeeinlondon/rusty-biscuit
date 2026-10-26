@@ -13,14 +13,19 @@ errors, credentials, redirects, deadlines, and hooks.
 
 You can:
 
-- set query parameters with the generated `with_*` builders and rely on the
-  same bytes reaching the server as before the query was kept separate
-- read a request's query parameters as plain, unencoded `(name, value)`
-  pairs by calling `into_parts()`, without parsing a URL
+- pass required query parameters to `new()` and set optional ones with the
+  generated `with_*` builders, using generated enums where a parameter has a
+  fixed set of values
+- rely on each array parameter reaching the server in its declared form:
+  repeated (`tags=a&tags=b`) or delimited (`tags=a,b`, `a%20b`, `a%7Cb`)
+- read a request's query parameters as unencoded `(name, value)` pairs by
+  calling `into_parts()`, without parsing a URL
 - send a text or binary body exactly as given, under the endpoint's declared
   content type
 - set header and cookie parameters with `with_*` builders; every request
   carries at most one `Cookie` header
+- rely on a request's declared [value rules](#value-rules) being checked
+  before anything is sent, or check them early with `validate()`
 - authenticate an API whose key travels in a query parameter or a cookie,
   per call, per client, or from an environment variable, without the key
   ever appearing in `Debug` output or stored request metadata
@@ -30,7 +35,7 @@ You can:
 ```mermaid
 flowchart LR
     A["Request struct<br/>(path, query, header, cookie fields, body)"] --> B["EndpointSpec::into_parts()<br/>(generated)"]
-    B --> C["path<br/>path parameters substituted<br/>and percent-encoded"]
+    B --> C["path<br/>path parameters in wire spelling,<br/>substituted and percent-encoded"]
     B --> D["query<br/>unencoded (name, value) pairs"]
     B --> E["headers<br/>static + header parameters<br/>+ one Cookie header"]
     B --> B2["body"]
@@ -60,8 +65,8 @@ static `Cookie` header that cannot be merged):
 | Field | Contents |
 | --- | --- |
 | `method` | HTTP method (`schematic_runtime::Method`), such as `Method::GET` |
-| `path` | Path with path parameters substituted and percent-encoded; keeps any query written in the path template |
-| `query` | Declared query parameters as unencoded `(name, value)` pairs, in declaration order, duplicates kept |
+| `path` | Path with path parameters substituted in their wire spelling and percent-encoded; keeps any query written in the path template |
+| `query` | Declared query parameters as unencoded `(name, QueryValue)` pairs, in declaration order, duplicates kept (see [Query parameters](#query-parameters)) |
 | `headers` | Endpoint headers as `(name, value)` pairs: static endpoint headers, set header parameters, and at most one `Cookie` header |
 | `body` | Request body (`schematic_runtime::RequestBody`) |
 
@@ -69,38 +74,77 @@ static `Cookie` header that cannot be merged):
 from the runtime's own checks below, into a `TransportError` whose kind is
 `TransportErrorKind::InvalidArgument`. Nothing is sent in that case.
 
+A [typed path parameter](./generated-clients.md#typed-path-parameters) is
+converted to its wire spelling before it is encoded: an `i64` or `f64` as its
+decimal form, a `bool` as `true` or `false`, and an enum as its `as_str()`
+value, so `new(-42, true, 2.5, Kind::FirstKind)` on
+`/items/{id}/flags/{flag}/ratios/{ratio}/kinds/{kind}` produces
+`/items/-42/flags/true/ratios/2.5/kinds/first-kind`. A `{+name}` occurrence
+keeps its value raw instead of percent-encoding it. A non-finite `f64` has no
+wire spelling, so `into_parts()` returns an `InvalidArgument` naming the
+parameter (``path parameter `ratio` must be a finite number``) and nothing is
+sent. Untyped placeholders are `String` fields and are encoded as given.
+
 ## Query parameters
 
 A definition declares query parameters in `EndpointParams.query`. Each one
-becomes an optional field with a `with_*` builder. Only parameters you set
-are sent, in declaration order:
+becomes a request field and a `with_*` builder:
+
+- a **required** parameter (`ParamDef::required()`) is a `T` field and a
+  `new()` argument, even when the definition gives it a default value;
+- an **optional** parameter is an `Option<T>` field, sent only when set;
+- an **enum** parameter (`QueryParamType::Enum`) gets its own type,
+  `{RequestType}{FieldPascalCase}`, with one variant per value; arrays of
+  enum values use the same type.
+
+`new()` takes the path parameters in template order, then the required query
+parameters in declaration order, then the body. A request with a required
+query parameter has no `Default`, so the value can only come from `new()`;
+a request whose parameters are all optional keeps `Default`.
 
 ```rust
-use schematic_schema::gitea::ListPullRequestsRequest;
-use schematic_schema::schematic_runtime::{EndpointSpec, Method};
+use schematic_schema::gitea::{ListPullRequestsRequest, ListPullRequestsRequestState};
+use schematic_schema::schematic_runtime::{EndpointSpec, Method, QueryValue};
 
 let parts = ListPullRequestsRequest::new("own er", "repo")
-    .with_sort("newest".to_string())
-    .with_state("open closed".to_string())
+    .with_state(ListPullRequestsRequestState::Closed)
     .into_parts()?;
 assert_eq!(parts.method, Method::GET);
 assert_eq!(parts.path, "/repos/own%20er/repo/pulls");
-// Declared order (state comes before sort), values not encoded.
-assert_eq!(
-    parts.query,
-    vec![
-        ("state".to_string(), "open closed".to_string()),
-        ("sort".to_string(), "newest".to_string()),
-    ]
-);
+assert_eq!(parts.query, vec![("state".to_string(), QueryValue::from("closed"))]);
 ```
 
 A Gitea client sends that request as
-`GET /api/v1/repos/own%20er/repo/pulls?state=open%20closed&sort=newest`.
+`GET /api/v1/repos/own%20er/repo/pulls?state=closed`. OpenAI's usage
+endpoints require `start_time`, so it is a `new()` argument:
+`UsageCostsRequest::new(1_700_000_000)`.
 
 A parameter that the endpoint's pagination strategy adopts, such as this
-endpoint's `page` and `limit`, is not a field: the pager writes it after the
-request's own query. See [Pagination](../pagination.md#adopted-parameters).
+endpoint's `page` and `limit`, is not a field and never a `new()` argument,
+even when the provider marks it required: the pager writes it after the
+request's own query, and an ordinary send carries the strategy's first-page
+value. See [Pagination](../pagination.md#adopted-parameters).
+
+### Array forms
+
+The parameter's `style` and `explode` choose how an array is sent. Given
+`tags = ["a,b", "c"]`:
+
+| Style | `explode` | On the wire |
+| --- | --- | --- |
+| `Form` | `true` | `tags=a%2Cb&tags=c` (one pair per element) |
+| `Form` | `false` | `tags=a%2Cb,c` |
+| `SpaceDelimited` | `false` | `tags=a%2Cb%20c` |
+| `PipeDelimited` | `false` | `tags=a%2Cb%7Cc` |
+
+Each element is encoded once before the elements are joined, so a delimiter
+inside an element stays escaped. An unset optional array sends nothing; an
+empty array sends `tags=`. `into_parts()` returns a delimited array as one
+`QueryValue::Delimited` pair holding the unencoded elements.
+
+`ParamDef::new` declares `Form` with `explode: false`; the OpenAPI importer
+records OpenAPI's default for an absent `explode`, which is `true` for
+`form` style and `false` otherwise.
 
 ### Encoding rules
 
@@ -114,30 +158,35 @@ characters (`A-Z a-z 0-9 - _ . ~`) becomes `%XX` with uppercase hex.
 | `a+b` | `a%2Bb` |
 | `x%y` | `x%25y` (a `%` is always encoded; values are never decoded) |
 | `ünï` | `%C3%BCn%C3%AF` (UTF-8 bytes) |
-| empty string | `state=` |
+| empty string | `ref=` |
 
-Array parameters repeat the key, one pair per element:
-`include=a&include=b`. An array of `serde_json::Value` sends each element's
-JSON text, so a string element arrives quoted (`include=%22a%22`).
-Generation rejects a query parameter whose type is an array of arrays
-(`query-parameter`), since an element that is itself an array has no
-single text value.
+A number is sent in its decimal form, a boolean as `true` or `false`, and an
+enum as its wire value (`as_str()`).
 
-A test compares the request lines the generated clients put on the wire,
-covering every case on this page, with a recorded baseline.
+### Parameters the Rust client cannot send
+
+Some declarations have no serialization in the Rust client: a JSON value, an
+array of arrays or of JSON values, `DeepObject` or `Simple` style, a
+`SpaceDelimited` or `PipeDelimited` single value, and an exploded delimited
+array. An **optional** parameter of that kind is left out of the request
+type, and generation reports a `query-parameter` warning for the Rust output
+naming the API, endpoint, and parameter. A **required** one is a
+`query-parameter` error, because no request without it could be correct. The
+OpenAPI and Postman exports keep the parameter as declared.
+
+A test compares the request lines the generated clients put on the wire
+with a recorded baseline, and another sends every form above through a
+generated client to a local server.
 
 ### Path templates that already contain a query
 
-Some definitions write a query directly into the path template, for example
-Gitea's `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true`. That query is
-not declared query data: it stays in `path` exactly as written, and
-generation reports a `query-in-path` warning for it (see
-[validation](./validation.md#embedded-queries)). Declared pairs are appended
-after it with `&`:
-
-```text
-/repos/o/r/git/trees/abc?recursive=true&page=1
-```
+Route paths must exclude query strings. For example, define
+`/repos/{owner}/{repo}/git/trees/{sha}` and an optional Boolean `recursive`
+query parameter. Omission sends no pair; `false` remains an explicit false.
+Endpoint/API build and all output validators reject `?` in a route path,
+with API, endpoint, and path context. The importer normalizes supported query
+expressions before building definitions; it rejects malformed or conflicting
+inputs. See [validation](./validation.md#embedded-queries).
 
 ### Base URLs that contain a query
 
@@ -332,16 +381,161 @@ client.list_things().anonymous().await?;
   `TransportErrorKind::InvalidArgument` before any network work, and the
   error does not contain the key.
 - **No key.** When no source supplies a key, the request is sent without
-  one; there is no missing-credential error. The response metadata records
+  one; there is no missing-credential error (except on an endpoint whose
+  definition replaces the API's policy, which fails the send instead; see
+  [Endpoint authentication](../runtime/credentials.md#endpoint-authentication)). The response metadata records
   `AuthMethod::Anonymous`, and the server's reply (typically a 401) arrives
   in the response envelope. A definition without an env fallback reads no
   variable, even if one is set, and a fallback with no variable to read is
   dropped from the generated definition.
-- **Wrong kind.** A per-call credential of a kind the API does not accept
-  (for example `Credential::basic` for a key-in-query API) fails with
-  `TransportErrorKind::InvalidArgument`; a client credential of such a kind
-  is refused with `BuildError::IncompatibleCredential` at `build()`, or else
-  on the first call as `TransportErrorKind::InvalidClient`.
+- **Wrong kind.** A per-call credential of a kind the endpoint's policy
+  does not accept (for example `Credential::basic` for a key-in-query API)
+  fails with `TransportErrorKind::InvalidArgument`; a client credential of a
+  kind neither the API nor any endpoint replacement accepts is refused with
+  `BuildError::IncompatibleCredential` at `build()`, or else on the first
+  call as `TransportErrorKind::InvalidClient`.
+
+## Value rules
+
+A request whose definition declares value rules, such as "at most 100
+characters" on a query parameter or `minimum: 1` on a body field, checks
+them before it is sent. You can:
+
+- call `request.validate()` to get every violation of a request before
+  sending it
+- rely on every send refusing a violating request before any credential or
+  network work: `.build()?`, an awaited call, `.full()`,
+  `client.send(request)`, and `send_raw`
+- read a violation's location (`query.limit`, `body.items[2].displayName`),
+  keyword, and reason, knowing it never contains a submitted value
+
+The rules come from the definition: the [value constraints](../value-constraints.md)
+of parameters, form fields, and a body root, and the
+[Schemars attributes](../typed-registration.md#value-rules-on-registered-models)
+of the models a JSON body reaches.
+
+```rust,ignore
+let request = ListItemsRequest::new().with_limit(500); // declared maximum: 100
+let violations = request.validate().unwrap_err();
+assert_eq!(violations.to_string(), "query.limit violates maximum: must be at most 100");
+
+// Sending it fails the same way, and nothing is sent.
+let error = client.list_items().limit(500).build().unwrap_err();
+assert_eq!(error.reason(), "query.limit violates maximum: must be at most 100");
+```
+
+### Where a request is checked
+
+```mermaid
+flowchart TD
+    V["request.validate()"] --> C
+    B["call.build()?"] --> P
+    A["awaited call, .full(), client.send(request), send_raw"] --> P
+    G["pager: .pages(), .fetch_page(), collect_all"] --> P
+    G --> Z["each page size the pager chooses,<br/>checked against the strategy's min/max"]
+    Z -->|out of bounds| E
+    P["EndpointSpec::into_parts()<br/>(generated)"] --> C
+    C["the request's checks<br/>1. parameters, as typed values<br/>2. text body and text form fields<br/>3. JSON body and JSON form fields,<br/>each serialized once"]
+    C -->|violations| E["InvalidArgument naming every violation<br/>(validate() returns Violations)"]
+    C -->|none| S["parts built from the checked values;<br/>credential added; request sent"]
+```
+
+Every send runs the checks again, because a send prepares the request
+afresh: changing a field after `validate()` returned `Ok` is still caught.
+`validate()` is an early report, not a permit. A pager prepares its request
+once, through the same checks, and then checks each page size it sends.
+
+| Send | A violating request returns |
+| --- | --- |
+| `.build()?` | `InvalidArgument` |
+| awaited call | `CallError::Transport` holding `TransportErrorKind::InvalidArgument` |
+| `.full().await`, `send_raw` | the `TransportError` itself, with the redacted request metadata |
+
+The error's reason lists every violation in a fixed order: parameters in
+declaration order (path, query, header, cookie), then body values with object
+members in key order and array items by index. Callers that need the
+individual violations use `validate()`, which returns them as
+`schematic_runtime::validate::Violations`.
+
+### What is checked
+
+- **Parameters** are checked as typed values, before they are joined or
+  exploded into the query, path, or headers: an array's item count first,
+  then each item under its index (`query.ids[1]`).
+- **Text bodies and form fields** are checked as strings before URL encoding
+  or multipart assembly.
+- **JSON bodies and JSON multipart fields** are serialized once into a
+  `serde_json::Value`, checked, and that same value is sent. Renamed,
+  skipped, and flattened fields are therefore checked as the server sees
+  them, under their serialized names. Two consequences: the body's object
+  members are sent in key order rather than struct order (the same JSON
+  document), and an `f32` field passes through `f64`, so `0.1_f32` is
+  checked and sent as `0.10000000149011612`. A request without JSON rules
+  serializes its body directly, as before.
+- A value that cannot be serialized is refused with the existing "cannot be
+  serialized as JSON" error, not reported as a violation.
+- A map's keys can hold secrets, so a map value's path shows
+  `[redacted]` in place of its key: `body.labels[[redacted]]`.
+- A parameter adopted by a [pager](../pagination.md) is not a request field;
+  the pager checks each page size it chooses.
+
+### What is not checked
+
+| Rule | Outcome |
+| --- | --- |
+| `format` | an annotation only; labeled in rustdoc and reported as a `type-constraint` warning |
+| a pattern outside the [enforced subset](../value-constraints.md#patterns) | labeled in rustdoc and reported as a `type-constraint` warning |
+| a rule beneath a `oneOf`, an `anyOf` (other than an `Option`), an `allOf` of more than one member, or a `not`, wherever it sits (a component's whole schema, as a Rust enum of structs is, or nested inside one) | a `type-constraint` **error**: the Rust client is not generated. The message names both remedies: remove the rule or the composition, or opt in (below) |
+| the same rule when the API accepts unchecked compositions | a `type-constraint` warning; the rule is listed under "Not checked" in the request's rustdoc and nothing checks it before sending |
+| a rule beside a `$ref` that names no component | a `type-constraint` **error**, with or without the opt-in |
+| a rule beneath a keyword the checks do not enter: a positional `items` list or `prefixItems` (a tuple's members), `additionalItems`, `contains`, `unevaluatedItems`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `dependentSchemas`, the schema form of `dependencies`, or `if`/`then`/`else` | a `type-constraint` **error**, for example ``body (component `Pair` at `#/prefixItems/0`) `maxLength` is not enforced: beneath the `prefixItems` at `#` of component `Pair`, which the client does not traverse; ...``; only an `items` object is checked as an array's item schema |
+| a Rust enum's own variant values (a unit enum's `enum`, a tagged enum's tag `const`) and the bounds Schemars writes for an integer width (`minimum: 0` on a `u32`) | the Rust type already guarantees them; neither checked nor reported |
+
+#### Accepting unchecked compositions
+
+The client checks no `oneOf`, `anyOf`, multi-member `allOf`, or `not`, so it
+cannot tell which member a value matched. By default a rule beneath one fails
+generation. When an API's request models put rules inside unions you cannot
+restructure (OpenAI's tool and response-format unions, for example), opt in
+for that API:
+
+```rust,ignore
+let api = RestApi::builder(ctx, "Shapes", "https://api.example.com")
+    .describes("Shapes")
+    .no_auth()
+    .accept_unchecked_compositions()
+    .endpoints(endpoints)
+    .build()?;
+```
+
+The choice is stored on the definition (`unchecked_compositions: true` in
+its JSON, omitted when false), so bundles and emitted definitions keep it.
+With it, each covered rule is a `type-constraint` warning naming the API,
+endpoint, schema location, keyword, and composition, for example
+``body (component `Item` at `#/properties/value/anyOf/0`) `maxLength` is not enforced: beneath the `anyOf` at `#/properties/value` of component `Item`, a composition whose members are not checked; the API accepts unchecked compositions``,
+and the request type's `## Value rules` rustdoc lists it under "Not
+checked". The opt-in covers nothing else: a rule beneath an untraversed
+keyword (even one inside a composition) or beside an unresolved reference is
+still an error, and so is a malformed or contradictory rule.
+
+A definition rebuilt by `import --definitions-out` can report one source
+rule twice, once beneath a component's `allOf` and once at the property its
+flattened member brings in, so its warning count can exceed the OpenAPI
+document's (see [`allOf` components](../io/import-openapi.md#value-constraints)).
+
+Responses are never checked: a reply that decodes is returned even when it
+breaks a declared rule.
+
+Generated rustdoc says which rules are checked. A parameter or form field
+lists them, for example "Value rules checked before sending: `minLength` 1,
+`maxLength` 100." and "Not checked: `format` `uuid` (an annotation only).",
+and a request with rules has a `## Value rules` section listing anything it
+does not check.
+
+The checks live in `schematic_runtime::validate` (see
+[request validation](../runtime/validation.md)); a generated module keeps
+its plans in a private `{api}_value_rules` module, so the generated crate
+needs no validation dependency of its own.
 
 ## Debug output never shows a credential
 

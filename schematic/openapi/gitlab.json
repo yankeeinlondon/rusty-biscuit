@@ -33,7 +33,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -67,6 +69,19 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -75,7 +90,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<TreeItem>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TreeItem"
+                  }
                 }
               }
             }
@@ -84,8 +102,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<TreeItem>"
+              "Array": {
+                "Named": "TreeItem"
+              }
             }
           }
         }
@@ -102,11 +121,36 @@
         }
       ]
     },
-    "/projects/{id}/repository/files/{file_path}?ref={git_ref}": {
+    "/projects/{id}/repository/files/{file_path}": {
       "get": {
         "summary": "Get file content (Base64 encoded, provide git_ref for branch/tag)",
         "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)",
         "operationId": "GetRepositoryFile",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -120,10 +164,16 @@
           }
         },
         "x-schematic": {
+          "params": {
+            "query": {
+              "ref": {
+                "rust_name": "git_ref"
+              }
+            }
+          },
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "FileContent"
+              "Named": "FileContent"
             }
           }
         }
@@ -146,15 +196,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "git_ref",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -163,6 +204,21 @@
         "summary": "Get project metadata (use URL-encoded path or numeric ID)",
         "description": "Get project metadata (use URL-encoded path or numeric ID)",
         "operationId": "GetProject",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -178,8 +234,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Project"
+              "Named": "Project"
             }
           }
         }
@@ -217,7 +272,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -288,6 +345,19 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -296,7 +366,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Project>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  }
                 }
               }
             }
@@ -305,8 +378,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Project>"
+              "Array": {
+                "Named": "Project"
+              }
             }
           }
         }
@@ -328,6 +402,21 @@
         "summary": "Get a single branch (commit.id is the branch head commit)",
         "description": "Get a single branch (commit.id is the branch head commit)",
         "operationId": "GetBranch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -343,8 +432,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Branch"
+              "Named": "Branch"
             }
           }
         }
@@ -391,7 +479,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -411,6 +501,19 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -419,7 +522,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<MergeRequest>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MergeRequest"
+                  }
                 }
               }
             }
@@ -428,8 +534,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<MergeRequest>"
+              "Array": {
+                "Named": "MergeRequest"
+              }
             }
           }
         }
@@ -451,6 +558,21 @@
         "summary": "Get a single merge request by IID",
         "description": "Get a single merge request by IID",
         "operationId": "GetMergeRequest",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -466,8 +588,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "MergeRequest"
+              "Named": "MergeRequest"
             }
           }
         }
@@ -514,10 +635,25 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -526,7 +662,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Commit>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  }
                 }
               }
             }
@@ -535,8 +674,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -567,6 +707,21 @@
         "summary": "Get merge request with file changes/diffs",
         "description": "Get merge request with file changes/diffs",
         "operationId": "ListMergeRequestChanges",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -582,8 +737,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "MergeRequestChanges"
+              "Named": "MergeRequestChanges"
             }
           }
         }
@@ -630,7 +784,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -649,6 +805,19 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -657,7 +826,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Issue>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Issue"
+                  }
                 }
               }
             }
@@ -666,8 +838,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Issue>"
+              "Array": {
+                "Named": "Issue"
+              }
             }
           }
         }
@@ -689,6 +862,21 @@
         "summary": "Get a single issue by IID",
         "description": "Get a single issue by IID",
         "operationId": "GetIssue",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -704,8 +892,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Issue"
+              "Named": "Issue"
             }
           }
         }
@@ -752,10 +939,25 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -764,7 +966,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Note>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Note"
+                  }
                 }
               }
             }
@@ -773,8 +978,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Note>"
+              "Array": {
+                "Named": "Note"
+              }
             }
           }
         }
@@ -805,13 +1011,31 @@
         "summary": "List participants on an issue",
         "description": "List participants on an issue",
         "operationId": "ListIssueParticipants",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<User>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
                 }
               }
             }
@@ -820,8 +1044,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<User>"
+              "Array": {
+                "Named": "User"
+              }
             }
           }
         }
@@ -868,10 +1093,25 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -880,7 +1120,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Tag>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Tag"
+                  }
                 }
               }
             }
@@ -889,8 +1132,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Tag>"
+              "Array": {
+                "Named": "Tag"
+              }
             }
           }
         }
@@ -912,6 +1156,21 @@
         "summary": "Get a single tag by name",
         "description": "Get a single tag by name",
         "operationId": "GetTag",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -927,8 +1186,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Tag"
+              "Named": "Tag"
             }
           }
         }
@@ -975,10 +1233,25 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -987,7 +1260,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Release>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Release"
+                  }
                 }
               }
             }
@@ -996,8 +1272,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Release>"
+              "Array": {
+                "Named": "Release"
+              }
             }
           }
         }
@@ -1019,6 +1296,21 @@
         "summary": "Get a single release by tag name",
         "description": "Get a single release by tag name",
         "operationId": "GetRelease",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -1034,8 +1326,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Release"
+              "Named": "Release"
             }
           }
         }
@@ -1066,6 +1357,21 @@
         "summary": "Get the latest release",
         "description": "Get the latest release",
         "operationId": "GetLatestRelease",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -1081,8 +1387,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Release"
+              "Named": "Release"
             }
           }
         }
@@ -1120,7 +1425,9 @@
             "name": "per_page",
             "description": "Items per page (default: 100, max: 100)",
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             "explode": false,
             "style": "form"
@@ -1177,6 +1484,19 @@
             },
             "explode": false,
             "style": "form"
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "required": true,
+            "schema": {
+              "default": "schematic-gitlab-client",
+              "type": "string",
+              "enum": [
+                "schematic-gitlab-client"
+              ]
+            },
+            "style": "simple"
           }
         ],
         "responses": {
@@ -1185,7 +1505,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Pipeline>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pipeline"
+                  }
                 }
               }
             }
@@ -1194,8 +1517,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Pipeline>"
+              "Array": {
+                "Named": "Pipeline"
+              }
             }
           }
         }
@@ -1223,6 +1547,7 @@
             "type": "string"
           },
           "mode": {
+            "nullable": true,
             "type": "string"
           },
           "name": {
@@ -1242,17 +1567,6 @@
           "path"
         ]
       },
-      "Vec<TreeItem>": {
-        "title": "Array_of_TreeItem",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/TreeItem"
-            }
-          ]
-        }
-      },
       "FileContent": {
         "title": "FileContent",
         "type": "object",
@@ -1267,6 +1581,7 @@
             "type": "string"
           },
           "content_sha256": {
+            "nullable": true,
             "type": "string"
           },
           "encoding": {
@@ -1279,6 +1594,7 @@
             "type": "string"
           },
           "last_commit_id": {
+            "nullable": true,
             "type": "string"
           },
           "ref": {
@@ -1286,7 +1602,8 @@
           },
           "size": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1304,101 +1621,175 @@
         "title": "MergeRequest",
         "type": "object",
         "properties": {
-          "assignee": {},
-          "assignees": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/User"
-                }
-              ]
-            }
-          },
-          "author": {
-            "allOf": [
+          "assignee": {
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
               }
             ]
           },
+          "assignees": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          },
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
           "changes_count": {
+            "nullable": true,
             "type": "string"
           },
           "closed_at": {
+            "nullable": true,
             "type": "string"
           },
-          "closed_by": {},
+          "closed_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "created_at": {
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "downvotes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "draft": {
+            "default": false,
             "type": "boolean"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "iid": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "labels": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "merge_commit_sha": {
+            "nullable": true,
             "type": "string"
           },
           "merge_status": {
+            "nullable": true,
             "type": "string"
           },
           "merge_when_pipeline_succeeds": {
+            "default": false,
             "type": "boolean"
           },
           "merged_at": {
+            "nullable": true,
             "type": "string"
           },
-          "merged_by": {},
-          "milestone": {},
+          "merged_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "milestone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Milestone"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "project_id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "references": {},
+          "references": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/References"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "reviewers": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/User"
-                }
-              ]
+              "$ref": "#/components/schemas/User"
             }
           },
           "sha": {
+            "nullable": true,
             "type": "string"
           },
           "source_branch": {
             "type": "string"
           },
           "source_project_id": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "squash": {
+            "default": false,
             "type": "boolean"
           },
           "squash_commit_sha": {
+            "nullable": true,
             "type": "string"
           },
           "state": {
@@ -1408,10 +1799,25 @@
             "type": "string"
           },
           "target_project_id": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "time_stats": {},
+          "time_stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeStats"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
@@ -1419,17 +1825,23 @@
             "type": "string"
           },
           "upvotes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "user_notes_count": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           },
           "work_in_progress": {
+            "default": false,
             "type": "boolean"
           }
         },
@@ -1449,28 +1861,56 @@
       "Milestone": {
         "type": "object",
         "properties": {
-          "created_at": {},
-          "description": {},
-          "due_date": {},
-          "expired": {},
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expired": {
+            "nullable": true,
+            "type": "boolean"
+          },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "iid": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "project_id": {},
-          "start_date": {},
+          "project_id": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
           "state": {
             "type": "string"
           },
           "title": {
             "type": "string"
           },
-          "updated_at": {},
-          "web_url": {}
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "web_url": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "id",
@@ -1501,15 +1941,25 @@
       "TimeStats": {
         "type": "object",
         "properties": {
-          "human_time_estimate": {},
-          "human_total_time_spent": {},
+          "human_time_estimate": {
+            "nullable": true,
+            "type": "string"
+          },
+          "human_total_time_spent": {
+            "nullable": true,
+            "type": "string"
+          },
           "time_estimate": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "total_time_spent": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         }
       },
@@ -1518,22 +1968,27 @@
         "type": "object",
         "properties": {
           "avatar_url": {
+            "nullable": true,
             "type": "string"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "name": {
+            "nullable": true,
             "type": "string"
           },
           "state": {
+            "nullable": true,
             "type": "string"
           },
           "username": {
             "type": "string"
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1541,17 +1996,6 @@
           "id",
           "username"
         ]
-      },
-      "Vec<MergeRequest>": {
-        "title": "Array_of_MergeRequest",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/MergeRequest"
-            }
-          ]
-        }
       },
       "Commit": {
         "title": "Commit",
@@ -1564,15 +2008,19 @@
             "type": "string"
           },
           "authored_date": {
+            "nullable": true,
             "type": "string"
           },
           "committed_date": {
+            "nullable": true,
             "type": "string"
           },
           "committer_email": {
+            "nullable": true,
             "type": "string"
           },
           "committer_name": {
+            "nullable": true,
             "type": "string"
           },
           "created_at": {
@@ -1582,9 +2030,11 @@
             "type": "string"
           },
           "message": {
+            "nullable": true,
             "type": "string"
           },
           "parent_ids": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
@@ -1597,6 +2047,7 @@
             "type": "string"
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1609,51 +2060,43 @@
           "author_email"
         ]
       },
-      "Vec<Commit>": {
-        "title": "Array_of_Commit",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Commit"
-            }
-          ]
-        }
-      },
       "MergeRequestChanges": {
         "title": "MergeRequestChanges",
         "type": "object",
         "properties": {
           "changes": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Diff"
-                }
-              ]
+              "$ref": "#/components/schemas/Diff"
             }
           },
           "closed_at": {
+            "nullable": true,
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "iid": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "merged_at": {
+            "nullable": true,
             "type": "string"
           },
           "project_id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "source_branch": {
             "type": "string"
@@ -1681,13 +2124,24 @@
       "Diff": {
         "type": "object",
         "properties": {
-          "a_mode": {},
-          "b_mode": {},
+          "a_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "b_mode": {
+            "nullable": true,
+            "type": "string"
+          },
           "deleted_file": {
+            "default": false,
             "type": "boolean"
           },
-          "diff": {},
+          "diff": {
+            "nullable": true,
+            "type": "string"
+          },
           "new_file": {
+            "default": false,
             "type": "boolean"
           },
           "new_path": {
@@ -1697,6 +2151,7 @@
             "type": "string"
           },
           "renamed_file": {
+            "default": false,
             "type": "boolean"
           }
         },
@@ -1709,88 +2164,176 @@
         "title": "Issue",
         "type": "object",
         "properties": {
-          "assignee": {},
-          "assignees": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/User"
-                }
-              ]
-            }
-          },
-          "author": {
-            "allOf": [
+          "assignee": {
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
               }
             ]
           },
+          "assignees": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          },
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
           "closed_at": {
+            "nullable": true,
             "type": "string"
           },
-          "closed_by": {},
+          "closed_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "confidential": {
+            "default": false,
             "type": "boolean"
           },
           "created_at": {
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "discussion_locked": {
+            "nullable": true,
             "type": "boolean"
           },
           "downvotes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "due_date": {
+            "nullable": true,
             "type": "string"
           },
           "has_tasks": {
+            "nullable": true,
             "type": "boolean"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "iid": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "issue_type": {
+            "nullable": true,
             "type": "string"
           },
           "labels": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "milestone": {},
+          "milestone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Milestone"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "moved_to_id": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "project_id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "references": {},
+          "references": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/References"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "severity": {
+            "nullable": true,
             "type": "string"
           },
           "state": {
             "type": "string"
           },
-          "task_completion_status": {},
+          "task_completion_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskCompletionStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "task_status": {
+            "nullable": true,
             "type": "string"
           },
-          "time_stats": {},
+          "time_stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeStats"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
@@ -1798,19 +2341,26 @@
             "type": "string"
           },
           "upvotes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "user_notes_count": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           },
           "weight": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1828,24 +2378,17 @@
         "type": "object",
         "properties": {
           "completed_count": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "count": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
-        }
-      },
-      "Vec<Issue>": {
-        "title": "Array_of_Issue",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Issue"
-            }
-          ]
         }
       },
       "Note": {
@@ -1853,19 +2396,17 @@
         "type": "object",
         "properties": {
           "attachment": {
+            "nullable": true,
             "type": "string"
           },
           "author": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/User"
-              }
-            ]
+            "$ref": "#/components/schemas/User"
           },
           "body": {
             "type": "string"
           },
           "confidential": {
+            "default": false,
             "type": "boolean"
           },
           "created_at": {
@@ -1873,29 +2414,51 @@
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "internal": {
+            "default": false,
             "type": "boolean"
           },
           "noteable_id": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "noteable_type": {
+            "nullable": true,
             "type": "string"
           },
           "resolvable": {
+            "default": false,
             "type": "boolean"
           },
           "resolved": {
+            "nullable": true,
             "type": "boolean"
           },
-          "resolved_by": {},
+          "resolved_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "system": {
+            "default": false,
             "type": "boolean"
           },
           "type": {
+            "nullable": true,
             "type": "string"
           },
           "updated_at": {
@@ -1910,49 +2473,36 @@
           "updated_at"
         ]
       },
-      "Vec<Note>": {
-        "title": "Array_of_Note",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Note"
-            }
-          ]
-        }
-      },
-      "Vec<User>": {
-        "title": "Array_of_User",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/User"
-            }
-          ]
-        }
-      },
       "Branch": {
         "title": "Branch",
         "description": "A branch from `GET /projects/{id}/repository/branches/{branch}`.",
         "type": "object",
         "properties": {
           "commit": {
-            "description": "Head commit of the branch."
+            "description": "Head commit of the branch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Commit"
+              }
+            ]
           },
           "default": {
+            "default": false,
             "type": "boolean"
           },
           "merged": {
+            "default": false,
             "type": "boolean"
           },
           "name": {
             "type": "string"
           },
           "protected": {
+            "default": false,
             "type": "boolean"
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1966,25 +2516,37 @@
         "type": "object",
         "properties": {
           "commit": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TagCommit"
-              }
-            ]
+            "$ref": "#/components/schemas/TagCommit"
           },
           "created_at": {
+            "nullable": true,
             "type": "string"
           },
           "message": {
+            "nullable": true,
             "type": "string"
           },
           "name": {
             "type": "string"
           },
           "protected": {
+            "default": false,
             "type": "boolean"
           },
-          "release": {},
+          "release": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagRelease"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "target": {
             "type": "string"
           }
@@ -1998,18 +2560,43 @@
       "TagCommit": {
         "type": "object",
         "properties": {
-          "author_email": {},
-          "author_name": {},
-          "authored_date": {},
-          "committed_date": {},
-          "committer_email": {},
-          "committer_name": {},
-          "created_at": {},
+          "author_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "author_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "authored_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committed_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committer_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committer_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
-          "message": {},
+          "message": {
+            "nullable": true,
+            "type": "string"
+          },
           "parent_ids": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
@@ -2031,7 +2618,10 @@
       "TagRelease": {
         "type": "object",
         "properties": {
-          "description": {},
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
           "tag_name": {
             "type": "string"
           }
@@ -2040,73 +2630,60 @@
           "tag_name"
         ]
       },
-      "Vec<Tag>": {
-        "title": "Array_of_Tag",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Tag"
-            }
-          ]
-        }
-      },
       "Release": {
         "title": "Release",
         "type": "object",
         "properties": {
-          "_links": {},
-          "assets": {
-            "allOf": [
+          "_links": {
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/ReleaseAssets"
+                "$ref": "#/components/schemas/ReleaseLinks"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
               }
             ]
+          },
+          "assets": {
+            "$ref": "#/components/schemas/ReleaseAssets"
           },
           "author": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/User"
-              }
-            ]
+            "$ref": "#/components/schemas/User"
           },
           "commit": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ReleaseCommit"
-              }
-            ]
+            "$ref": "#/components/schemas/ReleaseCommit"
           },
           "commit_path": {
+            "nullable": true,
             "type": "string"
           },
           "created_at": {
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "description_html": {
+            "nullable": true,
             "type": "string"
           },
           "evidences": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ReleaseEvidence"
-                }
-              ]
+              "$ref": "#/components/schemas/ReleaseEvidence"
             }
           },
           "milestones": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Milestone"
-                }
-              ]
+              "$ref": "#/components/schemas/Milestone"
             }
           },
           "name": {
@@ -2119,9 +2696,11 @@
             "type": "string"
           },
           "tag_path": {
+            "nullable": true,
             "type": "string"
           },
           "upcoming_release": {
+            "nullable": true,
             "type": "boolean"
           }
         },
@@ -2139,27 +2718,23 @@
         "type": "object",
         "properties": {
           "count": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "links": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ReleaseLink"
-                }
-              ]
+              "$ref": "#/components/schemas/ReleaseLink"
             }
           },
           "sources": {
+            "default": [],
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ReleaseSource"
-                }
-              ]
+              "$ref": "#/components/schemas/ReleaseSource"
             }
           }
         }
@@ -2167,20 +2742,42 @@
       "ReleaseCommit": {
         "type": "object",
         "properties": {
-          "author_email": {},
-          "author_name": {},
-          "authored_date": {},
-          "committed_date": {},
-          "committer_email": {},
-          "committer_name": {},
+          "author_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "author_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "authored_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committed_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committer_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "committer_name": {
+            "nullable": true,
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },
           "id": {
             "type": "string"
           },
-          "message": {},
+          "message": {
+            "nullable": true,
+            "type": "string"
+          },
           "parent_ids": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
@@ -2223,13 +2820,18 @@
         "type": "object",
         "properties": {
           "external": {
+            "default": false,
             "type": "boolean"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "link_type": {},
+          "link_type": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -2246,12 +2848,30 @@
       "ReleaseLinks": {
         "type": "object",
         "properties": {
-          "closed_issues_url": {},
-          "closed_merge_requests_url": {},
-          "edit_url": {},
-          "merged_merge_requests_url": {},
-          "opened_issues_url": {},
-          "opened_merge_requests_url": {},
+          "closed_issues_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "closed_merge_requests_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "edit_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "merged_merge_requests_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "opened_issues_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "opened_merge_requests_url": {
+            "nullable": true,
+            "type": "string"
+          },
           "self": {
             "type": "string"
           }
@@ -2275,94 +2895,133 @@
           "url"
         ]
       },
-      "Vec<Release>": {
-        "title": "Array_of_Release",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Release"
-            }
-          ]
-        }
-      },
       "Project": {
         "title": "Project",
         "type": "object",
         "properties": {
           "archived": {
+            "default": false,
             "type": "boolean"
           },
           "avatar_url": {
+            "nullable": true,
             "type": "string"
           },
           "created_at": {
+            "nullable": true,
             "type": "string"
           },
           "default_branch": {
+            "nullable": true,
             "type": "string"
           },
           "description": {
+            "nullable": true,
             "type": "string"
           },
           "empty_repo": {
+            "nullable": true,
             "type": "boolean"
           },
           "forks_count": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "http_url_to_repo": {
+            "nullable": true,
             "type": "string"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "issues_enabled": {
+            "nullable": true,
             "type": "boolean"
           },
           "last_activity_at": {
+            "nullable": true,
             "type": "string"
           },
           "merge_requests_enabled": {
+            "nullable": true,
             "type": "boolean"
           },
           "name": {
             "type": "string"
           },
-          "namespace": {},
-          "open_issues_count": {
-            "type": "integer",
-            "format": "uint64"
+          "namespace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Namespace"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
           },
-          "owner": {},
+          "open_issues_count": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "path": {
+            "nullable": true,
             "type": "string"
           },
           "path_with_namespace": {
+            "nullable": true,
             "type": "string"
           },
           "ssh_url_to_repo": {
+            "nullable": true,
             "type": "string"
           },
           "star_count": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "topics": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "visibility": {
+            "nullable": true,
             "type": "string"
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           },
           "wiki_enabled": {
+            "nullable": true,
             "type": "boolean"
           }
         },
@@ -2374,67 +3033,39 @@
       "Namespace": {
         "type": "object",
         "properties": {
-          "avatar_url": {},
-          "full_path": {},
-          "id": {
-            "type": "integer",
-            "format": "uint64"
+          "avatar_url": {
+            "nullable": true,
+            "type": "string"
           },
-          "kind": {},
-          "name": {},
-          "parent_id": {},
-          "path": {},
-          "web_url": {}
-        },
-        "required": [
-          "id"
-        ]
-      },
-      "Vec<Project>": {
-        "title": "Array_of_Project",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Project"
-            }
-          ]
-        }
-      },
-      "Pipeline": {
-        "title": "Pipeline",
-        "type": "object",
-        "properties": {
-          "created_at": {
+          "full_path": {
+            "nullable": true,
             "type": "string"
           },
           "id": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
+          },
+          "kind": {
+            "nullable": true,
+            "type": "string"
           },
           "name": {
+            "nullable": true,
             "type": "string"
           },
-          "project_id": {
+          "parent_id": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "ref": {
-            "type": "string"
-          },
-          "sha": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "updated_at": {
+          "path": {
+            "nullable": true,
             "type": "string"
           },
           "web_url": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -2442,16 +3073,57 @@
           "id"
         ]
       },
-      "Vec<Pipeline>": {
-        "title": "Array_of_Pipeline",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Pipeline"
-            }
-          ]
-        }
+      "Pipeline": {
+        "title": "Pipeline",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "ref": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sha": {
+            "nullable": true,
+            "type": "string"
+          },
+          "source": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "web_url": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
       }
     },
     "securitySchemes": {
@@ -2473,6 +3145,10 @@
     "url": "https://docs.gitlab.com/api/rest/"
   },
   "x-schematic": {
+    "env_auth": [
+      "GITLAB_TOKEN",
+      "GITLAB_PRIVATE_TOKEN"
+    ],
     "env_mapping": {
       "api_key": {
         "header": "PRIVATE-TOKEN",
@@ -2493,7 +3169,8 @@
         "schematic-gitlab-client"
       ]
     ],
-    "module_path": "gitlab"
+    "module_path": "gitlab",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "GitLab"

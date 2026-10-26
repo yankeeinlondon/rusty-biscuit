@@ -26,6 +26,13 @@ pub struct UserInfo {
     #[serde(rename = "numFollowing", skip_serializing_if = "Option::is_none")]
     pub num_following: Option<u64>,
 }
+impl schematic_define::Registration for UserInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UserInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WhoAmIResponse {

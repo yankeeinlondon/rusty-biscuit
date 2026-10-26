@@ -61,18 +61,20 @@ validates again on its next use, and clones made earlier keep theirs.
 | Method | Effect |
 | --- | --- |
 | `base_url(url)` | send to `url` instead of the definition's base URL; it must be an absolute HTTP(S) URL with a host and no user information |
+| `graphql_url(url)` | send GraphQL operations to `url` instead of the address the API's rules derive from the base URL; see [GraphQL](../graphql.md#how-a-client-resolves-the-address) |
 | `timeout(duration)` | the per-request timeout (default `DEFAULT_TIMEOUT`, 30 s); see [Deadlines and timeouts](./deadlines-and-timeouts.md) |
 | `connect_timeout(duration)` | bound on establishing a connection |
+| `max_frame_bytes(limit)` | the largest SSE event or NDJSON line a [stream](./codecs.md#streams-sse-ndjson-and-bytestream) accepts (default `DEFAULT_MAX_FRAME_BYTES`, 16 MiB); a larger one ends the stream with `StreamError::FrameLimitExceeded`. Byte streams ignore it |
 | `proxy(url)` | send every request through this proxy |
 | `add_root_certificate(pem_or_der)` | trust an extra root certificate, in addition to the platform's |
 | `danger_accept_invalid_certificates()` | accept any server certificate, including self-signed and expired ones; only for devices that cannot present a valid one |
 | `user_agent(value)` | the `User-Agent` of every request |
 | `default_header(name, value)` | a header sent with every request unless the request sets the same header |
-| `api_key(secret)` | the client [credential](./credentials.md#setting-a-client-credential), placed wherever the API takes a single secret |
-| `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs that accept Basic |
-| `credentials(credential)` | the client credential in its general form |
-| `env_order([..])` | replace the order of the environment variables the fallback reads |
-| `cross_origin(policy)` | tighten the API's [cross-origin policy](./origins-and-redirects.md) |
+| `api_key(secret)` | the client [credential](./credentials.md#setting-a-client-credential), placed wherever the API (or, failing that, an endpoint's replacement policy) takes a single secret |
+| `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs where the API or an endpoint's replacement policy accepts Basic |
+| `credentials(credential)` | the client credential in its general form; sent only to endpoints whose policy accepts its kind |
+| `env_order([..])` | replace the order of the environment variables the API's fallback reads; an endpoint with its own policy keeps its own order |
+| `cross_origin(policy)` | tighten the API default and endpoint [cross-origin policies](./origins-and-redirects.md) |
 | `transport(&shared)` | take connections from a `SharedTransport` |
 | `pre_response_json(hook)`, `mutate_response::<R, _>(hook)` | register [response hooks](./hooks.md) |
 | `build()` | validate now; returns the same client or the `BuildError` |
@@ -162,7 +164,7 @@ carried by `TransportErrorKind::InvalidClient` when the first call finds it:
 | --- | --- |
 | `InvalidBaseUrl { reason }` | the base URL is not absolute, not HTTP(S), has no host, or carries user information |
 | `InvalidAllowedOrigin { reason }` | an `allow_origins` entry is not a bare HTTP(S) origin (it has a path, query, fragment, or user information) |
-| `OriginPolicyNotPermitted { definition, requested }` | `cross_origin(..)` would loosen the API's policy |
+| `OriginPolicyNotPermitted { definition, requested }` | `cross_origin(..)` would loosen the API default or an endpoint policy |
 | `TransportOptionConflict { option }` | a transport-owned setting was set on a client attached to a `SharedTransport` |
 | `AuthBearingDefaultHeader { name }` | a default header would carry a credential (for example `Authorization`, `Cookie`, or the API's key header); set a credential instead |
 | `InvalidHeader { name }` | a default header name or value is not valid HTTP |
@@ -170,6 +172,8 @@ carried by `TransportErrorKind::InvalidClient` when the first call finds it:
 | `InvalidProxy` | the proxy URL is not valid |
 | `InvalidCertificate` | a root certificate could not be parsed |
 | `Transport` | the HTTP client could not be initialized |
+| `InvalidMaxFrameBytes` | `max_frame_bytes(0)`: the frame limit must be at least one byte |
+| `InvalidGraphQlUrl { reason }` | the `graphql_url` override is not an HTTP(S) URL with a host, or carries user information or a fragment; or the API's address rules cannot derive an address from the base URL. The reason never quotes the URL |
 
 Neither a `BuildError` nor an `InvalidClient` transport error displays a
 credential or a header value.
@@ -213,4 +217,9 @@ let client = Client::<ExampleApi>::new(definition).build()?;
 ```
 
 `ApiDefinition::cross_origin(policy)` sets the API's own policy (default
-`same_origin`); callers can only tighten it afterward.
+`same_origin`). `ApiDefinition::endpoint_cross_origin("Upload", policy)`
+replaces it for requests whose `EndpointSpec::ENDPOINT_ID` is `Upload`,
+including redirects and followed pagination links. Generated definitions emit
+this from the endpoint builder's `cross_origin` setting. Caller policies must
+tighten the API policy and every authored endpoint policy; an incompatible
+setting fails client build. Endpoints without overrides retain the API policy.

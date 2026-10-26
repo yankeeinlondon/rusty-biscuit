@@ -14,7 +14,6 @@
 //! deserializer per item type.
 
 use std::marker::PhantomData;
-use std::ops::RangeInclusive;
 
 use bytes::Bytes;
 use http::{HeaderMap, Method};
@@ -26,7 +25,8 @@ use super::engine::Plan;
 use super::json::as_text;
 use super::spec::{Carry, Input, Strategy};
 use crate::codec::{Decode, DecodeFailure, DecodeFailureKind, LiveBody};
-use crate::endpoint::{EndpointSpec, FormPart, RequestBody, RequestParts};
+use crate::client::{append_query, remove_query};
+use crate::endpoint::{Address, EndpointSpec, ErrorRoute, FormPart, QueryValue, RequestBody, RequestParts};
 use crate::error::InvalidArgument;
 use crate::hooks::HookStage;
 
@@ -44,7 +44,8 @@ impl<R: EndpointSpec> EndpointSpec for PageRequest<R> {
 
     const ENDPOINT_ID: &'static str = R::ENDPOINT_ID;
     const METHOD: Method = R::METHOD;
-    const DECLARED_ERROR_STATUSES: RangeInclusive<u16> = R::DECLARED_ERROR_STATUSES;
+    const ERRORS: &'static [ErrorRoute] = R::ERRORS;
+    const ADDRESS: Address = R::ADDRESS;
 
     fn into_parts(self) -> Result<RequestParts, InvalidArgument> {
         self.parts
@@ -111,7 +112,7 @@ impl<R: EndpointSpec> EndpointSpec for StepRequest<R> {
 
     const ENDPOINT_ID: &'static str = R::ENDPOINT_ID;
     const METHOD: Method = R::METHOD;
-    const DECLARED_ERROR_STATUSES: RangeInclusive<u16> = R::DECLARED_ERROR_STATUSES;
+    const ERRORS: &'static [ErrorRoute] = R::ERRORS;
 
     fn into_parts(self) -> Result<RequestParts, InvalidArgument> {
         self.parts
@@ -175,7 +176,7 @@ pub(crate) fn build_parts(
     let mut parts = base.clone();
     if let Some(link) = &plan.link {
         let mut url = link.clone();
-        let carried: Vec<(String, String)> = base
+        let carried: Vec<(String, QueryValue)> = base
             .query
             .iter()
             .filter(|(name, _)| carry.keeps(name))
@@ -206,21 +207,14 @@ pub(crate) fn build_parts(
 }
 
 /// Sets each `(name, value)` on `url`'s query, replacing values of the same
-/// names already there and keeping everything else in order.
-fn set_url_query(url: &mut Url, pairs: &[(String, String)]) {
+/// names already there and keeping everything else in order and byte for
+/// byte. The values set are encoded as every declared query value is.
+fn set_url_query(url: &mut Url, pairs: &[(String, QueryValue)]) {
     if pairs.is_empty() {
         return;
     }
-    let kept: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(name, _)| !pairs.iter().any(|(set, _)| set == name))
-        .map(|(name, value)| (name.into_owned(), value.into_owned()))
-        .collect();
-    let mut query = url.query_pairs_mut();
-    query.clear();
-    for (name, value) in kept.iter().chain(pairs) {
-        query.append_pair(name, value);
-    }
+    remove_query(url, |name| pairs.iter().any(|(set, _)| set == name));
+    append_query(url, pairs.iter().map(|(name, value)| (name.as_str(), value)));
 }
 
 /// The body a follow-up re-sends under `carry`.
@@ -275,11 +269,11 @@ pub(crate) fn write_input(parts: &mut RequestParts, input: Input, value: &Value)
             if is_absolute(&parts.path) {
                 // A followed link keeps its query in the path.
                 let mut url = Url::parse(&parts.path).map_err(|_| InvalidArgument::new("the page link is not a valid URL"))?;
-                set_url_query(&mut url, &[(name.to_owned(), text)]);
+                set_url_query(&mut url, &[(name.to_owned(), QueryValue::Text(text))]);
                 parts.path = url.to_string();
             } else {
                 parts.query.retain(|(existing, _)| existing != name);
-                parts.query.push((name.to_owned(), text));
+                parts.query.push((name.to_owned(), QueryValue::Text(text)));
             }
         }
         Input::Header(name) => {
@@ -365,7 +359,7 @@ mod tests {
     #[test]
     fn link_query_values_are_replaced_and_others_kept_in_order() {
         let mut url = Url::parse("https://a.test/x?cursor=c1&per_page=5&q=a").expect("url");
-        set_url_query(&mut url, &[("per_page".to_owned(), "50".to_owned())]);
+        set_url_query(&mut url, &[("per_page".to_owned(), "50".into())]);
         assert_eq!(url.as_str(), "https://a.test/x?cursor=c1&q=a&per_page=50");
     }
 

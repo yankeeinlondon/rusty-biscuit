@@ -70,6 +70,13 @@ pub struct MergeRequest {
     #[serde(default)]
     pub closed_by: Option<User>,
 }
+impl schematic_define::Registration for MergeRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MergeRequest));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MergeRequestChanges {
@@ -89,6 +96,13 @@ pub struct MergeRequestChanges {
     #[serde(default)]
     pub changes: Vec<Diff>,
 }
+impl schematic_define::Registration for MergeRequestChanges {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MergeRequestChanges));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Commit {
@@ -113,6 +127,13 @@ pub struct Commit {
     #[serde(default)]
     pub web_url: Option<String>,
 }
+impl schematic_define::Registration for Commit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Commit));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Diff {

@@ -1,0 +1,1897 @@
+---
+kind: inventory
+---
+
+# Vocabulary migration inventory
+
+Captured from the existing bare-definition snapshots after `just migration-check` proved their equality with current definitions. No fixtures or generated artifacts were rewritten.
+
+## Catalog
+
+18 REST APIs; 539 endpoints; 1818 ordered schema-component rows. API keys and authentication declarations:
+
+- `anthropic`: `{"ApiKey":{"header":"X-Api-Key","value_prefix":null}}`.
+- `artificial-analysis-critpt`: `{"ApiKey":{"header":"x-api-key","value_prefix":null}}`.
+- `artificial-analysis-data`: `{"ApiKey":{"header":"x-api-key","value_prefix":null}}`.
+- `bitbucket`: `"Basic"`.
+- `elevenlabs`: `{"ApiKey":{"header":"xi-api-key","value_prefix":null}}`.
+- `emqx-basic`: `"Basic"`.
+- `emqx-bearer`: `{"BearerToken":{"header":null}}`.
+- `eversolo`: `"None"`.
+- `gitea`: `{"ApiKey":{"header":"Authorization","value_prefix":"token "}}`.
+- `github`: `{"BearerToken":{"header":null}}`.
+- `gitlab`: `{"ApiKey":{"header":"PRIVATE-TOKEN","value_prefix":null}}`.
+- `huggingface`: `{"BearerToken":{"header":null}}`.
+- `lmstudio`: `{"BearerToken":{"header":null}}`.
+- `ollama-native`: `"None"`.
+- `ollama-openai`: `"None"`.
+- `openai`: `{"BearerToken":{"header":null}}`.
+- `samsung-smart-tv`: `"None"`.
+- `unfolded-circle-core-rest`: `{"BearerToken":{"header":null}}`.
+
+## Required or enum-bearing query fields
+
+Each row names the current generated request type. Adoption is the actual snapshot of `param_adoptions`; do not treat every required field as a constructor input. An empty adoption list means no pager ownership. Optional enum fields still need caller migration.
+
+| API | Endpoint / request | Wire field | Required | Type | Style / explode | Pager adoption |
+| --- | --- | --- | --- | --- | --- | --- |
+| eversolo | `RemoteSendKey` / `RemoteSendKeyRequest` | `key` | true | `"String"` | Form / false | `[]` |
+| eversolo | `RemoteInputText` / `RemoteInputTextRequest` | `text` | true | `"String"` | Form / false | `[]` |
+| eversolo | `MusicSeekTo` / `MusicSeekToRequest` | `time` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `MusicSetInput` / `MusicSetInputRequest` | `tag` | true | `"String"` | Form / false | `[]` |
+| eversolo | `MusicSetOutput` / `MusicSetOutputRequest` | `tag` | true | `"String"` | Form / false | `[]` |
+| eversolo | `MusicSetVolume` / `MusicSetVolumeRequest` | `volume` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `MusicSetMute` / `MusicSetMuteRequest` | `isMute` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `PowerSetOption` / `PowerSetOptionRequest` | `tag` | true | `"String"` | Form / false | `[]` |
+| eversolo | `SystemSetScreenBrightness` / `SystemSetScreenBrightnessRequest` | `index` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `SystemSetKnobBrightness` / `SystemSetKnobBrightnessRequest` | `index` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `SystemSetVuMode` / `SystemSetVuModeRequest` | `index` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `SystemSetSpectrumMode` / `SystemSetSpectrumModeRequest` | `index` | true | `"Integer"` | Form / false | `[]` |
+| eversolo | `SystemChangeVuDisplay` / `SystemChangeVuDisplayRequest` | `openType` | true | `"Integer"` | Form / false | `[]` |
+| gitea | `ListPullRequests` / `ListPullRequestsRequest` | `state` | false | `{"Enum": ["open", "closed", "all"]}` | Form / false | `[]` |
+| gitea | `ListPullRequests` / `ListPullRequestsRequest` | `sort` | false | `{"Enum": ["oldest", "recentupdate", "leastupdate", "mostcomment", "leastcomment", "priority"]}` | Form / false | `[]` |
+| gitea | `ListIssues` / `ListIssuesRequest` | `state` | false | `{"Enum": ["open", "closed", "all"]}` | Form / false | `[]` |
+| gitea | `ListIssues` / `ListIssuesRequest` | `issue_type` | false | `{"Enum": ["issues", "pulls", "all"]}` | Form / false | `[]` |
+| github | `ListPullRequests` / `ListPullRequestsRequest` | `state` | false | `{"Enum": ["open", "closed", "all"]}` | Form / false | `[]` |
+| github | `ListPullRequests` / `ListPullRequestsRequest` | `sort` | false | `{"Enum": ["created", "updated", "popularity", "long-running"]}` | Form / false | `[]` |
+| github | `ListPullRequests` / `ListPullRequestsRequest` | `direction` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| github | `ListIssues` / `ListIssuesRequest` | `state` | false | `{"Enum": ["open", "closed", "all"]}` | Form / false | `[]` |
+| github | `ListIssues` / `ListIssuesRequest` | `sort` | false | `{"Enum": ["created", "updated", "comments"]}` | Form / false | `[]` |
+| github | `ListIssues` / `ListIssuesRequest` | `direction` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| github | `ListWorkflowRuns` / `ListWorkflowRunsRequest` | `status` | false | `{"Enum": ["completed", "action_required", "cancelled", "failure", "neutral", "skipped", "stale", "success", "timed_out", "in_progress", "queued", "requested", "waiting", "pending"]}` | Form / false | `[]` |
+| github | `ListOrgRepos` / `ListOrgReposRequest` | `repo_type` | false | `{"Enum": ["all", "public", "private", "forks", "sources", "member"]}` | Form / false | `[]` |
+| github | `ListOrgRepos` / `ListOrgReposRequest` | `sort` | false | `{"Enum": ["created", "updated", "pushed", "full_name"]}` | Form / false | `[]` |
+| github | `ListOrgRepos` / `ListOrgReposRequest` | `direction` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| gitlab | `GetRepositoryFile` / `GetRepositoryFileRequest` | `ref` | true | `"String"` | Form / false | `[]` |
+| gitlab | `ListGroupProjects` / `ListGroupProjectsRequest` | `visibility` | false | `{"Enum": ["public", "internal", "private"]}` | Form / false | `[]` |
+| gitlab | `ListGroupProjects` / `ListGroupProjectsRequest` | `order_by` | false | `{"Enum": ["id", "name", "path", "created_at", "updated_at", "last_activity_at"]}` | Form / false | `[]` |
+| gitlab | `ListGroupProjects` / `ListGroupProjectsRequest` | `sort` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| gitlab | `ListMergeRequests` / `ListMergeRequestsRequest` | `state` | false | `{"Enum": ["opened", "closed", "merged", "all"]}` | Form / false | `[]` |
+| gitlab | `ListIssues` / `ListIssuesRequest` | `state` | false | `{"Enum": ["opened", "closed", "all"]}` | Form / false | `[]` |
+| gitlab | `ListProjectPipelines` / `ListProjectPipelinesRequest` | `status` | false | `{"Enum": ["created", "waiting_for_resource", "preparing", "pending", "running", "success", "failed", "canceled", "skipped", "manual", "scheduled"]}` | Form / false | `[]` |
+| openai | `ListChatCompletions` / `ListChatCompletionsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `GetChatCompletionMessages` / `GetChatCompletionMessagesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListContainers` / `ListContainersRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListContainerFiles` / `ListContainerFilesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListConversationItems` / `ListConversationItemsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListEvals` / `ListEvalsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListEvals` / `ListEvalsRequest` | `order_by` | false | `{"Enum": ["created_at", "updated_at"]}` | Form / false | `[]` |
+| openai | `GetEvalRuns` / `GetEvalRunsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `GetEvalRuns` / `GetEvalRunsRequest` | `status` | false | `{"Enum": ["queued", "in_progress", "completed", "canceled", "failed"]}` | Form / false | `[]` |
+| openai | `GetEvalRunOutputItems` / `GetEvalRunOutputItemsRequest` | `status` | false | `{"Enum": ["fail", "pass"]}` | Form / false | `[]` |
+| openai | `GetEvalRunOutputItems` / `GetEvalRunOutputItemsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListFiles` / `ListFilesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListFineTuningCheckpointPermissions` / `ListFineTuningCheckpointPermissionsRequest` | `order` | false | `{"Enum": ["ascending", "descending"]}` | Form / false | `[]` |
+| openai | `AdminApiKeysList` / `AdminApiKeysListRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListOrganizationCertificates` / `ListOrganizationCertificatesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `GetCertificate` / `GetCertificateRequest` | `include` | false | `{"Array": {"Enum": ["content"]}}` | Form / false | `[]` |
+| openai | `UsageCosts` / `UsageCostsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageCosts` / `UsageCostsRequest` | `bucket_width` | false | `{"Enum": ["1d"]}` | Form / false | `[]` |
+| openai | `UsageCosts` / `UsageCostsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "line_item", "api_key_id"]}}` | Form / false | `[]` |
+| openai | `ListGroups` / `ListGroupsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListGroupRoleAssignments` / `ListGroupRoleAssignmentsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListGroupUsers` / `ListGroupUsersRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListProjectApiKeys` / `ListProjectApiKeysRequest` | `owner_project_access` | false | `{"Enum": ["active", "inactive", "any"]}` | Form / false | `[]` |
+| openai | `ListProjectCertificates` / `ListProjectCertificatesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListProjectGroups` / `ListProjectGroupsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `RetrieveProjectGroup` / `RetrieveProjectGroupRequest` | `group_type` | false | `{"Enum": ["group", "tenant_group"]}` | Form / false | `[]` |
+| openai | `ListProjectSpendAlerts` / `ListProjectSpendAlertsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListRoles` / `ListRolesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListOrganizationSpendAlerts` / `ListOrganizationSpendAlertsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `UsageAudioSpeeches` / `UsageAudioSpeechesRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageAudioSpeeches` / `UsageAudioSpeechesRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageAudioSpeeches` / `UsageAudioSpeechesRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model"]}}` | Form / false | `[]` |
+| openai | `UsageAudioTranscriptions` / `UsageAudioTranscriptionsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageAudioTranscriptions` / `UsageAudioTranscriptionsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageAudioTranscriptions` / `UsageAudioTranscriptionsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model"]}}` | Form / false | `[]` |
+| openai | `UsageCodeInterpreterSessions` / `UsageCodeInterpreterSessionsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageCodeInterpreterSessions` / `UsageCodeInterpreterSessionsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageCodeInterpreterSessions` / `UsageCodeInterpreterSessionsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id"]}}` | Form / false | `[]` |
+| openai | `UsageCompletions` / `UsageCompletionsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageCompletions` / `UsageCompletionsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageCompletions` / `UsageCompletionsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model", "batch", "service_tier"]}}` | Form / false | `[]` |
+| openai | `UsageEmbeddings` / `UsageEmbeddingsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageEmbeddings` / `UsageEmbeddingsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageEmbeddings` / `UsageEmbeddingsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model"]}}` | Form / false | `[]` |
+| openai | `UsageFileSearchCalls` / `UsageFileSearchCallsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageFileSearchCalls` / `UsageFileSearchCallsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageFileSearchCalls` / `UsageFileSearchCallsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "vector_store_id"]}}` | Form / false | `[]` |
+| openai | `UsageImages` / `UsageImagesRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageImages` / `UsageImagesRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageImages` / `UsageImagesRequest` | `sources` | false | `{"Array": {"Enum": ["image.generation", "image.edit", "image.variation"]}}` | Form / false | `[]` |
+| openai | `UsageImages` / `UsageImagesRequest` | `sizes` | false | `{"Array": {"Enum": ["256x256", "512x512", "1024x1024", "1792x1792", "1024x1792"]}}` | Form / false | `[]` |
+| openai | `UsageImages` / `UsageImagesRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model", "size", "source"]}}` | Form / false | `[]` |
+| openai | `UsageModerations` / `UsageModerationsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageModerations` / `UsageModerationsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageModerations` / `UsageModerationsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model"]}}` | Form / false | `[]` |
+| openai | `UsageVectorStores` / `UsageVectorStoresRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageVectorStores` / `UsageVectorStoresRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageVectorStores` / `UsageVectorStoresRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id"]}}` | Form / false | `[]` |
+| openai | `UsageWebSearchCalls` / `UsageWebSearchCallsRequest` | `start_time` | true | `"Integer"` | Form / false | `[]` |
+| openai | `UsageWebSearchCalls` / `UsageWebSearchCallsRequest` | `bucket_width` | false | `{"Enum": ["1m", "1h", "1d"]}` | Form / false | `[]` |
+| openai | `UsageWebSearchCalls` / `UsageWebSearchCallsRequest` | `context_levels` | false | `{"Array": {"Enum": ["low", "medium", "high"]}}` | Form / false | `[]` |
+| openai | `UsageWebSearchCalls` / `UsageWebSearchCallsRequest` | `group_by` | false | `{"Array": {"Enum": ["project_id", "user_id", "api_key_id", "model", "context_level"]}}` | Form / false | `[]` |
+| openai | `ListUserRoleAssignments` / `ListUserRoleAssignmentsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListProjectGroupRoleAssignments` / `ListProjectGroupRoleAssignmentsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListProjectRoles` / `ListProjectRolesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListProjectUserRoleAssignments` / `ListProjectUserRoleAssignmentsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListInputItems` / `ListInputItemsRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListVectorStores` / `ListVectorStoresRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListFilesInVectorStoreBatch` / `ListFilesInVectorStoreBatchRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListFilesInVectorStoreBatch` / `ListFilesInVectorStoreBatchRequest` | `filter` | false | `{"Enum": ["in_progress", "completed", "failed", "cancelled"]}` | Form / false | `[]` |
+| openai | `ListVectorStoreFiles` / `ListVectorStoreFilesRequest` | `order` | false | `{"Enum": ["asc", "desc"]}` | Form / false | `[]` |
+| openai | `ListVectorStoreFiles` / `ListVectorStoreFilesRequest` | `filter` | false | `{"Enum": ["in_progress", "completed", "failed", "cancelled"]}` | Form / false | `[]` |
+
+## Manifest-verified reverse dependencies
+
+Direct dependencies on Schematic packages, including the excluded generated crate. Development dependencies are included; prototype manifests are excluded.
+
+- `biscuit-speaks/lib/Cargo.toml` → `biscuit-speaks`: schematic-schema (dependencies).
+- `homelab/arcam-amp-integration/Cargo.toml` → `arcam-amp-integration`: schematic-schema (dependencies).
+- `homelab/eversolo-integration/Cargo.toml` → `eversolo-integration`: schematic-schema (dependencies).
+- `homelab/lib/Cargo.toml` → `homelab`: schematic-schema (dependencies).
+- `homelab/sony-receiver-integration/Cargo.toml` → `sony-receiver-integration`: schematic-schema (dependencies).
+- `homelab/unfolded-integration-helper/Cargo.toml` → `unfolded-integration-helper`: schematic-schema (dependencies).
+- `model-citizen/lib/Cargo.toml` → `model-citizen`: schematic-definitions (dependencies).
+- `schematic/definitions/Cargo.toml` → `schematic-definitions`: schematic-define (dependencies).
+- `schematic/gen/Cargo.toml` → `schematic-gen`: schematic-define (dependencies), schematic-definitions (dependencies).
+- `schematic/oauth/Cargo.toml` → `schematic-oauth`: schematic-define (dependencies).
+- `schematic/schema/Cargo.toml` → `schematic-schema`: schematic-define (dependencies), schematic-definitions (dependencies), schematic-runtime (dependencies).
+- `sniff/lib/Cargo.toml` → `sniff`: schematic-schema (dependencies).
+
+## Repository caller locations
+
+The first list includes references to every affected required/enum request outside generated code. The second conservatively retains all request and default construction sites in the eight direct external consumer libraries, plus setter/enum assignments and Schematic imports. Entries are source coordinates for the next phase; generic defaults need their surrounding type checked before migration. Source matches are an inventory, not evidence that every match will break.
+
+### Affected request references
+
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2000`: `assert!(github.contains("impl schematic_runtime::EndpointSpec for ListPullRequestsRequest"));`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2106`: `use schematic_schema::gitea::{GetGitTreeRequest, Gitea, ListPullRequestsRequest};`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2107`: `use schematic_schema::gitlab::{GetRepositoryFileRequest, GitLab};`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2108`: `use schematic_schema::openai::{CreateResponseRequest, GetResponseRequest, DeleteResponseRequest, CancelResponseRequest, CompactconversationRequest, GetinputtokencountsRequest, ListInputItemsRequest, ListConversationItemsRequest, OpenAI};`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2150`: `let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2156`: `let mut empty = ListPullRequestsRequest::new("o", "r");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2161`: `let _ = gitea.send(ListPullRequestsRequest::new("o", "r")).credential(key.clone()).full().await;`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2179`: `let paged = ListPullRequestsRequest::new("o", "r");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2186`: `GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string()),`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2192`: `let omitted = GetRepositoryFileRequest::new("group/project", "dir/file name.rs");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2197`: `let request = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref(git_ref.to_string());`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2207`: `let mut items = ListConversationItemsRequest::new("conv 1");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2218`: `let mut beta = ListInputItemsRequest::new("resp 1");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2250`: `beta_pair!(ListInputItemsRequest::new("resp 1"), "ListInputItems");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2263`: `let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2277`: `let mut empty = ListPullRequestsRequest::new("o", "r");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2281`: `let parts = ListPullRequestsRequest::new("o", "r").into_parts().unwrap();`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2288`: `let parts = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string())`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2296`: `let mut items = ListConversationItemsRequest::new("conv 1");`
+- `schematic/gen/tests/l1/fresh_output_compile.rs:2302`: `let mut beta = ListInputItemsRequest::new("resp 1");`
+
+### External consumer construction and assignment exposure
+
+
+#### sniff/lib
+
+- `sniff/lib/benches/cases/filesystem.rs:17`: `use sniff::request::{FilesystemRequest, GitRequest, RepoRequest};`
+- `sniff/lib/benches/cases/filesystem.rs:43`: `let req = GitRequest::summary();`
+- `sniff/lib/benches/cases/filesystem.rs:51`: `let req = GitRequest::full();`
+- `sniff/lib/benches/cases/filesystem.rs:59`: `let req = GitRequest::summary();`
+- `sniff/lib/benches/cases/filesystem.rs:67`: `let req = GitRequest::full();`
+- `sniff/lib/benches/cases/filesystem.rs:96`: `// 'RepoRequest::full()' on large monorepos.`
+- `sniff/lib/benches/cases/filesystem.rs:206`: `let req = FilesystemRequest::new()`
+- `sniff/lib/benches/cases/filesystem.rs:207`: `.git(GitRequest::summary())`
+- `sniff/lib/benches/cases/filesystem.rs:208`: `.repo(RepoRequest::structure())`
+- `sniff/lib/benches/cases/filesystem.rs:220`: `let req = FilesystemRequest::new();`
+- `sniff/lib/benches/cases/git.rs:17`: `use sniff::request::GitRequest;`
+- `sniff/lib/benches/cases/git.rs:43`: `let full_req = GitRequest::full();`
+- `sniff/lib/benches/cases/git.rs:60`: `let deep_req = GitRequest::deep();`
+- `sniff/lib/benches/cases/git.rs:84`: `let deep_req = GitRequest::deep().commit_count(10);`
+- `sniff/lib/benches/cases/git_ops.rs:20`: `use sniff::request::GitRequest;`
+- `sniff/lib/benches/cases/git_ops.rs:92`: `let summary_req = GitRequest::summary();`
+- `sniff/lib/benches/cases/git_ops.rs:93`: `let full_req = GitRequest::full();`
+- `sniff/lib/benches/cases/git_ops.rs:138`: `let identity_req = GitRequest::identity();`
+- `sniff/lib/benches/cases/git_ops.rs:139`: `let summary_req = GitRequest::summary();`
+- `sniff/lib/benches/cases/git_ops.rs:267`: `let deep_req = GitRequest::deep().commit_count(10);`
+- `sniff/lib/benches/cases/hardware.rs:19`: `use sniff::request::HardwareRequest;`
+- `sniff/lib/benches/cases/hardware.rs:79`: `let req = HardwareRequest::full();`
+- `sniff/lib/benches/cases/hardware.rs:87`: `let req = HardwareRequest::summary().include_storage(true);`
+- `sniff/lib/benches/cases/hardware.rs:95`: `let req = HardwareRequest::summary().include_gpu(true);`
+- `sniff/lib/benches/cases/hardware.rs:106`: `let req = HardwareRequest::summary().include_audio(true);`
+- `sniff/lib/benches/cases/network.rs:20`: `use sniff::request::NetworkRequest;`
+- `sniff/lib/benches/cases/network.rs:30`: `let req = NetworkRequest::interfaces_only();`
+- `sniff/lib/benches/cases/network.rs:40`: `let req = NetworkRequest::full().force_refresh(true);`
+- `sniff/lib/benches/cases/network.rs:49`: `let warm = NetworkRequest::full();`
+- `sniff/lib/benches/cases/network.rs:52`: `let req = NetworkRequest::full();`
+- `sniff/lib/benches/cases/workload_matrix.rs:18`: `use sniff::request::{FilesystemRequest, GitRequest};`
+- `sniff/lib/benches/cases/workload_matrix.rs:84`: `let request = FilesystemRequest::new()`
+- `sniff/lib/benches/cases/workload_matrix.rs:102`: `let request = FilesystemRequest::new()`
+- `sniff/lib/benches/cases/workload_matrix.rs:103`: `.git(GitRequest::identity())`
+- `sniff/lib/benches/cases/workload_matrix.rs:143`: `let request = FilesystemRequest::new().without_git().without_formatting();`
+- `sniff/lib/benches/cases/workload_matrix.rs:164`: `let request = FilesystemRequest::new()`
+- `sniff/lib/benches/cases/workload_matrix.rs:194`: `let request = FilesystemRequest::new().without_git().without_formatting();`
+- `sniff/lib/benches/cases/workload_matrix.rs:217`: `let request = GitRequest::deep();`
+- `sniff/lib/benches/cases/workload_matrix.rs:232`: `let request = GitRequest::full();`
+- `sniff/lib/benches/cases/workload_matrix.rs:241`: `let request = GitRequest::deep().commit_count(100);`
+- `sniff/lib/benches/support/network_fixture.rs:2`: `//! 'detect_network_with_request(NetworkRequest::full())' path.`
+- `sniff/lib/benches/support/plans.rs:9`: `FilesystemRequest, GitRequest, HardwareRequest, NetworkRequest, OsRequest, RepoRequest,`
+- `sniff/lib/benches/support/plans.rs:36`: `.os(OsRequest::summary())`
+- `sniff/lib/benches/support/plans.rs:37`: `.hardware(HardwareRequest::summary())`
+- `sniff/lib/benches/support/plans.rs:38`: `.network(NetworkRequest::interfaces_only())`
+- `sniff/lib/benches/support/plans.rs:40`: `FilesystemRequest::new()`
+- `sniff/lib/benches/support/plans.rs:41`: `.git(GitRequest::summary())`
+- `sniff/lib/benches/support/plans.rs:42`: `.repo(RepoRequest::structure())`
+- `sniff/lib/benches/support/plans.rs:65`: `.network(NetworkRequest::full())`
+- `sniff/lib/examples/work_counts.rs:38`: `use sniff::request::{FilesystemRequest, GitRequest, RepoRequest};`
+- `sniff/lib/examples/work_counts.rs:53`: `let request = FilesystemRequest::new()`
+- `sniff/lib/examples/work_counts.rs:54`: `.git(GitRequest::summary())`
+- `sniff/lib/examples/work_counts.rs:55`: `.repo(RepoRequest::structure())`
+- `sniff/lib/examples/work_counts.rs:63`: `detect_filesystem_with_request(large.path(), &FilesystemRequest::new()).map(drop)`
+- `sniff/lib/examples/work_counts.rs:75`: `detect_git_with_request(dirty.path(), &GitRequest::full()).map(drop)`
+- `sniff/lib/examples/work_counts.rs:79`: `detect_git_with_request(dirty.path(), &GitRequest::deep()).map(drop)`
+- `sniff/lib/src/filesystem/docs.rs:172`: `/// ['RepoRequest::structure']: crate::request::RepoRequest::structure`
+- `sniff/lib/src/filesystem/docs.rs:1053`: `return Some(dt.with_timezone(&Utc));`
+- `sniff/lib/src/filesystem/file_types/aggregate.rs:53`: `.with_completeness_of(inventory)`
+- `sniff/lib/src/filesystem/file_types/model.rs:476`: `..Default::default()`
+- `sniff/lib/src/filesystem/file_types/model.rs:484`: `let summary = LanguageSummary::default().with_completeness_of(&inventory);`
+- `sniff/lib/src/filesystem/formatting.rs:184`: `..Default::default()`
+- `sniff/lib/src/filesystem/formatting.rs:233`: `"indent_style" => section.indent_style = None,`
+- `sniff/lib/src/filesystem/formatting.rs:234`: `"indent_size" => section.indent_size = None,`
+- `sniff/lib/src/filesystem/formatting.rs:235`: `"tab_width" => section.tab_width = None,`
+- `sniff/lib/src/filesystem/formatting.rs:236`: `"end_of_line" => section.end_of_line = None,`
+- `sniff/lib/src/filesystem/formatting.rs:237`: `"charset" => section.charset = None,`
+- `sniff/lib/src/filesystem/formatting.rs:238`: `"trim_trailing_whitespace" => section.trim_trailing_whitespace = None,`
+- `sniff/lib/src/filesystem/formatting.rs:239`: `"insert_final_newline" => section.insert_final_newline = None,`
+- `sniff/lib/src/filesystem/formatting.rs:240`: `"max_line_length" => section.max_line_length = None,`
+- `sniff/lib/src/filesystem/formatting.rs:250`: `section.indent_style = Some(value.to_lowercase());`
+- `sniff/lib/src/filesystem/formatting.rs:257`: `section.indent_size = None;`
+- `sniff/lib/src/filesystem/formatting.rs:266`: `section.end_of_line = Some(value.to_lowercase());`
+- `sniff/lib/src/filesystem/formatting.rs:269`: `section.charset = Some(value.to_lowercase());`
+- `sniff/lib/src/filesystem/git/api.rs:256`: `repo.with_cached_gix(|repo| {`
+- `sniff/lib/src/filesystem/git/changed_paths_tests.rs:801`: `use crate::request::GitRequest;`
+- `sniff/lib/src/filesystem/git/changed_paths_tests.rs:835`: `for request in [GitRequest::minimal(), GitRequest::summary()] {`
+- `sniff/lib/src/filesystem/git/changed_paths_tests.rs:838`: `let mut counts = GitRequest::minimal();`
+- `sniff/lib/src/filesystem/git/discovery.rs:14`: `use crate::request::GitRequest;`
+- `sniff/lib/src/filesystem/git/discovery.rs:166`: `pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Option<GitInfo>> {`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:4`: `use crate::{SniffError, request::GitRequest};`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:38`: `let identity = discover(path).detect_with_request(&GitRequest::identity()).unwrap();`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:57`: `let mut counts = GitRequest::minimal();`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:59`: `for request in [GitRequest::minimal(), GitRequest::summary(), counts, GitRequest::full()] {`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:102`: `for request in [GitRequest::minimal(), GitRequest::summary()] {`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:107`: `let mut counts = GitRequest::minimal();`
+- `sniff/lib/src/filesystem/git/index_reads_tests.rs:110`: `for request in [counts, GitRequest::full()] {`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:32`: `let probe = repo.clone().with_object_memory();`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:69`: `let pipeline = gix::merge::blob::Pipeline::new(Default::default(), filter, Default::default());`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:89`: `tree_options.fail_on_conflict = None;`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:145`: `..Default::default()`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:153`: `gix::diff::blob::Pipeline::new(Default::default(), filter, Vec::new(), Default::default());`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:174`: `Default::default(),`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:177`: `Default::default(),`
+- `sniff/lib/src/filesystem/git/merge_conflicts.rs:317`: `selected.initialize_with_selection(&Default::default(), ["merge", "filter"]);`
+- `sniff/lib/src/filesystem/git/open.rs:40`: `match gix::ThreadSafeRepository::discover_opts(path, Default::default(), trusted_options()) {`
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs:79`: `repo.with_cached_gix(|gix| collect_from(gix, options, &catalog, now, None))?;`
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs:80`: `Ok(commits.with_repo_root(repo.repo_root().to_path_buf()))`
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs:100`: `repo.with_cached_gix(|gix| collect_from(gix, options, &catalog, now, Some(refs)))?;`
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs:101`: `Ok(commits.with_repo_root(repo.repo_root().to_path_buf()))`
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs:133`: `.with_hidden(hidden)`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:116`: `let local_today = now.with_timezone(&timezone).date_naive();`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:179`: `.with_timezone(&Utc)`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:395`: `self.branch = Some(branch.into());`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:409`: `self.scope = Some(scope.into());`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:416`: `self.author = Some(author.into());`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:422`: `self.package = Some(package.into());`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:428`: `self.package_area = Some(package_area.into());`
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs:482`: `Utc.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap()`
+- `sniff/lib/src/filesystem/git/recent_commits/payload.rs:39`: `self.repo_root = Some(repo_root);`
+- `sniff/lib/src/filesystem/git/recent_commits/payload.rs:226`: `.map(|parsed| parsed.with_timezone(&Utc))`
+- `sniff/lib/src/filesystem/git/recent_commits/payload.rs:266`: `datetime: Utc.with_ymd_and_hms(2026, 9, 17, 8, 30, 0).unwrap(),`
+- `sniff/lib/src/filesystem/git/recent_commits/payload.rs:427`: `Utc.with_ymd_and_hms(2026, 9, 17, 8, 30, 0).unwrap()`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:46`: `Some(root) => projected.with_repo_root(root.to_path_buf()),`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:266`: `let local = datetime.with_timezone(&timezone);`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:267`: `let today = now.with_timezone(&timezone).date_naive();`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:453`: `Utc.with_ymd_and_hms(2026, 9, 17, 18, 0, 0).unwrap()`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:490`: `datetime: Utc.with_ymd_and_hms(2026, 9, 17, 13, 1, 0).unwrap(),`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:518`: `datetime: Utc.with_ymd_and_hms(2026, 9, 16, 9, 30, 0).unwrap(),`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:533`: `.with_repo_root(repo_root())`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:676`: `let commits = RecentCommits::from_commits(vec![commit]).with_repo_root(repo_root());`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:790`: `datetime: Utc.with_ymd_and_hms(2026, 9, 17, 2, 0, 0).unwrap(),`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:808`: `datetime: Utc.with_ymd_and_hms(2026, 4, 1, 23, 30, 0).unwrap(),`
+- `sniff/lib/src/filesystem/git/recent_commits/render.rs:833`: `.with_repo_root(repo_root())`
+- `sniff/lib/src/filesystem/git/remote_refresh.rs:298`: `.with_hidden(Some(hide))`
+- `sniff/lib/src/filesystem/git/remote_refresh.rs:535`: `.with_hidden(hidden)`
+- `sniff/lib/src/filesystem/git/remote_refresh.rs:824`: `commit.remotes = Some(containing);`
+- `sniff/lib/src/filesystem/git/remote_refresh.rs:911`: `/// default for ['GitRequest::full()'] and keeps enumeration fast on checkouts`
+- `sniff/lib/src/filesystem/git/remote_refresh.rs:1373`: `commits[0].remotes = None;`
+- `sniff/lib/src/filesystem/git/status.rs:21`: `/// Used by unit tests to prove that ['GitRequest::identity()'] never triggers a`
+- `sniff/lib/src/filesystem/git/status.rs:1050`: `/// Backs 'GitRequest::minimal()'/'summary()': those requests only need the`
+- `sniff/lib/src/filesystem/git/types.rs:10`: `use crate::request::GitRequest;`
+- `sniff/lib/src/filesystem/git/types.rs:896`: `self.with_cached_gix(|repo| {`
+- `sniff/lib/src/filesystem/git/types.rs:1033`: `/// diffs should use ['Self::detect_with_request'] with ['GitRequest::full()'] directly.`
+- `sniff/lib/src/filesystem/git/types.rs:1036`: `GitRequest::deep().commit_count(commit_count)`
+- `sniff/lib/src/filesystem/git/types.rs:1039`: `// New callers should use detect_with_request(GitRequest::full()) to`
+- `sniff/lib/src/filesystem/git/types.rs:1041`: `GitRequest::full()`
+- `sniff/lib/src/filesystem/git/types.rs:1056`: `/// Build the status-free identity payload used by ['GitRequest::identity()'].`
+- `sniff/lib/src/filesystem/git/types.rs:1079`: `pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {`
+- `sniff/lib/src/filesystem/git/types.rs:1239`: `status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);`
+- `sniff/lib/src/filesystem/git/types.rs:1297`: `let branches = self.with_cached_gix(|repo| {`
+- `sniff/lib/src/filesystem/git/types.rs:1305`: `.with_cached_gix(super::worktree::list_worktrees_from_gix)`
+- `sniff/lib/src/filesystem/git/types.rs:1311`: `self.with_cached_gix(super::worktree::current_worktree_name_from_gix);`
+- `sniff/lib/src/filesystem/git/types.rs:1365`: `/// Only populated by ['GitRequest::identity()']; status-bearing presets`
+- `sniff/lib/src/filesystem/git/types.rs:1833`: `git_repo.detect_with_request(&GitRequest::full()).is_err(),`
+- `sniff/lib/src/filesystem/git/types.rs:1883`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:1895`: `.detect_with_request(&GitRequest::summary())`
+- `sniff/lib/src/filesystem/git/types.rs:1911`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:1941`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:1966`: `GitRequest::identity(),`
+- `sniff/lib/src/filesystem/git/types.rs:1967`: `GitRequest::minimal(),`
+- `sniff/lib/src/filesystem/git/types.rs:1968`: `GitRequest::summary(),`
+- `sniff/lib/src/filesystem/git/types.rs:2002`: `for request in [GitRequest::identity(), GitRequest::summary(), GitRequest::full()] {`
+- `sniff/lib/src/filesystem/git/types.rs:2018`: `.detect_with_request(&GitRequest::summary())`
+- `sniff/lib/src/filesystem/git/types.rs:2043`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:2060`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:2076`: `.detect_with_request(&GitRequest::identity())`
+- `sniff/lib/src/filesystem/git/types.rs:2086`: `.detect_with_request(&GitRequest::summary())`
+- `sniff/lib/src/filesystem/git/types.rs:2106`: `for request in [GitRequest::minimal(), GitRequest::summary()] {`
+- `sniff/lib/src/filesystem/git/types.rs:2120`: `for request in [GitRequest::full(), GitRequest::deep()] {`
+- `sniff/lib/src/filesystem/git/types.rs:2154`: `let mut request = GitRequest::full().metadata(`
+- `sniff/lib/src/filesystem/git/types.rs:2155`: `crate::request::GitMetadataRequest::none()`
+- `sniff/lib/src/filesystem/git/types.rs:2202`: `GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));`
+- `sniff/lib/src/filesystem/git/types.rs:2236`: `GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));`
+- `sniff/lib/src/filesystem/git/worktree.rs:128`: `repo.with_cached_gix(list_worktrees_from_gix)`
+- `sniff/lib/src/filesystem/git/worktree.rs:133`: `repo.with_cached_gix(current_worktree_name_from_gix)`
+- `sniff/lib/src/filesystem/mod.rs:3`: `use crate::request::{FilesystemRequest, GitRequest, RepoRequest};`
+- `sniff/lib/src/filesystem/mod.rs:224`: `pub fn detect_git(&self, request: &GitRequest) -> Result<Option<GitInfo>> {`
+- `sniff/lib/src/filesystem/mod.rs:225`: `self.with_repository(|repo| repo.detect_with_request(request))`
+- `sniff/lib/src/filesystem/mod.rs:234`: `self.with_repository(GitRepo::file_changes)`
+- `sniff/lib/src/filesystem/mod.rs:244`: `self.with_repository(GitRepo::merge_conflicts)`
+- `sniff/lib/src/filesystem/mod.rs:314`: `fn of(request: &FilesystemRequest) -> Self {`
+- `sniff/lib/src/filesystem/mod.rs:380`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/mod.rs:414`: `request: &FilesystemRequest,`
+- `sniff/lib/src/filesystem/mod.rs:426`: `request: &FilesystemRequest,`
+- `sniff/lib/src/filesystem/mod.rs:445`: `request: &FilesystemRequest,`
+- `sniff/lib/src/filesystem/mod.rs:452`: `request: &FilesystemRequest,`
+- `sniff/lib/src/filesystem/mod.rs:494`: `.with_repository(|repo| repo.detect_with_request(git_request));`
+- `sniff/lib/src/filesystem/mod.rs:531`: `let structure_request = RepoRequest::structure();`
+- `sniff/lib/src/filesystem/mod.rs:583`: `.with_repository(|repo| {`
+- `sniff/lib/src/filesystem/mod.rs:723`: `GitRequest::deep().commit_count(commit_count)`
+- `sniff/lib/src/filesystem/mod.rs:725`: `GitRequest::full().commit_count(commit_count)`
+- `sniff/lib/src/filesystem/mod.rs:727`: `detect_filesystem_with_request(root, &FilesystemRequest::new().git(git_request))`
+- `sniff/lib/src/filesystem/mod.rs:804`: `use crate::request::{DetectionPlan, GitRequest, RepoRequest};`
+- `sniff/lib/src/filesystem/mod.rs:836`: `fn seeded_fixture_request() -> FilesystemRequest {`
+- `sniff/lib/src/filesystem/mod.rs:837`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:838`: `.git(GitRequest::identity())`
+- `sniff/lib/src/filesystem/mod.rs:839`: `.repo(RepoRequest::structure())`
+- `sniff/lib/src/filesystem/mod.rs:971`: `let second = observation.detect_git(&GitRequest::identity());`
+- `sniff/lib/src/filesystem/mod.rs:990`: `let request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:991`: `.git(GitRequest::full())`
+- `sniff/lib/src/filesystem/mod.rs:1051`: `&FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1052`: `.git(GitRequest::identity())`
+- `sniff/lib/src/filesystem/mod.rs:1095`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1096`: `.git(GitRequest::identity())`
+- `sniff/lib/src/filesystem/mod.rs:1097`: `.repo(RepoRequest::structure())`
+- `sniff/lib/src/filesystem/mod.rs:1134`: `let cases: Vec<(&str, FilesystemRequest, WalkScope)> = vec![`
+- `sniff/lib/src/filesystem/mod.rs:1137`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1146`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1147`: `.git(GitRequest::summary())`
+- `sniff/lib/src/filesystem/mod.rs:1148`: `.repo(RepoRequest::structure())`
+- `sniff/lib/src/filesystem/mod.rs:1156`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1166`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1167`: `.repo(RepoRequest::full())`
+- `sniff/lib/src/filesystem/mod.rs:1175`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1184`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1193`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1194`: `.git(GitRequest::summary())`
+- `sniff/lib/src/filesystem/mod.rs:1195`: `.repo(RepoRequest::structure())`
+- `sniff/lib/src/filesystem/mod.rs:1202`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1203`: `.git(GitRequest::summary())`
+- `sniff/lib/src/filesystem/mod.rs:1204`: `.repo(RepoRequest::full())`
+- `sniff/lib/src/filesystem/mod.rs:1226`: `let request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1228`: `.repo(RepoRequest::focused(`
+- `sniff/lib/src/filesystem/mod.rs:1229`: `crate::request::RepoDetailRequest::all(),`
+- `sniff/lib/src/filesystem/mod.rs:1266`: `let request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1298`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1302`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1313`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1335`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1339`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1350`: `..Default::default()`
+- `sniff/lib/src/filesystem/mod.rs:1367`: `use crate::request::GitRequest;`
+- `sniff/lib/src/filesystem/mod.rs:1381`: `let request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/mod.rs:1382`: `.git(GitRequest::full())`
+- `sniff/lib/src/filesystem/query/backend.rs:221`: `Some(detail) => example.with_detail(detail),`
+- `sniff/lib/src/filesystem/query/backend.rs:295`: `.with_exe(UpdateKind::Always)`
+- `sniff/lib/src/filesystem/query/backend.rs:296`: `.with_user(UpdateKind::Always),`
+- `sniff/lib/src/filesystem/query/linux.rs:108`: `Some(LimitationExample::path(self.proc_root.as_path()).with_detail(error.to_string())),`
+- `sniff/lib/src/filesystem/query/linux.rs:125`: `Some(LimitationExample::pid(pid).with_detail(detail)),`
+- `sniff/lib/src/filesystem/query/linux.rs:408`: `object.path = Some(PathBuf::from(OsString::from_vec(bytes)));`
+- `sniff/lib/src/filesystem/query/linux.rs:463`: `self.whole = Some(if error.kind() == io::ErrorKind::PermissionDenied {`
+- `sniff/lib/src/filesystem/query/linux_tests.rs:854`: `query_path_usage(path, &options.with_deadline(Duration::from_secs(120))).expect("report")`
+- `sniff/lib/src/filesystem/query/macos.rs:161`: `Some(LimitationExample::pid(pid).with_detail(detail)),`
+- `sniff/lib/src/filesystem/query/macos.rs:335`: `tally.whole = Some(match fault {`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:338`: `gone.inode = u64::MAX;`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:446`: `process.tasks = vec![Ok(Task {`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:465`: `process.tasks = vec![Err(Fault::Failed("short read".to_string()))];`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:532`: `process.tasks = vec![task(START), task(START + 1)];`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:549`: `process.tasks = vec![task(START), Err(Fault::Gone)];`
+- `sniff/lib/src/filesystem/query/macos_tests.rs:715`: `query_path_usage(path, &options.with_deadline(Duration::from_secs(120))).expect("report")`
+- `sniff/lib/src/filesystem/query/mod.rs:219`: `Some(LimitationExample::path(root.resolved.as_path()).with_detail(detail)),`
+- `sniff/lib/src/filesystem/query/mod.rs:228`: `Some(LimitationExample::path(root.resolved.as_path()).with_detail(detail)),`
+- `sniff/lib/src/filesystem/query/mod.rs:256`: `paths.status = CoverageStatus::Partial;`
+- `sniff/lib/src/filesystem/query/mod.rs:407`: `Some(example.with_detail(detail)),`
+- `sniff/lib/src/filesystem/query/mod.rs:489`: `coverage.status = CoverageStatus::Unsupported;`
+- `sniff/lib/src/filesystem/query/mod.rs:490`: `coverage.reason = Some(reason);`
+- `sniff/lib/src/filesystem/query/mod.rs:494`: `coverage.status = CoverageStatus::NotAttempted;`
+- `sniff/lib/src/filesystem/query/mod.rs:495`: `coverage.reason = Some(`
+- `sniff/lib/src/filesystem/query/mod.rs:505`: `coverage.attempted = Some(attempted);`
+- `sniff/lib/src/filesystem/query/mod.rs:506`: `coverage.succeeded = Some(succeeded);`
+- `sniff/lib/src/filesystem/query/mod.rs:516`: `coverage.status = CoverageStatus::NotAttempted;`
+- `sniff/lib/src/filesystem/query/mod.rs:517`: `coverage.reason = Some("the budget expired before inspection started".to_string());`
+- `sniff/lib/src/filesystem/query/mod.rs:536`: `coverage.truncation = Some(Truncation {`
+- `sniff/lib/src/filesystem/query/options.rs:22`: `///     .with_deadline(Duration::from_millis(500));`
+- `sniff/lib/src/filesystem/query/process.rs:104`: `Some(LimitationExample::pid(pid).with_detail(error)),`
+- `sniff/lib/src/filesystem/query/report.rs:338`: `self.detail = Some(detail.into());`
+- `sniff/lib/src/filesystem/query/tests.rs:63`: `fake.enumeration = Some(Err(reason.to_string()));`
+- `sniff/lib/src/filesystem/query/tests.rs:331`: `let options = PathUsageOptions::default().with_deadline(deadline);`
+- `sniff/lib/src/filesystem/query/tests.rs:739`: `fake.on_enumerate = Some(Box::new(|budget: &Budget| budget.expire()));`
+- `sniff/lib/src/filesystem/query/tests.rs:761`: `fake.on_inspect = Some(Box::new(|pid, context| {`
+- `sniff/lib/src/filesystem/query/tests.rs:866`: `fake.on_inspect = Some(Box::new(move |_, _| {`
+- `sniff/lib/src/filesystem/query/tests.rs:885`: `fake.on_inspect = Some(Box::new(move |_, _| std::fs::remove_file(&target).unwrap()));`
+- `sniff/lib/src/filesystem/query/tests.rs:964`: `process.details.name = Some(OsString::from("from-backend"));`
+- `sniff/lib/src/filesystem/query/tests.rs:1141`: `validated.matched = Some(ObjectMatch {`
+- `sniff/lib/src/filesystem/query/tests.rs:1152`: `fake.on_inspect = Some(Box::new(|_, context| context.budget.expire()));`
+- `sniff/lib/src/filesystem/query/tests.rs:1182`: `stale.object.path = Some(a);`
+- `sniff/lib/src/filesystem/query/tests.rs:1323`: `inspection.result = InspectionResult::Partial;`
+- `sniff/lib/src/filesystem/query/tests.rs:1326`: `malformed.examples.push(LimitationExample::pid(1).with_detail("inotify wd:x"));`
+- `sniff/lib/src/filesystem/query/tree.rs:99`: `.map(|p| LimitationExample::path(p).with_detail(error.to_string()));`
+- `sniff/lib/src/filesystem/query/tree.rs:126`: `Some(LimitationExample::path(entry.path()).with_detail(error.to_string())),`
+- `sniff/lib/src/filesystem/query/win32.rs:192`: `candidate.creation_token = Some(opened.creation_time);`
+- `sniff/lib/src/filesystem/query/win32.rs:217`: `Err(Fault::Denied) => candidate.payload = Some(Fault::Denied),`
+- `sniff/lib/src/filesystem/query/win32.rs:223`: `Some(LimitationExample::pid(pid).with_detail(detail.clone())),`
+- `sniff/lib/src/filesystem/query/win32.rs:225`: `candidate.payload = Some(Fault::Failed(detail));`
+- `sniff/lib/src/filesystem/query/win32.rs:260`: `modules.whole = Some(InspectionResult::Denied);`
+- `sniff/lib/src/filesystem/query/win32.rs:262`: `None => modules.whole = Some(InspectionResult::Failed("the process handle was not kept".to_string())),`
+- `sniff/lib/src/filesystem/query/win32.rs:297`: `observation.creation_token = Some(opened.creation_time);`
+- `sniff/lib/src/filesystem/query/win32.rs:322`: `coverage.status = super::CoverageStatus::Partial;`
+- `sniff/lib/src/filesystem/query/win32.rs:331`: `coverage.status = super::CoverageStatus::Partial;`
+- `sniff/lib/src/filesystem/query/win32.rs:393`: `tally.whole = Some(InspectionResult::Vanished);`
+- `sniff/lib/src/filesystem/query/win32.rs:422`: `tally.whole = Some(InspectionResult::Vanished);`
+- `sniff/lib/src/filesystem/query/win32.rs:462`: `tally.whole = Some(match fault {`
+- `sniff/lib/src/filesystem/query/win32_paths.rs:48`: `Some(LimitationExample::path(entry.path.as_path()).with_detail(failure.detail)));`
+- `sniff/lib/src/filesystem/query/win32_tests.rs:507`: `fake.pids = Some(Ok(vec![PID, OTHER_PID]));`
+- `sniff/lib/src/filesystem/query/win32_tests.rs:613`: `process.tokens = vec![Ok(CREATED + 1)];`
+- `sniff/lib/src/filesystem/query/win32_tests.rs:741`: `source.path_reader = Some(std::sync::Arc::new(move |entry, _| {`
+- `sniff/lib/src/filesystem/query/win32_tests.rs:1079`: `let options = PathUsageOptions::default().with_deadline(Duration::from_secs(120));`
+- `sniff/lib/src/filesystem/repo/aggregate.rs:1023`: `info.packages.as_mut().unwrap()[0].path = PathBuf::from("/repo/sniff/lib");`
+- `sniff/lib/src/filesystem/repo/aggregate.rs:1411`: `info.packages.as_mut().unwrap()[0].package_area = "sniff".to_string();`
+- `sniff/lib/src/filesystem/repo/aggregate.rs:1421`: `info.packages.as_mut().unwrap()[1].package_area = "sniff".to_string();`
+- `sniff/lib/src/filesystem/repo/aggregate.rs:1448`: `info.packages.as_mut().unwrap()[0].path = PathBuf::from("/repo/sniff/lib");`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:30`: `FilesystemRequest, GitMetadataRequest, GitRequest, RepoDetailRequest, RepoRequest,`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:163`: `fn aggregate_request() -> FilesystemRequest {`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:164`: `FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:166`: `GitRequest::full()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:168`: `.metadata(GitMetadataRequest::none().remotes(true).config(true)),`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:172`: `.repo(RepoRequest::focused(RepoDetailRequest::all()).with_lockfile_provenance(true))`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:364`: `/// 'GitRequest::full()'; every scope bucket projected from it would be empty`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:372`: `the aggregate needs a GitRequest at or above full() so that \`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:445`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:585`: `use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:587`: `use crate::request::{GitMetadataRequest, GitRequest};`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:735`: `&GitRequest::full()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:737`: `.metadata(GitMetadataRequest::none().config(true)),`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:846`: `let summary_request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:847`: `.git(GitRequest::summary())`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:990`: `use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:991`: `use crate::request::{GitMetadataRequest, GitRequest};`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:1126`: `let request = FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:1128`: `GitRequest::full()`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:1129`: `.metadata(GitMetadataRequest::none().remotes(true).config(true)),`
+- `sniff/lib/src/filesystem/repo/aggregate_view.rs:1159`: `fs.repo = Some(RepoInfo {`
+- `sniff/lib/src/filesystem/repo/detection.rs:3`: `use crate::request::RepoRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:128`: `RepoRequest::structure()`
+- `sniff/lib/src/filesystem/repo/detection.rs:130`: `RepoRequest::full()`
+- `sniff/lib/src/filesystem/repo/detection.rs:138`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:166`: `synthesize_root_package_repo_with_request(root, &RepoRequest::structure())`
+- `sniff/lib/src/filesystem/repo/detection.rs:172`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:182`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:215`: `package.name_source = PackageNameSource::Manifest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:732`: `RepoRequest::structure()`
+- `sniff/lib/src/filesystem/repo/detection.rs:734`: `RepoRequest::full()`
+- `sniff/lib/src/filesystem/repo/detection.rs:743`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:754`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:897`: `Some(index) => evidence.with_manifest_index(Some(index)),`
+- `sniff/lib/src/filesystem/repo/detection.rs:930`: `layer.provenance = PackageProvenance::Lockfile;`
+- `sniff/lib/src/filesystem/repo/detection.rs:1097`: `seed.provenance = PackageProvenance::Lockfile;`
+- `sniff/lib/src/filesystem/repo/detection.rs:1150`: `files.editor_config = Some(repo_relative.clone());`
+- `sniff/lib/src/filesystem/repo/detection.rs:1624`: `per_pkg_files[pkg_idx].editor_config = Some(repo_relative);`
+- `sniff/lib/src/filesystem/repo/detection.rs:1665`: `package.configuration = std::mem::take(&mut per_pkg_files[i].configuration);`
+- `sniff/lib/src/filesystem/repo/detection.rs:1666`: `package.documentation = std::mem::take(&mut per_pkg_files[i].documentation);`
+- `sniff/lib/src/filesystem/repo/detection.rs:1668`: `package.command_runner = std::mem::take(&mut per_pkg_files[i].command_runner);`
+- `sniff/lib/src/filesystem/repo/detection.rs:1739`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:1782`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:1794`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/detection.rs:2528`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2535`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2592`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2599`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2635`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2642`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2678`: `..Default::default()`
+- `sniff/lib/src/filesystem/repo/detection.rs:2876`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:2930`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:2979`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3019`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3046`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3074`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3199`: `let request = RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/src/filesystem/repo/detection.rs:3230`: `use crate::request::RepoDetailRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:3234`: `let request = RepoRequest::focused(RepoDetailRequest::dependencies())`
+- `sniff/lib/src/filesystem/repo/detection.rs:3235`: `.with_lockfile_provenance(true);`
+- `sniff/lib/src/filesystem/repo/detection.rs:3274`: `use crate::request::RepoDetailRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:3278`: `let request = RepoRequest::focused(RepoDetailRequest::dependencies());`
+- `sniff/lib/src/filesystem/repo/detection.rs:3392`: `let request = RepoRequest::structure();`
+- `sniff/lib/src/filesystem/repo/detection.rs:3454`: `let request = RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/src/filesystem/repo/detection.rs:3522`: `let request = RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/src/filesystem/repo/detection.rs:3663`: `let request = RepoRequest::full();`
+- `sniff/lib/src/filesystem/repo/detection.rs:3675`: `use crate::request::RepoDetailRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:3678`: `let request = RepoRequest::focused(RepoDetailRequest::test_runners());`
+- `sniff/lib/src/filesystem/repo/detection.rs:3706`: `use crate::request::RepoDetailRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:3709`: `let request = RepoRequest::focused(RepoDetailRequest::test_runners());`
+- `sniff/lib/src/filesystem/repo/detection.rs:3799`: `use crate::request::RepoDetailRequest;`
+- `sniff/lib/src/filesystem/repo/detection.rs:3803`: `(RepoDetailRequest::package_managers(), (true, false, false)),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3804`: `(RepoDetailRequest::dependencies(), (false, true, false)),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3805`: `(RepoDetailRequest::test_runners(), (false, false, true)),`
+- `sniff/lib/src/filesystem/repo/detection.rs:3809`: `let request = RepoRequest::focused(details);`
+- `sniff/lib/src/filesystem/repo/detection.rs:3849`: `use crate::request::{FilesystemRequest, RepoRequest};`
+- `sniff/lib/src/filesystem/repo/detection.rs:3859`: `&FilesystemRequest::new()`
+- `sniff/lib/src/filesystem/repo/detection.rs:3861`: `.repo(RepoRequest::full())`
+- `sniff/lib/src/filesystem/repo/lockfile/mod.rs:30`: `use crate::request::RepoRequest;`
+- `sniff/lib/src/filesystem/repo/lockfile/mod.rs:253`: `request: &RepoRequest,`
+- `sniff/lib/src/filesystem/repo/lockfile/npm.rs:204`: `packages.root = Some(map.next_value::<RootRecord>()?);`
+- `sniff/lib/src/filesystem/repo/lockfile/tests.rs:32`: `let request = RepoRequest::structure().with_lockfile_provenance(wants);`
+- `sniff/lib/src/filesystem/repo/lockfile/tests.rs:290`: `let request = RepoRequest::full();`
+- `sniff/lib/src/filesystem/repo/lockfile/tests.rs:356`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/lockfile/tests.rs:376`: `&RepoRequest::full(),`
+- `sniff/lib/src/filesystem/repo/lockfile/tests.rs:451`: `let request = RepoRequest::full();`
+- `sniff/lib/src/filesystem/repo/lockfile/yarn.rs:167`: `lock.metadata = Some(map.next_value::<Metadata>()?);`
+- `sniff/lib/src/filesystem/repo/seed.rs:82`: `self.relative = super::detection::make_relative_path(&self.path, new_root);`
+- `sniff/lib/src/filesystem/repo/seed.rs:178`: `authority.provenance = PackageProvenance::Globbed;`
+- `sniff/lib/src/filesystem/repo/standard.rs:386`: `/// [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance)`
+- `sniff/lib/src/filesystem/repo/standard.rs:395`: `/// ['RepoRequest::structure'](crate::request::RepoRequest::structure) and`
+- `sniff/lib/src/filesystem/repo/standard.rs:396`: `/// ['RepoRequest::focused'](crate::request::RepoRequest::focused)`
+- `sniff/lib/src/filesystem/repo/types.rs:505`: `/// Runs ['RepoRequest::full'](crate::request::RepoRequest::full), which includes lockfile corroboration of each`
+- `sniff/lib/src/filesystem/repo/types.rs:536`: `/// Runs ['RepoRequest::structure']: package managers, dependencies, test`
+- `sniff/lib/src/filesystem/repo/types.rs:541`: `/// ['detect_repo_with_request'] with ['RepoRequest::focused'] for selected`
+- `sniff/lib/src/filesystem/repo/types.rs:543`: `/// ['RepoRequest::with_lockfile_provenance'] for lockfile corroboration, or`
+- `sniff/lib/src/filesystem/repo/types.rs:546`: `/// ['RepoRequest::structure']: crate::request::RepoRequest::structure`
+- `sniff/lib/src/filesystem/repo/types.rs:547`: `/// ['RepoRequest::focused']: crate::request::RepoRequest::focused`
+- `sniff/lib/src/filesystem/repo/types.rs:548`: `/// ['RepoRequest::with_lockfile_provenance']: crate::request::RepoRequest::with_lockfile_provenance`
+- `sniff/lib/src/filesystem/repo/types.rs:559`: `/// 'request' [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance).`
+- `sniff/lib/src/filesystem/repo/types.rs:562`: `request: &crate::request::RepoRequest,`
+- `sniff/lib/src/filesystem/repo/types.rs:595`: `request: &crate::request::RepoRequest,`
+- `sniff/lib/src/filesystem/system_view.rs:384`: `..Default::default()`
+- `sniff/lib/src/filesystem/system_view.rs:476`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:719`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:847`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:877`: `let default: AudioDeviceKind = Default::default();`
+- `sniff/lib/src/hardware/audio.rs:890`: `let default: AudioDirection = Default::default();`
+- `sniff/lib/src/hardware/audio.rs:896`: `let default: AudioDeviceInfo = Default::default();`
+- `sniff/lib/src/hardware/audio.rs:1061`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:1073`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:1097`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:1125`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:1132`: `..Default::default()`
+- `sniff/lib/src/hardware/audio.rs:1148`: `..Default::default()`
+- `sniff/lib/src/hardware/cpu.rs:79`: `caps.sse = std::arch::is_x86_feature_detected!("sse");`
+- `sniff/lib/src/hardware/cpu.rs:80`: `caps.sse2 = std::arch::is_x86_feature_detected!("sse2");`
+- `sniff/lib/src/hardware/cpu.rs:81`: `caps.sse3 = std::arch::is_x86_feature_detected!("sse3");`
+- `sniff/lib/src/hardware/cpu.rs:82`: `caps.ssse3 = std::arch::is_x86_feature_detected!("ssse3");`
+- `sniff/lib/src/hardware/cpu.rs:83`: `caps.sse4_1 = std::arch::is_x86_feature_detected!("sse4.1");`
+- `sniff/lib/src/hardware/cpu.rs:84`: `caps.sse4_2 = std::arch::is_x86_feature_detected!("sse4.2");`
+- `sniff/lib/src/hardware/cpu.rs:85`: `caps.avx = std::arch::is_x86_feature_detected!("avx");`
+- `sniff/lib/src/hardware/cpu.rs:86`: `caps.avx2 = std::arch::is_x86_feature_detected!("avx2");`
+- `sniff/lib/src/hardware/cpu.rs:87`: `caps.avx512f = std::arch::is_x86_feature_detected!("avx512f");`
+- `sniff/lib/src/hardware/cpu.rs:88`: `caps.avx512vl = std::arch::is_x86_feature_detected!("avx512vl");`
+- `sniff/lib/src/hardware/cpu.rs:89`: `caps.avx512bw = std::arch::is_x86_feature_detected!("avx512bw");`
+- `sniff/lib/src/hardware/cpu.rs:90`: `caps.fma = std::arch::is_x86_feature_detected!("fma");`
+- `sniff/lib/src/hardware/cpu.rs:95`: `caps.neon = std::arch::is_aarch64_feature_detected!("neon");`
+- `sniff/lib/src/hardware/gpu.rs:219`: `..Default::default()`
+- `sniff/lib/src/hardware/gpu.rs:329`: `let default: GpuDeviceType = Default::default();`
+- `sniff/lib/src/hardware/gpu.rs:335`: `let default: GpuInfo = Default::default();`
+- `sniff/lib/src/hardware/gpu.rs:346`: `let caps: GpuCapabilities = Default::default();`
+- `sniff/lib/src/hardware/mod.rs:9`: `use crate::request::HardwareRequest;`
+- `sniff/lib/src/hardware/mod.rs:58`: `/// Use 'HardwareRequest::summary()' for CPU and memory only (fast),`
+- `sniff/lib/src/hardware/mod.rs:59`: `/// or 'HardwareRequest::full()' for everything including storage,`
+- `sniff/lib/src/hardware/mod.rs:68`: `pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {`
+- `sniff/lib/src/hardware/mod.rs:75`: `.with_cpu(CpuRefreshKind::everything())`
+- `sniff/lib/src/hardware/mod.rs:76`: `.with_memory(MemoryRefreshKind::everything()),`
+- `sniff/lib/src/hardware/mod.rs:274`: `detect_hardware_with_request(&HardwareRequest::full())`
+- `sniff/lib/src/hardware/mod.rs:283`: `detect_hardware_with_request(&HardwareRequest::summary())`
+- `sniff/lib/src/hardware/mod.rs:365`: `let info = detect_hardware_with_request(&HardwareRequest::summary().include_storage(true))`
+- `sniff/lib/src/hardware/mod.rs:387`: `let info = detect_hardware_with_request(&HardwareRequest::summary()).unwrap();`
+- `sniff/lib/src/hardware/mod.rs:399`: `let info = detect_hardware_with_request(&HardwareRequest::full()).unwrap();`
+- `sniff/lib/src/hardware/mod.rs:419`: `let with_all = HardwareRequest::full().include_audio(false);`
+- `sniff/lib/src/hardware/mod.rs:420`: `let with_none = HardwareRequest::summary();`
+- `sniff/lib/src/hardware/mod.rs:441`: `let gpu_only = HardwareRequest {`
+- `sniff/lib/src/hardware/mod.rs:457`: `let cpu_only = HardwareRequest {`
+- `sniff/lib/src/lib.rs:35`: `use request::{FilesystemRequest, GitRequest, HardwareRequest, NetworkRequest, OsRequest};`
+- `sniff/lib/src/lib.rs:131`: `self.base_dir = Some(path);`
+- `sniff/lib/src/lib.rs:181`: `GitRequest::deep().commit_count(config.commit_count)`
+- `sniff/lib/src/lib.rs:183`: `GitRequest::full().commit_count(config.commit_count)`
+- `sniff/lib/src/lib.rs:191`: `Some(OsRequest::full())`
+- `sniff/lib/src/lib.rs:196`: `Some(HardwareRequest::full())`
+- `sniff/lib/src/lib.rs:201`: `Some(NetworkRequest::full())`
+- `sniff/lib/src/lib.rs:206`: `Some(FilesystemRequest::new().git(git_request))`
+- `sniff/lib/src/lib.rs:262`: `///     .os(OsRequest::summary())`
+- `sniff/lib/src/lib.rs:263`: `///     .hardware(HardwareRequest::summary())`
+- `sniff/lib/src/lib.rs:266`: `///         FilesystemRequest::new()`
+- `sniff/lib/src/lib.rs:267`: `///             .git(GitRequest::summary())`
+- `sniff/lib/src/lib.rs:268`: `///             .repo(RepoRequest::structure())`
+- `sniff/lib/src/lib.rs:339`: `let detect_os = |req: &OsRequest| {`
+- `sniff/lib/src/lib.rs:348`: `let detect_hardware = |req: &HardwareRequest| {`
+- `sniff/lib/src/lib.rs:357`: `let detect_network = |req: &NetworkRequest| {`
+- `sniff/lib/src/lib.rs:366`: `let detect_filesystem = |req: &FilesystemRequest| {`
+- `sniff/lib/src/lib.rs:432`: `result.performance = Some(collector.snapshot(started.elapsed()));`
+- `sniff/lib/src/lib.rs:450`: `plan = plan.hardware(HardwareRequest::summary());`
+- `sniff/lib/src/lib.rs:453`: `plan = plan.network(NetworkRequest::interfaces_only());`
+- `sniff/lib/src/lib.rs:535`: `FilesystemRequest::new()`
+- `sniff/lib/src/lib.rs:536`: `.git(GitRequest::identity())`
+- `sniff/lib/src/network/address.rs:242`: `interface.index = Some(index);`
+- `sniff/lib/src/network/gateway/mod.rs:116`: `self.best = Some((metric, gateway));`
+- `sniff/lib/src/network/icmp/windows.rs:88`: `..Default::default()`
+- `sniff/lib/src/network/icmp/windows.rs:100`: `..Default::default()`
+- `sniff/lib/src/network/interface.rs:111`: `..Default::default()`
+- `sniff/lib/src/network/mod.rs:5`: `use crate::request::NetworkRequest;`
+- `sniff/lib/src/network/mod.rs:155`: `detect_network_with_request(&NetworkRequest::full())`
+- `sniff/lib/src/network/mod.rs:160`: `/// Use 'NetworkRequest::interfaces_only()' to skip the WAN IP lookup,`
+- `sniff/lib/src/network/mod.rs:161`: `/// or 'NetworkRequest::full()' for everything.`
+- `sniff/lib/src/network/mod.rs:167`: `/// use sniff::request::NetworkRequest;`
+- `sniff/lib/src/network/mod.rs:169`: `/// let info = detect_network_with_request(&NetworkRequest::interfaces_only()).unwrap();`
+- `sniff/lib/src/network/mod.rs:181`: `pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkInfo> {`
+- `sniff/lib/src/network/mod.rs:337`: `entry.mac_address = Some(format_mac_address(&mac));`
+- `sniff/lib/src/network/mod.rs:1113`: `detect_network_with_request(&NetworkRequest::interfaces_only()).unwrap()`
+- `sniff/lib/src/network/mod.rs:1130`: `let info = detect_network_with_request(&NetworkRequest::interfaces_only()).unwrap();`
+- `sniff/lib/src/network/mod.rs:1302`: `let detector = WanIpDetector::new().with_endpoints(vec![server.uri()]);`
+- `sniff/lib/src/network/mod.rs:1324`: `let detector = WanIpDetector::new().with_endpoints(vec![`
+- `sniff/lib/src/network/mod.rs:1370`: `let detector = WanIpDetector::new().with_endpoints(vec![`
+- `sniff/lib/src/network/mod.rs:1393`: `let detector = WanIpDetector::new().with_endpoints(vec![`
+- `sniff/lib/src/network/mod.rs:1433`: `WanIpDetector::new().with_endpoints(vec![format!("{}{route}", server.uri())]);`
+- `sniff/lib/src/network/mod.rs:1438`: `WanIpDetector::new().with_endpoints(vec![format!("{}/verbose-v6", server.uri())]);`
+- `sniff/lib/src/network/mod.rs:1467`: `let detector = WanIpDetector::new().with_endpoints(vec![`
+- `sniff/lib/src/network/mod.rs:1492`: `WanIpDetector::new().with_endpoints(endpoints).detect()`
+- `sniff/lib/src/os/distro.rs:498`: `let default: LinuxFamily = Default::default();`
+- `sniff/lib/src/os/distro.rs:795`: `let default: LinuxDistro = Default::default();`
+- `sniff/lib/src/os/mod.rs:24`: `use crate::request::OsRequest;`
+- `sniff/lib/src/os/mod.rs:197`: `detect_os_with_request(&OsRequest::full())`
+- `sniff/lib/src/os/mod.rs:202`: `/// Use 'OsRequest::summary()' for just core identity (fast),`
+- `sniff/lib/src/os/mod.rs:203`: `/// or 'OsRequest::full()' for everything including package managers`
+- `sniff/lib/src/os/mod.rs:210`: `/// use sniff::request::OsRequest;`
+- `sniff/lib/src/os/mod.rs:212`: `/// let info = detect_os_with_request(&OsRequest::summary()).unwrap();`
+- `sniff/lib/src/os/mod.rs:226`: `pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {`
+- `sniff/lib/src/os/mod.rs:300`: `let default: OsType = Default::default();`
+- `sniff/lib/src/os/mod.rs:349`: `let default: OsInfo = Default::default();`
+- `sniff/lib/src/os/mod.rs:393`: `let info = detect_os_with_request(&OsRequest::summary()).unwrap();`
+- `sniff/lib/src/os/time.rs:286`: `/// 'DetectionPlan::default()'; explicit 'OsRequest::full()' retains it.`
+- `sniff/lib/src/os/time.rs:423`: `let jan_1 = Local.with_ymd_and_hms(now.year(), 1, 1, 0, 0, 0);`
+- `sniff/lib/src/os/working_processes.rs:52`: `.with_cwd(UpdateKind::Always)`
+- `sniff/lib/src/os/working_processes.rs:53`: `.with_cmd(UpdateKind::Always),`
+- `sniff/lib/src/package/network.rs:134`: `///     .with_base_url("http://localhost:8080/api/v1/crates");`
+- `sniff/lib/src/package/network.rs:294`: `///     .with_base_url("http://localhost:8080");`
+- `sniff/lib/src/package/network.rs:744`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:775`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:803`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:821`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:838`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:855`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:876`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:894`: `let cargo = CargoNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:924`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:954`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:980`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1008`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1036`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1058`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1075`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1092`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1109`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1127`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/package/network.rs:1155`: `let npm = NpmNetwork::new().with_base_url(mock_server.uri());`
+- `sniff/lib/src/process.rs:515`: `..Default::default()`
+- `sniff/lib/src/programs/category_detector.rs:381`: `let detector = CategoryDetector::<Editor>::default().with_program(`
+- `sniff/lib/src/programs/category_detector.rs:397`: `.with_program(`
+- `sniff/lib/src/programs/category_detector.rs:402`: `.with_program(`
+- `sniff/lib/src/programs/category_detector.rs:445`: `let detector = CategoryDetector::<Editor>::default().with_program(`
+- `sniff/lib/src/programs/category_detector.rs:465`: `.with_program(`
+- `sniff/lib/src/programs/category_detector.rs:470`: `.with_program(`
+- `sniff/lib/src/programs/category_detector.rs:522`: `let detector = CategoryDetector::<Editor>::default().with_program(`
+- `sniff/lib/src/programs/host_capability.rs:311`: `let tmp = path.with_extension("json.tmp");`
+- `sniff/lib/src/programs/install/execute.rs:500`: `&InstallOptions::default().with_timeout(0),`
+- `sniff/lib/src/programs/install/execute.rs:522`: `&InstallOptions::default().with_timeout(0),`
+- `sniff/lib/src/programs/install/execute.rs:543`: `&InstallOptions::default().with_timeout(0),`
+- `sniff/lib/src/programs/install/execute.rs:566`: `&InstallOptions::default().with_timeout(0),`
+- `sniff/lib/src/programs/install/execute.rs:578`: `let opts = InstallOptions::default().with_timeout(0);`
+- `sniff/lib/src/programs/install/execute.rs:604`: `let opts = InstallOptions::default().with_timeout(0);`
+- `sniff/lib/src/programs/install/interview.rs:547`: `d.retry_answer = Some(RetryChoice::Quit);`
+- `sniff/lib/src/programs/install/interview.rs:701`: `d.retry_answer = Some(RetryChoice::RetryWith(InstallationMethod::Cargo("goodpkg")));`
+- `sniff/lib/src/programs/install/interview.rs:773`: `d.retry_answer = Some(RetryChoice::RetryWith(InstallationMethod::Cargo("goodpkg")));`
+- `sniff/lib/src/programs/install/options.rs:44`: `..Default::default()`
+- `sniff/lib/src/programs/install/options.rs:56`: `..Default::default()`
+- `sniff/lib/src/programs/install/options.rs:141`: `let opts = InstallOptions::default().with_approve_remote_bash(true);`
+- `sniff/lib/src/programs/notification_helpers.rs:117`: `self.detector = self.detector.with_program(helper, path, source);`
+- `sniff/lib/src/programs/notification_helpers.rs:176`: `let helpers = InstalledNotificationHelpers::default().with_program(`
+- `sniff/lib/src/programs/windows_apps.rs:297`: `let exe_path = tmp_path.with_extension("exe");`
+- `sniff/lib/src/remote/bitbucket.rs:7`: `use schematic_schema::bitbucket::*;`
+- `sniff/lib/src/remote/bitbucket.rs:8`: `use schematic_schema::schematic_runtime::CallError;`
+- `sniff/lib/src/remote/blocking.rs:511`: `client.with_deadline(expires).with_sent_log(Arc::clone(&log)),`
+- `sniff/lib/src/remote/check_status.rs:40`: `.map(|index| format!("p{index}:pullRequest(number:$n{index}){{...F}}"))`
+- `sniff/lib/src/remote/check_status.rs:44`: `fragment F on PullRequest{{state commits(last:1){{nodes{{commit{{oid statusCheckRollup{{\`
+- `sniff/lib/src/remote/check_status.rs:369`: `assert!(query.contains("p0:pullRequest(number:$n0)"));`
+- `sniff/lib/src/remote/check_status.rs:370`: `assert!(query.contains("p1:pullRequest(number:$n1)"));`
+- `sniff/lib/src/remote/envelope.rs:18`: `use schematic_schema::schematic_runtime::pager::{Page, PagerError};`
+- `sniff/lib/src/remote/envelope.rs:19`: `use schematic_schema::schematic_runtime::{`
+- `sniff/lib/src/remote/focused.rs:260`: `client.credential_scope = CredentialScope::ProviderAndHost;`
+- `sniff/lib/src/remote/focused.rs:269`: `let (remote, id) = parse_provider_url(raw, ReferenceKind::PullRequest)?;`
+- `sniff/lib/src/remote/focused.rs:271`: `client.original_reference = Some(raw.to_string());`
+- `sniff/lib/src/remote/focused.rs:328`: `query.state = Some(super::QueryValues::One(CanonicalPullRequestState::Open));`
+- `sniff/lib/src/remote/focused.rs:463`: `record.source_repo = Some(source_repo.to_string());`
+- `sniff/lib/src/remote/gitea.rs:11`: `use schematic_schema::gitea::*;`
+- `sniff/lib/src/remote/github.rs:7`: `use schematic_schema::github::*;`
+- `sniff/lib/src/remote/github.rs:8`: `use schematic_schema::schematic_runtime::AuthMethod;`
+- `sniff/lib/src/remote/github.rs:9`: `use schematic_schema::schematic_runtime::pager::PagerError;`
+- `sniff/lib/src/remote/gitlab.rs:15`: `use schematic_schema::gitlab::*;`
+- `sniff/lib/src/remote/provider.rs:133`: `query.state = Some(super::types::QueryValues::One(`
+- `sniff/lib/src/remote/provider.rs:766`: `..Default::default()`
+- `sniff/lib/src/remote/provider_url.rs:21`: `PullRequest,`
+- `sniff/lib/src/remote/provider_url.rs:197`: `use ReferenceKind::{CiCdJob, PullRequest};`
+- `sniff/lib/src/remote/provider_url.rs:200`: `(GitHub, PullRequest, true) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:204`: `(GitHub, PullRequest, false) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:221`: `(Gitea | Forgejo, PullRequest, true) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:225`: `(Gitea | Forgejo, PullRequest, false) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:242`: `(GitLab, PullRequest, true) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:246`: `(GitLab, PullRequest, false) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:259`: `(Bitbucket, PullRequest, true) => match segments {`
+- `sniff/lib/src/remote/provider_url.rs:265`: `(Bitbucket, PullRequest, false) => match segments {`
+- `sniff/lib/src/request.rs:13`: `//!     .os(OsRequest::summary())`
+- `sniff/lib/src/request.rs:14`: `//!     .hardware(HardwareRequest::summary())`
+- `sniff/lib/src/request.rs:25`: `//!         FilesystemRequest::new()`
+- `sniff/lib/src/request.rs:26`: `//!             .git(GitRequest::identity())`
+- `sniff/lib/src/request.rs:27`: `//!             .repo(RepoRequest::structure())`
+- `sniff/lib/src/request.rs:35`: `//!     .filesystem(FilesystemRequest::new().git(GitRequest::deep()));`
+- `sniff/lib/src/request.rs:48`: `/// '.os(OsRequest::full())'.`
+- `sniff/lib/src/request.rs:57`: `pub os: Option<OsRequest>,`
+- `sniff/lib/src/request.rs:59`: `pub hardware: Option<HardwareRequest>,`
+- `sniff/lib/src/request.rs:61`: `pub network: Option<NetworkRequest>,`
+- `sniff/lib/src/request.rs:63`: `pub filesystem: Option<FilesystemRequest>,`
+- `sniff/lib/src/request.rs:76`: `// one '.os(OsRequest::full())' away.`
+- `sniff/lib/src/request.rs:77`: `os: Some(OsRequest::full().include_ntp_status(false)),`
+- `sniff/lib/src/request.rs:78`: `hardware: Some(HardwareRequest::full()),`
+- `sniff/lib/src/request.rs:79`: `network: Some(NetworkRequest::full()),`
+- `sniff/lib/src/request.rs:80`: `filesystem: Some(FilesystemRequest::default()),`
+- `sniff/lib/src/request.rs:92`: `self.base_dir = Some(path);`
+- `sniff/lib/src/request.rs:96`: `pub fn os(mut self, request: OsRequest) -> Self {`
+- `sniff/lib/src/request.rs:97`: `self.os = Some(request);`
+- `sniff/lib/src/request.rs:101`: `pub fn hardware(mut self, request: HardwareRequest) -> Self {`
+- `sniff/lib/src/request.rs:102`: `self.hardware = Some(request);`
+- `sniff/lib/src/request.rs:106`: `pub fn network(mut self, request: NetworkRequest) -> Self {`
+- `sniff/lib/src/request.rs:107`: `self.network = Some(request);`
+- `sniff/lib/src/request.rs:111`: `pub fn filesystem(mut self, request: FilesystemRequest) -> Self {`
+- `sniff/lib/src/request.rs:112`: `self.filesystem = Some(request);`
+- `sniff/lib/src/request.rs:117`: `self.os = None;`
+- `sniff/lib/src/request.rs:122`: `self.hardware = None;`
+- `sniff/lib/src/request.rs:127`: `self.network = None;`
+- `sniff/lib/src/request.rs:132`: `self.filesystem = None;`
+- `sniff/lib/src/request.rs:144`: `pub struct OsRequest {`
+- `sniff/lib/src/request.rs:156`: `impl OsRequest {`
+- `sniff/lib/src/request.rs:200`: `pub struct HardwareRequest {`
+- `sniff/lib/src/request.rs:213`: `impl HardwareRequest {`
+- `sniff/lib/src/request.rs:264`: `pub struct NetworkRequest {`
+- `sniff/lib/src/request.rs:273`: `impl NetworkRequest {`
+- `sniff/lib/src/request.rs:308`: `/// This is only consulted when a ['GitRequest'] carries it. Absence means`
+- `sniff/lib/src/request.rs:310`: `/// — see ['GitRequest::metadata'].`
+- `sniff/lib/src/request.rs:315`: `/// use sniff::request::{GitMetadataRequest, GitRequest};`
+- `sniff/lib/src/request.rs:319`: `/// let request = GitRequest::full()`
+- `sniff/lib/src/request.rs:320`: `///     .metadata(GitMetadataRequest::none().commits(true));`
+- `sniff/lib/src/request.rs:325`: `pub struct GitMetadataRequest {`
+- `sniff/lib/src/request.rs:326`: `/// Collect recent commits (bounded by ['GitRequest::commit_count']).`
+- `sniff/lib/src/request.rs:347`: `impl GitMetadataRequest {`
+- `sniff/lib/src/request.rs:425`: `pub struct GitRequest {`
+- `sniff/lib/src/request.rs:468`: `pub metadata: Option<GitMetadataRequest>,`
+- `sniff/lib/src/request.rs:471`: `impl GitRequest {`
+- `sniff/lib/src/request.rs:648`: `pub fn metadata(mut self, metadata: GitMetadataRequest) -> Self {`
+- `sniff/lib/src/request.rs:649`: `self.metadata = Some(metadata);`
+- `sniff/lib/src/request.rs:727`: `/// that otherwise belong to ['RepoRequest::full'] without enabling its file`
+- `sniff/lib/src/request.rs:730`: `pub struct RepoDetailRequest {`
+- `sniff/lib/src/request.rs:739`: `impl RepoDetailRequest {`
+- `sniff/lib/src/request.rs:776`: `pub struct RepoRequest {`
+- `sniff/lib/src/request.rs:783`: `pub details: Option<RepoDetailRequest>,`
+- `sniff/lib/src/request.rs:801`: `/// Legacy value for a serialized ['RepoRequest'] without 'lockfile_provenance'.`
+- `sniff/lib/src/request.rs:806`: `impl RepoRequest {`
+- `sniff/lib/src/request.rs:836`: `pub fn focused(details: RepoDetailRequest) -> Self {`
+- `sniff/lib/src/request.rs:880`: `pub struct FilesystemRequest {`
+- `sniff/lib/src/request.rs:882`: `pub git: Option<GitRequest>,`
+- `sniff/lib/src/request.rs:884`: `pub repo: Option<RepoRequest>,`
+- `sniff/lib/src/request.rs:893`: `impl Default for FilesystemRequest {`
+- `sniff/lib/src/request.rs:896`: `git: Some(GitRequest::full()),`
+- `sniff/lib/src/request.rs:897`: `repo: Some(RepoRequest::full()),`
+- `sniff/lib/src/request.rs:905`: `impl FilesystemRequest {`
+- `sniff/lib/src/request.rs:910`: `pub fn git(mut self, request: GitRequest) -> Self {`
+- `sniff/lib/src/request.rs:911`: `self.git = Some(request);`
+- `sniff/lib/src/request.rs:915`: `pub fn repo(mut self, request: RepoRequest) -> Self {`
+- `sniff/lib/src/request.rs:916`: `self.repo = Some(request);`
+- `sniff/lib/src/request.rs:921`: `self.git = None;`
+- `sniff/lib/src/request.rs:926`: `self.repo = None;`
+- `sniff/lib/src/request.rs:962`: `("identity", GitRequest::identity()),`
+- `sniff/lib/src/request.rs:963`: `("minimal", GitRequest::minimal()),`
+- `sniff/lib/src/request.rs:964`: `("summary", GitRequest::summary()),`
+- `sniff/lib/src/request.rs:965`: `("full", GitRequest::full()),`
+- `sniff/lib/src/request.rs:966`: `("deep", GitRequest::deep()),`
+- `sniff/lib/src/request.rs:993`: `let request: GitRequest = serde_json::from_str(legacy).unwrap();`
+- `sniff/lib/src/request.rs:1005`: `let request = GitRequest::full().metadata(`
+- `sniff/lib/src/request.rs:1006`: `GitMetadataRequest::none()`
+- `sniff/lib/src/request.rs:1010`: `let round_tripped: GitRequest =`
+- `sniff/lib/src/request.rs:1022`: `let value = serde_json::to_value(GitMetadataRequest::all()).unwrap();`
+- `sniff/lib/src/request.rs:1051`: `let request = GitRequest::full().metadata(GitMetadataRequest::none().commits(true));`
+- `sniff/lib/src/request.rs:1070`: `let request = GitRequest::summary().metadata(GitMetadataRequest::all());`
+- `sniff/lib/src/request.rs:1117`: `let plan = DetectionPlan::new().os(OsRequest::full());`
+- `sniff/lib/src/request.rs:1132`: `let summary = OsRequest::summary();`
+- `sniff/lib/src/request.rs:1138`: `let full = OsRequest::full();`
+- `sniff/lib/src/request.rs:1147`: `let summary = HardwareRequest::summary();`
+- `sniff/lib/src/request.rs:1154`: `let full = HardwareRequest::full();`
+- `sniff/lib/src/request.rs:1161`: `let gpu_only = HardwareRequest::summary()`
+- `sniff/lib/src/request.rs:1172`: `let req = NetworkRequest::interfaces_only();`
+- `sniff/lib/src/request.rs:1175`: `let full = NetworkRequest::full();`
+- `sniff/lib/src/request.rs:1181`: `let identity = GitRequest::identity();`
+- `sniff/lib/src/request.rs:1188`: `assert!(!GitRequest::minimal().is_identity_only());`
+- `sniff/lib/src/request.rs:1189`: `assert!(!GitRequest::summary().is_identity_only());`
+- `sniff/lib/src/request.rs:1190`: `assert!(!GitRequest::full().is_identity_only());`
+- `sniff/lib/src/request.rs:1191`: `assert!(!GitRequest::deep().is_identity_only());`
+- `sniff/lib/src/request.rs:1196`: `let minimal = GitRequest::minimal();`
+- `sniff/lib/src/request.rs:1204`: `let summary = GitRequest::summary();`
+- `sniff/lib/src/request.rs:1211`: `let full = GitRequest::full();`
+- `sniff/lib/src/request.rs:1219`: `let deep = GitRequest::deep();`
+- `sniff/lib/src/request.rs:1230`: `assert!(GitRequest::minimal().is_minimal());`
+- `sniff/lib/src/request.rs:1231`: `assert!(GitRequest::summary().is_minimal());`
+- `sniff/lib/src/request.rs:1232`: `assert!(!GitRequest::full().is_minimal());`
+- `sniff/lib/src/request.rs:1233`: `assert!(!GitRequest::deep().is_minimal());`
+- `sniff/lib/src/request.rs:1235`: `let with_commits = GitRequest::minimal().commit_count(1);`
+- `sniff/lib/src/request.rs:1238`: `let with_changes = GitRequest::minimal().include_file_changes(true);`
+- `sniff/lib/src/request.rs:1246`: `let changes_only = GitRequest::summary().include_file_changes(true);`
+- `sniff/lib/src/request.rs:1251`: `assert!(!GitRequest::summary().wants_repo_metadata());`
+- `sniff/lib/src/request.rs:1252`: `assert!(!GitRequest::minimal().wants_repo_metadata());`
+- `sniff/lib/src/request.rs:1256`: `assert!(GitRequest::full().wants_repo_metadata());`
+- `sniff/lib/src/request.rs:1257`: `assert!(GitRequest::deep().wants_repo_metadata());`
+- `sniff/lib/src/request.rs:1258`: `assert!(GitRequest::minimal().commit_count(1).wants_repo_metadata());`
+- `sniff/lib/src/request.rs:1263`: `let req = FilesystemRequest::new()`
+- `sniff/lib/src/request.rs:1264`: `.git(GitRequest::summary())`
+- `sniff/lib/src/request.rs:1274`: `let structure = RepoRequest::structure();`
+- `sniff/lib/src/request.rs:1279`: `let full = RepoRequest::full();`
+- `sniff/lib/src/request.rs:1290`: `(RepoDetailRequest::package_managers(), (true, false, false)),`
+- `sniff/lib/src/request.rs:1291`: `(RepoDetailRequest::dependencies(), (false, true, false)),`
+- `sniff/lib/src/request.rs:1292`: `(RepoDetailRequest::test_runners(), (false, false, true)),`
+- `sniff/lib/src/request.rs:1293`: `(RepoDetailRequest::all(), (true, true, true)),`
+- `sniff/lib/src/request.rs:1297`: `let request = RepoRequest::focused(details);`
+- `sniff/lib/src/request.rs:1312`: `let structure_json = serde_json::to_value(RepoRequest::structure()).unwrap();`
+- `sniff/lib/src/request.rs:1313`: `let full_json = serde_json::to_value(RepoRequest::full()).unwrap();`
+- `sniff/lib/src/request.rs:1317`: `let legacy: RepoRequest = serde_json::from_str(r#"{"structure_only":true}"#).unwrap();`
+- `sniff/lib/src/request.rs:1321`: `let focused = RepoRequest::focused(RepoDetailRequest::dependencies());`
+- `sniff/lib/src/request.rs:1322`: `let roundtrip: RepoRequest =`
+- `sniff/lib/src/request.rs:1328`: `let opted_in = RepoRequest::focused(RepoDetailRequest::dependencies())`
+- `sniff/lib/src/request.rs:1329`: `.with_lockfile_provenance(true);`
+- `sniff/lib/src/request.rs:1330`: `let roundtrip: RepoRequest =`
+- `sniff/lib/src/request.rs:1343`: `let legacy: RepoRequest = serde_json::from_str(legacy_json).unwrap();`
+- `sniff/lib/src/request.rs:1350`: `assert!(!RepoRequest::structure().wants_lockfile_provenance());`
+- `sniff/lib/src/request.rs:1351`: `assert!(RepoRequest::full().wants_lockfile_provenance());`
+- `sniff/lib/src/request.rs:1352`: `assert!(!RepoRequest::focused(RepoDetailRequest::all()).wants_lockfile_provenance());`
+- `sniff/lib/src/request.rs:1358`: `RepoRequest::structure()`
+- `sniff/lib/src/request.rs:1359`: `.with_lockfile_provenance(true)`
+- `sniff/lib/src/request.rs:1363`: `RepoRequest::focused(RepoDetailRequest::package_managers())`
+- `sniff/lib/src/request.rs:1364`: `.with_lockfile_provenance(true)`
+- `sniff/lib/src/request.rs:1368`: `!RepoRequest::full()`
+- `sniff/lib/src/request.rs:1369`: `.with_lockfile_provenance(false)`
+- `sniff/lib/src/request.rs:1377`: `(RepoRequest::structure(), false),`
+- `sniff/lib/src/request.rs:1378`: `(RepoRequest::full(), true),`
+- `sniff/lib/src/request.rs:1379`: `(RepoRequest::focused(RepoDetailRequest::dependencies()), false),`
+- `sniff/lib/src/request.rs:1380`: `(RepoRequest::structure().with_lockfile_provenance(true), true),`
+- `sniff/lib/src/request.rs:1393`: `.os(OsRequest::summary())`
+- `sniff/lib/src/request.rs:1396`: `FilesystemRequest::new()`
+- `sniff/lib/src/request.rs:1397`: `.git(GitRequest::deep().commit_count(5))`
+- `sniff/lib/src/request.rs:1398`: `.repo(RepoRequest::structure()),`
+- `sniff/lib/src/request.rs:1428`: `let parsed: GitRequest = serde_json::from_str(json).unwrap();`
+- `sniff/lib/src/request.rs:1435`: `let gpu_only = HardwareRequest {`
+- `sniff/lib/src/request.rs:1443`: `let parsed: HardwareRequest = serde_json::from_str(&json).unwrap();`
+- `sniff/lib/src/services/mod.rs:217`: `ev.pid1_comm = Some(c.clone());`
+- `sniff/lib/src/services/mod.rs:232`: `ev.pid1_exe = Some(p.clone());`
+- `sniff/lib/src/test_helpers.rs:62`: `let path = base.with_file_name(name);`
+- `sniff/lib/tests/l1/bench_fixtures.rs:183`: `let path = base.with_extension(ext);`
+- `sniff/lib/tests/l1/benchmark_workloads.rs:15`: `use sniff::request::{FilesystemRequest, GitRequest};`
+- `sniff/lib/tests/l1/benchmark_workloads.rs:20`: `let request = FilesystemRequest::new()`
+- `sniff/lib/tests/l1/benchmark_workloads.rs:71`: `&FilesystemRequest::new()`
+- `sniff/lib/tests/l1/benchmark_workloads.rs:72`: `.git(GitRequest::full())`
+- `sniff/lib/tests/l1/focused_provider.rs:657`: `identity_remote.namespace = Some(namespace.to_string());`
+- `sniff/lib/tests/l1/focused_provider.rs:658`: `identity_remote.repository = Some(repository.to_string());`
+- `sniff/lib/tests/l1/focused_provider.rs:824`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1258`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1281`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1317`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1344`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1455`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1506`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1541`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1558`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1582`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1628`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1912`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1916`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1920`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1924`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:1958`: `mismatched_remote.host = Some("provider.example".to_string());`
+- `sniff/lib/tests/l1/focused_provider.rs:1974`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2066`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2080`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2094`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2110`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2125`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2159`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2197`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2245`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2280`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2313`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2865`: `resolved.endpoint = Some(RemoteEndpoint {`
+- `sniff/lib/tests/l1/focused_provider.rs:2945`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:2992`: `..Default::default()`
+- `sniff/lib/tests/l1/focused_provider.rs:3078`: `..Default::default()`
+- `sniff/lib/tests/l1/git_parity.rs:24`: `use sniff::request::GitRequest;`
+- `sniff/lib/tests/l1/git_parity.rs:135`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:231`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:329`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:364`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:391`: `&GitRequest::full().full_worktree_details(true),`
+- `sniff/lib/tests/l1/git_parity.rs:668`: `let request = GitRequest::summary()`
+- `sniff/lib/tests/l1/git_parity.rs:669`: `.metadata(sniff::request::GitMetadataRequest::none().remotes(true));`
+- `sniff/lib/tests/l1/git_parity.rs:1223`: `let info = handle.detect_with_request(&GitRequest::full()).unwrap();`
+- `sniff/lib/tests/l1/git_parity.rs:1281`: `handle.detect_with_request(&GitRequest::full()).is_err(),`
+- `sniff/lib/tests/l1/git_parity.rs:1297`: `handle.detect_with_request(&GitRequest::minimal()).is_err(),`
+- `sniff/lib/tests/l1/git_parity.rs:1310`: `handle.detect_with_request(&GitRequest::summary()).is_err(),`
+- `sniff/lib/tests/l1/git_parity.rs:1326`: `handle.detect_with_request(&GitRequest::minimal()).is_err(),`
+- `sniff/lib/tests/l1/git_parity.rs:1368`: `let request = GitRequest::full().commit_count(10);`
+- `sniff/lib/tests/l1/git_parity.rs:1574`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1595`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1624`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1650`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1676`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1702`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1734`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1765`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1816`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1834`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1885`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1916`: `let info = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1948`: `let full = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1958`: `&GitRequest::minimal().include_worktrees(true),`
+- `sniff/lib/tests/l1/git_parity.rs:1994`: `let full = detect_git_with_request(dir.path(), &GitRequest::full())`
+- `sniff/lib/tests/l1/git_parity.rs:1998`: `// GitRequest::deep() triggers the detailed path listing but omits diffs.`
+- `sniff/lib/tests/l1/git_parity.rs:1999`: `let detailed = detect_git_with_request(dir.path(), &GitRequest::deep())`
+- `sniff/lib/tests/l1/host_capability_cache.rs:40`: `..Default::default()`
+- `sniff/lib/tests/l1/integration.rs:3`: `use sniff::request::{DetectionPlan, HardwareRequest, NetworkRequest};`
+- `sniff/lib/tests/l1/integration.rs:19`: `.hardware(HardwareRequest::summary())`
+- `sniff/lib/tests/l1/integration.rs:143`: `.hardware(HardwareRequest::summary())`
+- `sniff/lib/tests/l1/integration.rs:742`: `let request = sniff::request::RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/tests/l1/integration.rs:1664`: `plan = plan.hardware(HardwareRequest::summary());`
+- `sniff/lib/tests/l1/integration.rs:1667`: `plan = plan.network(NetworkRequest::interfaces_only());`
+- `sniff/lib/tests/l1/integration.rs:1992`: `// OS-only via the default OsRequest -- the same OS code path detect() runs,`
+- `sniff/lib/tests/l1/integration.rs:2074`: `.network(NetworkRequest::interfaces_only())`
+- `sniff/lib/tests/l1/integration.rs:2116`: `.network(NetworkRequest::interfaces_only())`
+- `sniff/lib/tests/l1/integration.rs:2190`: `.network(NetworkRequest::interfaces_only())`
+- `sniff/lib/tests/l1/integration.rs:2197`: `network.wan_ip_address = Some("203.0.113.7".to_string());`
+- `sniff/lib/tests/l1/integration.rs:2259`: `.os(OsRequest::summary())`
+- `sniff/lib/tests/l1/integration.rs:2260`: `.hardware(HardwareRequest::summary())`
+- `sniff/lib/tests/l1/integration.rs:2402`: `FilesystemRequest::new()`
+- `sniff/lib/tests/l1/integration.rs:2403`: `.git(GitRequest::full())`
+- `sniff/lib/tests/l1/integration.rs:2414`: `// GitRequest::full() includes file_changes (paths, status, line counts)`
+- `sniff/lib/tests/l1/integration.rs:2448`: `FilesystemRequest::new()`
+- `sniff/lib/tests/l1/integration.rs:2449`: `.git(GitRequest::deep())`
+- `sniff/lib/tests/l1/integration.rs:2495`: `FilesystemRequest::new()`
+- `sniff/lib/tests/l1/integration.rs:2496`: `.git(GitRequest::full())`
+- `sniff/lib/tests/l1/integration.rs:2525`: `.os(OsRequest::summary()`
+- `sniff/lib/tests/l1/integration.rs:2554`: `.os(OsRequest::summary())`
+- `sniff/lib/tests/l1/integration.rs:2603`: `.network(NetworkRequest::interfaces_only())`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:22`: `use sniff::request::RepoRequest;`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:54`: `request: &RepoRequest,`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:105`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:135`: `let (repo, counts) = measured(&root, &RepoRequest::structure());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:351`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:378`: `let (repo, counts) = measured(&root, &RepoRequest::structure());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:407`: `let (repo, _) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:502`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:547`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:602`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:638`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:670`: `let (repo, counts) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:833`: `RepoRequest::full(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:838`: `RepoRequest::structure(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:882`: `let (repo, _) = measured(root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1126`: `let (repo, _) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1211`: `RepoRequest::full(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1216`: `RepoRequest::structure(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1279`: `RepoRequest::full(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1284`: `RepoRequest::structure(),`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1327`: `let repo = detect_repo_with_request_or_root_package(&root, &RepoRequest::full())`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1337`: `let repo = detect_repo_with_request_or_root_package(&root, &RepoRequest::full())`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1362`: `for request in [RepoRequest::full(), RepoRequest::structure()] {`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1382`: `let (repo, _) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1403`: `let (repo, _) = measured(&root, &RepoRequest::structure());`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1749`: `let repo = match detect_repo_with_request(root, &RepoRequest::full()) {`
+- `sniff/lib/tests/l1/lockfile_fixtures.rs:1795`: `let (repo, _) = measured(&root, &RepoRequest::full());`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:23`: `use sniff::request::RepoRequest;`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:100`: `fn detect(root: &Path, request: &RepoRequest) -> (RepoInfo, BTreeMap<String, u64>) {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:111`: `fn corroborating() -> RepoRequest {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:112`: `RepoRequest::structure().with_lockfile_provenance(true)`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:328`: `("structure", RepoRequest::structure()),`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:329`: `("full, declined", RepoRequest::full().with_lockfile_provenance(false)),`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:666`: `let (_, without_lockfile) = detect(root, &RepoRequest::structure());`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:669`: `let (repo, declined) = detect(root, &RepoRequest::structure());`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:716`: `for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:763`: `let request = RepoRequest::full().with_lockfile_provenance(false);`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:845`: `for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:894`: `for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:928`: `for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:1094`: `for request in [corroborating(), RepoRequest::full()] {`
+- `sniff/lib/tests/l1/lockfile_isolation.rs:1371`: `for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:26`: `use sniff::request::RepoRequest;`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:461`: `/// 'RepoRequest::structure()' and 'detect_repo_structure'.`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:727`: `let request = RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:795`: `detect_repo_with_request(root, &RepoRequest::structure())`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:846`: `let request = RepoRequest::structure().with_lockfile_provenance(true);`
+- `sniff/lib/tests/l1/lockfile_provenance.rs:1539`: `let request = RepoRequest::structure().with_lockfile_provenance(case.corroborate);`
+- `sniff/lib/tests/l1/network_primitives.rs:15`: `use sniff::request::NetworkRequest;`
+- `sniff/lib/tests/l1/network_primitives.rs:19`: `let info = detect_network_with_request(&NetworkRequest::interfaces_only()).unwrap();`
+- `sniff/lib/tests/l1/package_identity.rs:196`: `duplicate.name = "second-alias".into();`
+- `sniff/lib/tests/l1/pr_check_status.rs:95`: `self.with_status_within(Duration::from_secs(5))`
+- `sniff/lib/tests/l1/pr_check_status.rs:124`: `let answer = provider.with_status_within(Duration::from_secs(5)).unwrap();`
+- `sniff/lib/tests/l1/pr_check_status.rs:205`: `anonymous.with_status_within(Duration::from_secs(5)).unwrap().credentials,`
+- `sniff/lib/tests/l1/pr_check_status.rs:307`: `let answer = provider.with_status_within(Duration::from_secs(1)).unwrap();`
+- `sniff/lib/tests/l1/pr_check_status.rs:326`: `assert!(provider.with_status_within(Duration::from_secs(5)).is_err());`
+- `sniff/lib/tests/l1/recent_commits.rs:255`: `let early = Utc.with_ymd_and_hms(2026, 3, 31, 18, 45, 0).unwrap();`
+- `sniff/lib/tests/l1/recent_commits.rs:257`: `let late_evening = Utc.with_ymd_and_hms(2026, 4, 2, 7, 30, 0).unwrap();`
+- `sniff/lib/tests/l1/recent_commits.rs:259`: `let after_midnight = Utc.with_ymd_and_hms(2026, 4, 2, 8, 30, 0).unwrap();`
+
+#### biscuit-speaks/lib
+
+- `biscuit-speaks/lib/src/audio_cache.rs:36`: `//!     .with_speed(1.25);`
+- `biscuit-speaks/lib/src/audio_cache.rs:110`: `self.speed = Some(speed);`
+- `biscuit-speaks/lib/src/audio_cache.rs:216`: `let key = CacheKey::new("elevenlabs", "voice-id", "Hello", "mp3").with_speed(1.25);`
+- `biscuit-speaks/lib/src/audio_cache.rs:273`: `let key2 = CacheKey::new("elevenlabs", "voice-id", "Hello", "mp3").with_speed(1.0);`
+- `biscuit-speaks/lib/src/audio_cache.rs:274`: `let key3 = CacheKey::new("elevenlabs", "voice-id", "Hello", "mp3").with_speed(1.25);`
+- `biscuit-speaks/lib/src/cache.rs:208`: `capabilities.last_updated = SystemTime::now()`
+- `biscuit-speaks/lib/src/cache.rs:637`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:639`: `.with_voice(Voice::new("Samantha").with_gender(Gender::Female)),`
+- `biscuit-speaks/lib/src/cache.rs:641`: `.with_timestamp(1234567890);`
+- `biscuit-speaks/lib/src/cache.rs:666`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/cache.rs:667`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/cache.rs:668`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/cache.rs:669`: `Voice::new("Alex").with_gender(Gender::Male),`
+- `biscuit-speaks/lib/src/cache.rs:687`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:689`: `.with_voice(Voice::new("OldVoice")),`
+- `biscuit-speaks/lib/src/cache.rs:691`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:693`: `.with_voice(Voice::new("ESpeak1")),`
+- `biscuit-speaks/lib/src/cache.rs:703`: `let new_capability = HostTtsCapability::new(provider).with_voice(Voice::new("NewVoice"));`
+- `biscuit-speaks/lib/src/cache.rs:724`: `let mut capabilities = HostTtsCapabilities::new().with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:726`: `.with_voice(Voice::new("Samantha")),`
+- `biscuit-speaks/lib/src/cache.rs:736`: `let new_capability = HostTtsCapability::new(provider).with_voice(Voice::new("PiperVoice"));`
+- `biscuit-speaks/lib/src/cache.rs:790`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:792`: `.with_voice(Voice::new("Test")),`
+- `biscuit-speaks/lib/src/cache.rs:794`: `.with_timestamp(1234567890);`
+- `biscuit-speaks/lib/src/cache.rs:813`: `let initial = HostTtsCapabilities::new().with_timestamp(1000);`
+- `biscuit-speaks/lib/src/cache.rs:818`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:820`: `.with_voice(Voice::new("Voice1"))`
+- `biscuit-speaks/lib/src/cache.rs:821`: `.with_voice(Voice::new("Voice2")),`
+- `biscuit-speaks/lib/src/cache.rs:823`: `.with_timestamp(2000);`
+- `biscuit-speaks/lib/src/cache.rs:862`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:864`: `.with_voice(`
+- `biscuit-speaks/lib/src/cache.rs:866`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/cache.rs:867`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/cache.rs:868`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/src/cache.rs:869`: `.with_priority(10),`
+- `biscuit-speaks/lib/src/cache.rs:871`: `.with_voice(Voice::new("Alex").with_gender(Gender::Male))`
+- `biscuit-speaks/lib/src/cache.rs:872`: `.with_available_voice(Voice::new("Zoe")),`
+- `biscuit-speaks/lib/src/cache.rs:874`: `.with_provider(`
+- `biscuit-speaks/lib/src/cache.rs:876`: `.with_voice(Voice::new("en-us")),`
+- `biscuit-speaks/lib/src/cache.rs:878`: `.with_timestamp(1704067200); // 2024-01-01 00:00:00 UTC`
+- `biscuit-speaks/lib/src/cache.rs:937`: `let mut capabilities = HostTtsCapabilities::new().with_timestamp(0);`
+- `biscuit-speaks/lib/src/cache.rs:940`: `capabilities.last_updated = SystemTime::now()`
+- `biscuit-speaks/lib/src/cache.rs:1013`: `Voice::new("TestVoice1").with_gender(Gender::Female),`
+- `biscuit-speaks/lib/src/cache.rs:1014`: `Voice::new("TestVoice2").with_gender(Gender::Male),`
+- `biscuit-speaks/lib/src/detached.rs:319`: `tts_config: TtsConfig::default().with_gender(Gender::Male),`
+- `biscuit-speaks/lib/src/detached.rs:499`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/src/detached.rs:500`: `.with_failover(strategy)`
+- `biscuit-speaks/lib/src/detached.rs:516`: `let config = silent(TtsFailoverStrategy::FirstAvailable).with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/detached.rs:517`: `let prepared = Speak::new(text).with_config(config).prepare().await.unwrap();`
+- `biscuit-speaks/lib/src/detection.rs:369`: `let installed = InstalledTtsClients::default().with_program(`
+- `biscuit-speaks/lib/src/lib.rs:24`: `//!     .with_voice("Samantha")`
+- `biscuit-speaks/lib/src/lib.rs:25`: `//!     .with_volume(VolumeLevel::Soft)`
+- `biscuit-speaks/lib/src/playa_bridge.rs:66`: `.with_volume(volume.value())`
+- `biscuit-speaks/lib/src/playa_bridge.rs:67`: `.with_speed(speed.value())`
+- `biscuit-speaks/lib/src/playback.rs:27`: `//!     .with_volume(VolumeLevel::Soft)`
+- `biscuit-speaks/lib/src/playback.rs:28`: `//!     .with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/playback.rs:70`: `///     .with_volume(VolumeLevel::Soft)`
+- `biscuit-speaks/lib/src/playback.rs:71`: `///     .with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/playback.rs:95`: `.with_options(options)`
+- `biscuit-speaks/lib/src/playback.rs:111`: `.with_options(to_playa_options(config.volume, config.speed))`
+- `biscuit-speaks/lib/src/playback.rs:143`: `/// let config = TtsConfig::new().with_volume(VolumeLevel::Loud);`
+- `biscuit-speaks/lib/src/playback.rs:167`: `.with_options(options)`
+- `biscuit-speaks/lib/src/playback.rs:186`: `.with_options(to_playa_options(config.volume, config.speed))`
+- `biscuit-speaks/lib/src/playback.rs:241`: `.with_volume(VolumeLevel::Soft)`
+- `biscuit-speaks/lib/src/playback.rs:242`: `.with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/playback.rs:257`: `.with_volume(VolumeLevel::Explicit(0.33))`
+- `biscuit-speaks/lib/src/playback.rs:258`: `.with_speed(SpeedLevel::Explicit(1.8));`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:40`: `use schematic_schema::elevenlabs::{`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:41`: `CreateSoundEffectBody, CreateSpeechBody, CreateSpeechRequest, ListVoicesResponse, ModelInfo,`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:44`: `use schematic_schema::prelude::{Credential, ElevenLabs, TransportError};`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:45`: `use schematic_schema::schematic_runtime::{ApiError, CallError, ErrorKind, NoDeclaredError};`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:327`: `.with_identifier(&voice.voice_id)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:328`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:329`: `.with_quality(VoiceQuality::Excellent) // All ElevenLabs voices are excellent quality`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:330`: `.with_languages(languages);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:333`: `v = v.with_description(desc);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:338`: `v = v.with_recommended_models(models);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:347`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:348`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:349`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:350`: `.with_identifier(DEFAULT_VOICE_ID)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:443`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:450`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:453`: `let request = CreateSpeechRequest::new(voice_id.to_string(), body);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:478`: `key.with_speed(speed.value())`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:608`: `playback.speed = SpeedLevel::Normal;`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:706`: `.with_identifier(voice_id)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:707`: `.with_gender(config.gender)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:708`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:709`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:713`: `.with_identifier(voice_id)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:714`: `.with_gender(config.gender)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:715`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:716`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:720`: `voice.identifier = Some(voice_id.to_string());`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:728`: `.with_audio_file(audio_path)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:729`: `.with_codec("mp3")`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:730`: `.with_cache_hit(cache_hit)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:731`: `.with_playback(playback))`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:802`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:810`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:814`: `let request = CreateSpeechRequest::new(voice_id.clone(), body);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:909`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:942`: `request: CreateSpeechRequest,`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:958`: `request: CreateSpeechRequest,`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1177`: `use schematic_schema::elevenlabs::{CreateSpeechRequest, ListVoicesResponse, VoiceResponseModel};`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1256`: `request: CreateSpeechRequest,`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1278`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1485`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1505`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1520`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1539`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1549`: `use schematic_schema::elevenlabs::LanguageModel;`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1558`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1563`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1566`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1585`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1602`: `..Default::default()`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1761`: `use schematic_schema::elevenlabs::ListVoicesResponse;`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1904`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1918`: `assert_eq!(selected_voice(&transport, &TtsConfig::new().with_gender(Gender::Female)).await, "unlabeled");`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:1934`: `let config = TtsConfig::new().with_voice("chosen").with_model("eleven_turbo_v2");`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2022`: `.with_account_context(account.map(str::to_owned))`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2027`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2028`: `.with_volume(crate::types::VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2092`: `let louder = female().with_volume(crate::types::VolumeLevel::Loud);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2134`: `let other_language = female().with_language(Language::Custom("fr".into()));`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2136`: `let other_fallback = at(NOW).with_default_voice("someone-else");`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2249`: `let config = female().with_voice("chosen");`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2279`: `let fast = female().with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs:2457`: `let fast = female().with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:169`: `key.with_speed(speed.value())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:177`: `playback.speed = SpeedLevel::Normal;`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:446`: `.with_gender(config.gender)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:447`: `.with_quality(self.engine.quality())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:448`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:449`: `.with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:453`: `.with_gender(config.gender)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:454`: `.with_quality(self.engine.quality())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:455`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:456`: `.with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:460`: `.with_codec("wav")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:461`: `.with_playback(playback);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:463`: `Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:622`: `.with_gender(voice_gender)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:623`: `.with_quality(self.engine.quality())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:624`: `.with_language(Language::English))`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:689`: `.with_identifier(format!("{}:{}", engine.as_str(), identifier))`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:690`: `.with_gender(current_gender)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:691`: `.with_quality(engine.quality())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:692`: `.with_languages(current_languages.clone());`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:716`: `.with_identifier(format!("{}:{}", engine.as_str(), identifier))`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:717`: `.with_gender(current_gender)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:718`: `.with_quality(engine.quality())`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:719`: `.with_languages(current_languages);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:987`: `let config = TtsConfig::new().with_voice("CustomVoice");`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:994`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1001`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1022`: `let config = TtsConfig::new().with_language(Language::Custom("ja".into()));`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1025`: `provider.known_voice(&config.with_voice("Alpha")),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1039`: `.with_speed(1.25)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1053`: `.with_speed(SpeedLevel::Fast)`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1054`: `.with_volume(crate::types::VolumeLevel::Soft);`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1282`: `.with_identifier("vits:nl_BE-nathalie-medium")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1283`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1285`: `.with_identifier("vits:nl_BE-nathalie-x_low")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1286`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1301`: `.with_identifier("vits:nl_BE-nathalie-low")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1302`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1304`: `.with_identifier("vits:nl_BE-nathalie-x_low")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1305`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1317`: `.with_identifier("vits:en_US-lessac-high")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1318`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1320`: `.with_identifier("vits:en_US-lessac-medium")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1321`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1335`: `Voice::new("nl_BE-nathalie-medium").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1336`: `Voice::new("nl_BE-nathalie-x_low").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1337`: `Voice::new("nl_BE-rdh-medium").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1338`: `Voice::new("nl_BE-rdh-x_low").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1339`: `Voice::new("uk_UA-lada-x_low").with_quality(VoiceQuality::Good), // Only x_low - filtered`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1340`: `Voice::new("de_DE-thorsten-medium").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1341`: `Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1366`: `Voice::new("Heart").with_quality(VoiceQuality::Excellent),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1367`: `Voice::new("Michael").with_quality(VoiceQuality::Excellent),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1386`: `Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Unknown),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1387`: `Voice::new("de_DE-thorsten-medium").with_quality(VoiceQuality::Unknown),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1403`: `Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1404`: `Voice::new("en_US-lessac-medium").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1408`: `Voice::new("en_US-lessac-medium").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1409`: `Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1499`: `let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1552`: `.with_voice("Heart")`
+- `biscuit-speaks/lib/src/providers/host/echogarden.rs:1553`: `.with_volume(crate::types::VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:116`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:117`: `.with_quality(VoiceQuality::Low) // eSpeak uses formant synthesis`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:118`: `.with_language(language)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:119`: `.with_identifier(&voice_arg)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:260`: `.with_gender(voice_gender)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:261`: `.with_quality(VoiceQuality::Low)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:262`: `.with_language(Language::English))`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:357`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:358`: `.with_quality(VoiceQuality::Low) // Formant synthesis = low quality`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:359`: `.with_language(language)`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:360`: `.with_identifier(language_str); // Use language code as identifier for eSpeak`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:430`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:434`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:442`: `let config = TtsConfig::new().with_language(Language::Custom("de".into()));`
+- `biscuit-speaks/lib/src/providers/host/espeak.rs:450`: `let config = TtsConfig::new().with_voice("en-gb+f4");`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:156`: `.with_gender(Gender::Any) // gTTS doesn't distinguish gender`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:157`: `.with_quality(VoiceQuality::Good) // Google TTS is good quality`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:158`: `.with_language(language)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:159`: `.with_identifier(lang_code), // Use language code as identifier for gTTS`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:299`: `.with_gender(Gender::Any)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:300`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:301`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:302`: `.with_identifier(lang_code)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:307`: `.with_gender(Gender::Any)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:308`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:309`: `.with_language(config.language.clone())`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:310`: `.with_identifier(lang_code)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:333`: `.with_audio_file(audio_path)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:334`: `.with_codec("mp3")`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:335`: `.with_cache_hit(cache_hit)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:336`: `.with_playback(playback),`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:460`: `.with_gender(Gender::Any)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:461`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:462`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:463`: `.with_identifier("en"))`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:537`: `let config = TtsConfig::new().with_voice("fr");`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:543`: `let config = TtsConfig::new().with_language(Language::Custom("de".into()));`
+- `biscuit-speaks/lib/src/providers/host/gtts.rs:902`: `let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:364`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:365`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:366`: `.with_language(language);`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:370`: `.with_audio_file(audio_path)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:371`: `.with_codec("wav")`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:372`: `.with_cache_hit(cache_hit)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:373`: `.with_playback(playback),`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:473`: `.with_gender(voice_gender)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:474`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:475`: `.with_language(Language::English))`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:584`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:585`: `.with_quality(VoiceQuality::Excellent) // Neural TTS = excellent quality`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:586`: `.with_language(language)`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:619`: `let config = TtsConfig::new().with_voice("bf_emma");`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:625`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:631`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:643`: `let japanese = TtsConfig::new().with_language(Language::Custom("ja".into()));`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:645`: `let japanese_male = japanese.with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/kokoro.rs:1012`: `let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:143`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:144`: `.with_quality(quality)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:145`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:203`: `.with_gender(Gender::Any)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:204`: `.with_quality(VoiceQuality::Moderate)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:205`: `.with_language(Language::English);`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:278`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:279`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:280`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:282`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:283`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:284`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:295`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:296`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:297`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:308`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:309`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:310`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:312`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:313`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:314`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:325`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:326`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:327`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:329`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:330`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/sapi.rs:331`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:221`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:222`: `.with_quality(quality)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:223`: `.with_language(language),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:290`: `playback.speed = SpeedLevel::Normal;`
+- `biscuit-speaks/lib/src/providers/host/say.rs:491`: `.unwrap_or_else(|| Voice::new(name.clone()).with_language(Language::English)),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:499`: `resolution.voice = Some(selected.name.clone());`
+- `biscuit-speaks/lib/src/providers/host/say.rs:507`: `.with_codec("wav")`
+- `biscuit-speaks/lib/src/providers/host/say.rs:508`: `.with_playback(playback);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:510`: `Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:686`: `.with_gender(gender)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:687`: `.with_language(Language::English);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:716`: `let config = TtsConfig::new().with_voice("Alex");`
+- `biscuit-speaks/lib/src/providers/host/say.rs:722`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:728`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1016`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1017`: `.with_quality(VoiceQuality::Moderate)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1018`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1020`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1021`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1022`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1024`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1025`: `.with_quality(VoiceQuality::Moderate)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1026`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1029`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1038`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1039`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1040`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1042`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1043`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1044`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1046`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1047`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1048`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1051`: `let config = TtsConfig::new().with_gender(Gender::Female);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1060`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1061`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1062`: `.with_language(Language::English),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1065`: `let config = TtsConfig::new().with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1086`: `(TtsConfig::new().with_voice("Victoria").with_speed(SpeedLevel::Fast), Some("Victoria"), Some(219), 0),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1087`: `(TtsConfig::new().with_gender(Gender::Male), Some("Alex"), Some(175), 1),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1088`: `(TtsConfig::new().with_gender(Gender::Female), Some("Samantha"), Some(175), 1),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1090`: `(TtsConfig::new().with_speed(SpeedLevel::Slow), Some("Ava (Premium)"), Some(131), 1),`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1107`: `let male = SayProvider::resolve(&TtsConfig::new().with_gender(Gender::Male), &no_rate).await;`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1111`: `let resolved = SayProvider::resolve(&TtsConfig::new().with_speed(SpeedLevel::Fast), &no_voice).await;`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1240`: `let config = TtsConfig::new().with_voice("Samantha").with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/providers/host/say.rs:1271`: `let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/src/speak.rs:41`: `///     .with_voice("Samantha")`
+- `biscuit-speaks/lib/src/speak.rs:42`: `///     .with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/speak.rs:94`: `self.config.requested_voice = Some(voice.into());`
+- `biscuit-speaks/lib/src/speak.rs:95`: `self.prepared = None;`
+- `biscuit-speaks/lib/src/speak.rs:103`: `self.prepared = None;`
+- `biscuit-speaks/lib/src/speak.rs:111`: `self.prepared = None;`
+- `biscuit-speaks/lib/src/speak.rs:128`: `self.prepared = None;`
+- `biscuit-speaks/lib/src/speak.rs:136`: `self.prepared = None;`
+- `biscuit-speaks/lib/src/speak.rs:195`: `self.prepared = Some(settings);`
+- `biscuit-speaks/lib/src/speak.rs:555`: `/// This is equivalent to 'Speak::new(text).with_config(config).play().await'.`
+- `biscuit-speaks/lib/src/speak.rs:565`: `Speak::new(text).with_config(config.clone()).play().await`
+- `biscuit-speaks/lib/src/speak.rs:570`: `/// This is equivalent to 'Speak::new(text).with_config(config).play_with_result().await'.`
+- `biscuit-speaks/lib/src/speak.rs:583`: `.with_config(config.clone())`
+- `biscuit-speaks/lib/src/speak.rs:625`: `.with_voice("Samantha")`
+- `biscuit-speaks/lib/src/speak.rs:626`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/speak.rs:627`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/src/speak.rs:628`: `.with_volume(VolumeLevel::Soft);`
+- `biscuit-speaks/lib/src/speak.rs:640`: `.with_voice("Alex")`
+- `biscuit-speaks/lib/src/speak.rs:641`: `.with_gender(Gender::Male);`
+- `biscuit-speaks/lib/src/speak.rs:643`: `let speak = Speak::new("Test").with_config(config);`
+- `biscuit-speaks/lib/src/speak.rs:651`: `speak.prepared = Some(ResolvedSynthesis::Kokoro {`
+- `biscuit-speaks/lib/src/speak.rs:661`: `let louder = prepared().with_volume(VolumeLevel::Loud);`
+- `biscuit-speaks/lib/src/speak.rs:669`: `prepared().with_voice("Samantha"),`
+- `biscuit-speaks/lib/src/speak.rs:670`: `prepared().with_gender(Gender::Male),`
+- `biscuit-speaks/lib/src/speak.rs:671`: `prepared().with_language(Language::Custom("fr".into())),`
+- `biscuit-speaks/lib/src/speak.rs:672`: `prepared().with_failover(TtsFailoverStrategy::PreferCloud),`
+- `biscuit-speaks/lib/src/speak.rs:673`: `prepared().with_config(TtsConfig::default()),`
+- `biscuit-speaks/lib/src/speak.rs:684`: `let speak = Speak::new("Test").with_failover(TtsFailoverStrategy::SpecificProvider(`
+- `biscuit-speaks/lib/src/speak.rs:693`: `let speak = Speak::new("Test").with_failover(TtsFailoverStrategy::SpecificProvider(`
+- `biscuit-speaks/lib/src/traits.rs:252`: `Voice::new("MockVoice").with_gender(Gender::Female),`
+- `biscuit-speaks/lib/src/traits.rs:275`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/traits.rs:276`: `.with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/traits.rs:278`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/traits.rs:279`: `.with_quality(VoiceQuality::Moderate),`
+- `biscuit-speaks/lib/src/traits.rs:293`: `.with_gender(Gender::Male)`
+- `biscuit-speaks/lib/src/traits.rs:294`: `.with_quality(VoiceQuality::Moderate)),`
+- `biscuit-speaks/lib/src/traits.rs:296`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/traits.rs:297`: `.with_quality(VoiceQuality::Good)),`
+- `biscuit-speaks/lib/src/types.rs:129`: `///     .with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:130`: `///     .with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/types.rs:131`: `///     .with_language(Language::English);`
+- `biscuit-speaks/lib/src/types.rs:226`: `self.identifier = Some(identifier.into());`
+- `biscuit-speaks/lib/src/types.rs:233`: `self.description = Some(description.into());`
+- `biscuit-speaks/lib/src/types.rs:247`: `self.model_file = Some(path.into());`
+- `biscuit-speaks/lib/src/types.rs:275`: `///     .with_voice(Voice::new("Samantha")`
+- `biscuit-speaks/lib/src/types.rs:276`: `///         .with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:277`: `///         .with_quality(VoiceQuality::Good));`
+- `biscuit-speaks/lib/src/types.rs:701`: `///     .with_voice("Samantha")`
+- `biscuit-speaks/lib/src/types.rs:702`: `///     .with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:703`: `///     .with_language(Language::English);`
+- `biscuit-speaks/lib/src/types.rs:736`: `self.requested_voice = Some(voice.into());`
+- `biscuit-speaks/lib/src/types.rs:746`: `self.requested_model = Some(model.into());`
+- `biscuit-speaks/lib/src/types.rs:851`: `///         .with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:852`: `///         .with_quality(VoiceQuality::Good),`
+- `biscuit-speaks/lib/src/types.rs:917`: `self.audio_file_path = Some(path);`
+- `biscuit-speaks/lib/src/types.rs:924`: `self.audio_codec = Some(codec.into());`
+- `biscuit-speaks/lib/src/types.rs:938`: `self.playback = Some(playback);`
+- `biscuit-speaks/lib/src/types.rs:1078`: `.with_voice("Samantha")`
+- `biscuit-speaks/lib/src/types.rs:1079`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:1080`: `.with_language(Language::Custom("en-US".into()))`
+- `biscuit-speaks/lib/src/types.rs:1081`: `.with_volume(VolumeLevel::Soft)`
+- `biscuit-speaks/lib/src/types.rs:1082`: `.with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/src/types.rs:1132`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:1133`: `.with_quality(VoiceQuality::Excellent)`
+- `biscuit-speaks/lib/src/types.rs:1134`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/src/types.rs:1135`: `.with_identifier("voice_123")`
+- `biscuit-speaks/lib/src/types.rs:1136`: `.with_priority(10)`
+- `biscuit-speaks/lib/src/types.rs:1137`: `.with_model_file("/path/to/model.onnx");`
+- `biscuit-speaks/lib/src/types.rs:1151`: `.with_languages(vec![Language::English, Language::Custom("fr-FR".into())]);`
+- `biscuit-speaks/lib/src/types.rs:1159`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/src/types.rs:1160`: `.with_quality(VoiceQuality::Good)`
+- `biscuit-speaks/lib/src/types.rs:1161`: `.with_language(Language::English);`
+- `biscuit-speaks/lib/src/types.rs:1295`: `.with_voice(Voice::new("Samantha"))`
+- `biscuit-speaks/lib/src/types.rs:1296`: `.with_available_voice(Voice::new("Alex"));`
+- `biscuit-speaks/lib/src/types.rs:1307`: `.with_voices(vec![Voice::new("V1"), Voice::new("V2")])`
+- `biscuit-speaks/lib/src/types.rs:1308`: `.with_available_voices(vec![Voice::new("V3")]);`
+- `biscuit-speaks/lib/src/types.rs:1317`: `.with_voice(Voice::new("Samantha").with_gender(Gender::Female));`
+- `biscuit-speaks/lib/src/types.rs:1338`: `.with_provider(`
+- `biscuit-speaks/lib/src/types.rs:1340`: `.with_voice(Voice::new("Samantha")),`
+- `biscuit-speaks/lib/src/types.rs:1342`: `.with_timestamp(1234567890);`
+- `biscuit-speaks/lib/src/types.rs:1351`: `.with_provider(`
+- `biscuit-speaks/lib/src/types.rs:1353`: `.with_voices(vec![Voice::new("V1"), Voice::new("V2")]),`
+- `biscuit-speaks/lib/src/types.rs:1355`: `.with_provider(`
+- `biscuit-speaks/lib/src/types.rs:1357`: `.with_voice(Voice::new("V3")),`
+- `biscuit-speaks/lib/src/types.rs:1366`: `let caps = HostTtsCapabilities::new().with_provider(HostTtsCapability::new(`
+- `biscuit-speaks/lib/src/types.rs:1383`: `.with_provider(`
+- `biscuit-speaks/lib/src/types.rs:1385`: `.with_voice(Voice::new("Test")),`
+- `biscuit-speaks/lib/src/types.rs:1387`: `.with_timestamp(1234567890);`
+- `biscuit-speaks/lib/tests/common/mod.rs:231`: `let read = |extension: &str| std::fs::read_to_string(base.with_extension(extension)).ok();`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:40`: `.with_playback(playback);`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:53`: `.with_voice("en+f3")`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:54`: `.with_language(Language::English)`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:55`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:56`: `.with_speed(SpeedLevel::Fast)`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:57`: `.with_volume(VolumeLevel::Soft);`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:85`: `.with_voice("af_heart")`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:86`: `.with_model("kokoro-v1.0")`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:87`: `.with_gender(Gender::Female)`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:88`: `.with_language(Language::Custom("en-US".into()))`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:89`: `.with_volume(VolumeLevel::Explicit(0.42))`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:90`: `.with_speed(SpeedLevel::Explicit(1.15))`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:91`: `.with_failover(TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:141`: `let config = TtsConfig::new().with_voice("Samantha")`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:142`: `.with_speed(SpeedLevel::Slow).with_volume(VolumeLevel::Explicit(volume));`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:161`: `assert!(SayProvider.cached_detached_job(&original, &config.clone().with_voice("Alex")).await.unwrap().is_none());`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:162`: `assert!(SayProvider.cached_detached_job(&original, &config.clone().with_speed(SpeedLevel::Fast)).await.unwrap().is_none());`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:174`: `let config = TtsConfig::new().with_voice("test voice").with_volume(VolumeLevel::Explicit(volume));`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:212`: `let config = TtsConfig::new().with_voice("af_heart").with_volume(VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:263`: `.with_voice("voice-id")`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:264`: `.with_model("model-id").with_volume(VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:312`: `let config = TtsConfig::new().with_failover(TtsFailoverStrategy::SpecificProvider(`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:355`: `.with_config(config)`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:396`: `let base = TtsConfig::new().with_voice("Samantha").with_volume(VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/tests/detached_phase4.rs:404`: `let config = base.clone().with_speed(speed);`
+- `biscuit-speaks/lib/tests/elevenlabs_http.rs:57`: `let config = TtsConfig::new().with_voice("voice-abc");`
+- `biscuit-speaks/lib/tests/elevenlabs_http.rs:231`: `&TtsConfig::new().with_voice("voice-abc"),`
+- `biscuit-speaks/lib/tests/elevenlabs_http.rs:278`: `let config = TtsConfig::new().with_voice("voice-abc");`
+- `biscuit-speaks/lib/tests/prepare.rs:146`: `.with_voice("af_heart")`
+- `biscuit-speaks/lib/tests/prepare.rs:147`: `.with_volume(VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/tests/prepare.rs:190`: `.with_voice("af_heart")`
+- `biscuit-speaks/lib/tests/prepare.rs:191`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:192`: `.with_failover(TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(`
+- `biscuit-speaks/lib/tests/prepare.rs:199`: `let id = Speak::new(text).with_config(config).play_detached().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:223`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:224`: `.with_failover(TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(host)))`
+- `biscuit-speaks/lib/tests/prepare.rs:273`: `let prepared = Speak::new(&text).with_config(config.clone()).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:284`: `let fresh = || Speak::new(&text).with_config(config.clone());`
+- `biscuit-speaks/lib/tests/prepare.rs:357`: `Speak::new(text).with_config(config.clone()).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:360`: `.with_config(config.clone())`
+- `biscuit-speaks/lib/tests/prepare.rs:361`: `.with_volume(VolumeLevel::Explicit(0.5))`
+- `biscuit-speaks/lib/tests/prepare.rs:368`: `let other_voice = config.clone().with_voice("am_adam");`
+- `biscuit-speaks/lib/tests/prepare.rs:369`: `Speak::new(text).with_config(other_voice).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:394`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:395`: `.with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/tests/prepare.rs:431`: `.with_config(pinned(HostTtsProvider::Pico2Wave))`
+- `biscuit-speaks/lib/tests/prepare.rs:442`: `let speak = Speak::new(text).with_config(pinned(host)).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:462`: `.with_config(pinned(HostTtsProvider::KokoroTts))`
+- `biscuit-speaks/lib/tests/prepare.rs:486`: `.with_language(biscuit_speaks::Language::Custom("ja".into()));`
+- `biscuit-speaks/lib/tests/prepare.rs:489`: `let speak = Speak::new(text).with_config(config.clone()).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:498`: `let result = Speak::new(text).with_config(config.clone()).play().await;`
+- `biscuit-speaks/lib/tests/prepare.rs:524`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:525`: `.with_failover(TtsFailoverStrategy::FirstAvailable);`
+- `biscuit-speaks/lib/tests/prepare.rs:532`: `let result = Speak::new("This is a test message: failing").with_config(config).prepare().await;`
+- `biscuit-speaks/lib/tests/prepare.rs:550`: `Speak::new("This is a test message: cancelled").with_config(config).prepare().await`
+- `biscuit-speaks/lib/tests/prepare.rs:572`: `Speak::new(text).with_config(config.clone()).prepare(),`
+- `biscuit-speaks/lib/tests/prepare.rs:573`: `Speak::new(text).with_config(config.clone()).prepare(),`
+- `biscuit-speaks/lib/tests/prepare.rs:595`: `let speak = Speak::new(text).with_config(config).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:614`: `.with_config(pinned(HostTtsProvider::Piper))`
+- `biscuit-speaks/lib/tests/prepare.rs:663`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:664`: `.with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/tests/prepare.rs:715`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:716`: `.with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/tests/prepare.rs:748`: `let silent = TtsConfig::new().with_volume(VolumeLevel::Explicit(0.0));`
+- `biscuit-speaks/lib/tests/prepare.rs:751`: `for config in [silent.clone(), silent.clone().with_gender(biscuit_speaks::Gender::Male)] {`
+- `biscuit-speaks/lib/tests/prepare.rs:758`: `let fast = silent.clone().with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/tests/prepare.rs:768`: `for config in [&silent, &silent.clone().with_gender(biscuit_speaks::Gender::Male), &fast] {`
+- `biscuit-speaks/lib/tests/prepare.rs:795`: `let config = TtsConfig::new().with_voice("Samantha").with_speed(SpeedLevel::Slow);`
+- `biscuit-speaks/lib/tests/prepare.rs:813`: `.with_config(pinned(HostTtsProvider::Say).with_speed(SpeedLevel::Fast))`
+- `biscuit-speaks/lib/tests/prepare.rs:818`: `let normal = Speak::new(text).with_config(pinned(HostTtsProvider::Say)).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:841`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/prepare.rs:842`: `.with_failover(TtsFailoverStrategy::FirstAvailable);`
+- `biscuit-speaks/lib/tests/prepare.rs:869`: `.with_config(config.clone().with_gender(biscuit_speaks::Gender::Male))`
+- `biscuit-speaks/lib/tests/prepare.rs:927`: `.with_config(pinned(HostTtsProvider::KokoroTts))`
+- `biscuit-speaks/lib/tests/prepare.rs:959`: `.with_config(pinned(HostTtsProvider::KokoroTts).with_gender(biscuit_speaks::Gender::Male))`
+- `biscuit-speaks/lib/tests/prepare.rs:995`: `.with_config(pinned(HostTtsProvider::KokoroTts))`
+- `biscuit-speaks/lib/tests/prepare.rs:1052`: `.with_config(pinned(host).with_speed(SpeedLevel::Fast))`
+- `biscuit-speaks/lib/tests/prepare.rs:1090`: `let config = pinned(HostTtsProvider::Say).with_speed(SpeedLevel::Fast);`
+- `biscuit-speaks/lib/tests/prepare.rs:1092`: `let prepared = Speak::new(text).with_config(config.clone()).prepare().await.unwrap();`
+- `biscuit-speaks/lib/tests/prepare.rs:1124`: `let fresh = Speak::new(text).with_config(config).play_with_result().await.unwrap();`
+- `biscuit-speaks/lib/tests/real_detached_phase4.rs:23`: `.with_voice("af_heart")`
+- `biscuit-speaks/lib/tests/real_detached_phase4.rs:24`: `.with_failover(TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(`
+- `biscuit-speaks/lib/tests/real_detached_phase4.rs:27`: `.with_volume(VolumeLevel::Explicit(0.0))`
+- `biscuit-speaks/lib/tests/volume_control.rs:25`: `let config = TtsConfig::new().with_voice("en+f3").with_volume(VolumeLevel::Explicit(volume));`
+- `biscuit-speaks/lib/tests/volume_control.rs:66`: `let config = TtsConfig::new().with_voice("Samantha").with_speed(SpeedLevel::Slow)`
+- `biscuit-speaks/lib/tests/volume_control.rs:67`: `.with_volume(VolumeLevel::Explicit(volume));`
+- `biscuit-speaks/lib/tests/volume_control.rs:99`: `let config = TtsConfig::new().with_voice("Samantha").with_volume(VolumeLevel::Explicit(0.0));`
+
+#### model-citizen/lib
+
+- `model-citizen/lib/src/config.rs:134`: `config.shared_models_dir = Some(PathBuf::from(shared_dir));`
+- `model-citizen/lib/src/config.rs:146`: `config.scanners.ollama.api_host = Some(host);`
+- `model-citizen/lib/src/config.rs:150`: `config.scanners.lmstudio.api_host = Some(host);`
+- `model-citizen/lib/src/config.rs:425`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:427`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:429`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:439`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:441`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:443`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:476`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:478`: `..Default::default()`
+- `model-citizen/lib/src/config.rs:480`: `..Default::default()`
+- `model-citizen/lib/src/registry.rs:299`: `self.delay_ms = Some(delay_ms);`
+- `model-citizen/lib/src/registry.rs:372`: `MockScanner::new("scanner1").with_models(vec![make_model("model1", "/path/a.gguf")]),`
+- `model-citizen/lib/src/registry.rs:374`: `registry.add_scanner(MockScanner::new("scanner2").with_models(vec![`
+- `model-citizen/lib/src/registry.rs:390`: `.with_models(vec![make_model("model1", "/shared/model.gguf")]),`
+- `model-citizen/lib/src/registry.rs:394`: `.with_models(vec![make_model("model1", "/shared/model.gguf")]),`
+- `model-citizen/lib/src/registry.rs:406`: `MockScanner::new("good").with_models(vec![make_model("model1", "/path/a.gguf")]),`
+- `model-citizen/lib/src/registry.rs:408`: `registry.add_scanner(MockScanner::new("bad").with_error());`
+- `model-citizen/lib/src/registry.rs:420`: `MockScanner::new("fast").with_models(vec![make_model("model1", "/path/a.gguf")]),`
+- `model-citizen/lib/src/registry.rs:422`: `registry.add_scanner(MockScanner::new("slow").with_delay(200)); // Exceeds timeout`
+- `model-citizen/lib/src/registry.rs:434`: `MockScanner::new("available").with_models(vec![make_model("model1", "/path/a.gguf")]),`
+- `model-citizen/lib/src/registry.rs:439`: `.with_models(vec![make_model("model2", "/path/b.gguf")]),`
+- `model-citizen/lib/src/registry.rs:452`: `MockScanner::new("success").with_models(vec![make_model("model1", "/path/a.gguf")]),`
+- `model-citizen/lib/src/registry.rs:454`: `registry.add_scanner(MockScanner::new("error").with_error());`
+- `model-citizen/lib/src/registry.rs:455`: `registry.add_scanner(MockScanner::new("timeout").with_delay(200));`
+- `model-citizen/lib/src/scanner/llamacpp.rs:293`: `..Default::default()`
+- `model-citizen/lib/src/scanner/lmstudio.rs:253`: `.with_metadata(metadata),`
+- `model-citizen/lib/src/scanner/lmstudio.rs:274`: `..Default::default()`
+- `model-citizen/lib/src/scanner/lmstudio.rs:374`: `let api_response: schematic_definitions::lmstudio::ListModelsResponse =`
+- `model-citizen/lib/src/scanner/lmstudio.rs:405`: `api_model: &schematic_definitions::lmstudio::ModelInfo,`
+- `model-citizen/lib/src/scanner/ollama.rs:192`: `.with_metadata(metadata)`
+- `model-citizen/lib/src/scanner/ollama.rs:276`: `) -> Option<schematic_definitions::ollama::ShowModelResponse> {`
+- `model-citizen/lib/src/scanner/ollama.rs:284`: `let body = schematic_definitions::ollama::ShowModelBody {`
+- `model-citizen/lib/src/scanner/ollama.rs:295`: `show: &schematic_definitions::ollama::ShowModelResponse,`
+- `model-citizen/lib/src/scanner/ollama.rs:379`: `meta.vision = Some(caps.iter().any(|c| c == "vision"));`
+- `model-citizen/lib/src/scanner/ollama.rs:382`: `meta.function_calling = Some(caps.iter().any(|c| c == "tools"));`
+- `model-citizen/lib/src/scanner/ollama.rs:450`: `model.metadata = Self::metadata_from_show(&show, &model.metadata);`
+- `model-citizen/lib/src/scanner/ollama.rs:642`: `fn empty_show_response() -> schematic_definitions::ollama::ShowModelResponse {`
+- `model-citizen/lib/src/scanner/ollama.rs:643`: `schematic_definitions::ollama::ShowModelResponse {`
+- `model-citizen/lib/src/scanner/ollama.rs:658`: `show.model_info = Some(serde_json::json!({`
+- `model-citizen/lib/src/scanner/ollama.rs:674`: `show.model_info = Some(serde_json::json!({`
+- `model-citizen/lib/src/scanner/ollama.rs:690`: `show.model_info = Some(serde_json::json!({`
+
+#### homelab/lib
+
+- `homelab/lib/src/arcam.rs:398`: `status.friendly_name = Some(name);`
+- `homelab/lib/src/arcam.rs:403`: `status.ip_address = Some(format!(`
+- `homelab/lib/src/arcam.rs:417`: `status.input_detect = Some(resp.data.first().copied() == Some(0x01))`
+- `homelab/lib/src/arcam.rs:423`: `status.model = Some(model);`
+- `homelab/lib/src/eversolo.rs:5`: `use schematic_schema::eversolo::Eversolo as EversoloRest;`
+- `homelab/lib/src/eversolo.rs:6`: `use schematic_schema::schematic_runtime::{CallError, NoDeclaredError};`
+- `homelab/lib/src/eversolo.rs:11`: `pub use schematic_schema::eversolo::{`
+- `homelab/lib/src/eversolo.rs:293`: `use schematic_schema::schematic_runtime::{BuildError, SharedTransport};`
+- `homelab/lib/src/rest.rs:6`: `use schematic_schema::schematic_runtime::{`
+- `homelab/lib/src/rest.rs:107`: `use schematic_schema::eversolo::Eversolo;`
+- `homelab/lib/src/samsung_tv.rs:9`: `use schematic_schema::samsung_smart_tv::SamsungSmartTv;`
+- `homelab/lib/src/samsung_tv.rs:10`: `use schematic_schema::samsung_smart_tv_remote_ws::{`
+- `homelab/lib/src/samsung_tv.rs:11`: `ArtModeClient, ArtModeConnectionParams, RemoteControlClient, RemoteControlConnectionParams,`
+- `homelab/lib/src/samsung_tv.rs:14`: `use schematic_schema::schematic_runtime::{CallError, NoDeclaredError};`
+- `homelab/lib/src/samsung_tv.rs:15`: `use schematic_schema::ws_shared::{WsClientOptions, WsError};`
+- `homelab/lib/src/samsung_tv.rs:20`: `pub use schematic_schema::samsung_smart_tv::{`
+- `homelab/lib/src/samsung_tv.rs:23`: `pub use schematic_schema::samsung_smart_tv_remote_ws::{`
+- `homelab/lib/src/samsung_tv.rs:25`: `SamsungAppLaunchParams, SamsungArtModeCommand, SamsungArtModeData, SamsungArtModeEmitParams,`
+- `homelab/lib/src/samsung_tv.rs:26`: `SamsungArtModeEvent, SamsungArtModeRequest, SamsungArtModeStatus, SamsungArtworkItem,`
+- `homelab/lib/src/samsung_tv.rs:28`: `SamsungInstalledAppsParams, SamsungRemoteCommandAction, SamsungRemoteConnectData,`
+- `homelab/lib/src/samsung_tv.rs:29`: `SamsungRemoteControlCommand, SamsungRemoteControlParams, SamsungRemoteEnvelope,`
+- `homelab/lib/src/samsung_tv.rs:238`: `let params = RemoteControlConnectionParams {`
+- `homelab/lib/src/samsung_tv.rs:290`: `let params = ArtModeConnectionParams {`
+- `homelab/lib/src/samsung_tv.rs:305`: `request: SamsungArtModeRequest,`
+- `homelab/lib/src/samsung_tv.rs:318`: `SamsungArtModeRequest::GetArtModeStatus,`
+- `homelab/lib/src/samsung_tv.rs:335`: `self.send_art_mode_command(SamsungArtModeRequest::SetArtModeStatus, extra)`
+- `homelab/lib/src/samsung_tv.rs:342`: `SamsungArtModeRequest::GetCurrentArtwork,`
+- `homelab/lib/src/samsung_tv.rs:351`: `SamsungArtModeRequest::GetContentList,`
+- `homelab/lib/src/samsung_tv.rs:364`: `self.send_art_mode_command(SamsungArtModeRequest::SelectImage, extra)`
+- `homelab/lib/src/samsung_tv.rs:371`: `SamsungArtModeRequest::GetBrightness,`
+- `homelab/lib/src/samsung_tv.rs:384`: `self.send_art_mode_command(SamsungArtModeRequest::SetBrightness, extra)`
+- `homelab/lib/src/samsung_tv.rs:413`: `params: SamsungRemoteControlParams {`
+- `homelab/lib/src/samsung_tv.rs:431`: `params: SamsungAppLaunchParams {`
+- `homelab/lib/src/samsung_tv.rs:447`: `params: SamsungInstalledAppsParams {`
+- `homelab/lib/src/samsung_tv.rs:456`: `request: SamsungArtModeRequest,`
+- `homelab/lib/src/samsung_tv.rs:467`: `params: SamsungArtModeEmitParams {`
+- `homelab/lib/src/samsung_tv.rs:487`: `use schematic_schema::schematic_runtime::{BuildError, SharedTransport};`
+- `homelab/lib/src/sony_receiver.rs:695`: `struct SonyRequest<M: Serialize> {`
+- `homelab/lib/src/sony_receiver.rs:743`: `let payload = SonyRequest {`
+
+#### homelab/eversolo-integration
+
+- `homelab/eversolo-integration/src/dispatch.rs:13`: `use schematic_schema::eversolo::VolumeData;`
+- `homelab/eversolo-integration/src/dispatch.rs:1001`: `use schematic_schema::eversolo::{InputItem, OutputItem, PlayingMusic, VolumeData};`
+- `homelab/eversolo-integration/src/handler.rs:5`: `use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};`
+- `homelab/eversolo-integration/src/handler.rs:11`: `ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,`
+- `homelab/eversolo-integration/src/handler.rs:46`: `async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {`
+- `homelab/eversolo-integration/src/handler.rs:69`: `request: &IntegrationRequest,`
+- `homelab/eversolo-integration/src/handler.rs:139`: `request: &IntegrationRequest,`
+- `homelab/eversolo-integration/src/handler.rs:217`: `driver_config: Default::default(),`
+- `homelab/eversolo-integration/src/handler.rs:260`: `driver_config: Default::default(),`
+- `homelab/eversolo-integration/src/handler.rs:395`: `let request = match IntegrationRequest::parse(message) {`
+- `homelab/eversolo-integration/src/handler.rs:481`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;`
+- `homelab/eversolo-integration/src/handler.rs:507`: `metadata: Default::default(),`
+- `homelab/eversolo-integration/src/handler.rs:508`: `driver_config: Default::default(),`
+- `homelab/eversolo-integration/src/main.rs:25`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost;`
+- `homelab/eversolo-integration/src/main.rs:81`: `.with_env_filter(`
+
+#### homelab/arcam-amp-integration
+
+- `homelab/arcam-amp-integration/src/discovery.rs:48`: `..Default::default()`
+- `homelab/arcam-amp-integration/src/handler.rs:5`: `use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};`
+- `homelab/arcam-amp-integration/src/handler.rs:11`: `ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,`
+- `homelab/arcam-amp-integration/src/handler.rs:46`: `async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {`
+- `homelab/arcam-amp-integration/src/handler.rs:69`: `request: &IntegrationRequest,`
+- `homelab/arcam-amp-integration/src/handler.rs:135`: `request: &IntegrationRequest,`
+- `homelab/arcam-amp-integration/src/handler.rs:213`: `driver_config: Default::default(),`
+- `homelab/arcam-amp-integration/src/handler.rs:256`: `driver_config: Default::default(),`
+- `homelab/arcam-amp-integration/src/handler.rs:391`: `let request = match IntegrationRequest::parse(message) {`
+- `homelab/arcam-amp-integration/src/handler.rs:477`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;`
+- `homelab/arcam-amp-integration/src/handler.rs:503`: `metadata: Default::default(),`
+- `homelab/arcam-amp-integration/src/handler.rs:504`: `driver_config: Default::default(),`
+- `homelab/arcam-amp-integration/src/main.rs:24`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost;`
+- `homelab/arcam-amp-integration/src/main.rs:68`: `.with_env_filter(`
+
+#### homelab/sony-receiver-integration
+
+- `homelab/sony-receiver-integration/src/handler.rs:5`: `use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};`
+- `homelab/sony-receiver-integration/src/handler.rs:11`: `ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,`
+- `homelab/sony-receiver-integration/src/handler.rs:46`: `async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {`
+- `homelab/sony-receiver-integration/src/handler.rs:69`: `request: &IntegrationRequest,`
+- `homelab/sony-receiver-integration/src/handler.rs:135`: `request: &IntegrationRequest,`
+- `homelab/sony-receiver-integration/src/handler.rs:213`: `driver_config: Default::default(),`
+- `homelab/sony-receiver-integration/src/handler.rs:256`: `driver_config: Default::default(),`
+- `homelab/sony-receiver-integration/src/handler.rs:391`: `let request = match IntegrationRequest::parse(message) {`
+- `homelab/sony-receiver-integration/src/handler.rs:477`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;`
+- `homelab/sony-receiver-integration/src/handler.rs:503`: `metadata: Default::default(),`
+- `homelab/sony-receiver-integration/src/handler.rs:504`: `driver_config: Default::default(),`
+- `homelab/sony-receiver-integration/src/main.rs:25`: `use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost;`
+- `homelab/sony-receiver-integration/src/main.rs:69`: `.with_env_filter(`
+
+#### homelab/unfolded-integration-helper
+
+- `homelab/unfolded-integration-helper/src/discovery.rs:214`: `..Default::default()`
+- `homelab/unfolded-integration-helper/src/discovery.rs:226`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/envelope.rs:3`: `use schematic_schema::unfolded_circle_integration_ws::{`
+- `homelab/unfolded-integration-helper/src/envelope.rs:31`: `pub struct IntegrationRequest {`
+- `homelab/unfolded-integration-helper/src/envelope.rs:37`: `impl IntegrationRequest {`
+- `homelab/unfolded-integration-helper/src/lib.rs:29`: `EnvelopeError, IntegrationRequest, RequestEnvelope, available_entities_response,`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:92`: `let tmp_path = inner.path.with_extension("json.tmp");`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:289`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:298`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:299`: `driver_config: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:325`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:326`: `driver_config: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:336`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:416`: `dev.host = "10.0.0.50".to_string();`
+- `homelab/unfolded-integration-helper/src/persistent_registry.rs:439`: `assert!(!path.with_extension("json.tmp").exists());`
+- `homelab/unfolded-integration-helper/src/setup.rs:13`: `use schematic_schema::unfolded_circle_integration_ws::WsConnectionContext;`
+- `homelab/unfolded-integration-helper/src/setup.rs:290`: `..Default::default()`
+- `homelab/unfolded-integration-helper/src/setup.rs:302`: `metadata: Default::default(),`
+- `homelab/unfolded-integration-helper/src/setup.rs:303`: `driver_config: Default::default(),`
+- `homelab/unfolded-integration-helper/src/subscriptions.rs:3`: `use schematic_schema::unfolded_circle_integration_ws::{`
+
+## Basic and OAuth2 implementation consumers
+
+These are actual source coordinates for the two breaking representation changes, including colocated unit tests. A field access can refer to a grant-specific runtime payload; inspect its surrounding type before migrating it. No shipped provider uses OAuth2, but the OAuth runtime and generator still consume the flat configuration.
+
+- `schematic/define/src/prelude.rs:39`: `pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};`
+- `schematic/gen/src/ws_codegen/client.rs:177`: `schematic_define::AuthStrategy::Basic => {`
+- `schematic/gen/src/ws_codegen/docs.rs:94`: `schematic_define::AuthStrategy::Basic => "basic auth header",`
+- `schematic/oauth/src/manager/revocation.rs:19`: `if self.config.provider.revocation_url.is_none() {`
+- `schematic/gen/src/definition_gen.rs:167`: `(&api.docs_url, "docs_url"), (&api.env_username, "env_username"),`
+- `schematic/gen/src/definition_gen.rs:388`: `AuthStrategy::Basic => quote! { AuthStrategy::Basic },`
+- `schematic/gen/src/definition_gen.rs:414`: `let grant = format_ident!("{}", format!("{:?}", config.grant_type));`
+- `schematic/gen/src/definition_gen.rs:415`: `let pkce = format_ident!("{}", format!("{:?}", config.pkce));`
+- `schematic/gen/src/definition_gen.rs:416`: `let client_auth = format_ident!("{}", format!("{:?}", config.client_auth));`
+- `schematic/gen/src/definition_gen.rs:417`: `let authorization_url = option_string_tokens(config.authorization_url.as_deref());`
+- `schematic/gen/src/definition_gen.rs:418`: `let revocation_url = option_string_tokens(config.revocation_url.as_deref());`
+- `schematic/gen/src/definition_gen.rs:419`: `let device_authorization_url = option_string_tokens(config.device_authorization_url.as_deref());`
+- `schematic/gen/src/definition_gen.rs:420`: `let token_url = &config.token_url;`
+- `schematic/gen/src/definition_gen.rs:421`: `let scopes = string_vec_tokens(&config.default_scopes);`
+- `schematic/gen/src/definition_gen.rs:422`: `quote! { AuthStrategy::OAuth2(OAuth2Config {`
+- `schematic/gen/src/definition_gen.rs:550`: `let config = schematic_define::OAuth2Config {`
+- `schematic/oauth/src/manager/authorization_code.rs:30`: `let use_pkce = match self.config.provider.pkce {`
+- `schematic/oauth/src/manager/authorization_code.rs:81`: `if let Some(ref verifier) = session.pkce_verifier {`
+- `schematic/define/src/oauth.rs:18`: `/// use schematic_define::{OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};`
+- `schematic/define/src/oauth.rs:20`: `/// let config = OAuth2Config {`
+- `schematic/define/src/oauth.rs:32`: `pub struct OAuth2Config {`
+- `schematic/define/src/oauth.rs:96`: `let config = OAuth2Config {`
+- `schematic/define/src/oauth.rs:108`: `let parsed: OAuth2Config = serde_json::from_str(&json).unwrap();`
+- `schematic/define/src/oauth.rs:166`: `let strategy = AuthStrategy::OAuth2(OAuth2Config {`
+- `schematic/gen/src/export/auth.rs:80`: `AuthStrategy::Basic => ExportAuth::Basic {`
+- `schematic/gen/src/export/auth.rs:182`: `map_auth(&AuthStrategy::Basic),`
+- `schematic/oauth/src/manager/mod.rs:54`: `/// use schematic_define::{OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};`
+- `schematic/oauth/src/manager/mod.rs:57`: `///     provider: OAuth2Config {`
+- `schematic/oauth/src/manager/mod.rs:97`: `let token_url = TokenUrl::new(config.provider.token_url.clone())`
+- `schematic/oauth/src/manager/mod.rs:102`: `.authorization_url`
+- `schematic/oauth/src/manager/mod.rs:110`: `.revocation_url`
+- `schematic/oauth/src/manager/mod.rs:188`: `OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement,`
+- `schematic/oauth/src/manager/mod.rs:193`: `provider: OAuth2Config {`
+- `schematic/oauth/src/manager/mod.rs:212`: `provider: OAuth2Config {`
+- `schematic/oauth/src/manager/mod.rs:238`: `config.provider.token_url = "not a url".into();`
+- `schematic/oauth/src/manager/mod.rs:253`: `.authorization_url`
+- `schematic/oauth/src/manager/mod.rs:255`: `assert!(session.authorization_url.contains("client_id=test_client"));`
+- `schematic/oauth/src/manager/mod.rs:257`: `assert!(session.pkce_verifier.is_some());`
+- `schematic/oauth/src/manager/mod.rs:266`: `assert!(session.authorization_url.contains("code_challenge="));`
+- `schematic/oauth/src/manager/mod.rs:268`: `.authorization_url`
+- `schematic/oauth/src/manager/mod.rs:275`: `config.provider.pkce = PkceRequirement::NotUsed;`
+- `schematic/oauth/src/manager/mod.rs:279`: `assert!(session.pkce_verifier.is_none());`
+- `schematic/oauth/src/manager/mod.rs:280`: `assert!(!session.authorization_url.contains("code_challenge"));`
+- `schematic/oauth/src/manager/mod.rs:385`: `config.provider.revocation_url = Some("https://example.com/revoke".into());`
+- `schematic/define/src/openapi/extensions.rs:407`: `strategy: AuthStrategy::Basic,`
+- `schematic/define/src/openapi/extensions.rs:412`: `assert!(matches!(ext.strategy, AuthStrategy::Basic));`
+- `schematic/define/src/openapi/extensions.rs:413`: `assert!(ext.env_username.is_some());`
+- `schematic/oauth/src/lib.rs:6`: `//! the declarative ['schematic_define::OAuth2Config'] model.`
+- `schematic/define/src/openapi/import/builder.rs:755`: `assert!(matches!(result.api.auth, crate::auth::AuthStrategy::Basic));`
+- `schematic/definitions/src/bitbucket/mod.rs:218`: `.authentication(AuthStrategy::Basic, vec!["BITBUCKET_APP_PASSWORD".to_string()])`
+- `schematic/definitions/src/bitbucket/mod.rs:226`: `.env_username("BITBUCKET_USERNAME")`
+- `schematic/definitions/src/bitbucket/mod.rs:324`: `assert!(matches!(api.auth, AuthStrategy::Basic));`
+- `schematic/definitions/src/bitbucket/mod.rs:326`: `assert_eq!(api.env_username, Some("BITBUCKET_USERNAME".to_string()));`
+- `schematic/definitions/src/bitbucket/mod.rs:486`: `assert!(matches!(api.auth, AuthStrategy::Basic));`
+- `schematic/define/src/openapi/import/mappings/mod.rs:118`: `"basic" => Ok(AuthStrategy::Basic),`
+- `schematic/define/src/openapi/import/mappings/mod.rs:139`: `Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {`
+- `schematic/define/src/openapi/import/mappings/mod.rs:141`: `authorization_url: Some(auth_code.authorization_url.clone()),`
+- `schematic/define/src/openapi/import/mappings/mod.rs:142`: `token_url: auth_code.token_url.clone(),`
+- `schematic/define/src/openapi/import/mappings/mod.rs:151`: `Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {`
+- `schematic/define/src/openapi/import/mappings/mod.rs:154`: `token_url: client_creds.token_url.clone(),`
+- `schematic/define/src/openapi/import/mappings/mod.rs:275`: `assert!(matches!(result, AuthStrategy::Basic));`
+- `schematic/definitions/src/emqx/mod.rs:157`: `.authentication(AuthStrategy::Basic, vec!["EMQX_API_SECRET".to_string()])`
+- `schematic/definitions/src/emqx/mod.rs:158`: `.env_username("EMQX_API_KEY".to_string())`
+- `schematic/definitions/src/emqx/mod.rs:263`: `assert!(matches!(api.auth, AuthStrategy::Basic));`
+- `schematic/definitions/src/emqx/mod.rs:265`: `assert_eq!(api.env_username, Some("EMQX_API_KEY".to_string()));`
+- `schematic/definitions/src/emqx/mod.rs:301`: `assert!(api.env_username.is_none());`
+- `schematic/definitions/src/eversolo/mod.rs:328`: `assert!(api.env_username.is_none());`
+- `schematic/definitions/src/unfolded_circle/core_rest/mod.rs:119`: `.env_username("UCR_CORE_USER".to_string())`
+- `schematic/define/src/openapi/export/security.rs:43`: `AuthStrategy::Basic => Some((`
+- `schematic/define/src/openapi/export/security.rs:68`: `let flows = match config.grant_type {`
+- `schematic/define/src/openapi/export/security.rs:71`: `for scope in &config.default_scopes {`
+- `schematic/define/src/openapi/export/security.rs:76`: `authorization_url: config.authorization_url.clone().unwrap_or_default(),`
+- `schematic/define/src/openapi/export/security.rs:77`: `token_url: config.token_url.clone(),`
+- `schematic/define/src/openapi/export/security.rs:87`: `for scope in &config.default_scopes {`
+- `schematic/define/src/openapi/export/security.rs:92`: `token_url: config.token_url.clone(),`
+- `schematic/define/src/openapi/export/security.rs:128`: `AuthStrategy::Basic => {`
+- `schematic/define/src/openapi/export/security.rs:207`: `let auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/openapi.rs:1061`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic API", name); fixture.base_url = format!("https://{}.example.com", name.to_lowercase()); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = endpoints`
+- `schematic/gen/src/export/openapi.rs:1213`: `AuthStrategy::Basic,`
+- `schematic/gen/src/export/openapi.rs:1410`: `AuthStrategy::Basic,`
+- `schematic/gen/src/codegen/client/tests.rs:8`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = env_auth; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/codegen/client/tests.rs:12`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/codegen/client/tests.rs:17`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::Basic; fixture.auth_policy = None; fixture.env_auth = vec![password_env.to_string()]; fixture.env_username = Some(username_env.to_string()); fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/codegen/client/tests.rs:98`: `assert!(shared.contains("schematic_define::EnvAuthStrategy::Basic"));`
+- `schematic/gen/src/codegen/client/tests.rs:130`: `assert!(code.contains("EnvAuthStrategy::Basic"));`
+- `schematic/gen/src/codegen/client/tests.rs:201`: `assert!(code.contains("EnvAuthStrategy::Basic"));`
+- `schematic/define/src/builders.rs:198`: `self.env_username(username).authentication(AuthStrategy::Basic, passwords)`
+- `schematic/define/src/builders.rs:202`: `if self.api.env_username.as_ref().is_some_and(|old| old != &name) {`
+- `schematic/define/src/builders.rs:205`: `self.api.env_username = Some(name); self`
+- `schematic/define/src/builders.rs:236`: `let expected = RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth, api.env_username.as_deref());`
+- `schematic/gen/src/test_utils.rs:20`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = base_url.to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = env_auth; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/test_utils.rs:30`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = env_auth; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![endpoint]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/test_utils.rs:52`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "Test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List all items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/test_utils.rs:62`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "OpenAI".to_string(); fixture.description = "OpenAI REST API".to_string(); fixture.base_url = "https://api.openai.com/v1".to_string(); fixture.docs_url = Some("https://platform.openai.com/docs".to_string()); fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec!["OPENAI_API_KEY".to_string()]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![`
+- `schematic/define/src/auth.rs:21`: `use crate::oauth::OAuth2Config;`
+- `schematic/define/src/auth.rs:67`: `/// let auth = AuthStrategy::Basic;`
+- `schematic/define/src/auth.rs:171`: `/// use schematic_define::{AuthStrategy, OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};`
+- `schematic/define/src/auth.rs:173`: `/// let auth = AuthStrategy::OAuth2(OAuth2Config {`
+- `schematic/define/src/auth.rs:184`: `OAuth2(OAuth2Config),`
+- `schematic/define/src/auth.rs:217`: `OAuth2(OAuth2Config),`
+- `schematic/define/src/auth.rs:293`: `AuthStrategy::Basic => Self {`
+- `schematic/define/src/auth.rs:295`: `env_fallback: Some(EnvAuthStrategy::Basic),`
+- `schematic/define/src/auth.rs:316`: `pub fn oauth2(&self) -> Option<&OAuth2Config> {`
+- `schematic/define/src/auth.rs:487`: `let config = OAuth2Config {`
+- `schematic/define/src/auth.rs:638`: `let original = UpdateStrategy::ChangeTo(AuthStrategy::Basic);`
+- `schematic/define/src/websocket/mod.rs:513`: `AuthStrategy::Basic,`
+- `schematic/gen/src/codegen/client/shared_auth.rs:120`: `Some(schematic_define::EnvAuthStrategy::Basic) => {`
+- `schematic/gen/src/codegen/client/shared_auth.rs:217`: `Some(schematic_define::EnvAuthStrategy::Basic) => {`
+- `schematic/gen/src/codegen/client/shared_auth.rs:250`: `Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),`
+- `schematic/define/src/lib.rs:153`: `pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};`
+- `schematic/gen/src/output/mod.rs:1012`: `AuthStrategy::Basic,`
+- `schematic/gen/src/output/mod.rs:1024`: `api.env_username = env_username;`
+- `schematic/define/src/types.rs:140`: `/// Only used when 'auth' is 'AuthStrategy::Basic'. The password is read`
+- `schematic/define/src/types.rs:263`: `Self::legacy_env_mapping_for(&self.auth, &self.env_auth, self.env_username.as_deref())`
+- `schematic/define/src/types.rs:308`: `Some(EnvAuthStrategy::Basic) => EnvMapping {`
+- `schematic/define/src/types.rs:310`: `basic_pass: env_auth.first().cloned().map(EnvList::single),`
+- `schematic/define/src/types.rs:569`: `auth: AuthStrategy::Basic,`
+- `schematic/define/src/types.rs:633`: `auth: AuthStrategy::Basic,`
+- `schematic/gen/src/output/assemble/lib_rs.rs:54`: `AuthStrategy::Basic => "Basic".to_string(),`
+- `schematic/gen/src/output/assemble/lib_rs.rs:196`: `AuthStrategy::Basic => "Basic".to_string(),`
+- `schematic/gen/src/codegen/module_docs.rs:110`: `AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),`
+- `schematic/gen/src/codegen/module_docs.rs:112`: `let flow = match config.grant_type {`
+- `schematic/gen/src/codegen/module_docs.rs:120`: `let scopes_info = if config.default_scopes.is_empty() {`
+- `schematic/gen/src/codegen/module_docs.rs:123`: `format!(" Default scopes: '{}'.", config.default_scopes.join("', '"))`
+- `schematic/gen/src/codegen/module_docs.rs:372`: `api.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/codegen/request_enum.rs:227`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/asyncapi_import.rs:303`: `return AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:21`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "A test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/export/postman/tests.rs:563`: `api.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:712`: `basic.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:757`: `basic.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:781`: `basic.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:818`: `basic.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/export/postman/tests.rs:858`: `api1.auth = AuthStrategy::Basic;`
+- `schematic/gen/src/codegen/api_struct/constructors.rs:33`: `let env_username_init = init.env_username_init;`
+- `schematic/gen/src/codegen/api_struct/request_method.rs:35`: `pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {`
+- `schematic/gen/src/codegen/api_struct/variant.rs:288`: `self.base.env_username.as_deref(),`
+- `schematic/gen/src/codegen/api_struct/variant.rs:301`: `env_username: self.base.env_username.clone(),`
+- `schematic/gen/src/codegen/endpoint_methods/tests.rs:33`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} API"); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/codegen/endpoint_methods/tests.rs:615`: `basic.auth = AuthStrategy::Basic;`
+- `schematic/oauth/src/types.rs:7`: `/// This bridges the declarative 'OAuth2Config' from 'schematic-define' with the`
+- `schematic/oauth/src/types.rs:14`: `pub provider: schematic_define::OAuth2Config,`
+- `schematic/oauth/src/types.rs:56`: `.field("authorization_url", &self.authorization_url)`
+- `schematic/oauth/src/types.rs:58`: `.field("pkce_verifier", &redact_option(&self.pkce_verifier))`
+- `schematic/gen/src/codegen/api_struct/tests.rs:6`: `EnvList, EnvMapping, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement,`
+- `schematic/gen/src/codegen/api_struct/tests.rs:28`: `fn oauth() -> OAuth2Config {`
+- `schematic/gen/src/codegen/api_struct/tests.rs:29`: `OAuth2Config {`
+- `schematic/gen/src/codegen/api_struct/tests.rs:80`: `let basic = code(&make_api("Basic", AuthStrategy::Basic, &["BASIC_PASS"]));`
+- `schematic/gen/src/codegen/api_struct/tests.rs:164`: `let mut basic = make_api("Basic", AuthStrategy::Basic, &["PASS"]);`
+- `schematic/gen/src/codegen/api_struct/tests.rs:165`: `basic.env_username = Some("USER".to_string());`
+- `schematic/gen/src/codegen/api_struct/tests.rs:332`: `let mut basic = make_api("B", AuthStrategy::Basic, &["PASS"]);`
+- `schematic/gen/src/codegen/api_struct/tests.rs:342`: `let mut basic = make_api("Basic", AuthStrategy::Basic, &["PASS"]);`
+- `schematic/gen/src/codegen/api_struct/tests.rs:343`: `basic.env_username = Some("USER".to_string());`
+- `schematic/gen/src/codegen/pagination/tests.rs:36`: `{ let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }`
+- `schematic/gen/src/codegen/api_struct/auth.rs:107`: `EnvAuthStrategy::Basic => (`

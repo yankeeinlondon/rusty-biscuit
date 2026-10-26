@@ -84,6 +84,13 @@ pub struct Repository {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for Repository {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Repository");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Repository {
     /// Returns the default branch name if available.
     pub fn default_branch(&self) -> Option<&str> {
@@ -183,6 +190,13 @@ pub struct SourceEntry {
     /// File attributes.
     #[serde(default)]
     pub attributes: Option<Vec<String>>,
+}
+
+impl schematic_define::Registration for SourceEntry {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SourceEntry");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 impl SourceEntry {

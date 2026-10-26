@@ -24,7 +24,7 @@
 //!
 //! let api = define_gitea_api();
 //! assert_eq!(api.name, "Gitea");
-//! assert_eq!(api.endpoints.len(), 16);
+//! assert_eq!(api.endpoints.len(), 15);
 //! ```
 //!
 //! ```

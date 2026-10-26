@@ -8,7 +8,7 @@ description: |-
 
     This file is itself composed when it is transcluded. Every example is therefore inside a fenced code block, where nothing is evaluated, and every brace span in running text is written as an interpolation literal.
 $prompt:
-    lifecycle: boolean(required) -> include the lifecycle events, stacks, and flow-control section (_default is `true`_)
+    lifecycle: boolean(required) -> include the lifecycle events, actions, and flow-control section (_default is `true`_)
     flow: boolean(required) -> include the multi-document section on proxy handoffs, sequences, and loops (_default is `true`_)
     testing: boolean(required) -> include the section on rehearsing a prompt without launching a model (_default is `true`_)
 lifecycle: true
@@ -48,7 +48,7 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **2026-09-28**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **2026-10-14**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 
@@ -96,7 +96,7 @@ initialize → (schema verdict, shell approval) → start → agent → success 
                                                  blocked fires instead when the run stops before the agent launches
 ```
 
-Each event is a frontmatter key holding an ordered list of actions, run top to bottom. A `when` item guards a `then` list, with an optional `else` list; guards nest up to five levels.
+Each event is a frontmatter key holding an ordered list of actions, run top to bottom. A `when` item guards a `then` list, with an optional `else` list; guards nest up to five levels. The former `stack:` wrapper and `action:` aggregator are removed grammar.
 
 ```yaml
 success:
@@ -114,7 +114,7 @@ An event with no guard or ordering needs may be one dictionary (`success: { mess
 
 - **Where a notification goes.** `info`, `warn`, `success`, and `stderr` print to the terminal. `message` goes to the configured messaging route and prints **nothing** locally. `say` and `effect` are audio. An outcome the caller must see in the terminal needs one of the first group.
 - **Values are literal text.** Only `when`, `while`, and `until` are expressions. Everywhere else a brace span opts in, and it is resolved when the event fires, so a hook reports the state at that moment. A brace span inside a quoted string *inside* an expression is rejected; build the string with `+`.
-- **Two action forms.** Short form is `verb: value`, or `verb: [a, b, c]` for several arguments. Long form is `verb: { <named parameters> }`, and is required for `with:` and an action's own `no_error:`. A flow-control directive must be the last item in its list, and the first one that fires ends the whole event.
+- **Two action forms.** Short form is `verb: value`, or `verb: [a, b, c]` for several arguments. Long form is `verb: { <named parameters> }`, and is required for `with:` and an action's own `no_error:`. A flow-control directive must be the last item in its list, and the first one that fires ends the whole event. Place `say` and `effect` in the order you want them to run; `say_first` is removed grammar.
 - **`err`** exists only in `blocked`, `failure`, and `finalize`. Match on `err.code`, `err.category`, `err.is_transient`, or `err.is_throttled`, never on message text. `err.msg` is safe to speak or post.
 
 Flow control:
@@ -140,7 +140,7 @@ Rules that shape a design:
 ::block when="flow"
 ### More than one document
 
-- **Share state through a file, not through prose.** Give the flow one report file with a documented frontmatter contract. Each stage writes its outcome there and each lifecycle stack reads it. Create it fresh for each run; a reused file carries the previous run's answers.
+- **Share state through a file, not through prose.** Give the flow one report file with a documented frontmatter contract. Each stage writes its outcome there and each lifecycle event reads it. Create it fresh for each run; a reused file carries the previous run's answers.
 - **A router needs no agent.** A document can do all its routing in `initialize` or `start` and never launch. Give it a short body that tells an agent that reaches it to do nothing and report the fault.
 - **`proxy … with:`** parameterizes the target. Values keep their types, are resolved at the source when the event fires, and are never written to disk. The overlay reaches only the immediate target, so forward what the next hop needs explicitly. It can set any top-level key, including a lifecycle block, which is how a reusable prompt such as `commit.md` can be given a continuation it does not know about.
 - **A proxy chain visits a document once.** Returning to an earlier document is rejected as a cycle, and a chain is limited to 16 hops. A flow that must repeat a stage cannot do it with `proxy`; that is what a sequence is for.
@@ -165,7 +165,7 @@ Rules that shape a design:
 
 - **Give facts, not chores.** Anything the agent would certainly look up (the branch, the commits being proposed, which packages changed, whether `main` is behind its remote) belongs in the prompt, gathered by `ctx` or a shell block. Tell the agent the facts are current so it does not re-derive them.
 - **One stage, one job.** A stage that pushes should not also diagnose. A small body wastes less context on paths that are not taken, and each stage can pin the `agent:` and `model:` its job deserves.
-- **Name the deliverable and its format.** When a lifecycle stack reads a value, the body must tell the agent exactly which file, property, and values to write.
+- **Name the deliverable and its format.** When a lifecycle action reads a value, the body must tell the agent exactly which file, property, and values to write.
 - **Say what is out of bounds.** A stage that must not commit, push, or repair has to be told so, along with which stage does.
 - Claudine already appends a system prompt telling a non-interactive agent that nobody can answer it. Do not repeat that; add only what is specific to the task, such as where to record what it cannot ask.
 
@@ -237,7 +237,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 
 - **`--dry-run`** composes and prints the body. It fires **no lifecycle events** and follows no `proxy`, so it proves the body and the expressions and nothing about the flow. It still runs `::shell` and `$(…)` for real.
 - **Stub the provider** to exercise the real flow. Put an executable named after the provider first on `PATH`; a provider is only a program that reads a prompt, prints text, and exits. Have it recognize each stage by the body's first heading and edit the report the way a real agent would. Run it in a scratch repository whose `origin` is a local bare repository, with `HOME` pointed at an empty directory so that no messaging route or voice is configured, and with `PLAYA_DRY_RUN=1` and `CLAUDINE_RENDEZVOUS_REPORT=false`. Every route can then be driven to completion in seconds, and nothing is pushed.
-- **To stop before the agent launches**, which is how a lifecycle-only probe is written, end the `start` stack with an `error`.
+- **To stop before the agent launches**, which is how a lifecycle-only probe is written, end the `start` event with an `error`.
 - **`cargo nextest run -p claudine-cli --test l1 shipped_prompt_contract::`** checks every file under `prompts/`: schemas parse, expressions parse, and no lifecycle value nests a brace span inside a string literal. Run it after any change to a prompt.
 - Claudine's banner for each stage says whether it launched `Interactive`, which a stub run does show. A stub cannot show that an interactive session behaved, or that `resume` works, because it has no session. Those need the L2 tmux harness (see the `rust-testing` and `biscuit-test-harness` skills).
 ::end-block

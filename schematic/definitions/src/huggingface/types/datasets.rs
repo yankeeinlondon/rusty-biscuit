@@ -39,6 +39,13 @@ pub struct DatasetInfo {
     #[serde(rename = "trendingScore", skip_serializing_if = "Option::is_none")]
     pub trending_score: Option<f64>,
 }
+impl schematic_define::Registration for DatasetInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DatasetInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCardData {

@@ -1,0 +1,2159 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "PRIVATE-TOKEN",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://gitlab.com/api/v4",
+    "cross_origin": "SameOrigin",
+    "default_pagination": {
+      "constants": [],
+      "follow_up": null,
+      "kind": {
+        "base": "one_based",
+        "kind": "page_number",
+        "more": {
+          "signal": "present",
+          "source": {
+            "at": "X-Next-Page",
+            "from": "header"
+          }
+        },
+        "page": {
+          "in": "query",
+          "name": "page"
+        },
+        "size": {
+          "adjustable": false,
+          "max": 100,
+          "min": 1,
+          "param": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "sent_default": null,
+          "server_default": 20
+        }
+      },
+      "partition": null,
+      "session": null,
+      "terminal_values": [],
+      "total": {
+        "at": "X-Total",
+        "from": "header"
+      }
+    },
+    "description": "GitLab REST API v4 for repository, MR, issue, and release workflows",
+    "docs_url": "https://docs.gitlab.com/api/rest/",
+    "endpoints": [
+      {
+        "description": "List repository tree recursively (files and directories)",
+        "headers": [],
+        "id": "ListRepositoryTree",
+        "method": "GET",
+        "pagination": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include files from subdirectories recursively",
+              "explode": false,
+              "name": "recursive",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Branch, tag, or commit SHA to list tree for",
+              "explode": false,
+              "name": "git_ref",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Subdirectory path to list",
+              "explode": false,
+              "name": "path",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/repository/tree",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "TreeItem"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)",
+        "headers": [],
+        "id": "GetRepositoryFile",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": null,
+              "explode": false,
+              "name": "ref",
+              "param_type": "String",
+              "required": true,
+              "rust_name": "git_ref",
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/repository/files/{file_path}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "FileContent"
+          }
+        }
+      },
+      {
+        "description": "Get project metadata (use URL-encoded path or numeric ID)",
+        "headers": [],
+        "id": "GetProject",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Project"
+          }
+        }
+      },
+      {
+        "description": "List projects in a group",
+        "headers": [],
+        "id": "ListGroupProjects",
+        "method": "GET",
+        "pagination": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by archived status",
+              "explode": false,
+              "name": "archived",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by visibility level",
+              "explode": false,
+              "name": "visibility",
+              "param_type": {
+                "Enum": [
+                  "public",
+                  "internal",
+                  "private"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Sort field",
+              "explode": false,
+              "name": "order_by",
+              "param_type": {
+                "Enum": [
+                  "id",
+                  "name",
+                  "path",
+                  "created_at",
+                  "updated_at",
+                  "last_activity_at"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Sort direction",
+              "explode": false,
+              "name": "sort",
+              "param_type": {
+                "Enum": [
+                  "asc",
+                  "desc"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include projects from subgroups",
+              "explode": false,
+              "name": "include_subgroups",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/groups/{id}/projects",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Project"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single branch (commit.id is the branch head commit)",
+        "headers": [],
+        "id": "GetBranch",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/repository/branches/{branch}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Branch"
+          }
+        }
+      },
+      {
+        "description": "List merge requests with metadata",
+        "headers": [],
+        "id": "ListMergeRequests",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by merge request state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "opened",
+                  "closed",
+                  "merged",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/merge_requests",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "MergeRequest"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single merge request by IID",
+        "headers": [],
+        "id": "GetMergeRequest",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/merge_requests/{merge_request_iid}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MergeRequest"
+          }
+        }
+      },
+      {
+        "description": "List commits in a merge request",
+        "headers": [],
+        "id": "ListMergeRequestCommits",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/merge_requests/{merge_request_iid}/commits",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Commit"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get merge request with file changes/diffs",
+        "headers": [],
+        "id": "ListMergeRequestChanges",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/merge_requests/{merge_request_iid}/changes",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "MergeRequestChanges"
+          }
+        }
+      },
+      {
+        "description": "List issues",
+        "headers": [],
+        "id": "ListIssues",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by issue state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "opened",
+                  "closed",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/issues",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Issue"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single issue by IID",
+        "headers": [],
+        "id": "GetIssue",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/issues/{issue_iid}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Issue"
+          }
+        }
+      },
+      {
+        "description": "List comments/notes on an issue",
+        "headers": [],
+        "id": "ListIssueNotes",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/issues/{issue_iid}/notes",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Note"
+            }
+          }
+        }
+      },
+      {
+        "description": "List participants on an issue",
+        "headers": [],
+        "id": "ListIssueParticipants",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": null,
+        "path": "/projects/{id}/issues/{issue_iid}/participants",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "User"
+            }
+          }
+        }
+      },
+      {
+        "description": "List repository tags (check `release` field for release tags)",
+        "headers": [],
+        "id": "ListTags",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/repository/tags",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Tag"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single tag by name",
+        "headers": [],
+        "id": "GetTag",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/repository/tags/{tag_name}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Tag"
+          }
+        }
+      },
+      {
+        "description": "List releases",
+        "headers": [],
+        "id": "ListReleases",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/releases",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Release"
+            }
+          }
+        }
+      },
+      {
+        "description": "Get a single release by tag name",
+        "headers": [],
+        "id": "GetRelease",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/releases/{tag_name}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Release"
+          }
+        }
+      },
+      {
+        "description": "Get the latest release",
+        "headers": [],
+        "id": "GetLatestRelease",
+        "method": "GET",
+        "params": null,
+        "path": "/projects/{id}/releases/permalink/latest",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Release"
+          }
+        }
+      },
+      {
+        "description": "List CI/CD pipelines for a project",
+        "headers": [],
+        "id": "ListProjectPipelines",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 100, max: 100)",
+              "explode": false,
+              "name": "per_page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by pipeline status",
+              "explode": false,
+              "name": "status",
+              "param_type": {
+                "Enum": [
+                  "created",
+                  "waiting_for_resource",
+                  "preparing",
+                  "pending",
+                  "running",
+                  "success",
+                  "failed",
+                  "canceled",
+                  "skipped",
+                  "manual",
+                  "scheduled"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by pipeline source (e.g., push, merge_request_event, schedule)",
+              "explode": false,
+              "name": "source",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by branch or tag name",
+              "explode": false,
+              "name": "git_ref",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by commit SHA",
+              "explode": false,
+              "name": "sha",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/pipelines",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Pipeline"
+            }
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "GITLAB_TOKEN",
+      "GITLAB_PRIVATE_TOKEN"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "PRIVATE-TOKEN",
+        "names": {
+          "names": [
+            "GITLAB_TOKEN",
+            "GITLAB_PRIVATE_TOKEN"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [
+      [
+        "User-Agent",
+        "schematic-gitlab-client"
+      ]
+    ],
+    "module_path": "gitlab",
+    "name": "GitLab",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "06cbce7546b61762add14be09d83f8369dc8f8a5e914fd911f736579bb7d23b7",
+    "endpoints": [
+      {
+        "blake3": "65fdb6bccc6608b0e83fe295931bab94d7f7888abe939b58c85e17c4b6c4ce11",
+        "id": "ListRepositoryTree"
+      },
+      {
+        "blake3": "a381ae72320955cf9feb8fd87ecd75f4962523d24e592b9e5855ca7f417686f3",
+        "id": "GetRepositoryFile"
+      },
+      {
+        "blake3": "62d55e7cc1aaeede3c1db4ccb242108a2957d2917081bcf9bb7a4e75232653d4",
+        "id": "GetProject"
+      },
+      {
+        "blake3": "fb4a0e64089c3009726494296a9f9bf1fb3b7d4e2f2d42790f7bf1c5699e76b2",
+        "id": "ListGroupProjects"
+      },
+      {
+        "blake3": "137fc8d4db45637ed6d27d638a7ef5080d7bd211929822cf92ea650dfb4bddf2",
+        "id": "GetBranch"
+      },
+      {
+        "blake3": "17b12d281e31b7197d5ec466c1ed5a4252183fd5ae66f950a5c08d3983b0656d",
+        "id": "ListMergeRequests"
+      },
+      {
+        "blake3": "390bc273c842f464ddcd7be57e685c365fe6e181252b19fa82c3411b8f00cca3",
+        "id": "GetMergeRequest"
+      },
+      {
+        "blake3": "379d5eee4f2b8d41b7188a2a9211c56229b205cb59f91183bf746853052b7da9",
+        "id": "ListMergeRequestCommits"
+      },
+      {
+        "blake3": "1a04bacc900ddd416bcef027c755441ffb1f47a32b3a644787cb5ebe58ea29c9",
+        "id": "ListMergeRequestChanges"
+      },
+      {
+        "blake3": "235c99b6f98241edfd5b0a2561e422a9f3d5d8e7568fe74c8d030ac8fd1eccc6",
+        "id": "ListIssues"
+      },
+      {
+        "blake3": "567e64070ace2a02539864c75889ef6033d86722cee89f44e0be769d21da7004",
+        "id": "GetIssue"
+      },
+      {
+        "blake3": "754c5d843b2ea149ba97ff9175ae557848b7ceff4397f2980ccf593574d9fe5f",
+        "id": "ListIssueNotes"
+      },
+      {
+        "blake3": "3ff67e85b330c3cab032d7e6765da1567d977847fdda1167c1c299e62778395e",
+        "id": "ListIssueParticipants"
+      },
+      {
+        "blake3": "1945b68efffe196d8c6439c15fed470bb94a69d625a5b11f1943c250a0324c47",
+        "id": "ListTags"
+      },
+      {
+        "blake3": "95c80cd14619647f91b8cfd96f08a88b3587fc15fb74dd71b1308b0c0d3df4ac",
+        "id": "GetTag"
+      },
+      {
+        "blake3": "41b8cdc282d01a371fbce0d7b8846e44ed3c85404483571d298be20adbeeabd8",
+        "id": "ListReleases"
+      },
+      {
+        "blake3": "97639b69f6d381701f2872e996a52619b930eee05c770ccf4ef0d851313b1729",
+        "id": "GetRelease"
+      },
+      {
+        "blake3": "65259cc7c259d8e5ed66d3abec4d9914d69ec5883d4bdb4c00060b81d0e88d55",
+        "id": "GetLatestRelease"
+      },
+      {
+        "blake3": "b533b6516a074ae61d9e851036fc6e5b6e5e7a50d905d71c41ee707c0fdd8215",
+        "id": "ListProjectPipelines"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListRepositoryTree",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::TreeItem",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepositoryFile",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetProject",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListGroupProjects",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Project",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetBranch",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListMergeRequests",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::MergeRequest",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetMergeRequest",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListMergeRequestCommits",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Commit",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListMergeRequestChanges",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssues",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Issue",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetIssue",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssueNotes",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Note",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListIssueParticipants",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::User",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListTags",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Tag",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetTag",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListReleases",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Release",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRelease",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetLatestRelease",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "per_page",
+            "server_default": 20
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListProjectPipelines",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "per_page"
+          },
+          "location": "Query",
+          "name": "per_page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "::schematic_definitions::gitlab::Pipeline",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "signal": "present",
+                "source": {
+                  "at": "X-Next-Page",
+                  "from": "header"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "per_page"
+                },
+                "sent_default": null,
+                "server_default": 20
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total",
+              "from": "header"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "50c09cc8a50b39d42b25226e59b18b6f78c36d13e60971f635e486b266fabc54",
+      "name": "TreeItem",
+      "rust_path": "::schematic_definitions::gitlab::TreeItem"
+    },
+    {
+      "blake3": "44188c9ca85a095acff4c64e3265030469e0d4efb0f17073c404f3b00614671a",
+      "name": "FileContent",
+      "rust_path": "::schematic_definitions::gitlab::FileContent"
+    },
+    {
+      "blake3": "c39b2370f0b5c84818aadd609d752f56f7791ae3d11466626623bdaade054f8c",
+      "name": "MergeRequest",
+      "rust_path": "::schematic_definitions::gitlab::MergeRequest"
+    },
+    {
+      "blake3": "378eaf50f80b4e259e8718e5d53c39dcad3ff58eb6fdc33fcef5c0bffa3c1b32",
+      "name": "Milestone",
+      "rust_path": null
+    },
+    {
+      "blake3": "2e5d84d048d143420aa0514481ecfb8a264d497bb9331fe2fdb9055deb8e2139",
+      "name": "References",
+      "rust_path": null
+    },
+    {
+      "blake3": "ef6740b96dd4b9d0dd6ab3b16496b059ad0044d45eaf8c26b9e4ee4f0bddb2d7",
+      "name": "TimeStats",
+      "rust_path": null
+    },
+    {
+      "blake3": "d3d3978b071ee2fbcecd21901775ea31b0c2191257d3387e22c259206847aa7d",
+      "name": "User",
+      "rust_path": "::schematic_definitions::gitlab::User"
+    },
+    {
+      "blake3": "d88983b987ed7d0f0fcbd1a6b24d1fc8b8f63f28df172be7e7c795486a828aa6",
+      "name": "Commit",
+      "rust_path": "::schematic_definitions::gitlab::Commit"
+    },
+    {
+      "blake3": "7adb05ab7ab34588cefcfa43b716dffcd167a4afe143a5180a55c8a0d569951b",
+      "name": "MergeRequestChanges",
+      "rust_path": "::schematic_definitions::gitlab::MergeRequestChanges"
+    },
+    {
+      "blake3": "e54beb59c3538e882ed66ae9ebe472247439febe445507a31f8d8bda86e91a5f",
+      "name": "Diff",
+      "rust_path": null
+    },
+    {
+      "blake3": "0374c098794a0d6189c84615f3169f8324c3fde7a37e199717bd4a954b9cb84e",
+      "name": "Issue",
+      "rust_path": "::schematic_definitions::gitlab::Issue"
+    },
+    {
+      "blake3": "9f6fb97bbbfde77585bb5a708ee5d57c83caa21f5f895fb828043b3b9ff0fb9b",
+      "name": "TaskCompletionStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "935415cde7c62f525b5b1e75a73daf7d135f6cdf2635795d8d390bc3e3b1c072",
+      "name": "Note",
+      "rust_path": "::schematic_definitions::gitlab::Note"
+    },
+    {
+      "blake3": "75edd8b87c3a225ea26a5afea67a144ed682015afec29e02982fbcc042277107",
+      "name": "Branch",
+      "rust_path": "::schematic_definitions::gitlab::Branch"
+    },
+    {
+      "blake3": "505d1f6a1ba237de5fbfb61690b4dc465fe8d5f71595211f11e90f4753ac4d42",
+      "name": "Tag",
+      "rust_path": "::schematic_definitions::gitlab::Tag"
+    },
+    {
+      "blake3": "7c2dadb214b74d65a8ff4c301588b90ae9ec11e521f2e734e0bd4e434028e0b5",
+      "name": "TagCommit",
+      "rust_path": null
+    },
+    {
+      "blake3": "ae88640fc207b50b0a9d30ed3214a8d2e10f91d26461911b0d3ec77d95f25b14",
+      "name": "TagRelease",
+      "rust_path": null
+    },
+    {
+      "blake3": "0d3b5166e7d75a84d93339f19ca751660fbb94ca799214c00c22280fc1235f7e",
+      "name": "Release",
+      "rust_path": "::schematic_definitions::gitlab::Release"
+    },
+    {
+      "blake3": "39ca857c0bc00a37cba5e6d83040234558595f28b0d52ca9724e81adaa7972bf",
+      "name": "ReleaseAssets",
+      "rust_path": null
+    },
+    {
+      "blake3": "fdd7436b8edebeeb06364cc6e2b96f21f470bc12b51ee72ae84337c07e32f824",
+      "name": "ReleaseCommit",
+      "rust_path": null
+    },
+    {
+      "blake3": "8dd4fc4856fe45bad99d12a81b1ec3868d0962168af43128b030911aad4a343f",
+      "name": "ReleaseEvidence",
+      "rust_path": null
+    },
+    {
+      "blake3": "21fb95df00fa72c9c3ec52793a364f0e3c3399e7658f26fb4fe44127b06b2746",
+      "name": "ReleaseLink",
+      "rust_path": null
+    },
+    {
+      "blake3": "7fd6df0c2dd66d5fdd927f9dc1f3f0f19cbfd20e439bc9e78b39b6eb2469aab7",
+      "name": "ReleaseLinks",
+      "rust_path": null
+    },
+    {
+      "blake3": "059254e1ffd25928546bfdb8705984c74046f7ad00401847a54bae34e2e45453",
+      "name": "ReleaseSource",
+      "rust_path": null
+    },
+    {
+      "blake3": "af8e31ba8215b13e86da38c5273e82e9fb46ddfa7ef0158ecd168f02e86fc913",
+      "name": "Project",
+      "rust_path": "::schematic_definitions::gitlab::Project"
+    },
+    {
+      "blake3": "3aef71ac813ea96459763384cf46ebd982bc26486f9822d85915ae76163f7a55",
+      "name": "Namespace",
+      "rust_path": null
+    },
+    {
+      "blake3": "7012690b79edb9721b70780816adcb1d3da0e33dcdeeb6eb13c2e943c2fbde0c",
+      "name": "Pipeline",
+      "rust_path": "::schematic_definitions::gitlab::Pipeline"
+    }
+  ]
+}

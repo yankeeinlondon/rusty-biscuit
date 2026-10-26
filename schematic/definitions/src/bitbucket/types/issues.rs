@@ -89,6 +89,13 @@ pub struct Issue {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for Issue {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Issue");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Issue {
     /// Returns `true` if this issue is open.
     pub fn is_open(&self) -> bool {
@@ -154,6 +161,13 @@ pub struct IssueComment {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for IssueComment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("IssueComment");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// An issue change record from the change history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueChange {
@@ -180,6 +194,13 @@ pub struct IssueChange {
     /// HATEOAS links.
     #[serde(default)]
     pub links: Option<HashMap<String, Link>>,
+}
+
+impl schematic_define::Registration for IssueChange {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("IssueChange");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Detail of a field change.

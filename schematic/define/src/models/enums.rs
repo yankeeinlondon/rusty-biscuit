@@ -23,7 +23,8 @@
 ///     description: None,
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnumVariant {
     /// Variant name (PascalCase recommended).
     pub name: String,
@@ -31,8 +32,10 @@ pub struct EnumVariant {
     ///
     /// If `None`, the variant name is used as-is.
     /// If `Some`, this value is used for `#[serde(rename = "...")]`.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub value: Option<String>,
     /// Human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub description: Option<String>,
 }
 
@@ -66,11 +69,13 @@ pub struct EnumVariant {
 ///
 /// assert_eq!(status_enum.variants.len(), 2);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnumDef {
     /// Name of the enum (PascalCase recommended).
     pub name: String,
     /// Human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub description: Option<String>,
     /// List of enum variants.
     pub variants: Vec<EnumVariant>,

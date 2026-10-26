@@ -10,7 +10,7 @@
 /// ```
 /// use schematic_define::params::{ParamDef, QueryParamType, ParamStyle};
 ///
-/// let param = ParamDef {
+/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None,
 ///     name: "tags".to_string(),
 ///     required: false,
 ///     description: Some("Filter by tags".to_string()),
@@ -22,10 +22,23 @@
 /// assert_eq!(param.name, "tags");
 /// assert!(!param.required);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParamDef {
     /// Parameter name as used in the API.
     pub name: String,
+    /// Optional Rust identifier; the wire name remains `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_name: Option<String>,
+    /// Adds the wire name to the runtime redaction metadata.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    /// Requires adoption by a resolved pagination strategy at this location.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pager_managed: bool,
+    /// The provider marks this parameter deprecated. Documentation only: no
+    /// Rust `#[deprecated]` attribute is generated.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
     /// Whether this parameter is required.
     pub required: bool,
     /// Human-readable description.
@@ -39,13 +52,16 @@ pub struct ParamDef {
     pub explode: bool,
     /// Serialization style for the parameter.
     pub style: ParamStyle,
+    /// Value rules checked before the parameter is serialized; arrays are
+    /// counted before joining or exploding. See [`crate::constraints`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null_map", skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<Box<crate::constraints::Constraints>>,
 }
 
 /// Type of a parameter value.
 ///
-/// Represents the possible types for query, header, or cookie parameters.
-/// Note: This is named `QueryParamType` to avoid conflict with
-/// [`crate::websocket::ParamType`] which is used for WebSocket connection parameters.
+/// Represents the possible types for query, header, cookie, and typed path
+/// parameters of REST endpoints and WebSocket handshakes alike.
 ///
 /// ## Examples
 ///
@@ -65,7 +81,7 @@ pub struct ParamDef {
 /// ]);
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueryParamType {
     /// UTF-8 string parameter.
     String,
@@ -110,7 +126,7 @@ pub enum QueryParamType {
 /// | SpaceDelimited | `tags=a%20b%20c` | `tags=a&tags=b&tags=c` |
 /// | PipeDelimited | `tags=a\|b\|c` | `tags=a&tags=b&tags=c` |
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ParamStyle {
     /// Form style (default for query parameters).
     ///
@@ -135,13 +151,35 @@ pub enum ParamStyle {
     DeepObject,
 }
 
+
+#[allow(missing_docs)]
+impl ParamDef {
+    pub fn new(name: impl Into<String>, param_type: QueryParamType) -> Self {
+        Self { name: name.into(), param_type, required: false, description: None,
+            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false, deprecated: false, constraints: None }
+    }
+    /// A typed path parameter: required, `Simple` style, not exploded, as
+    /// [`crate::EndpointBuilder::path_param`] also enforces.
+    pub fn path(name: impl Into<String>, param_type: QueryParamType) -> Self {
+        Self { required: true, style: ParamStyle::Simple, ..Self::new(name, param_type) }
+    }
+    pub fn required(mut self) -> Self { self.required = true; self }
+    pub fn describes(mut self, description: impl Into<String>) -> Self { self.description = Some(description.into()); self }
+    pub fn rust_name(mut self, name: impl Into<String>) -> Self { self.rust_name = Some(name.into()); self }
+    pub fn secret(mut self) -> Self { self.secret = true; self }
+    pub fn pager_managed(mut self) -> Self { self.pager_managed = true; self }
+    pub fn deprecated(mut self) -> Self { self.deprecated = true; self }
+    /// Replaces the parameter's value rules; they must suit its type.
+    pub fn constraints(mut self, rules: crate::constraints::Constraints) -> Self { self.constraints = Some(Box::new(rules)); self }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn param_def_debug_clone_eq() {
-        let param = ParamDef {
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "limit".to_string(),
             required: false,
             description: Some("Max results".to_string()),
@@ -156,7 +194,7 @@ mod tests {
 
     #[test]
     fn param_def_required() {
-        let param = ParamDef {
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "id".to_string(),
             required: true,
             description: None,
@@ -169,7 +207,7 @@ mod tests {
 
     #[test]
     fn param_def_with_explode() {
-        let param = ParamDef {
+        let param = ParamDef { constraints: None, rust_name: None, secret: false, pager_managed: false, deprecated: false,
             name: "tags".to_string(),
             required: false,
             description: None,

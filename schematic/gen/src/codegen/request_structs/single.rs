@@ -51,7 +51,7 @@ pub fn generate_from_string_impls(
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", param_field_name(&qp.name));
+                let name = format_ident!("{}", qp.field_name());
                 quote! { #name: None }
             })
             .collect();

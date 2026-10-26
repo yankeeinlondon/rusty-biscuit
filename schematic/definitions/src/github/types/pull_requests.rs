@@ -98,6 +98,13 @@ pub struct PullRequestSummary {
     #[serde(default)]
     pub labels: Vec<IssueLabel>,
 }
+impl schematic_define::Registration for PullRequestSummary {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PullRequestSummary));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A file changed in a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -144,6 +151,13 @@ pub struct PullRequestFile {
     #[serde(default)]
     pub previous_filename: Option<String>,
 }
+impl schematic_define::Registration for PullRequestFile {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PullRequestFile));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

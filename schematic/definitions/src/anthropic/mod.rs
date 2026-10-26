@@ -41,49 +41,15 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::assemble_module_group;
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::{ResponseShape, RestMethod, StreamEnd, StreamFraming, TypeRef};
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping,
-    RestApi, RestMethod,
-    pagination::{Collection, PaginationException},
+    ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping,
+    RestApi, Success,
+    pagination::{Collection},
 };
-
-/// Creates a schema registry containing all Anthropic response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Anthropic API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::anthropic::{openapi_registry, define_anthropic_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_anthropic_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("MessageResponse").is_some());
-/// assert!(registry.get("CountTokensResponse").is_some());
-/// assert!(registry.get("ListModelsResponse").is_some());
-/// assert!(registry.get("ModelInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<CreateMessageBody>("CreateMessageBody")
-        .register::<CountTokensBody>("CountTokensBody")
-        .register::<MessageResponse>("MessageResponse")
-        .register::<CountTokensResponse>("CountTokensResponse")
-        .register::<ListModelsResponse>("ListModelsResponse")
-        .register::<ModelInfo>("ModelInfo")
-        // Nested types used by request/response bodies
-        .register::<Message>("Message")
-        .register::<ContentBlock>("ContentBlock")
-        .register::<Tool>("Tool")
-}
 
 /// Creates the Anthropic API definition.
 ///
@@ -109,92 +75,79 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 4);
 /// ```
 pub fn define_anthropic_api() -> RestApi {
-    RestApi {
-        name: "Anthropic".to_string(),
-        description: "Anthropic Messages API for Claude AI interactions and agent tool use"
-            .to_string(),
-        base_url: "https://api.anthropic.com/v1".to_string(),
-        docs_url: Some("https://docs.anthropic.com/en/api/messages".to_string()),
-        auth: AuthStrategy::ApiKey {
+    module_group().expect("valid anthropic definitions").remove(0)
+}
+
+fn build_anthropic_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+
+            Endpoint::post("CreateMessage", "/messages")
+                .describes("Create a message with optional tool use for agent interactions")
+                .request_json::<CreateMessageBody>(ctx)
+                .returns(
+                    Success::json(ctx.register::<MessageResponse>()?)
+                        .note("returned when `stream` is false or omitted"),
+                )
+                .returns(
+                    Success::sse(ctx.register::<MessageStreamEvent>()?)
+                        .note("returned when `stream` is true")
+                        .ends_at_event("message_stop"),
+                )
+                .build()?,
+
+            Endpoint::post("CountTokens", "/messages/count_tokens")
+                .describes("Count tokens in a message before sending")
+                .request_json::<CountTokensBody>(ctx)
+                .returns_json::<CountTokensResponse>(ctx)
+                .build()?,
+
+            Endpoint::get("ListModels", "/models")
+                .describes("List available Claude models")
+                .returns_json::<ListModelsResponse>(ctx)
+                .pagination(Collection::at("data").item_type("ModelInfo").unpaginated())
+                .build()?,
+            Endpoint::get("RetrieveModel", "/models/{model_id}")
+                .describes("Get information about a specific model")
+                .returns_json::<ModelInfo>(ctx)
+                .build()?,
+        ];
+    RestApi::builder(ctx, "Anthropic", "https://api.anthropic.com/v1")
+        .describes("Anthropic Messages API for Claude AI interactions and agent tool use")
+        .authentication(AuthStrategy::ApiKey {
             header: "X-Api-Key".to_string(),
             value_prefix: None,
-        },
-        auth_policy: None,
-        env_auth: vec!["ANTHROPIC_API_KEY".to_string()],
-        env_username: None,
-        headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
-        endpoints: vec![
-            // Core Messages endpoint - the heart of the agent API
-            Endpoint {
-                id: "CreateMessage".to_string(),
-                method: RestMethod::Post,
-                path: "/messages".to_string(),
-                description: "Create a message with optional tool use for agent interactions"
-                    .to_string(),
-                request: Some(ApiRequest::json_type("CreateMessageBody")),
-                response: ApiResponse::json_type("MessageResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // Token counting for cost estimation
-            Endpoint {
-                id: "CountTokens".to_string(),
-                method: RestMethod::Post,
-                path: "/messages/count_tokens".to_string(),
-                description: "Count tokens in a message before sending".to_string(),
-                request: Some(ApiRequest::json_type("CountTokensBody")),
-                response: ApiResponse::json_type("CountTokensResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // Model discovery
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/models".to_string(),
-                description: "List available Claude models".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "RetrieveModel".to_string(),
-                method: RestMethod::Get,
-                path: "/models/{model_id}".to_string(),
-                description: "Get information about a specific model".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ModelInfo"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+        }, vec!["ANTHROPIC_API_KEY".to_string()])
+        .docs_url("https://docs.anthropic.com/en/api/messages")
+        .env_mapping(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::new(vec!["ANTHROPIC_API_KEY".to_string()]),
                 header: "X-Api-Key".to_string(),
             }),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        // Unverified: believed to page by an `after_id`/`before_id` cursor,
-        // but the definition declares no request inputs and no source
-        // confirms them.
-        pagination_exceptions: vec![PaginationException::new(
-            "ListModels",
-            Collection::at("data").item_type("ModelInfo").unpaginated(),
-        )],
-    }
+        })
+        .header("anthropic-version", "2023-06-01")
+        .endpoints(endpoints)
+        .build()
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::anthropic", |ctx| {
+        ctx.register::<CreateMessageBody>()?;
+        ctx.register::<CountTokensBody>()?;
+        ctx.register::<MessageResponse>()?;
+        ctx.register::<CountTokensResponse>()?;
+        ctx.register::<ListModelsResponse>()?;
+        ctx.register::<ModelInfo>()?;
+        ctx.register::<Message>()?;
+        ctx.register::<ContentBlock>()?;
+        ctx.register::<Tool>()?;
+        ctx.register::<MessageStreamEvent>()?;
+        ctx.register::<ContentBlockDelta>()?;
+        Ok(vec![
+            build_anthropic_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
@@ -250,7 +203,33 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/messages");
         assert!(endpoint.request.is_some());
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+    }
+
+    #[test]
+    fn create_message_returns_json_or_message_stream() {
+        let api = define_anthropic_api();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "CreateMessage").unwrap();
+
+        let [json, stream] = endpoint.response.as_slice() else {
+            panic!("expected two success shapes, got {:?}", endpoint.response)
+        };
+        assert_eq!(json.shape, ResponseShape::Json(TypeRef::Named("MessageResponse".into())));
+        assert_eq!(json.note.as_deref(), Some("returned when `stream` is false or omitted"));
+        assert_eq!(
+            stream.shape,
+            ResponseShape::Stream {
+                framing: StreamFraming::Sse(TypeRef::Named("MessageStreamEvent".into())),
+                end: StreamEnd::EventNamed("message_stop".into()),
+                keep: false,
+            }
+        );
+        assert_eq!(stream.note.as_deref(), Some("returned when `stream` is true"));
+        for shape in [json, stream] {
+            assert_eq!(shape.content_type, None);
+            assert_eq!(shape.variant, None);
+            assert!(shape.statuses.is_empty());
+            assert!(!shape.fallback);
+        }
     }
 
     #[test]
@@ -290,4 +269,19 @@ mod tests {
         assert_eq!(endpoint.path, "/models/{model_id}");
         assert!(endpoint.path.contains("{model_id}"));
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["CreateMessage", "CountTokens", "ListModels", "RetrieveModel"]
+        );
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["CreateMessageBody", "ContentBlock", "Message", "Tool", "CountTokensBody", "MessageResponse", "CountTokensResponse", "ListModelsResponse", "ModelInfo", "MessageStreamEvent", "ContentBlockDelta"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
+        }
+    }
+
 }

@@ -1,0 +1,27 @@
+error[E0277]: the trait bound `Mixed: JsonAlternatives` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  |
+  |     let _ = Client::<Fixture>::new(ApiDefinition::new("https://x.invalid")).mutate_response::<Get, _>(|_, _value| Ok(()));
+  |                                                                                               ^^^ unsatisfied trait bound
+  |
+help: the trait `JsonAlternatives` is not implemented for `Mixed`
+ --> tests/fixtures/compile_fail/mutator_on_mixed_alternatives.rs
+  |
+  | enum Mixed {
+  | ^^^^^^^^^^
+help: the trait `SupportsHooks` is conditionally implemented for `Shapes<A>`
+ --> src/shapes.rs
+  |
+  | impl<A: JsonAlternatives> SupportsHooks for Shapes<A> {}
+  | ^^^^^^^^----------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         |
+  |         unsatisfied requirement introduced here: `Mixed: JsonAlternatives`
+  = note: required for `Shapes<Mixed>` to implement `SupportsHooks`
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`

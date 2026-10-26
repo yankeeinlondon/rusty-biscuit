@@ -213,3 +213,137 @@ fn source_bytes_convenience() {
     let source = OpenApiSource::bytes(b"openapi: 3.0.0".to_vec());
     assert!(matches!(source, OpenApiSource::Bytes(_)));
 }
+
+// ========================================
+// Import Result Reference Assembly
+// ========================================
+
+/// The Petstore fixture the generator's import tests also use.
+const PETSTORE: &str = include_str!("../../gen/tests/fixtures/petstore.yaml");
+
+fn import(source: OpenApiSource) -> Result<schematic_define::openapi::OpenApiImportResult, OpenApiError> {
+    schematic_define::openapi::OpenApiImport::new(source).build()
+}
+
+/// Petstore with one `$ref` of the create operation renamed to `MissingPet`.
+fn petstore_with(original: &str, replacement: &str) -> String {
+    assert_eq!(PETSTORE.matches(original).count(), 1, "fixture anchor {original:?}");
+    PETSTORE.replace(original, replacement)
+}
+
+#[test]
+fn every_source_form_imports_petstore_with_resolvable_exportable_components() {
+    let document: openapiv3::OpenAPI = serde_yaml_ng::from_str(PETSTORE).unwrap();
+    let json = serde_json::to_string(&document).unwrap();
+    let path = std::env::temp_dir().join(format!("schematic-define-petstore-{}.yaml", std::process::id()));
+    std::fs::write(&path, PETSTORE).unwrap();
+    let sources = [
+        ("yaml", OpenApiSource::yaml(PETSTORE)),
+        ("json", OpenApiSource::json(json)),
+        ("path", OpenApiSource::path(&path)),
+        ("bytes", OpenApiSource::bytes(PETSTORE.as_bytes().to_vec())),
+        ("document", OpenApiSource::Document(Box::new(document))),
+    ];
+
+    let results: Vec<_> = sources.into_iter().map(|(form, source)| (form, import(source))).collect();
+    std::fs::remove_file(&path).unwrap();
+
+    for (form, result) in results {
+        let api = result.unwrap_or_else(|error| panic!("{form}: {error}")).api;
+        let components: Vec<(&str, Option<&str>)> =
+            api.schemas.iter().map(|c| (c.name.as_str(), c.rust_path.as_deref())).collect();
+        assert_eq!(api.endpoints.len(), 4, "{form}");
+        // Source order; `CreatePetRequest` yields its name to the CreatePet request struct.
+        assert_eq!(
+            components,
+            [("Pet", Some("Pet")), ("CreatePetRequest2", Some("CreatePetRequest2")), ("PetStatus", Some("PetStatus"))],
+            "{form}"
+        );
+        api.validate_references().unwrap_or_else(|error| panic!("{form}: {error}"));
+        let document = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .unwrap_or_else(|error| panic!("{form}: {error}"));
+        let pet = serde_json::to_value(&document.components.unwrap().schemas["Pet"]).unwrap();
+        assert_eq!(pet.pointer("/properties/status/$ref"), Some(&"#/components/schemas/PetStatus".into()), "{form}");
+    }
+}
+
+#[test]
+fn a_component_that_yields_its_name_is_renamed_in_success_stream_and_error_references() {
+    let original = "            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+  /pets/{petId}:";
+    let replacement = r"            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/CreatePetRequest'
+        '400':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePetRequest'
+  /pets/{petId}:";
+    let api = import(OpenApiSource::yaml(petstore_with(original, replacement))).unwrap().api;
+    let create = api.endpoints.iter().find(|endpoint| endpoint.id == "CreatePet").unwrap();
+    let renamed = schematic_define::TypeRef::Named("CreatePetRequest2".into());
+
+    assert!(matches!(&create.response[1].shape, schematic_define::ResponseShape::Stream {
+        framing: schematic_define::StreamFraming::Sse(item), .. } if *item == renamed), "{:?}", create.response);
+    assert_eq!(create.errors[0].shape, schematic_define::ResponseShape::Json(renamed));
+    api.validate_references().unwrap();
+}
+
+#[test]
+fn an_import_module_path_qualifies_component_rust_paths() {
+    let imported = schematic_define::openapi::OpenApiImport::new(OpenApiSource::yaml(PETSTORE))
+        .module_path("petstore")
+        .build()
+        .unwrap();
+
+    let pet = imported.api.component("Pet").unwrap();
+
+    assert_eq!(pet.rust_path.as_deref(), Some("petstore::Pet"));
+    assert_eq!(imported.api.rust_type(&imported.api.endpoints[1].json_references()[0].clone()).as_deref(), Some("petstore::Pet"));
+}
+
+#[test]
+fn a_dangling_create_reference_fails_the_import_naming_api_endpoint_and_type() {
+    let response = petstore_with(
+        "The created pet\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'",
+        "The created pet\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/MissingPet'",
+    );
+    let request = petstore_with(
+        "$ref: '#/components/schemas/CreatePetRequest'",
+        "$ref: '#/components/schemas/MissingPet'",
+    );
+
+    for (site, text) in [("response", response), ("request", request)] {
+        let error = import(OpenApiSource::yaml(text)).expect_err(site);
+
+        assert_eq!(
+            error,
+            OpenApiError::Definition(schematic_define::DefinitionError::UnresolvedReference {
+                api: "Petstore".into(),
+                endpoint: "CreatePet".into(),
+                name: "MissingPet".into(),
+            }),
+            "{site}"
+        );
+        assert!(error.to_string().contains("Petstore endpoint CreatePet: unresolved schema reference \"MissingPet\""), "{site}: {error}");
+    }
+}
+
+#[test]
+fn a_component_free_import_still_validates_and_exports() {
+    let yaml = "openapi: '3.0.3'\ninfo: {title: Plain, version: '1'}\npaths:\n  /hello:\n    get:\n      operationId: hello\n      responses:\n        '200':\n          description: Greeting\n          content:\n            application/json:\n              schema: {type: string}\n";
+
+    let api = import(OpenApiSource::yaml(yaml)).unwrap().api;
+
+    assert!(api.schemas.is_empty());
+    assert_eq!(api.endpoints.len(), 1);
+    api.validate_references().unwrap();
+    schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new()).unwrap();
+}

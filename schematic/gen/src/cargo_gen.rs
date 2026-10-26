@@ -2,13 +2,21 @@
 //!
 //! This module generates the Cargo.toml file for the schematic-schema package,
 //! which contains the generated API client code. The generated manifest includes
-//! all runtime dependencies needed by the generated code.
+//! all runtime dependencies needed by the generated code, and one Cargo feature
+//! per generated module group ([`ModuleFeatures`]); the default feature set
+//! enables every module.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
+use schematic_define::RestApi;
+use schematic_definitions::naming::resolve_module_name;
+use schematic_definitions::registry::ApiRegistration;
+
 use crate::errors::GeneratorError;
 use crate::output::write_atomic;
+use crate::output::ws_modules::ws_registrations;
 
 /// The line in a generated `Cargo.toml` that proves schematic-gen wrote it.
 ///
@@ -29,23 +37,104 @@ description = "Generated REST and WebSocket API client code from schematic defin
 
 [dependencies]
 bytes = "1"
-futures-util = "0.3"
+futures-util = { version = "0.3", optional = true }
 schematic-define = { version = "0.1.0", path = "{{DEFINE_PATH}}" }
 schematic-definitions = { version = "0.1.0", path = "{{DEFINITIONS_PATH}}" }
 schematic-runtime = { version = "0.1.0", path = "{{RUNTIME_PATH}}" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
+thiserror = { version = "2.0", optional = true }
 tokio = { version = "1.43", features = ["rt", "macros", "sync", "time", "net"] }
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"], optional = true }
 urlencoding = "2.1"
 
+{{FEATURES}}
 [dev-dependencies]
 serial_test = "3"
 trybuild = "1.0"
 wiremock = "0.6"
 "#;
+
+/// Dependencies only WebSocket modules use. They are optional, enabled by
+/// every WebSocket module's feature, and left out of a manifest with no
+/// WebSocket module.
+pub const WEBSOCKET_DEPENDENCIES: &[&str] = &["futures-util", "thiserror", "tokio-tungstenite"];
+
+/// The module groups a generated crate declares, each one Cargo feature
+/// named for the module.
+///
+/// Built from the same inventory `lib.rs` declares modules from, so every
+/// `#[cfg(feature = "…")]` the generated code carries names a declared
+/// feature. A run always passes the whole registry, never only the APIs it
+/// regenerates, so a partial run writes the same manifest as a full one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleFeatures {
+    rest: BTreeSet<String>,
+    websocket: BTreeSet<String>,
+}
+
+impl ModuleFeatures {
+    /// The resolved module groups of `registry` and the WebSocket modules of
+    /// `registrations`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_definitions::registry::{registrations, rest_apis};
+    /// use schematic_gen::cargo_gen::ModuleFeatures;
+    ///
+    /// let apis = rest_apis(registrations());
+    /// let registry: Vec<_> = apis.iter().collect();
+    /// let features = ModuleFeatures::new(&registry, registrations());
+    /// assert!(features.rest().any(|module| module == "ollama"));
+    /// assert!(features.websocket().any(|module| module == "elevenlabs_ws"));
+    /// ```
+    pub fn new(registry: &[&RestApi], registrations: &[ApiRegistration]) -> Self {
+        Self {
+            rest: registry.iter().map(|api| resolve_module_name(api)).collect(),
+            websocket: ws_registrations(registrations)
+                .map(|(entry, _)| entry.module.to_string())
+                .collect(),
+        }
+    }
+
+    /// REST module features, sorted.
+    pub fn rest(&self) -> impl Iterator<Item = &str> {
+        self.rest.iter().map(String::as_str)
+    }
+
+    /// WebSocket module features, sorted.
+    pub fn websocket(&self) -> impl Iterator<Item = &str> {
+        self.websocket.iter().map(String::as_str)
+    }
+
+    /// The `[features]` table, with an empty line after it.
+    fn table(&self) -> String {
+        let all: BTreeSet<&str> = self.rest().chain(self.websocket()).collect();
+        let mut table = String::from("[features]\n");
+        if all.is_empty() {
+            table.push_str("default = []\n");
+        } else {
+            table.push_str("default = [\n");
+            for module in &all {
+                table.push_str(&format!("    {},\n", toml_string(module)));
+            }
+            table.push_str("]\n");
+        }
+        let websocket_deps = WEBSOCKET_DEPENDENCIES
+            .iter()
+            .map(|dep| toml_string(&format!("dep:{dep}")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for module in all {
+            let enables = if self.websocket.contains(module) { websocket_deps.as_str() } else { "" };
+            table.push_str(&format!("{} = [{enables}]\n", toml_key(module)));
+        }
+        table.push('\n');
+        table
+    }
+}
 
 /// Generates the Cargo.toml content for the schema package.
 ///
@@ -62,26 +151,29 @@ wiremock = "0.6"
 /// ## Examples
 ///
 /// ```
-/// use schematic_gen::cargo_gen::generate_cargo_toml;
+/// use schematic_gen::cargo_gen::{ModuleFeatures, generate_cargo_toml};
+///
+/// let features = ModuleFeatures::default();
 ///
 /// // Default relative paths (production use)
-/// let content = generate_cargo_toml(None);
+/// let content = generate_cargo_toml(None, &features);
 /// assert!(content.contains("schematic-schema"));
 /// assert!(content.contains("edition = \"2024\""));
 /// assert!(content.contains("path = \"../define\""));
 ///
 /// // Absolute paths (for testing)
-/// let content = generate_cargo_toml(Some("/workspace/schematic"));
+/// let content = generate_cargo_toml(Some("/workspace/schematic"), &features);
 /// assert!(content.contains("path = \"/workspace/schematic/define\""));
 /// ```
-pub fn generate_cargo_toml(workspace_root: Option<&str>) -> String {
+pub fn generate_cargo_toml(workspace_root: Option<&str>, features: &ModuleFeatures) -> String {
     match workspace_root {
         Some(root) => generate_cargo_toml_with_paths(
             &format!("{}/define", root),
             &format!("{}/definitions", root),
             &format!("{}/runtime", root),
+            features,
         ),
-        None => generate_cargo_toml_with_paths("../define", "../definitions", "../runtime"),
+        None => generate_cargo_toml_with_paths("../define", "../definitions", "../runtime", features),
     }
 }
 
@@ -98,15 +190,33 @@ pub fn generate_cargo_toml_with_paths(
     define_path: &str,
     definitions_path: &str,
     runtime_path: &str,
+    features: &ModuleFeatures,
 ) -> String {
-    CARGO_TOML_TEMPLATE
+    let manifest = CARGO_TOML_TEMPLATE
         .replace("\"{{DEFINE_PATH}}\"", &toml_string(define_path))
         .replace("\"{{DEFINITIONS_PATH}}\"", &toml_string(definitions_path))
         .replace("\"{{RUNTIME_PATH}}\"", &toml_string(runtime_path))
+        .replace("{{FEATURES}}\n", &features.table());
+    if features.websocket.is_empty() {
+        manifest
+            .lines()
+            .filter(|line| !WEBSOCKET_DEPENDENCIES.iter().any(|dep| line.starts_with(&format!("{dep} = "))))
+            .map(|line| format!("{line}\n"))
+            .collect()
+    } else {
+        manifest
+    }
 }
 
 fn toml_string(value: &str) -> String {
     biscuit_file::toml_crate::Value::String(value.to_string()).to_string()
+}
+
+/// `name` as a TOML key: bare when TOML allows it, quoted otherwise.
+fn toml_key(name: &str) -> String {
+    let bare = !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if bare { name.to_string() } else { toml_string(name) }
 }
 
 /// Writes the Cargo.toml to the output directory.
@@ -119,21 +229,24 @@ fn toml_string(value: &str) -> String {
 /// * `output_dir` - Parent directory for the schema package (not src/)
 /// * `dry_run` - If true, print content instead of writing
 /// * `workspace_root` - Optional path to workspace root for absolute paths (testing)
+/// * `features` - The module groups the crate's `lib.rs` declares
 ///
 /// ## Examples
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_gen::cargo_gen::write_cargo_toml;
+/// use schematic_gen::cargo_gen::{ModuleFeatures, write_cargo_toml};
+///
+/// let features = ModuleFeatures::default();
 ///
 /// // Dry run mode - prints to stdout
-/// write_cargo_toml(Path::new("schematic/schema"), true, None).unwrap();
+/// write_cargo_toml(Path::new("schematic/schema"), true, None, &features).unwrap();
 ///
 /// // Normal mode - writes to file (production)
-/// write_cargo_toml(Path::new("schematic/schema"), false, None).unwrap();
+/// write_cargo_toml(Path::new("schematic/schema"), false, None, &features).unwrap();
 ///
 /// // For tests - use absolute paths to workspace packages
-/// write_cargo_toml(Path::new("/tmp/test/schema"), false, Some("/workspace/schematic")).unwrap();
+/// write_cargo_toml(Path::new("/tmp/test/schema"), false, Some("/workspace/schematic"), &features).unwrap();
 /// ```
 ///
 /// ## Errors
@@ -145,8 +258,9 @@ pub fn write_cargo_toml(
     output_dir: &Path,
     dry_run: bool,
     workspace_root: Option<&str>,
+    features: &ModuleFeatures,
 ) -> Result<(), GeneratorError> {
-    let content = generate_cargo_toml(workspace_root);
+    let content = generate_cargo_toml(workspace_root, features);
 
     if dry_run {
         println!(
@@ -173,21 +287,30 @@ pub fn write_cargo_toml(
 mod tests {
     use super::*;
     use biscuit_file::toml_crate;
+    use schematic_define::AuthStrategy;
     use std::fs;
+    use schematic_definitions::registry::{registrations, rest_apis};
     use tempfile::TempDir;
+
+    /// The shipped inventory's module features.
+    fn shipped() -> ModuleFeatures {
+        let apis = rest_apis(registrations());
+        let registry: Vec<&RestApi> = apis.iter().collect();
+        ModuleFeatures::new(&registry, registrations())
+    }
 
     // === generate_cargo_toml tests ===
 
     #[test]
     fn generated_manifest_carries_the_ownership_marker() {
-        for content in [generate_cargo_toml(None), generate_cargo_toml_with_paths("a", "b", "c")] {
+        for content in [generate_cargo_toml(None, &shipped()), generate_cargo_toml_with_paths("a", "b", "c", &shipped())] {
             assert!(content.lines().any(|line| line == MANIFEST_OWNERSHIP_MARKER));
         }
     }
 
     #[test]
     fn generate_cargo_toml_produces_valid_toml() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
 
         // Parse as TOML to validate syntax
         let parsed: toml_crate::Table =
@@ -200,7 +323,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_has_correct_package_name() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -212,7 +335,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_uses_edition_2024() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -221,7 +344,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_has_correct_license() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -233,7 +356,7 @@ mod tests {
 
     #[test]
     fn generated_crate_sends_through_the_runtime_not_its_own_http_client() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -246,7 +369,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_serde_with_derive() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -260,7 +383,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_serde_json() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -272,7 +395,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_thiserror() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -284,7 +407,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_tokio() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -299,7 +422,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_bytes() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -311,7 +434,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_urlencoding() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -323,7 +446,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_serial_test_dev_dependency() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let dev_deps = parsed
@@ -339,7 +462,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_trybuild_dev_dependency() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let dev_deps = parsed
@@ -355,7 +478,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_schematic_define() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
         let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -374,7 +497,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_generated_notice() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
 
         assert!(content.contains("automatically generated"));
         assert!(content.contains("Do not edit manually"));
@@ -387,7 +510,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        let result = write_cargo_toml(&output_dir, true, None);
+        let result = write_cargo_toml(&output_dir, true, None, &shipped());
 
         assert!(result.is_ok());
         assert!(!output_dir.join("Cargo.toml").exists());
@@ -398,7 +521,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        let result = write_cargo_toml(&output_dir, false, None);
+        let result = write_cargo_toml(&output_dir, false, None, &shipped());
 
         assert!(result.is_ok());
         assert!(output_dir.join("Cargo.toml").exists());
@@ -409,7 +532,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("nested/deep/schema");
 
-        let result = write_cargo_toml(&output_dir, false, None);
+        let result = write_cargo_toml(&output_dir, false, None, &shipped());
 
         assert!(result.is_ok());
         assert!(output_dir.join("Cargo.toml").exists());
@@ -420,12 +543,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        write_cargo_toml(&output_dir, false, None).unwrap();
+        write_cargo_toml(&output_dir, false, None, &shipped()).unwrap();
 
         let content = fs::read_to_string(output_dir.join("Cargo.toml")).unwrap();
 
         // Verify content matches what generate_cargo_toml produces
-        assert_eq!(content, generate_cargo_toml(None));
+        assert_eq!(content, generate_cargo_toml(None, &shipped()));
     }
 
     #[test]
@@ -439,7 +562,7 @@ mod tests {
         fs::write(&cargo_path, "# old content").unwrap();
 
         // Overwrite with generated content
-        write_cargo_toml(&output_dir, false, None).unwrap();
+        write_cargo_toml(&output_dir, false, None, &shipped()).unwrap();
 
         let content = fs::read_to_string(&cargo_path).unwrap();
         assert!(content.contains("schematic-schema"));
@@ -451,7 +574,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        write_cargo_toml(&output_dir, false, None).unwrap();
+        write_cargo_toml(&output_dir, false, None, &shipped()).unwrap();
 
         // No scratch file (regardless of its pid/counter suffix) should survive.
         let leftover_temp = std::fs::read_dir(&output_dir)
@@ -468,7 +591,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_with_workspace_root_uses_absolute_paths() {
-        let content = generate_cargo_toml(Some("/workspace/schematic"));
+        let content = generate_cargo_toml(Some("/workspace/schematic"), &shipped());
 
         assert!(content.contains("path = \"/workspace/schematic/define\""));
         assert!(content.contains("path = \"/workspace/schematic/definitions\""));
@@ -477,7 +600,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_without_workspace_root_uses_relative_paths() {
-        let content = generate_cargo_toml(None);
+        let content = generate_cargo_toml(None, &shipped());
 
         assert!(content.contains("path = \"../define\""));
         assert!(content.contains("path = \"../definitions\""));
@@ -497,7 +620,7 @@ mod tests {
         let define = r"C:\Users\dev\rusty-biscuit\schematic\define";
         let definitions = r"D:\tmp\fixture definitions\stub";
         let runtime = r"E:\runtime copy\schematic-runtime";
-        let content = generate_cargo_toml_with_paths(define, definitions, runtime);
+        let content = generate_cargo_toml_with_paths(define, definitions, runtime, &shipped());
 
         assert_eq!(dependency_path(&content, "schematic-define"), define);
         assert_eq!(dependency_path(&content, "schematic-definitions"), definitions);
@@ -507,7 +630,7 @@ mod tests {
     #[test]
     fn explicit_paths_with_quotes_round_trip_through_toml() {
         let define = r#"/tmp/a "quoted" dir/define"#;
-        let content = generate_cargo_toml_with_paths(define, "/tmp/definitions", "/tmp/runtime");
+        let content = generate_cargo_toml_with_paths(define, "/tmp/definitions", "/tmp/runtime", &shipped());
 
         assert_eq!(dependency_path(&content, "schematic-define"), define);
         assert_eq!(dependency_path(&content, "schematic-definitions"), "/tmp/definitions");
@@ -515,7 +638,7 @@ mod tests {
 
     #[test]
     fn windows_workspace_root_keeps_backslashes() {
-        let content = generate_cargo_toml(Some(r"C:\work\schematic"));
+        let content = generate_cargo_toml(Some(r"C:\work\schematic"), &shipped());
 
         assert_eq!(
             dependency_path(&content, "schematic-define"),
@@ -526,6 +649,115 @@ mod tests {
     #[test]
     fn default_manifest_matches_the_committed_schema_manifest() {
         let committed = include_str!("../../schema/Cargo.toml");
-        assert_eq!(generate_cargo_toml(None), committed);
+        assert_eq!(generate_cargo_toml(None, &shipped()), committed);
+    }
+
+    // === module features (R29) ===
+
+    fn features_table(content: &str) -> toml_crate::Table {
+        let parsed: toml_crate::Table = toml_crate::from_str(content).expect("valid TOML");
+        parsed["features"].as_table().expect("[features] is a table").clone()
+    }
+
+    fn strings(value: &toml_crate::Value) -> Vec<String> {
+        value
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|item| item.as_str().expect("a string").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn every_shipped_module_group_is_one_default_feature() {
+        let features = shipped();
+        let table = features_table(&generate_cargo_toml(None, &features));
+        let mut modules: Vec<String> = registrations().iter().map(|entry| entry.module.to_string()).collect();
+        modules.sort();
+        modules.dedup();
+
+        assert_eq!(strings(&table["default"]), modules, "default enables every module, sorted");
+        let mut declared: Vec<String> = table.keys().filter(|key| *key != "default").cloned().collect();
+        declared.sort();
+        assert_eq!(declared, modules, "one feature per module group, named for the module");
+        assert_eq!(
+            registrations().iter().filter(|entry| entry.module == "ollama").count(),
+            2,
+            "Ollama is the shared group this test relies on"
+        );
+    }
+
+    #[test]
+    fn websocket_features_enable_exactly_the_websocket_only_dependencies() {
+        let features = shipped();
+        let table = features_table(&generate_cargo_toml(None, &features));
+        let websocket: Vec<&str> = features.websocket().collect();
+        assert!(websocket.contains(&"elevenlabs_ws"), "{websocket:?}");
+
+        for module in features.websocket() {
+            assert_eq!(
+                strings(&table[module]),
+                ["dep:futures-util", "dep:thiserror", "dep:tokio-tungstenite"],
+                "{module}"
+            );
+        }
+        for module in features.rest() {
+            assert!(strings(&table[module]).is_empty(), "REST feature {module} enables nothing");
+        }
+    }
+
+    #[test]
+    fn only_websocket_dependencies_are_optional() {
+        let content = generate_cargo_toml(None, &shipped());
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
+        let deps = parsed["dependencies"].as_table().unwrap();
+
+        for (name, spec) in deps {
+            let optional = spec.get("optional").and_then(toml_crate::Value::as_bool).unwrap_or(false);
+            assert_eq!(
+                optional,
+                WEBSOCKET_DEPENDENCIES.contains(&name.as_str()),
+                "{name} optional = {optional}"
+            );
+        }
+        for dep in WEBSOCKET_DEPENDENCIES {
+            assert!(deps.contains_key(*dep), "{dep} is declared");
+        }
+    }
+
+    #[test]
+    fn a_manifest_without_websocket_modules_declares_no_websocket_dependency() {
+        let api = crate::test_utils::make_api("PagerDutyApi", "https://x.test", AuthStrategy::None, vec![]);
+        let mut shared = api.clone();
+        shared.name = "PagerDutyClient".to_string();
+        let features = ModuleFeatures::new(&[&api, &shared], &[]);
+        let content = generate_cargo_toml(None, &features);
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).expect("valid TOML");
+        let deps = parsed["dependencies"].as_table().unwrap();
+
+        for dep in WEBSOCKET_DEPENDENCIES {
+            assert!(!deps.contains_key(*dep), "{dep} is left out:\n{content}");
+        }
+        let table = features_table(&content);
+        assert_eq!(strings(&table["default"]), ["pagerduty"], "two APIs of one group are one feature");
+        assert!(strings(&table["pagerduty"]).is_empty());
+        assert!(!content.contains("dep:"), "{content}");
+    }
+
+    #[test]
+    fn an_empty_inventory_has_an_empty_default_feature() {
+        let content = generate_cargo_toml(None, &ModuleFeatures::default());
+        let table = features_table(&content);
+        assert_eq!(table.len(), 1, "{content}");
+        assert!(strings(&table["default"]).is_empty());
+    }
+
+    #[test]
+    fn a_feature_name_toml_cannot_leave_bare_is_quoted() {
+        let mut api = crate::test_utils::make_api("Cafe", "https://x.test", AuthStrategy::None, vec![]);
+        api.module_path = Some("café".to_string());
+        let content = generate_cargo_toml(None, &ModuleFeatures::new(&[&api], &[]));
+        assert!(content.contains("\"café\" = []"), "{content}");
+        assert_eq!(strings(&features_table(&content)["default"]), ["café"]);
     }
 }

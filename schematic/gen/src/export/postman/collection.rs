@@ -1,335 +1,232 @@
 //! Collection builders for single and grouped RestApi definitions.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use schematic_define::RestApi;
 
-use crate::export::auth::{ExportAuth, map_auth};
+use crate::export::auth::{ExportAuth, map_auth, with_variable_suffix};
+use crate::export::examples::ExampleSource;
 use crate::export::path_params::extract_folder_key;
 
-use super::auth::{auth_variables, build_collection_auth};
-use super::item::build_request_item;
+use super::auth::build_collection_auth;
+use super::graphql::graphql_items;
+use super::item::{Member, build_request_item};
 use super::request::capitalize_folder_name;
 use super::types::*;
-use super::variables::merge_variables;
+use super::variables::{Collected, merge_variables};
+
+const SCHEMA_URL: &str = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
+
+/// A collection with what building it collected: secret variables for an
+/// environment, and diagnostics for examples or operations left out.
+pub(crate) struct Built {
+    pub collection: PostmanCollection,
+    pub collected: Collected,
+}
 
 /// Builds a Postman collection from a single RestApi.
 ///
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi, Endpoint};
 /// use schematic_gen::export::postman::build_postman_collection;
 ///
-/// let api = RestApi {
-///     name: "TestApi".to_string(),
-///     description: "Test API".to_string(),
-///     base_url: "https://api.test.com/v1".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![
-///         Endpoint {
-///             id: "GetUser".to_string(),
-///             method: RestMethod::Get,
-///             path: "/users/{id}".to_string(),
-///             description: "Get a user by ID".to_string(),
-///             request: None,
-///             response: ApiResponse::json_type("User"),
-///             headers: vec![],
-///             params: None,
-///             oauth_scopes: None,
-///         },
-///     ],
-///     module_path: None,
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let mut ctx = DefinitionContext::types_in("crate::types");
+/// let endpoint = Endpoint::get("GetUser", "/users/{id}")
+///     .describes("Get a user by ID")
+///     .returns_json::<serde_json::Value>(&mut ctx)
+///     .build().unwrap();
+/// let api = RestApi::builder(&ctx, "TestApi", "https://api.test.com/v1")
+///     .describes("Test API")
+///     .no_auth()
+///     .endpoints([endpoint])
+///     .build().unwrap();
 ///
 /// let collection = build_postman_collection(&api);
 /// assert_eq!(collection.info.name, "TestApi");
 /// assert_eq!(collection.item.len(), 1); // 1 request
 /// ```
 pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
+    build_single(api).collection
+}
+
+/// [`build_postman_collection`] with what the build collected.
+pub(crate) fn build_single(api: &RestApi) -> Built {
     let auth = map_auth(&api.auth);
     let collection_auth = build_collection_auth(&auth);
-    let base_url_var = PostmanVariable {
-        key: "baseUrl".to_string(),
-        value: Some(api.base_url.clone()),
-        description: Some("Base URL for all requests".to_string()),
+    let member = Member {
+        api,
+        auth,
+        base_url_var: "baseUrl".to_string(),
+        request_level_auth: false,
+        variable_suffix: None,
+        examples: ExampleSource::new(api),
     };
-
-    // Group endpoints by folder
-    let mut folders: BTreeMap<Option<String>, Vec<PostmanItem>> = BTreeMap::new();
-
-    for endpoint in &api.endpoints {
-        let folder_key = extract_folder_key(&endpoint.path);
-        let request_item = build_request_item(endpoint, api, &auth, false, false, "baseUrl");
-        folders
-            .entry(folder_key.clone())
-            .or_default()
-            .push(request_item);
-    }
-
-    // Build items: folders + root-level requests
-    let mut items = Vec::new();
-
-    // Add folders first (sorted by key)
-    for (folder_key, folder_items) in folders.iter() {
-        if let Some(key) = folder_key {
-            items.push(PostmanItem::Folder {
-                name: capitalize_folder_name(key),
-                item: folder_items.clone(),
-            });
-        }
-    }
-
-    // Add root-level requests
-    if let Some(root_items) = folders.get(&None) {
-        items.extend(root_items.clone());
-    }
-
-    // Build collection variable list: base-URL var first, then any
-    // auth-implied variables (e.g. bearerToken, apiKey, username, password).
-    // Dedupe by key so a future overlap with the base-URL var name cannot
-    // produce duplicate declarations.
-    let mut variables = vec![base_url_var];
-    merge_variables(&mut variables, auth_variables(&auth));
-
-    PostmanCollection {
-        info: PostmanInfo {
-            name: api.name.clone(),
-            description: if api.description.is_empty() {
-                None
-            } else {
-                Some(api.description.clone())
-            },
-            schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-                .to_string(),
-        },
-        variable: variables,
-        auth: collection_auth,
-        item: items,
-    }
+    let description = (!api.description.is_empty()).then(|| api.description.clone());
+    assemble(vec![member], api.name.clone(), description, collection_auth, &HashSet::new())
 }
 
 /// Builds a Postman collection from grouped RestApis sharing a module.
 ///
 /// Merges endpoints from all APIs into one collection with:
 /// - Title-cased `module_name` as collection name
-/// - Collection-level auth when every member API maps to the same
-///   [`ExportAuth`]; otherwise per-request auth and `collection.auth = None`
-/// - Merged base URLs as variables (one per distinct `base_url`)
-/// - Auth-implied variables unioned across every distinct member auth
+/// - One base-URL variable per member (`baseUrl`, `baseUrl2`, …), even
+///   when two members share a URL
+/// - In a module of several APIs, credential variables suffixed with the
+///   member's name (`bearerToken_EmqxBearer`), so members never share a
+///   credential
+/// - Collection-level auth when every member maps to the same
+///   [`ExportAuth`] (after suffixing, only when none authenticates);
+///   otherwise per-request auth and `collection.auth = None`
 /// - All endpoints grouped by folder key, with duplicate request IDs
-///   in mixed-auth groups disambiguated as `"<Id> (<ApiName>)"`
+///   in mixed-auth groups disambiguated as `"<Id> (<ApiName>)"`, and every
+///   member's GraphQL operations in one `GraphQL` folder
 ///
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi};
 /// use schematic_gen::export::postman::build_postman_collection_grouped;
 ///
-/// let api1 = RestApi {
-///     name: "OllamaNative".to_string(),
-///     description: "Native API".to_string(),
-///     base_url: "http://localhost:11434".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: Some("ollama".to_string()),
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let ctx = DefinitionContext::types_in("crate::types");
+/// let api1 = RestApi::builder(&ctx, "OllamaNative", "http://localhost:11434")
+///     .describes("Native API")
+///     .no_auth()
+///     .module_path("ollama")
+///     .build().unwrap();
 ///
-/// let api2 = RestApi {
-///     name: "OllamaOpenAI".to_string(),
-///     description: "OpenAI-compatible API".to_string(),
-///     base_url: "http://localhost:11434/v1".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: Some("ollama".to_string()),
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let api2 = RestApi::builder(&ctx, "OllamaOpenAI", "http://localhost:11434/v1")
+///     .describes("OpenAI-compatible API")
+///     .no_auth()
+///     .module_path("ollama")
+///     .build().unwrap();
 ///
 /// let collection = build_postman_collection_grouped(&[&api1, &api2], "ollama");
 /// assert_eq!(collection.info.name, "Ollama");
 /// assert!(collection.variable.len() >= 2); // At least 2 base URLs
 /// ```
 pub fn build_postman_collection_grouped(apis: &[&RestApi], module_name: &str) -> PostmanCollection {
+    build_grouped(apis, module_name).collection
+}
+
+/// [`build_postman_collection_grouped`] with what the build collected.
+pub(crate) fn build_grouped(apis: &[&RestApi], module_name: &str) -> Built {
     if apis.is_empty() {
         panic!("Cannot build grouped collection from empty API list");
     }
+    let shared = apis.len() > 1;
 
-    // Map every member API's auth once. This drives both the
-    // uniform-vs-mixed decision and per-request auth emission below.
-    let auths: Vec<ExportAuth> = apis.iter().map(|a| map_auth(&a.auth)).collect();
+    let auths: Vec<ExportAuth> = apis
+        .iter()
+        .map(|api| {
+            let auth = map_auth(&api.auth);
+            if shared { with_variable_suffix(auth, &api.name) } else { auth }
+        })
+        .collect();
     let uniform = auths.iter().all(|a| a == &auths[0]);
+    let collection_auth = if uniform { build_collection_auth(&auths[0]) } else { None };
 
-    // Collection-level auth is set only when every member agrees. In a
-    // mixed-auth group we omit collection.auth entirely and attach the
-    // owning API's auth to each request instead.
-    let collection_auth = if uniform {
-        build_collection_auth(&auths[0])
+    // Only the request IDs that collide across members of a mixed-auth group
+    // need disambiguation; unique IDs stay verbatim.
+    let duplicate_ids: HashSet<String> = if uniform {
+        HashSet::new()
     } else {
-        None
-    };
-
-    // Collect all unique base URLs as variables, and map each base_url to its
-    // assigned variable name so requests can reference the correct one.
-    let mut base_url_vars = Vec::new();
-    let mut seen_urls = std::collections::HashSet::new();
-    let mut base_url_var_map: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-
-    for (idx, api) in apis.iter().enumerate() {
-        if !seen_urls.contains(&api.base_url) {
-            seen_urls.insert(&api.base_url);
-            let var_name = if idx == 0 {
-                "baseUrl".to_string()
-            } else {
-                format!("baseUrl{}", idx + 1)
-            };
-            base_url_var_map.insert(api.base_url.clone(), var_name.clone());
-            base_url_vars.push(PostmanVariable {
-                key: var_name,
-                value: Some(api.base_url.clone()),
-                description: Some(format!("Base URL for {}", api.name)),
-            });
-        }
-    }
-
-    // For mixed-auth groups, only the request IDs that actually collide
-    // across member APIs need disambiguation. Unique IDs stay verbatim
-    // so single-API endpoints (e.g. EmqxBearer's Login/Logout) keep
-    // their tidy names.
-    let duplicate_ids: std::collections::HashSet<String> = if uniform {
-        std::collections::HashSet::new()
-    } else {
-        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut counts: HashMap<&str, usize> = HashMap::new();
         for api in apis {
             for endpoint in &api.endpoints {
                 *counts.entry(endpoint.id.as_str()).or_insert(0) += 1;
             }
         }
-        counts
-            .into_iter()
-            .filter(|(_, n)| *n > 1)
-            .map(|(id, _)| id.to_string())
-            .collect()
+        counts.into_iter().filter(|(_, n)| *n > 1).map(|(id, _)| id.to_string()).collect()
     };
 
-    // Merge all endpoints across APIs, grouped by folder
-    let mut folders: BTreeMap<Option<String>, Vec<PostmanItem>> = BTreeMap::new();
+    let members = apis
+        .iter()
+        .zip(auths)
+        .enumerate()
+        .map(|(index, (api, auth))| Member {
+            api,
+            auth,
+            base_url_var: numbered("baseUrl", index),
+            request_level_auth: !uniform,
+            variable_suffix: shared.then(|| api.name.clone()),
+            examples: ExampleSource::new(api),
+        })
+        .collect();
 
-    for (api, owning_auth) in apis.iter().zip(auths.iter()) {
-        let base_url_var = base_url_var_map
-            .get(&api.base_url)
-            .map(String::as_str)
-            .unwrap_or("baseUrl");
-        for endpoint in &api.endpoints {
-            let folder_key = extract_folder_key(&endpoint.path);
-            let disambiguate = !uniform && duplicate_ids.contains(&endpoint.id);
-            let request_item = build_request_item(
-                endpoint,
-                api,
-                owning_auth,
-                !uniform,
-                disambiguate,
-                base_url_var,
-            );
-            folders
-                .entry(folder_key.clone())
-                .or_default()
-                .push(request_item);
-        }
-    }
-
-    // Build items: folders + root-level requests
-    let mut items = Vec::new();
-
-    // Add folders first (sorted by key)
-    for (folder_key, folder_items) in folders.iter() {
-        if let Some(key) = folder_key {
-            items.push(PostmanItem::Folder {
-                name: capitalize_folder_name(key),
-                item: folder_items.clone(),
-            });
-        }
-    }
-
-    // Add root-level requests
-    if let Some(root_items) = folders.get(&None) {
-        items.extend(root_items.clone());
-    }
-
-    // Capitalize module name for collection title
-    let collection_name = capitalize_folder_name(module_name);
-
-    // Merge descriptions from all APIs
     let description = apis
         .iter()
         .map(|api| format!("{}: {}", api.name, api.description))
         .collect::<Vec<_>>()
         .join("\n");
+    let description = (!description.is_empty()).then_some(description);
+    assemble(members, capitalize_folder_name(module_name), description, collection_auth, &duplicate_ids)
+}
 
-    // Union auth-implied variables across every distinct ExportAuth in
-    // the group. For uniform groups this collapses to one auth's
-    // variables; for mixed groups every per-request auth still resolves
-    // to a declared collection variable.
-    let mut variables = base_url_vars;
-    let mut seen_auths: Vec<&ExportAuth> = Vec::new();
-    for auth in &auths {
-        if !seen_auths.contains(&auth) {
-            merge_variables(&mut variables, auth_variables(auth));
-            seen_auths.push(auth);
+/// `base` for the first member, then `base2`, `base3`, ….
+fn numbered(base: &str, index: usize) -> String {
+    if index == 0 { base.to_string() } else { format!("{base}{}", index + 1) }
+}
+
+/// Builds every member's requests and the collection's variables: base
+/// URLs, GraphQL addresses, credentials, then parameters.
+fn assemble(
+    members: Vec<Member<'_>>,
+    name: String,
+    description: Option<String>,
+    auth: Option<PostmanAuth>,
+    duplicate_ids: &HashSet<String>,
+) -> Built {
+    let mut collected = Collected::default();
+    let mut variables = Vec::new();
+    let mut folders: BTreeMap<Option<String>, Vec<PostmanItem>> = BTreeMap::new();
+    let mut graphql = Vec::new();
+
+    for (index, member) in members.iter().enumerate() {
+        let label = if members.len() > 1 { format!("Base URL for {}", member.api.name) } else { "Base URL for all requests".to_string() };
+        variables.push(PostmanVariable {
+            key: member.base_url_var.clone(),
+            value: Some(member.api.base_url.clone()),
+            description: Some(label),
+        });
+        collected.auth(&member.auth);
+        for endpoint in &member.api.endpoints {
+            let disambiguate = duplicate_ids.contains(&endpoint.id);
+            let item = build_request_item(endpoint, member, disambiguate, &mut collected);
+            folders.entry(extract_folder_key(&endpoint.path)).or_default().push(item);
+        }
+        if let Some((address, items)) = graphql_items(member, &numbered("graphqlUrl", index), &mut collected) {
+            variables.push(address);
+            graphql.extend(items);
         }
     }
 
-    PostmanCollection {
-        info: PostmanInfo {
-            name: collection_name,
-            description: if description.is_empty() {
-                None
-            } else {
-                Some(description)
-            },
-            schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-                .to_string(),
+    // Folders first (sorted by key), then GraphQL operations, then
+    // root-level requests.
+    let mut items = Vec::new();
+    for (folder_key, folder_items) in &folders {
+        if let Some(key) = folder_key {
+            items.push(PostmanItem::Folder { name: capitalize_folder_name(key), item: folder_items.clone() });
+        }
+    }
+    if !graphql.is_empty() {
+        items.push(PostmanItem::Folder { name: "GraphQL".to_string(), item: graphql });
+    }
+    if let Some(root_items) = folders.remove(&None) {
+        items.extend(root_items);
+    }
+
+    merge_variables(&mut variables, collected.credentials.clone());
+    merge_variables(&mut variables, collected.parameters.clone());
+
+    Built {
+        collection: PostmanCollection {
+            info: PostmanInfo { name, description, schema: SCHEMA_URL.to_string() },
+            variable: variables,
+            auth,
+            item: items,
         },
-        variable: variables,
-        auth: collection_auth,
-        item: items,
+        collected,
     }
 }

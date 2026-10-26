@@ -12389,13 +12389,17 @@ dependencies = [
  "biscuit-file",
  "indexmap 2.14.2",
  "openapiv3",
+ "regex",
+ "regex-syntax",
  "reqwest 0.13.2",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "serial_test",
  "strum 0.28.0",
  "thiserror 2.0.21",
  "tokio",
+ "url",
  "wiremock",
 ]
 
@@ -12403,8 +12407,9 @@ dependencies = [
 name = "schematic-definitions"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "indexmap 2.14.2",
- "openapiv3",
+ "jsonschema",
  "schemars 1.2.1",
  "schematic-define",
  "serde",
@@ -12416,6 +12421,7 @@ name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
  "biscuit-file",
+ "biscuit-hash",
  "biscuit-test-harness",
  "clap 4.6.1",
  "colored",
@@ -12462,7 +12468,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 1.4.0",
+ "num-bigint",
  "rcgen",
+ "regex",
  "reqwest 0.13.2",
  "rustls",
  "serde",

@@ -11,19 +11,59 @@
       "description": "Base URL for EmqxBasic"
     },
     {
-      "key": "username",
+      "key": "baseUrl2",
+      "value": "http://localhost:18083/api/v5",
+      "description": "Base URL for EmqxBearer"
+    },
+    {
+      "key": "username_EmqxBasic",
       "value": "",
       "description": "Username for Basic authentication"
     },
     {
-      "key": "password",
+      "key": "password_EmqxBasic",
       "value": "",
       "description": "Password for Basic authentication"
     },
     {
-      "key": "bearerToken",
+      "key": "bearerToken_EmqxBearer",
       "value": "",
       "description": "Bearer token for Authorization header"
+    },
+    {
+      "key": "path_node",
+      "value": "",
+      "description": "Value of the `node` path parameter"
+    },
+    {
+      "key": "path_id",
+      "value": "",
+      "description": "Value of the `id` path parameter"
+    },
+    {
+      "key": "path_clientid",
+      "value": "",
+      "description": "Value of the `clientid` path parameter"
+    },
+    {
+      "key": "path_topic",
+      "value": "",
+      "description": "Value of the `topic` path parameter"
+    },
+    {
+      "key": "path_user_id",
+      "value": "",
+      "description": "Value of the `user_id` path parameter"
+    },
+    {
+      "key": "path_ban_type",
+      "value": "",
+      "description": "Value of the `ban_type` path parameter"
+    },
+    {
+      "key": "path_who",
+      "value": "",
+      "description": "Value of the `who` path parameter"
     }
   ],
   "item": [
@@ -48,25 +88,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List active alarms"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListAlarms (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/alarms",
+              "raw": "{{baseUrl2}}/alarms",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "alarms"
@@ -77,12 +131,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List active alarms"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -107,16 +175,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all configured authentication providers"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetAuthenticator (EmqxBasic)",
@@ -134,7 +216,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -143,16 +225,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get details of a specific authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"type\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListAuthUsers (EmqxBasic)",
@@ -171,7 +267,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -180,16 +276,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List users in a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "CreateAuthUser (EmqxBasic)",
@@ -208,7 +318,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -217,17 +327,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"password\": \"string\",\n  \"user_id\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -235,7 +345,21 @@
               }
             },
             "description": "Create a new user in a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"user_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteAuthUser (EmqxBasic)",
@@ -255,11 +379,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "user_id",
-                  "value": "<user_id>"
+                  "value": "{{path_user_id}}"
                 }
               ]
             },
@@ -268,25 +392,32 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Delete a user from a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "ListAuthenticators (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/authentication",
+              "raw": "{{baseUrl2}}/authentication",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authentication"
@@ -297,21 +428,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all configured authentication providers"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetAuthenticator (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/authentication/:id",
+              "raw": "{{baseUrl2}}/authentication/:id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authentication",
@@ -320,7 +465,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -329,21 +474,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get details of a specific authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"type\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListAuthUsers (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/authentication/:id/users",
+              "raw": "{{baseUrl2}}/authentication/:id/users",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authentication",
@@ -353,7 +512,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -362,21 +521,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List users in a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "CreateAuthUser (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/authentication/:id/users",
+              "raw": "{{baseUrl2}}/authentication/:id/users",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authentication",
@@ -386,7 +559,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -395,13 +568,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"password\": \"string\",\n  \"user_id\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -409,16 +582,30 @@
               }
             },
             "description": "Create a new user in a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"user_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteAuthUser (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
-              "raw": "{{baseUrl}}/authentication/:id/users/:user_id",
+              "raw": "{{baseUrl2}}/authentication/:id/users/:user_id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authentication",
@@ -429,11 +616,11 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 },
                 {
                   "key": "user_id",
-                  "value": "<user_id>"
+                  "value": "{{path_user_id}}"
                 }
               ]
             },
@@ -442,12 +629,19 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Delete a user from a built-in database authenticator"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -473,25 +667,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all authorization sources"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"sources\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListAuthzSources (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/authorization/sources",
+              "raw": "{{baseUrl2}}/authorization/sources",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "authorization",
@@ -503,12 +711,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all authorization sources"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"sources\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -533,16 +755,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all banned clients, usernames, and hosts"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateBan (EmqxBasic)",
@@ -562,17 +798,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"as\": \"string\",\n  \"who\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -580,7 +816,21 @@
               }
             },
             "description": "Ban a client, username, or host"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"as\": \"string\",\n  \"who\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteBan (EmqxBasic)",
@@ -599,11 +849,11 @@
               "variable": [
                 {
                   "key": "ban_type",
-                  "value": "<ban_type>"
+                  "value": "{{path_ban_type}}"
                 },
                 {
                   "key": "who",
-                  "value": "<who>"
+                  "value": "{{path_who}}"
                 }
               ]
             },
@@ -612,25 +862,32 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Remove a ban by type (clientid, username, peerhost) and value"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "ListBanned (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/banned",
+              "raw": "{{baseUrl2}}/banned",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "banned"
@@ -641,21 +898,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all banned clients, usernames, and hosts"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateBan (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/banned",
+              "raw": "{{baseUrl2}}/banned",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "banned"
@@ -666,13 +937,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"as\": \"string\",\n  \"who\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -680,16 +951,30 @@
               }
             },
             "description": "Ban a client, username, or host"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"as\": \"string\",\n  \"who\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteBan (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
-              "raw": "{{baseUrl}}/banned/:ban_type/:who",
+              "raw": "{{baseUrl2}}/banned/:ban_type/:who",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "banned",
@@ -699,11 +984,11 @@
               "variable": [
                 {
                   "key": "ban_type",
-                  "value": "<ban_type>"
+                  "value": "{{path_ban_type}}"
                 },
                 {
                   "key": "who",
-                  "value": "<who>"
+                  "value": "{{path_who}}"
                 }
               ]
             },
@@ -712,12 +997,19 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Remove a ban by type (clientid, username, peerhost) and value"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -742,16 +1034,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List connected MQTT clients with pagination"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetClient (EmqxBasic)",
@@ -769,7 +1075,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -778,16 +1084,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get detailed information about a specific client"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"clientid\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DisconnectClient (EmqxBasic)",
@@ -805,7 +1125,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -814,16 +1134,23 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Forcefully disconnect a client from the broker"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "SubscribeClient (EmqxBasic)",
@@ -842,7 +1169,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -851,17 +1178,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -869,7 +1196,14 @@
               }
             },
             "description": "Create a subscription for a connected client"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "UnsubscribeClient (EmqxBasic)",
@@ -888,7 +1222,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -897,17 +1231,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -915,16 +1249,23 @@
               }
             },
             "description": "Remove a subscription from a connected client"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "ListClients (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/clients",
+              "raw": "{{baseUrl2}}/clients",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "clients"
@@ -935,21 +1276,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List connected MQTT clients with pagination"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetClient (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/clients/:clientid",
+              "raw": "{{baseUrl2}}/clients/:clientid",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "clients",
@@ -958,7 +1313,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -967,21 +1322,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get detailed information about a specific client"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"clientid\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DisconnectClient (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
-              "raw": "{{baseUrl}}/clients/:clientid",
+              "raw": "{{baseUrl2}}/clients/:clientid",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "clients",
@@ -990,7 +1359,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -999,21 +1368,28 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Forcefully disconnect a client from the broker"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "SubscribeClient (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/clients/:clientid/subscribe",
+              "raw": "{{baseUrl2}}/clients/:clientid/subscribe",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "clients",
@@ -1023,7 +1399,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -1032,13 +1408,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1046,16 +1422,23 @@
               }
             },
             "description": "Create a subscription for a connected client"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "UnsubscribeClient (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/clients/:clientid/unsubscribe",
+              "raw": "{{baseUrl2}}/clients/:clientid/unsubscribe",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "clients",
@@ -1065,7 +1448,7 @@
               "variable": [
                 {
                   "key": "clientid",
-                  "value": "<clientid>"
+                  "value": "{{path_clientid}}"
                 }
               ]
             },
@@ -1074,13 +1457,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1088,7 +1471,14 @@
               }
             },
             "description": "Remove a subscription from a connected client"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -1113,25 +1503,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get cluster status and node membership"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "GetCluster (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/cluster",
+              "raw": "{{baseUrl2}}/cluster",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "cluster"
@@ -1142,12 +1546,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get cluster status and node membership"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         }
       ]
     },
@@ -1172,16 +1590,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all configured listeners"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetListener (EmqxBasic)",
@@ -1199,7 +1631,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -1208,25 +1640,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get details of a specific listener"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"type\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListListeners (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/listeners",
+              "raw": "{{baseUrl2}}/listeners",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "listeners"
@@ -1237,21 +1683,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all configured listeners"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetListener (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/listeners/:id",
+              "raw": "{{baseUrl2}}/listeners/:id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "listeners",
@@ -1260,7 +1720,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -1269,12 +1729,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get details of a specific listener"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"type\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -1286,9 +1760,9 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/login",
+              "raw": "{{baseUrl2}}/login",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "login"
@@ -1299,13 +1773,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"password\": \"string\",\n  \"username\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1313,7 +1787,21 @@
               }
             },
             "description": "Authenticate with username/password and receive a JWT token"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"token\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -1325,9 +1813,9 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/logout",
+              "raw": "{{baseUrl2}}/logout",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "logout"
@@ -1338,12 +1826,19 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Invalidate the current bearer token"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -1368,25 +1863,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get broker metrics for all nodes"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListMetrics (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/metrics",
+              "raw": "{{baseUrl2}}/metrics",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "metrics"
@@ -1397,12 +1906,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get broker metrics for all nodes"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -1427,16 +1950,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all nodes in the EMQX cluster"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetNode (EmqxBasic)",
@@ -1454,7 +1991,7 @@
               "variable": [
                 {
                   "key": "node",
-                  "value": "<node>"
+                  "value": "{{path_node}}"
                 }
               ]
             },
@@ -1463,25 +2000,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get detailed information about a specific node"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"node\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListNodes (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/nodes",
+              "raw": "{{baseUrl2}}/nodes",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "nodes"
@@ -1492,21 +2043,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all nodes in the EMQX cluster"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetNode (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/nodes/:node",
+              "raw": "{{baseUrl2}}/nodes/:node",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "nodes",
@@ -1515,7 +2080,7 @@
               "variable": [
                 {
                   "key": "node",
-                  "value": "<node>"
+                  "value": "{{path_node}}"
                 }
               ]
             },
@@ -1524,12 +2089,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get detailed information about a specific node"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"node\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -1555,25 +2134,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get metrics in Prometheus format"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         },
         {
           "name": "GetPrometheus (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/prometheus/stats",
+              "raw": "{{baseUrl2}}/prometheus/stats",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "prometheus",
@@ -1585,12 +2178,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get metrics in Prometheus format"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         }
       ]
     },
@@ -1615,17 +2222,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"payload\": \"string\",\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1633,7 +2240,14 @@
               }
             },
             "description": "Publish an MQTT message to a topic"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "PublishBulk (EmqxBasic)",
@@ -1654,17 +2268,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1672,16 +2286,23 @@
               }
             },
             "description": "Publish multiple MQTT messages in a single request"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "Publish (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/publish",
+              "raw": "{{baseUrl2}}/publish",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "publish"
@@ -1692,13 +2313,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"payload\": \"string\",\n  \"topic\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1706,16 +2327,23 @@
               }
             },
             "description": "Publish an MQTT message to a topic"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "PublishBulk (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/publish/bulk",
+              "raw": "{{baseUrl2}}/publish/bulk",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "publish",
@@ -1727,13 +2355,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1741,7 +2369,14 @@
               }
             },
             "description": "Publish multiple MQTT messages in a single request"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -1767,16 +2402,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List retained messages with pagination"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetRetained (EmqxBasic)",
@@ -1795,7 +2444,7 @@
               "variable": [
                 {
                   "key": "topic",
-                  "value": "<topic>"
+                  "value": "{{path_topic}}"
                 }
               ]
             },
@@ -1804,16 +2453,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get a specific retained message by topic"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"topic\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteRetained (EmqxBasic)",
@@ -1832,7 +2495,7 @@
               "variable": [
                 {
                   "key": "topic",
-                  "value": "<topic>"
+                  "value": "{{path_topic}}"
                 }
               ]
             },
@@ -1841,25 +2504,32 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Delete a retained message"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "ListRetained (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/retainer/messages",
+              "raw": "{{baseUrl2}}/retainer/messages",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "retainer",
@@ -1871,21 +2541,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List retained messages with pagination"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetRetained (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "raw": "{{baseUrl2}}/retainer/messages/:topic",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "retainer",
@@ -1895,7 +2579,7 @@
               "variable": [
                 {
                   "key": "topic",
-                  "value": "<topic>"
+                  "value": "{{path_topic}}"
                 }
               ]
             },
@@ -1904,21 +2588,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get a specific retained message by topic"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"topic\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteRetained (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
-              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "raw": "{{baseUrl2}}/retainer/messages/:topic",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "retainer",
@@ -1928,7 +2626,7 @@
               "variable": [
                 {
                   "key": "topic",
-                  "value": "<topic>"
+                  "value": "{{path_topic}}"
                 }
               ]
             },
@@ -1937,12 +2635,19 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Delete a retained message"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -1967,16 +2672,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all rules in the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateRule (EmqxBasic)",
@@ -1996,17 +2715,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2014,7 +2733,21 @@
               }
             },
             "description": "Create a new rule in the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetRule (EmqxBasic)",
@@ -2032,7 +2765,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2041,16 +2774,30 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get details of a specific rule"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UpdateRule (EmqxBasic)",
@@ -2068,7 +2815,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2077,17 +2824,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2095,7 +2842,21 @@
               }
             },
             "description": "Update an existing rule"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteRule (EmqxBasic)",
@@ -2113,7 +2874,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2122,16 +2883,23 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Delete a rule from the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "TestRule (EmqxBasic)",
@@ -2150,7 +2918,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2159,17 +2927,17 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2177,16 +2945,30 @@
               }
             },
             "description": "Test a rule with sample data"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "ListRules (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/rules",
+              "raw": "{{baseUrl2}}/rules",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules"
@@ -2197,21 +2979,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all rules in the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateRule (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/rules",
+              "raw": "{{baseUrl2}}/rules",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules"
@@ -2222,13 +3018,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2236,16 +3032,30 @@
               }
             },
             "description": "Create a new rule in the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetRule (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/rules/:id",
+              "raw": "{{baseUrl2}}/rules/:id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules",
@@ -2254,7 +3064,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2263,21 +3073,35 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get details of a specific rule"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UpdateRule (EmqxBearer)",
           "request": {
             "method": "PUT",
             "url": {
-              "raw": "{{baseUrl}}/rules/:id",
+              "raw": "{{baseUrl2}}/rules/:id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules",
@@ -2286,7 +3110,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2295,13 +3119,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2309,16 +3133,30 @@
               }
             },
             "description": "Update an existing rule"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"string\",\n  \"sql\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteRule (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
-              "raw": "{{baseUrl}}/rules/:id",
+              "raw": "{{baseUrl2}}/rules/:id",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules",
@@ -2327,7 +3165,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2336,21 +3174,28 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Delete a rule from the rules engine"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "TestRule (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/rules/:id/test",
+              "raw": "{{baseUrl2}}/rules/:id/test",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "rules",
@@ -2360,7 +3205,7 @@
               "variable": [
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
@@ -2369,13 +3214,13 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"sql\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2383,7 +3228,21 @@
               }
             },
             "description": "Test a rule with sample data"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         }
       ]
     },
@@ -2408,25 +3267,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "Get broker statistics for all nodes"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListStats (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/stats",
+              "raw": "{{baseUrl2}}/stats",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "stats"
@@ -2437,12 +3310,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "Get broker statistics for all nodes"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -2467,25 +3354,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List all subscriptions across the cluster"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListSubscriptions (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/subscriptions",
+              "raw": "{{baseUrl2}}/subscriptions",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "subscriptions"
@@ -2496,12 +3397,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List all subscriptions across the cluster"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -2526,25 +3441,39 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ]
             },
             "description": "List active topics in the broker"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListTopics (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/topics",
+              "raw": "{{baseUrl2}}/topics",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "topics"
@@ -2555,12 +3484,26 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ]
             },
             "description": "List active topics in the broker"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": []\n}"
+            }
+          ]
         }
       ]
     }

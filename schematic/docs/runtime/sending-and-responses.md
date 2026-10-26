@@ -121,7 +121,7 @@ flowchart TD
     R -->|"head arrives"| H
     H -->|no| I{"2xx?"}
     I -->|yes| J["Codec and hooks"]
-    J --> OK1["Ok: Success, or MalformedSuccess /<br/>BodyInterrupted / Hook"]
+    J --> OK1["Ok: Success, or MalformedSuccess /<br/>UnexpectedContentType / BodyInterrupted /<br/>Hook / Declared (GraphQL errors)"]
     I -->|no| OK2["Ok: Declared / MalformedError /<br/>Undeclared / BodyInterrupted"]
 ```
 
@@ -204,34 +204,38 @@ received (the whole body, or the bytes that arrived before an interruption).
 
 | `ErrorKind` | Status | Meaning | Helper |
 | --- | --- | --- | --- |
-| `Declared(E)` | declared error status | the body decoded into the endpoint's declared error type | `ApiError::declared()` |
+| `Declared(E)` | declared error status, or a 2xx [GraphQL](../graphql.md#decoding-a-reply) reply with `errors` | the body decoded into the endpoint's declared error type | `ApiError::declared()` |
 | `MalformedError` | declared error status | the endpoint declares an error body, and this one did not decode | |
 | `Undeclared` | other non-2xx, or 3xx not followed | the endpoint declares no body for this status | |
 | `MalformedSuccess` | 2xx | the body did not decode with the endpoint's codec | `is_decode_failure()` |
+| `UnexpectedContentType` | 2xx | a [multi-shape](./codecs.md#several-shapes-shapes) endpoint declares no shape for this status, `Content-Type`, or JSON tag | |
 | `BodyInterrupted` | any | the body was cut off, or its read timed out, after the head arrived | `is_interrupted()` |
 | `RedirectRefused { reason }` | 3xx | a redirect was received and not followed | |
 | `RedirectFailed { target, category }` | 3xx | a followed hop got no head; the envelope describes the last redirect | |
 | `Hook` | 2xx | a [response hook](./hooks.md) refused the body | |
 
 **Declared errors are decoded on arrival.** An endpoint's error type
-implements `ErrorBody`; when a reply's status falls in the endpoint's
-`DECLARED_ERROR_STATUSES` (400 through 599 by default), the runtime decodes
-it before returning, so the caller never runs a decode step. Every endpoint
-generated today uses `NoDeclaredError`, which has no values, so its error
-replies are `Undeclared`. Declaring error bodies in an API definition is
-**planned**.
+implements `ErrorBody`, and its error table chooses, for each status, which
+of the error type's shapes the body decodes as: an exact status first, then
+the narrowest range (see
+[Codecs and decoding](./codecs.md#declared-error-bodies-errorbody-and-the-error-table)).
+The runtime decodes the body before returning, so the caller never runs a
+decode step; a status no entry matches is `Undeclared`. The generator
+emits that table from the definition's effective errors; an endpoint with no
+declared errors (most shipped endpoints) uses `NoDeclaredError`, which has no
+values, so its error replies are `Undeclared`.
 
 A redirect status other than 301, 302, 303, 307, and 308 (for example 300
 or 304) is not followed and is reported as a final reply.
 
 ## Codecs judge the body, not the `Content-Type`
 
-Each request type names its codec, chosen from the definition's
-`ApiResponse`:
+Each request type names its codec, chosen from the definition's success
+shape (`ResponseShape`) when the endpoint declares one:
 
-| `ApiResponse` | Codec | Success type | Accepts |
+| Shape | Codec | Success type | Accepts |
 | --- | --- | --- | --- |
-| `Json(schema)` | `Json<T>` | `T` | any body that parses as `T` |
+| `Json(reference)` | `Json<T>` | `T` | any body that parses as `T` |
 | `Text` | `Text` | `String` | any body; invalid UTF-8 is replaced |
 | `Binary` | `Binary` | `bytes::Bytes` | any body |
 | `Empty` | `Empty` | `()` | any body; it is read to the end and dropped |
@@ -240,10 +244,16 @@ A successful parse is the only check the `Json` codec makes. Valid JSON
 served as `text/plain` decodes; an HTML error page served with status 200 on
 a JSON endpoint is `MalformedSuccess`, and `error.body` holds the HTML.
 
+A single-shape endpoint never checks the `Content-Type`. An endpoint that
+declares several shapes uses it to choose one, and reports a reply that
+matches none as `UnexpectedContentType`.
+
 Codecs implement the `Decode` trait, which reads the body as it arrives
 rather than a pre-buffered copy; [Codecs and decoding](./codecs.md)
-describes that contract and how to write a codec. Server-sent events, NDJSON, and GraphQL
-codecs built on it are **planned**; none ships today.
+describes that contract, the server-sent event, NDJSON, and byte stream
+codecs, the multi-shape codec, and the GraphQL codec. The generator emits each
+endpoint's codec from its success shapes (see
+[Generated success and failure types](../responses-and-errors.md#generated-success-and-failure-types)).
 
 ## The raw send
 

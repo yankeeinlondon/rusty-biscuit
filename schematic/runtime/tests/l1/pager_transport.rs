@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use schematic_runtime::pager::{ContinuationProblem, Incomplete, IncompleteReason, PagerError, PagerErrorKind};
+use schematic_runtime::pager::{ContinuationProblem, Incomplete, IncompleteReason, PagerError};
 use schematic_runtime::{
     ApiDefinition, AuthConfig, Client, Credential, CredentialPlacement, Deadline, ErrorKind, FailureCategory,
     HookError, OriginPolicy, RedirectRefusal, TransportErrorKind,
@@ -522,7 +522,7 @@ async fn a_deadline_that_expires_while_page_two_waits_reports_the_completed_page
     assert!(deadline_elapsed < Duration::from_secs(1), "{deadline_elapsed:?}");
 
     let again = pages.next().await.expect_err("already failed");
-    assert!(matches!(again, PagerError::AlreadyFailed { first: PagerErrorKind::DeadlineExceeded }), "{again:?}");
+    assert_eq!(again, error);
     let heads = server.heads_through_control().await;
     assert_eq!(heads.len(), 2, "{heads:?}");
     assert!(is_page_two(&heads[1]), "{heads:?}");

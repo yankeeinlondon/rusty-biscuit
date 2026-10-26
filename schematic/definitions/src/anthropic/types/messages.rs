@@ -135,6 +135,13 @@ pub enum ContentBlock {
     },
 }
 
+impl schematic_define::Registration for ContentBlock {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ContentBlock");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl ContentBlock {
     /// Creates a text content block.
     pub fn text(text: impl Into<String>) -> Self {
@@ -194,6 +201,13 @@ pub struct Message {
     /// For simple text messages, use a single TextBlock.
     /// For multimodal or tool interactions, use multiple blocks.
     pub content: Vec<ContentBlock>,
+}
+
+impl schematic_define::Registration for Message {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Message");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 impl Message {
@@ -358,6 +372,13 @@ pub struct MessageResponse {
 
     /// Token usage statistics.
     pub usage: Usage,
+}
+
+impl schematic_define::Registration for MessageResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("MessageResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 impl MessageResponse {

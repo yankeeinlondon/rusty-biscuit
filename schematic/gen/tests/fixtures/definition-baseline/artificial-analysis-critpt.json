@@ -1,0 +1,144 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "x-api-key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://artificialanalysis.ai/api/v2",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.",
+    "docs_url": "https://artificialanalysis.ai/api-reference",
+    "endpoints": [
+      {
+        "description": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark.",
+        "headers": [],
+        "id": "EvaluateCritPt",
+        "method": "POST",
+        "params": null,
+        "path": "/critpt/evaluate",
+        "request": {
+          "Json": {
+            "Named": "CritPtEvaluateBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CritPtEvaluateResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ARTIFICIAL_ANALYSIS_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "x-api-key",
+        "names": {
+          "names": [
+            "ARTIFICIAL_ANALYSIS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "artificial_analysis",
+    "name": "ArtificialAnalysisCritPt",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "67d1520ef26952d5093a93db5a3b4b2a588c13c8f7c55ac040aa24aa05942bef",
+    "endpoints": [
+      {
+        "blake3": "7ec3dd5f7f9cc2120e363c0b39b2ca6db8311518749628a26a57648d4ced8900",
+        "id": "EvaluateCritPt"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "EvaluateCritPt",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "fc25ada9649460aeabd2bd5b14cef1a4b7dae29d1e5f25e4fbc2460eddf2fb06",
+      "name": "ModelCreator",
+      "rust_path": "::schematic_definitions::artificial_analysis::ModelCreator"
+    },
+    {
+      "blake3": "f06cf720a3d599b8f0f714cdd304abcfbcacb5fd1da070c4a3cb43dba6fe2b2a",
+      "name": "CategoryBreakdown",
+      "rust_path": "::schematic_definitions::artificial_analysis::CategoryBreakdown"
+    },
+    {
+      "blake3": "e3f60015de298a69d6310da78b205f03ed03d63e3877b993db09cca7a2133680",
+      "name": "LlmEvaluations",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmEvaluations"
+    },
+    {
+      "blake3": "ba5ced4558af4ba648e3d8bc28c6884ca13b7195d906265c96aac39a2e82a97b",
+      "name": "LlmPricing",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmPricing"
+    },
+    {
+      "blake3": "a7360203cc008f1287556f57935d28be3bcd21c9ed0c125a5a9b9e6568110356",
+      "name": "LlmModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModel"
+    },
+    {
+      "blake3": "a27b7a33d6224cd4c29ffa400a24bef1e0986ff1e0712f4ef014118550c21e3b",
+      "name": "PromptOptions",
+      "rust_path": "::schematic_definitions::artificial_analysis::PromptOptions"
+    },
+    {
+      "blake3": "e65f1f015a9cc0f1261f43e10b2531a512fb5da52a2a65485a84913c317a6c35",
+      "name": "LlmModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModelsResponse"
+    },
+    {
+      "blake3": "19cf97d77fdae6343b9b6d3ba73029f487026fbf7f4dfc689c013f04dd52cf11",
+      "name": "MediaModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModel"
+    },
+    {
+      "blake3": "24010320af07636a9b56bd4d72da340717eb2b6db7b9d152a3c91d495716c93a",
+      "name": "MediaModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
+    },
+    {
+      "blake3": "d5237d155cb4158062e9991bd8e2785ec30d6e23b7085b144561a81c5ea82d14",
+      "name": "CritPtMessage",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtMessage"
+    },
+    {
+      "blake3": "3424e8b4dffad6e3b907389c3f3de7df9a529e7120fcff907a218b7a3a71c442",
+      "name": "CritPtSubmission",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtSubmission"
+    },
+    {
+      "blake3": "66640d274bd34fef32ad5657f73af9687fd412a312c7d03191023143da2bb4b4",
+      "name": "CritPtEvaluateBody",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateBody"
+    },
+    {
+      "blake3": "51f1803bad8a7fd631235b94ab676db1049345e95bc624c0a5b8ec8e0c84b174",
+      "name": "CritPtEvaluateResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateResponse"
+    }
+  ]
+}

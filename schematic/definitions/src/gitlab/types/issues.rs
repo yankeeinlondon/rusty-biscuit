@@ -60,6 +60,13 @@ pub struct Issue {
     #[serde(default)]
     pub moved_to_id: Option<u64>,
 }
+impl schematic_define::Registration for Issue {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Issue));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
@@ -88,4 +95,10 @@ pub struct Note {
     pub confidential: bool,
     #[serde(default)]
     pub internal: bool,
+}
+impl schematic_define::Registration for Note {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Note));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

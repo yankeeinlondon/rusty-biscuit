@@ -1,82 +1,43 @@
-//! The `Endpoint` and `EndpointParams` literals as the definitions spell them
-//! on 2026-10-13. Pagination added no field to either; only `RestApi` gained
-//! `default_pagination` and `pagination_exceptions`.
-//!
-//! Frozen to that surface: the definition-API work that moves exception rows
-//! onto endpoints replaces or retires this test.
+//! Required-fact endpoint authoring retains empty parameters and no pagination.
 
 use schematic_define::pagination::{Resolution, resolve};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef, ParamStyle,
-    QueryParamType, RestApi, RestMethod,
+    DefinitionContext, Endpoint, EndpointParams, ParamDef, ParamStyle,
+    QueryParamType, RestApi, definition_type,
 };
 
-fn endpoint_literal() -> Endpoint {
-    Endpoint {
-        id: "ListReleases".to_string(),
-        method: RestMethod::Get,
-        path: "/repos/{owner}/{repo}/releases".to_string(),
-        description: "List releases".to_string(),
-        request: None,
-        response: ApiResponse::json_type("Vec<Release>"),
-        headers: vec![],
-        params: Some(EndpointParams {
-            query: vec![ParamDef {
-                name: "per_page".to_string(),
-                required: false,
-                description: None,
-                param_type: QueryParamType::Integer,
-                explode: true,
-                style: ParamStyle::Form,
+definition_type!(#[derive(schemars::JsonSchema)] pub struct Release { pub id: u64 });
+
+fn endpoint_literal(ctx: &mut DefinitionContext) -> Endpoint {
+    Endpoint::get("ListReleases", "/repos/{owner}/{repo}/releases")
+        .describes("List releases")
+        .returns_json::<Vec<Release>>(ctx)
+        .params(EndpointParams {
+            query: vec![ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
+                name: "per_page".to_string(), required: false, description: None,
+                param_type: QueryParamType::Integer, explode: true, style: ParamStyle::Form,
             }],
-            header: vec![],
-            cookie: vec![],
-            pagination: None,
-            response_pagination: None,
-        }),
-        oauth_scopes: None,
-    }
+            ..EndpointParams::default()
+        })
+        .build().unwrap()
 }
 
 #[test]
-fn endpoint_and_params_literals_compile_unchanged_and_behave_the_same() {
-    let endpoint = endpoint_literal();
+fn endpoint_builder_and_parameter_default_preserve_unpaginated_behavior() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let endpoint = endpoint_literal(&mut ctx);
     let params = endpoint.params.as_ref().unwrap();
     assert_eq!(params.query[0].name, "per_page");
-    assert!(params.pagination.is_none() && params.response_pagination.is_none());
     assert_eq!(
-        EndpointParams {
+        EndpointParams { path: vec![],
             query: vec![],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
         },
         EndpointParams::default()
     );
 
-    // An API without authored pagination resolves the literal as before:
-    // an unpaginated list that exposes nothing.
-    let api = RestApi {
-        name: "GitHub".to_string(),
-        description: "GitHub".to_string(),
-        base_url: "https://api.github.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![endpoint.clone()],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = RestApi::builder(&ctx, "GitHub", "https://api.github.com")
+        .describes("GitHub").no_auth().endpoints([endpoint.clone()]).build().unwrap();
     assert!(matches!(resolve(&api, &endpoint), Resolution::Unpaginated { .. }));
 }

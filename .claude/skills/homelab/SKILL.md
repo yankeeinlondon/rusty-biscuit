@@ -83,7 +83,7 @@ Named device routes (`{name}` = device name from `~/homey.json`):
 | Crate | Version | Used In |
 |-------|---------|---------|
 | `reqwest` | 0.13.2 | lib (Sony HTTP) |
-| `schematic-schema` | local | lib (Eversolo and Samsung TV REST clients), eversolo-integration, WebSocket integrations |
+| `schematic-schema` | local | lib (Eversolo and Samsung TV REST clients, the Samsung TV remote WebSocket client in `samsung_tv.rs`), the four integration crates (the typed `unfolded_circle_integration_ws` messages and host) |
 | `axum` | 0.8 | server |
 | `tower` / `tower-http` | 0.5 / 0.6 | server middleware |
 | `clap` + `clap_complete` | 4.5 | cli |

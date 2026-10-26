@@ -22,10 +22,10 @@ description: |-
         - if there is then this review will be repurposed to focus on getting the review feedback from the caller
         - if there is not then this review will be conducted like a normal review that compares the implementation against what was specified
     
-    2. **Last Review** (_in a multi-spec pipeline_)
+    2. **Next-spec refresh** (_in a multi-spec pipeline_)
 
-        In the last review cycle (aka, when `ready` has been set to `true`) -- but _only_ if this spec is part of a multi-spec pipeline -- we will
-        look at whether the next spec and plan need to be refreshed based on the current spec's findings and decisions.
+        In the first review -- but _only_ when a `next_spec` is passed and no human ruling is pending -- the next spec and plan are
+        refreshed against what this spec actually built, and the outcome is recorded as `next_spec_refresh` on the review file.
     
 dir: "{{dirname(spec)}}"
 design: |-
@@ -101,44 +101,31 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    - when: "refreshed && !err"
+    # Read the refresh outcome after the agent writes the review file.
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'refreshed'"
       message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have been refreshed:
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, and its plan were refreshed:
 
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
       info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
+        - the next spec in the pipeline, {{link(next_spec)}}, and its plan were refreshed:
 
-        {{refreshed}}
-
-        > **Note:** no human review was needed for this refresh
-    - when: "refresh_review && !err"
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'not-needed'"
       message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-        - the spec and plan have decisions that require human intervention:
-  
-        {{refresh_review}}
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, was checked and needed no refresh
       info: |-
-        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-        - the next spec which will be implemented is `{{link(next_spec)}}`
-        - the spec and plan have been refreshed:
-  
-        {{refreshed}}     
+        - the next spec in the pipeline, {{link(next_spec)}}, was checked and needed no refresh
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'blocked'"
+      message: |-
+        - refreshing the next spec in the pipeline, `{{parent_dir(next_spec)}}`, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+      info: |-
+        - refreshing the next spec in the pipeline, {{link(next_spec)}}, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
       stop: null
-    - when: "no_refresh && !err"
-      message: |-
-        - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-        - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
-      info: |-
-          - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-          - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
@@ -464,8 +451,26 @@ We are in a multi-plan based implementation:
 - the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
 - both the **spec** and the **plan** were written _before_ the current spec was implemented
 - we must now refresh the next spec and plan based on:
-    - what we've learned during the implementation of the current phase
-    - 
+    - what was learned and built while implementing this spec (its implementation log, the landed code, and this review's findings)
+    - every decision recorded in this review, adopted or ruled
+- skip this section when "Stopping for a human" requires a ruling; the next spec then stays `refresh_required: true` until the blocking decisions are ruled
+
+Refresh the next spec ({{next_spec}}):
+
+- check its "Refresh notes" (or similar) section and every assumption it makes about this spec: symbol names, file paths, contracts, serialized formats, counts, version constants, and builder or runtime surfaces; verify each against the landed code, not against this spec's text
+- correct stale facts in place and add a dated reader note summarizing what changed and why; keep decided requirements unless the landed code forces a change, and say so when it does
+- resolve choices using "Stopping for a human": adopt a recommendation that stays within the spec and author rulings and record it; request a ruling only when that test requires one
+- set its `refresh_required` frontmatter property to `false`
+
+Refresh the next plan ({{next_plan}}):
+
+- update rules and tasks that cite stale names, files, counts, or prerequisites; a prerequisite gate that the landed code now satisfies must say so, listing the actual symbols and locations, and must not wait on rulings already recorded
+- if its implementation log already exists from a run that stopped at a prerequisite gate, set that log's `human_review` to `false`, remove its `human_review_items` and `message_to_agent`, append a dated note explaining the refresh, and set the plan's `phase` back to the first phase that did no real work
+
+Record the outcome on this review file ({{review}}):
+
+- `next_spec_refresh`: `refreshed`, `not-needed`, or `blocked` (only when a blocking decision stops the refresh)
+- `next_spec_refresh_summary`: a short Markdown list of what changed, or of the blocking decision
 
 ::end-block
 

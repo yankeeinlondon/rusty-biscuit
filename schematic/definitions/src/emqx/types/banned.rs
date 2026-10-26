@@ -25,6 +25,13 @@ pub struct BanInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub until: Option<String>,
 }
+impl schematic_define::Registration for BanInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("BanInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Request body for creating a ban.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -44,6 +51,13 @@ pub struct CreateBanBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<u64>,
 }
+impl schematic_define::Registration for CreateBanBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateBanBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for banned list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -54,4 +68,10 @@ pub struct ListBannedResponse {
     /// Pagination metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<PaginationMeta>,
+}
+impl schematic_define::Registration for ListBannedResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListBannedResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

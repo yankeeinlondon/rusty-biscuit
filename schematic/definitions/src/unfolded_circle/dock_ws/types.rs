@@ -1,44 +1,86 @@
 //! Unfolded Circle Dock WebSocket model types.
+//!
+//! Shapes follow the UCD2 AsyncAPI (`specs/unfolded-circle/UCD2-asyncapi.yaml`).
+//! The Dock protocol has no nested payload object: a command's parameters and
+//! a reply's or event's data are top-level fields beside `type`, `id`/`req_id`,
+//! `command`/`msg`, and `code`. The envelopes name those common fields and
+//! keep every other top-level field in a JSON map, so no recorded data is
+//! dropped and no per-command type is needed.
 
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use serde_json::{Map, Value};
 
-/// Dock WebSocket envelope discriminator (`type` field).
+/// Dock WebSocket message discriminator (`type` field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DockWsEnvelopeType {
-    /// Request envelope (`type=req`).
-    Req,
-    /// Response envelope (`type=resp`).
-    Resp,
-    /// Event envelope (`type=event`).
+    /// A command or its reply (`type=dock`).
+    Dock,
+    /// An asynchronous event (`type=event`).
     Event,
+    /// The dock's authentication challenge (`type=auth_required`).
+    AuthRequired,
+    /// An authentication request or its result (`type=auth`).
+    Auth,
 }
 
-/// Known Dock message identifiers.
+/// The command and message names the UCD2 AsyncAPI records.
+///
+/// A request names one in `command`; its reply echoes it in `msg`. Events
+/// use `msg` for their own names (`ir_receive`, `port_mode`, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DockWsKnownMessage {
-    /// Message-based authentication request.
-    Auth,
-    /// Server asks the peer to authenticate with a message.
-    AuthRequired,
-    /// Authentication result/confirmation.
+    /// Authentication result (`type=auth`).
     Authentication,
-    /// Send an IR command.
+    /// Application-level ping.
+    Ping,
+    /// Reply to `ping`.
+    Pong,
+    /// Get system information; also the reply's `msg`.
+    GetSysinfo,
+    /// Send an IR code.
     IrSend,
-    /// Get dock status (charging, battery, connection).
-    GetStatus,
-    /// Start IR learning mode.
-    IrLearnStart,
-    /// Stop IR learning mode.
-    IrLearnStop,
-    /// IR learning result.
-    IrLearnResult,
-    /// Get dock configuration.
-    GetConfig,
-    /// Dock status update event.
-    StatusUpdate,
+    /// Stop a repeating IR transmission.
+    IrStop,
+    /// Enable IR learning (system command, and the matching event).
+    IrReceiveOn,
+    /// Disable IR learning (system command, and the matching event).
+    IrReceiveOff,
+    /// A learned IR code (event).
+    IrReceive,
+    /// Status LED: remote charged (system command).
+    RemoteCharged,
+    /// Status LED: remote battery low (system command).
+    RemoteLowbattery,
+    /// Status LED: normal operation (system command).
+    RemoteNormal,
+    /// Blink the status LED for identification (system command).
+    Identify,
+    /// Reboot the dock (system command).
+    Reboot,
+    /// Factory-reset the dock (system command).
+    Reset,
+    /// Change the dock's configuration.
+    SetConfig,
+    /// Set LED brightness.
+    SetBrightness,
+    /// Set speaker volume.
+    SetVolume,
+    /// Configure logging.
+    SetLogging,
+    /// Get one external port's mode.
+    GetPortMode,
+    /// Set one external port's mode.
+    SetPortMode,
+    /// Get every external port's mode.
+    GetPortModes,
+    /// Set an external port's trigger.
+    SetPortTrigger,
+    /// Get an external port's trigger.
+    GetPortTrigger,
+    /// An external port's mode changed (event).
+    PortMode,
 }
 
 /// Message identifier with known variants and passthrough fallback.
@@ -51,394 +93,280 @@ pub enum DockWsMessageName {
     Other(String),
 }
 
-/// Dock request envelope (`type=req`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Dock command request (`type=dock`), for example
+/// `{"type":"dock","id":1,"command":"ir_send","code":"4;0x10;12;0","format":"hex"}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DockWsRequestEnvelope {
-    /// Envelope type discriminator.
+    /// Envelope type discriminator (`dock`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Client request id.
+    /// Client request id, echoed as the reply's `req_id`. A correlated
+    /// request overwrites it with an id the client allocates.
     pub id: u64,
-    /// Command message id/name.
-    pub msg: DockWsMessageName,
-    /// Optional raw payload. Deserialize after routing by `msg`.
-    pub msg_data: Option<Box<RawValue>>,
+    /// The command to run.
+    pub command: DockWsMessageName,
+    /// The command's parameters, written as top-level fields.
+    #[serde(flatten)]
+    pub params: Map<String, Value>,
 }
 
-/// Dock response envelope (`type=resp`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Dock reply (`type=dock`), for example the `get_sysinfo` reply
+/// `{"type":"dock","req_id":2,"msg":"get_sysinfo","code":200,"name":"My dock",…}`.
+///
+/// Also the shape of `pong`, which carries neither `req_id` nor `code`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DockWsResponseEnvelope {
-    /// Envelope type discriminator.
+    /// Envelope type discriminator (`dock`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Correlation id.
-    pub req_id: u64,
-    /// Command message id/name.
+    /// The request's `id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub req_id: Option<u64>,
+    /// The command this replies to.
     pub msg: DockWsMessageName,
-    /// Response status code.
-    pub code: i32,
-    /// Optional reboot flag.
+    /// Status code, following HTTP status code conventions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<i32>,
+    /// Set when the dock restarts after this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reboot: Option<bool>,
-    /// Optional raw payload. Deserialize after routing by `msg`.
-    pub msg_data: Option<Box<RawValue>>,
+    /// The reply's result fields (`name`, `model`, `version`, …).
+    #[serde(flatten)]
+    pub data: Map<String, Value>,
 }
 
-/// Dock event envelope (`type=event`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Dock event (`type=event`), for example
+/// `{"type":"event","msg":"ir_receive","ir_code":"4;0x10;12;0"}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DockWsEventEnvelope {
-    /// Envelope type discriminator.
+    /// Envelope type discriminator (`event`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Event message id/name.
+    /// Event name.
     pub msg: DockWsMessageName,
-    /// Optional raw payload. Deserialize after routing by `msg`.
-    pub msg_data: Option<Box<RawValue>>,
+    /// The event's fields (`ir_code`, `format`, …).
+    #[serde(flatten)]
+    pub data: Map<String, Value>,
 }
 
-/// Dock auth message for post-connect authentication.
+/// Dock auth request (`{"type": "auth", "token": …}`) for post-connect
+/// authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockWsAuthMessage {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Message id/name (`auth`).
-    pub msg: DockWsKnownMessage,
     /// Auth token.
     pub token: String,
 }
 
-/// Dock auth-required event (`msg=auth_required`).
+/// Dock authentication challenge (`type=auth_required`), sent right after
+/// the connection opens.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockWsAuthRequired {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth_required`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
-    /// Message id/name (`auth_required`).
-    pub msg: DockWsKnownMessage,
+    /// Dock model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Dock hardware revision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// Dock firmware version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
-/// Dock authentication result (`msg=authentication`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Dock authentication result (`type=auth`, `msg=authentication`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DockWsAuthenticationMessage {
-    /// Envelope type discriminator.
+    /// Message type discriminator (`auth`).
     #[serde(rename = "type")]
     pub type_name: DockWsEnvelopeType,
     /// Message id/name (`authentication`).
     pub msg: DockWsKnownMessage,
-    /// Optional auth status payload.
-    pub msg_data: Option<Box<RawValue>>,
+    /// Result: `200` authenticated; `401` rejected, and the dock closes the
+    /// connection.
+    pub code: i32,
 }
 
-impl DockWsRequestEnvelope {
-    /// Deserialize the deferred `msg_data` payload into a concrete type.
-    ///
-    /// ## Errors
-    ///
-    /// Returns a [`serde_json::Error`] if `msg_data` is absent or the payload
-    /// does not match the target type `T`.
-    pub fn parse_payload<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        match &self.msg_data {
-            Some(raw) => serde_json::from_str(raw.get()),
-            None => Err(serde::de::Error::custom("msg_data is absent")),
-        }
-    }
+fn parse_fields<T: serde::de::DeserializeOwned>(fields: &Map<String, Value>) -> Result<T, serde_json::Error> {
+    T::deserialize(Value::Object(fields.clone()))
 }
 
 impl DockWsResponseEnvelope {
-    /// Deserialize the deferred `msg_data` payload into a concrete type.
+    /// Deserialize the reply's result fields into a concrete type.
     ///
     /// ## Errors
     ///
-    /// Returns a [`serde_json::Error`] if `msg_data` is absent or the payload
-    /// does not match the target type `T`.
-    pub fn parse_payload<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        match &self.msg_data {
-            Some(raw) => serde_json::from_str(raw.get()),
-            None => Err(serde::de::Error::custom("msg_data is absent")),
-        }
-    }
-}
-
-impl DockWsAuthenticationMessage {
-    /// Deserialize the deferred `msg_data` payload into a concrete type.
-    ///
-    /// ## Errors
-    ///
-    /// Returns a [`serde_json::Error`] if `msg_data` is absent or the payload
-    /// does not match the target type `T`.
-    pub fn parse_payload<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        match &self.msg_data {
-            Some(raw) => serde_json::from_str(raw.get()),
-            None => Err(serde::de::Error::custom("msg_data is absent")),
-        }
+    /// Returns a [`serde_json::Error`] if the fields do not match `T`.
+    pub fn parse_data<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
+        parse_fields(&self.data)
     }
 }
 
 impl DockWsEventEnvelope {
-    /// Deserialize the deferred `msg_data` payload into a concrete type.
+    /// Deserialize the event's fields into a concrete type.
     ///
     /// ## Errors
     ///
-    /// Returns a [`serde_json::Error`] if `msg_data` is absent or the payload
-    /// does not match the target type `T`.
-    pub fn parse_payload<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
-        match &self.msg_data {
-            Some(raw) => serde_json::from_str(raw.get()),
-            None => Err(serde::de::Error::custom("msg_data is absent")),
-        }
+    /// Returns a [`serde_json::Error`] if the fields do not match `T`.
+    pub fn parse_data<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
+        parse_fields(&self.data)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::value::RawValue;
+    use serde_json::json;
 
-    // ── Enum serialization (Priority 1) ──────────────────────────────
+    // Recorded examples from `specs/unfolded-circle/UCD2-asyncapi.yaml`.
+    const SYSINFO_REQUEST: &str = r#"{"type":"dock","id":2,"command":"get_sysinfo"}"#;
+    const IR_SEND_REQUEST: &str =
+        r#"{"type":"dock","id":1,"command":"ir_send","code":"4;0x10;12;0","format":"hex","int_side":true}"#;
+    const SYSINFO_RESPONSE: &str = r#"{"type":"dock","req_id":2,"msg":"get_sysinfo","code":200,"name":"My dock","hostname":"UC-Dock-1234","model":"UCD2","revision":"5.4","version":"0.4.0","serial":"0042","ir_learning":false}"#;
+    const PONG: &str = r#"{"type":"dock","msg":"pong"}"#;
+    const IR_RECEIVE_EVENT: &str = r#"{"type":"event","msg":"ir_receive","ir_code":"4;0x10;12;0"}"#;
 
-    #[test]
-    fn envelope_type_serializes_to_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&DockWsEnvelopeType::Req).unwrap(),
-            "\"req\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DockWsEnvelopeType::Resp).unwrap(),
-            "\"resp\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DockWsEnvelopeType::Event).unwrap(),
-            "\"event\""
-        );
+    fn json_of<T: Serialize>(value: &T) -> Value {
+        serde_json::to_value(value).unwrap()
+    }
+
+    fn raw(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
     }
 
     #[test]
-    fn known_message_serializes_to_snake_case() {
+    fn envelope_type_wire_names() {
         let cases = [
-            (DockWsKnownMessage::Auth, "\"auth\""),
-            (DockWsKnownMessage::AuthRequired, "\"auth_required\""),
-            (DockWsKnownMessage::Authentication, "\"authentication\""),
-            (DockWsKnownMessage::IrSend, "\"ir_send\""),
-            (DockWsKnownMessage::GetStatus, "\"get_status\""),
-            (DockWsKnownMessage::IrLearnStart, "\"ir_learn_start\""),
-            (DockWsKnownMessage::IrLearnStop, "\"ir_learn_stop\""),
-            (DockWsKnownMessage::IrLearnResult, "\"ir_learn_result\""),
-            (DockWsKnownMessage::GetConfig, "\"get_config\""),
-            (DockWsKnownMessage::StatusUpdate, "\"status_update\""),
+            (DockWsEnvelopeType::Dock, "dock"),
+            (DockWsEnvelopeType::Event, "event"),
+            (DockWsEnvelopeType::AuthRequired, "auth_required"),
+            (DockWsEnvelopeType::Auth, "auth"),
         ];
-        for (variant, expected) in cases {
-            assert_eq!(
-                serde_json::to_string(&variant).unwrap(),
-                expected,
-                "failed for {variant:?}"
-            );
+        for (variant, wire) in cases {
+            assert_eq!(json_of(&variant), json!(wire), "{variant:?}");
+        }
+        assert!(serde_json::from_str::<DockWsEnvelopeType>(r#""req""#).is_err());
+    }
+
+    #[test]
+    fn known_message_uses_recorded_command_names() {
+        let cases = [
+            (DockWsKnownMessage::GetSysinfo, "get_sysinfo"),
+            (DockWsKnownMessage::RemoteLowbattery, "remote_lowbattery"),
+            (DockWsKnownMessage::IrReceiveOn, "ir_receive_on"),
+            (DockWsKnownMessage::GetPortModes, "get_port_modes"),
+            (DockWsKnownMessage::PortMode, "port_mode"),
+        ];
+        for (variant, wire) in cases {
+            assert_eq!(json_of(&variant), json!(wire), "{variant:?}");
         }
     }
 
-    // ── Untagged enum behavior (Priority 2) ──────────────────────────
-
     #[test]
-    fn message_name_deserializes_known_variant() {
-        let name: DockWsMessageName = serde_json::from_str("\"auth\"").unwrap();
-        assert_eq!(name, DockWsMessageName::Known(DockWsKnownMessage::Auth));
-    }
-
-    #[test]
-    fn message_name_deserializes_known_new_variant() {
-        let name: DockWsMessageName = serde_json::from_str("\"ir_send\"").unwrap();
+    fn message_name_passes_unknown_names_through() {
+        let name: DockWsMessageName = serde_json::from_str(r#""some_future_msg""#).unwrap();
+        assert_eq!(name, DockWsMessageName::Other("some_future_msg".to_string()));
+        let name: DockWsMessageName = serde_json::from_str(r#""ir_send""#).unwrap();
         assert_eq!(name, DockWsMessageName::Known(DockWsKnownMessage::IrSend));
     }
 
     #[test]
-    fn message_name_deserializes_unknown_as_other() {
-        let name: DockWsMessageName = serde_json::from_str("\"some_future_msg\"").unwrap();
-        assert_eq!(
-            name,
-            DockWsMessageName::Other("some_future_msg".to_string())
-        );
-    }
+    fn recorded_requests_round_trip_with_top_level_params() {
+        let request: DockWsRequestEnvelope = serde_json::from_str(SYSINFO_REQUEST).unwrap();
+        assert_eq!(request.type_name, DockWsEnvelopeType::Dock);
+        assert_eq!(request.id, 2);
+        assert_eq!(request.command, DockWsMessageName::Known(DockWsKnownMessage::GetSysinfo));
+        assert!(request.params.is_empty());
+        assert_eq!(json_of(&request), raw(SYSINFO_REQUEST));
 
-    // ── serde(rename = "type") field (Priority 4) ────────────────────
-
-    #[test]
-    fn request_envelope_roundtrip_uses_type_field() {
-        let json = r#"{"type":"req","id":1,"msg":"get_status"}"#;
-        let env: DockWsRequestEnvelope = serde_json::from_str(json).unwrap();
-        assert_eq!(env.type_name, DockWsEnvelopeType::Req);
-        assert_eq!(
-            env.msg,
-            DockWsMessageName::Known(DockWsKnownMessage::GetStatus)
-        );
-        assert!(env.msg_data.is_none());
-
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(
-            serialized.contains("\"type\":"),
-            "serialized JSON must use \"type\" not \"type_name\": {serialized}"
-        );
-        assert!(
-            !serialized.contains("\"type_name\":"),
-            "must not contain \"type_name\": {serialized}"
-        );
+        let request: DockWsRequestEnvelope = serde_json::from_str(IR_SEND_REQUEST).unwrap();
+        assert_eq!(request.command, DockWsMessageName::Known(DockWsKnownMessage::IrSend));
+        assert_eq!(request.params["code"], "4;0x10;12;0");
+        assert_eq!(request.params["int_side"], true);
+        assert_eq!(json_of(&request), raw(IR_SEND_REQUEST));
     }
 
     #[test]
-    fn response_envelope_serializes_with_type_field() {
-        let env = DockWsResponseEnvelope {
-            type_name: DockWsEnvelopeType::Resp,
-            req_id: 1,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::Auth),
-            code: 200,
-            reboot: None,
-            msg_data: None,
-        };
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"));
-        assert!(!serialized.contains("\"type_name\":"));
+    fn recorded_sysinfo_response_retains_its_result_fields() {
+        #[derive(Debug, Deserialize)]
+        struct SystemInfo {
+            name: String,
+            model: String,
+            version: String,
+            ir_learning: bool,
+        }
+
+        let response: DockWsResponseEnvelope = serde_json::from_str(SYSINFO_RESPONSE).unwrap();
+        assert_eq!(response.type_name, DockWsEnvelopeType::Dock);
+        assert_eq!(response.req_id, Some(2));
+        assert_eq!(response.msg, DockWsMessageName::Known(DockWsKnownMessage::GetSysinfo));
+        assert_eq!(response.code, Some(200));
+        assert_eq!(response.data["hostname"], "UC-Dock-1234");
+        assert!(!response.data.contains_key("type") && !response.data.contains_key("req_id"));
+
+        let info: SystemInfo = response.parse_data().unwrap();
+        assert_eq!((info.name.as_str(), info.model.as_str(), info.version.as_str()), ("My dock", "UCD2", "0.4.0"));
+        assert!(!info.ir_learning);
+        assert_eq!(json_of(&response), raw(SYSINFO_RESPONSE));
     }
 
     #[test]
-    fn event_envelope_serializes_with_type_field() {
-        let env = DockWsEventEnvelope {
-            type_name: DockWsEnvelopeType::Event,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::StatusUpdate),
-            msg_data: None,
-        };
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"));
-        assert!(!serialized.contains("\"type_name\":"));
+    fn pong_decodes_as_a_response_without_id_or_code() {
+        let pong: DockWsResponseEnvelope = serde_json::from_str(PONG).unwrap();
+        assert_eq!(pong.msg, DockWsMessageName::Known(DockWsKnownMessage::Pong));
+        assert_eq!((pong.req_id, pong.code), (None, None));
+        assert_eq!(json_of(&pong), raw(PONG));
     }
 
     #[test]
-    fn auth_message_serializes_with_type_field() {
-        let env = DockWsAuthMessage {
-            type_name: DockWsEnvelopeType::Req,
-            msg: DockWsKnownMessage::Auth,
-            token: "test-token".to_string(),
-        };
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"));
-        assert!(!serialized.contains("\"type_name\":"));
+    fn recorded_ir_receive_event_retains_its_code() {
+        let event: DockWsEventEnvelope = serde_json::from_str(IR_RECEIVE_EVENT).unwrap();
+        assert_eq!(event.type_name, DockWsEnvelopeType::Event);
+        assert_eq!(event.msg, DockWsMessageName::Known(DockWsKnownMessage::IrReceive));
+        assert_eq!(event.data["ir_code"], "4;0x10;12;0");
+
+        #[derive(Deserialize)]
+        struct IrReceive {
+            ir_code: String,
+        }
+        assert_eq!(event.parse_data::<IrReceive>().unwrap().ir_code, "4;0x10;12;0");
+        assert_eq!(json_of(&event), raw(IR_RECEIVE_EVENT));
     }
 
     #[test]
-    fn auth_required_serializes_with_type_field() {
-        let env = DockWsAuthRequired {
-            type_name: DockWsEnvelopeType::Event,
-            msg: DockWsKnownMessage::AuthRequired,
-        };
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"));
-        assert!(!serialized.contains("\"type_name\":"));
+    fn parse_data_reports_a_mismatched_target() {
+        let event: DockWsEventEnvelope = serde_json::from_str(IR_RECEIVE_EVENT).unwrap();
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        struct Wrong {
+            port: u8,
+        }
+        assert!(event.parse_data::<Wrong>().is_err());
     }
 
+    /// The three authentication frames as the UCD2 AsyncAPI documents them.
     #[test]
-    fn authentication_message_serializes_with_type_field() {
-        let env = DockWsAuthenticationMessage {
-            type_name: DockWsEnvelopeType::Resp,
-            msg: DockWsKnownMessage::Authentication,
-            msg_data: None,
-        };
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"));
-        assert!(!serialized.contains("\"type_name\":"));
-    }
+    fn recorded_authentication_frames_round_trip() {
+        let challenge_text = r#"{"type":"auth_required","model":"UCD2","revision":"5.4","version":"0.6.0"}"#;
+        let challenge: DockWsAuthRequired = serde_json::from_str(challenge_text).unwrap();
+        assert_eq!(challenge.type_name, DockWsEnvelopeType::AuthRequired);
+        assert_eq!(challenge.model.as_deref(), Some("UCD2"));
+        assert_eq!(json_of(&challenge), raw(challenge_text));
 
-    // ── Envelope roundtrip with RawValue (Priority 3) ────────────────
+        let request_text = r#"{"type":"auth","token":"1234"}"#;
+        let request: DockWsAuthMessage = serde_json::from_str(request_text).unwrap();
+        assert_eq!(request.type_name, DockWsEnvelopeType::Auth);
+        assert_eq!(request.token, "1234");
+        assert_eq!(json_of(&request), raw(request_text));
 
-    #[test]
-    fn request_envelope_roundtrip_with_msg_data() {
-        let json =
-            r#"{"type":"req","id":42,"msg":"ir_send","msg_data":{"code":"ABC123","repeat":2}}"#;
-        let env: DockWsRequestEnvelope = serde_json::from_str(json).unwrap();
-        assert_eq!(env.id, 42);
-        assert!(env.msg_data.is_some());
-
-        let reserialized = serde_json::to_string(&env).unwrap();
-        let roundtrip: DockWsRequestEnvelope = serde_json::from_str(&reserialized).unwrap();
-        assert_eq!(roundtrip.id, env.id);
-        assert_eq!(roundtrip.msg, env.msg);
-    }
-
-    #[test]
-    fn auth_message_roundtrip() {
-        let json = r#"{"type":"req","msg":"auth","token":"my-secret"}"#;
-        let env: DockWsAuthMessage = serde_json::from_str(json).unwrap();
-        assert_eq!(env.token, "my-secret");
-        assert_eq!(env.msg, DockWsKnownMessage::Auth);
-
-        let reserialized = serde_json::to_string(&env).unwrap();
-        let roundtrip: DockWsAuthMessage = serde_json::from_str(&reserialized).unwrap();
-        assert_eq!(roundtrip.token, env.token);
-    }
-
-    // ── parse_payload tests ──────────────────────────────────────────
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    struct IrPayload {
-        code: String,
-        repeat: u32,
-    }
-
-    #[test]
-    fn request_parse_payload_with_data() {
-        let raw: Box<RawValue> =
-            RawValue::from_string(r#"{"code":"NEC-1234","repeat":3}"#.to_string()).unwrap();
-        let env = DockWsRequestEnvelope {
-            type_name: DockWsEnvelopeType::Req,
-            id: 1,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::IrSend),
-            msg_data: Some(raw),
-        };
-        let payload: IrPayload = env.parse_payload().unwrap();
-        assert_eq!(
-            payload,
-            IrPayload {
-                code: "NEC-1234".to_string(),
-                repeat: 3
-            }
-        );
-    }
-
-    #[test]
-    fn request_parse_payload_returns_error_when_absent() {
-        let env = DockWsRequestEnvelope {
-            type_name: DockWsEnvelopeType::Req,
-            id: 1,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::GetStatus),
-            msg_data: None,
-        };
-        let result = env.parse_payload::<IrPayload>();
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("msg_data is absent")
-        );
-    }
-
-    #[test]
-    fn event_parse_payload_with_data() {
-        let raw: Box<RawValue> =
-            RawValue::from_string(r#"{"code":"RC5-99","repeat":1}"#.to_string()).unwrap();
-        let env = DockWsEventEnvelope {
-            type_name: DockWsEnvelopeType::Event,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::IrLearnResult),
-            msg_data: Some(raw),
-        };
-        let payload: IrPayload = env.parse_payload().unwrap();
-        assert_eq!(payload.code, "RC5-99");
-    }
-
-    #[test]
-    fn event_parse_payload_returns_error_when_absent() {
-        let env = DockWsEventEnvelope {
-            type_name: DockWsEnvelopeType::Event,
-            msg: DockWsMessageName::Known(DockWsKnownMessage::StatusUpdate),
-            msg_data: None,
-        };
-        let result = env.parse_payload::<IrPayload>();
-        assert!(result.is_err());
+        let result_text = r#"{"type":"auth","msg":"authentication","code":401}"#;
+        let result: DockWsAuthenticationMessage = serde_json::from_str(result_text).unwrap();
+        assert_eq!(result.msg, DockWsKnownMessage::Authentication);
+        assert_eq!(result.code, 401);
+        assert_eq!(json_of(&result), raw(result_text));
     }
 }

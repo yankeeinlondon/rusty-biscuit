@@ -1,22 +1,25 @@
 //! OpenAPI export functionality.
 //!
 //! This module provides the core export logic for transforming `RestApi` definitions
-//! into OpenAPI 3.0.3 documents with vendor extensions for round-trip fidelity.
+//! into OpenAPI 3.0.3 documents. `x-schematic` vendor extensions carry the
+//! metadata standard OpenAPI cannot express; the importer reads them back for
+//! the subset `schematic/docs/io/openapi-extensions.md` lists.
 //!
 //! ## Examples
 //!
 //! ```text
 //! use schematic_define::openapi::{export, ExportOptions};
-//! use schematic_definitions::openai::{define_openai_api, openapi_registry};
+//! use schematic_definitions::openai::define_openai_api;
 //!
 //! let api = define_openai_api();
-//! let registry = openapi_registry();
 //! let options = ExportOptions::new().with_version("1.0.0");
 //!
-//! let openapi_doc = export(&api, &registry, &options)?;
+//! let openapi_doc = export(&api, &options)?;
 //! ```
 
 mod components;
+mod conversion;
+mod headers;
 mod info;
 mod paths;
 mod parameters;
@@ -36,23 +39,30 @@ use crate::types::RestApi;
 use components::map_components;
 use info::{map_info, map_servers};
 use paths::map_paths;
-use security::map_security_requirements;
 use validate::validate_ref_closure;
 
-pub use components::SchemaRegistryLike;
+pub use headers::{HeaderGap, HeaderGapReason};
 pub use paths::extract_path_params;
 pub use security::map_security;
+
+// The importer re-exports a value to compare it with the standard field it
+// sits beside (R12).
+pub(crate) use paths::strip_reserved_markers;
+pub(crate) use request_body::map_request_body;
+pub(crate) use responses::map_responses;
 
 /// Exports a `RestApi` definition to an OpenAPI 3.0.3 document.
 ///
 /// This function transforms the Schematic API definition into a fully compliant
-/// OpenAPI document, including vendor extensions (`x-schematic`) to preserve
-/// Schematic-specific metadata for round-trip fidelity.
+/// OpenAPI document. The root `security` lists one requirement per method of
+/// the API's effective auth policy. Vendor extensions (`x-schematic`) carry
+/// the Schematic metadata standard OpenAPI cannot express; the importer reads
+/// back the subset `schematic/docs/io/openapi-extensions.md` lists.
 ///
 /// ## Parameters
 ///
-/// - `api` - The REST API definition to export
-/// - `registry` - Schema registry containing JSON schemas for response types
+/// - `api` - The REST API definition to export; `components.schemas` comes
+///   from [`RestApi::schemas`]
 /// - `options` - Export configuration options
 ///
 /// ## Returns
@@ -61,17 +71,41 @@ pub use security::map_security;
 ///
 /// ## Errors
 ///
-/// Returns `OpenApiError` if the export fails due to validation issues.
-pub fn export<R: SchemaRegistryLike>(
+/// Returns `OpenApiError` if the export fails due to validation issues: a
+/// component `$ref` that does not resolve
+/// ([`crate::DefinitionError::UnresolvedSchemaReferences`]), a schema keyword
+/// OpenAPI 3.0.3 cannot express, or a dangling endpoint reference.
+pub fn export(
     api: &RestApi,
-    registry: &R,
     options: &ExportOptions,
 ) -> Result<OpenAPI, OpenApiError> {
+    export_with_header_gaps(api, options).map(|(openapi, _)| openapi)
+}
+
+/// The headers of `api` its OpenAPI export does not carry as header
+/// parameters: credential headers, `Accept`/`Content-Type` values the
+/// operation's content does not declare, `Authorization`, and fixed headers
+/// that conflict with an explicit header parameter.
+///
+/// ## Errors
+///
+/// Whatever [`export`] returns for `api`.
+pub fn header_gaps(api: &RestApi) -> Result<Vec<HeaderGap>, OpenApiError> {
+    export_with_header_gaps(api, &ExportOptions::new().skip_extensions()).map(|(_, gaps)| gaps)
+}
+
+fn export_with_header_gaps(
+    api: &RestApi,
+    options: &ExportOptions,
+) -> Result<(OpenAPI, Vec<HeaderGap>), OpenApiError> {
+    api.validate_schema_closure()?;
     let info = map_info(api, options);
     let servers = map_servers(api);
-    let paths = map_paths(api, registry, options)?;
-    let security = map_security_requirements(api);
-    let components = map_components(api, registry, options);
+    let (mut components, root) = map_components(api, options)?;
+    // Endpoint auth registers override-only schemes after the API's own.
+    let mut header_gaps = Vec::new();
+    let paths = map_paths(api, options, &root.requirements, &mut components.security_schemes, &mut header_gaps)?;
+    let security = root.requirements;
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
@@ -79,7 +113,16 @@ pub fn export<R: SchemaRegistryLike>(
             module_path: api.module_path.clone(),
             request_suffix: api.request_suffix.clone(),
             env_mapping: api.env_mapping.clone(),
+            env_auth: api.env_auth.clone(),
             headers: api.headers.clone(),
+            auth: root.details,
+            rate_limit: api.rate_limit.clone(),
+            retry_guidance: api.retry_guidance.clone(),
+            errors: api.errors.clone(),
+            cross_origin: api.cross_origin.clone(),
+            request_id_header: api.request_id_header.clone(),
+            secret_names: api.secret_names.clone(),
+            ..Default::default()
         };
         extensions.insert("x-schematic".to_string(), doc_ext.into());
     }
@@ -109,7 +152,7 @@ pub fn export<R: SchemaRegistryLike>(
 
     validate_ref_closure(&openapi)?;
 
-    Ok(openapi)
+    Ok((openapi, header_gaps))
 }
 
 #[cfg(test)]
@@ -119,45 +162,21 @@ mod tests {
     use crate::cross_origin::CrossOrigin;
     use crate::headers::{EnvList, EnvMapping};
     use crate::request::ApiRequest;
-    use crate::response::ApiResponse;
+    use crate::response::SuccessShape;
     use crate::types::{Endpoint, RestMethod};
 
-    struct TestRegistry {
-        schemas: IndexMap<String, openapiv3::Schema>,
-    }
-
-    impl TestRegistry {
-        fn new() -> Self {
-            Self {
-                schemas: IndexMap::new(),
-            }
-        }
-
-        fn with_schema(mut self, name: &str) -> Self {
-            self.schemas.insert(
-                name.to_string(),
-                openapiv3::Schema {
-                    schema_data: openapiv3::SchemaData {
-                        description: Some(format!("{} schema", name)),
-                        ..Default::default()
-                    },
-                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
-                        openapiv3::ObjectType::default(),
-                    )),
-                },
-            );
-            self
-        }
-    }
-
-    impl SchemaRegistryLike for TestRegistry {
-        fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema> {
-            self.schemas.clone()
-        }
+    /// Give `api` one object component per name.
+    fn with_components(mut api: RestApi, names: &[&str]) -> RestApi {
+        api.schemas = names.iter().map(|name| crate::SchemaComponent {
+            name: (*name).to_string(),
+            rust_path: Some(format!("::models::{name}")),
+            schema: serde_json::json!({"description": format!("{name} schema"), "type": "object"}),
+        }).collect();
+        api
     }
 
     fn create_test_api() -> RestApi {
-        RestApi {
+        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -165,7 +184,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -179,12 +197,12 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+            schemas: vec![],
+            }
     }
 
     fn create_test_api_with_endpoints() -> RestApi {
-        RestApi {
+        RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test API description".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -192,30 +210,29 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "ListItems".to_string(),
                     method: RestMethod::Get,
                     path: "/items".to_string(),
                     description: "List all items".to_string(),
                     request: None,
-                    response: ApiResponse::json_type("ListResponse"),
+                    response: vec![SuccessShape::json_type("ListResponse")],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "GetItem".to_string(),
                     method: RestMethod::Get,
                     path: "/items/{item_id}".to_string(),
                     description: "Get a specific item".to_string(),
                     request: None,
-                    response: ApiResponse::json_type("Item"),
+                    response: vec![SuccessShape::json_type("Item")],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -226,51 +243,45 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+            schemas: vec![],
+            }
     }
 
     #[test]
     fn export_produces_valid_openapi_version() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert_eq!(doc.openapi, "3.0.3");
     }
 
     #[test]
     fn export_includes_info() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert_eq!(doc.info.title, "TestAPI");
     }
 
     #[test]
     fn export_includes_paths() {
         let api = create_test_api_with_endpoints();
-        let registry = TestRegistry::new()
-            .with_schema("ListResponse")
-            .with_schema("Item");
+        let api = with_components(api, &["ListResponse", "Item"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(!doc.paths.paths.is_empty());
     }
 
     #[test]
     fn export_includes_components_schemas() {
         let api = create_test_api();
-        let registry = TestRegistry::new()
-            .with_schema("TestSchema")
-            .with_schema("AnotherSchema");
+        let api = with_components(api, &["TestSchema", "AnotherSchema"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.components.is_some());
 
         let components = doc.components.unwrap();
@@ -281,10 +292,9 @@ mod tests {
     #[test]
     fn export_includes_security_schemes() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         let components = doc.components.unwrap();
 
         assert!(components.security_schemes.contains_key("bearerAuth"));
@@ -293,30 +303,27 @@ mod tests {
     #[test]
     fn export_includes_vendor_extensions_by_default() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.extensions.contains_key("x-schematic"));
     }
 
     #[test]
     fn export_skips_extensions_when_requested() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new().skip_extensions();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(!doc.extensions.contains_key("x-schematic"));
     }
 
     #[test]
     fn export_includes_external_docs_when_present() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.external_docs.is_some());
         assert_eq!(doc.external_docs.unwrap().url, "https://docs.test.com");
     }
@@ -327,10 +334,9 @@ mod tests {
         api.module_path = Some("mymodule".to_string());
         api.request_suffix = Some("Params".to_string());
 
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         let ext = doc.extensions.get("x-schematic").unwrap();
 
         assert!(ext.get("module_path").is_some());
@@ -339,7 +345,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_request_schema_ref() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -347,18 +353,17 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
                 description: "Create something".to_string(),
                 request: Some(ApiRequest::json_type("MissingBody")),
-                response: ApiResponse::Empty,
+                response: vec![SuccessShape::empty()],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -368,12 +373,11 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
-        let registry = TestRegistry::new();
+            schemas: vec![],
+            };
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -386,7 +390,7 @@ mod tests {
 
     #[test]
     fn export_fails_on_unresolved_response_schema_ref() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -394,18 +398,17 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Get".to_string(),
                 method: RestMethod::Get,
                 path: "/get".to_string(),
                 description: "Get something".to_string(),
                 request: None,
-                response: ApiResponse::json_type("MissingResponse"),
+                response: vec![SuccessShape::json_type("MissingResponse")],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -415,12 +418,11 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
-        let registry = TestRegistry::new();
+            schemas: vec![],
+            };
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn export_strips_reserved_marker_from_path_and_params() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com".to_string(),
@@ -441,18 +443,17 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "GetModel".to_string(),
                 method: RestMethod::Get,
                 path: "/models/{+repo_id}".to_string(),
                 description: "Get a model".to_string(),
                 request: None,
-                response: ApiResponse::json_type("Model"),
+                response: vec![SuccessShape::json_type("Model")],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -462,19 +463,24 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
-        let registry = TestRegistry::new().with_schema("Model");
+            schemas: vec![],
+            };
+        let api = with_components(api, &["Model"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
 
         // The path key renders as valid `{repo_id}`, never `{+repo_id}`.
         assert!(doc.paths.paths.contains_key("/models/{repo_id}"));
         assert!(!doc.paths.paths.contains_key("/models/{+repo_id}"));
 
-        // No `{+` may leak anywhere in the serialized document.
-        let json = serde_json::to_string(&doc).unwrap();
+        // No `{+` may leak into a standard member; only the extension's
+        // `path_template` keeps the runtime template.
+        let mut value = serde_json::to_value(&doc).unwrap();
+        let operation = value["paths"]["/models/{repo_id}"]["get"].as_object_mut().unwrap();
+        let extension = operation.remove("x-schematic").unwrap();
+        assert_eq!(extension["path_template"], "/models/{+repo_id}");
+        let json = value.to_string();
         assert!(!json.contains("{+"), "reserved marker leaked: {json}");
 
         if let openapiv3::ReferenceOr::Item(path_item) = &doc.paths.paths["/models/{repo_id}"] {
@@ -492,7 +498,7 @@ mod tests {
 
     #[test]
     fn export_succeeds_when_all_refs_are_resolved() {
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "TestAPI".to_string(),
             description: "Test".to_string(),
             base_url: "https://api.test.com/v1".to_string(),
@@ -500,18 +506,17 @@ mod tests {
             auth: AuthStrategy::None,
             auth_policy: None,
             env_auth: vec![],
-            env_username: None,
             headers: vec![],
-            endpoints: vec![Endpoint {
+            endpoints: vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "Create".to_string(),
                 method: RestMethod::Post,
                 path: "/create".to_string(),
                 description: "Create something".to_string(),
                 request: Some(ApiRequest::json_type("RequestBody")),
-                response: ApiResponse::json_type("ResponseBody"),
+                response: vec![SuccessShape::json_type("ResponseBody")],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -521,14 +526,12 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
-        let registry = TestRegistry::new()
-            .with_schema("RequestBody")
-            .with_schema("ResponseBody");
+            schemas: vec![],
+            };
+        let api = with_components(api, &["RequestBody", "ResponseBody"]);
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(
             result.is_ok(),
             "export should succeed when all refs are resolved"
@@ -544,16 +547,16 @@ mod tests {
         use openapiv3::ReferenceOr;
 
         let mut api = create_test_api();
-        api.endpoints = vec![Endpoint {
+        api.endpoints = vec![Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
             id: "ListItems".to_string(),
             method: RestMethod::Get,
             path: "/items".to_string(),
             description: "List items".to_string(),
             request: None,
-            response: ApiResponse::Empty,
+            response: vec![SuccessShape::empty()],
             headers: vec![],
             params: Some(EndpointParams {
-                query: vec![ParamDef {
+                query: vec![ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
                     name: "limit".to_string(),
                     required: false,
                     description: Some("Page size".to_string()),
@@ -563,10 +566,10 @@ mod tests {
                 }],
                 ..Default::default()
             }),
-            oauth_scopes: None,
+            cross_origin: None, pagination: None,
         }];
 
-        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+        let doc = export(&api, &ExportOptions::new())
             .expect("export should succeed");
 
         let ReferenceOr::Item(path_item) = &doc.paths.paths["/items"] else {
@@ -597,31 +600,31 @@ mod tests {
 
         let mut api = create_test_api();
         api.endpoints = vec![
-            Endpoint {
+            Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "GetItem".to_string(),
                 method: RestMethod::Get,
                 path: "/items/{item_id}".to_string(),
                 description: "Get".to_string(),
                 request: None,
-                response: ApiResponse::Empty,
+                response: vec![SuccessShape::empty()],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             },
-            Endpoint {
+            Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                 id: "DeleteItem".to_string(),
                 method: RestMethod::Delete,
                 path: "/items/{item_id}".to_string(),
                 description: "Delete".to_string(),
                 request: None,
-                response: ApiResponse::Empty,
+                response: vec![SuccessShape::empty()],
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                cross_origin: None, pagination: None,
             },
         ];
 
-        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+        let doc = export(&api, &ExportOptions::new())
             .expect("export should succeed");
 
         let ReferenceOr::Item(path_item) = &doc.paths.paths["/items/{item_id}"] else {
@@ -629,5 +632,99 @@ mod tests {
         };
 
         assert_eq!(path_item.parameters.len(), 1, "item_id declared twice");
+    }
+    #[test]
+    fn typed_builder_exports_named_wrapped_request_response_and_form_schemas() {
+        use crate::{DefinitionContext, Success, FormField};
+        use std::{collections::HashMap, time::Duration};
+        let mut ctx = DefinitionContext::types_in("::models");
+        let desc = ctx.register::<Vec<Duration>>().unwrap();
+        let mut json = Endpoint::post("Json", "/json").describes("Json")
+            .returns_json::<Option<Vec<Duration>>>(&mut ctx)
+            .request_json::<HashMap<String, Duration>>(&mut ctx).build().unwrap();
+        json.headers.push(("x-fixture".into(), "one".into()));
+        let form = Endpoint::post("Form", "/form").describes("Form")
+            .returns(Success::empty()).request_form(vec![FormField::json_desc("metadata", desc)
+                .optional().with_description("metadata")]).build().unwrap();
+        let api = RestApi::builder(&ctx, "Typed", "https://example.com").describes("Typed")
+            .no_auth().endpoints([json, form]).build().unwrap();
+        assert_eq!(api.schemas.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Duration"]);
+        let doc = export(&api, &ExportOptions::new()).unwrap();
+        let value = serde_json::to_value(doc).unwrap();
+        let response = &value["paths"]["/json"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(response["anyOf"][0]["type"], "array");
+        assert_eq!(response["anyOf"][1]["nullable"], true);
+        assert_eq!(response["anyOf"][0]["items"]["$ref"], "#/components/schemas/Duration");
+        let request = &value["paths"]["/json"]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(request["additionalProperties"]["$ref"], "#/components/schemas/Duration");
+        let form = &value["paths"]["/form"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"];
+        assert_eq!(form["properties"]["metadata"]["allOf"][0]["items"]["$ref"], "#/components/schemas/Duration");
+        assert!(form["required"].as_array().is_none_or(|v| v.is_empty()));
+        let mut without_components = api.clone();
+        without_components.schemas.clear();
+        assert!(matches!(export(&without_components, &ExportOptions::new()), Err(OpenApiError::UnresolvedRefs { .. })));
+    }
+
+
+    // Schema-only fixtures: nothing constructs or reads them.
+    #[allow(dead_code)]
+    mod composed {
+        use schemars::JsonSchema;
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Cat { pub meows: bool });
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Dog { pub barks: u8 });
+        crate::definition_type!(#[derive(JsonSchema)] #[serde(untagged)] pub enum Pet { Cat(Cat), Dog(Dog) });
+        crate::definition_type!(#[derive(JsonSchema)] #[serde(untagged)] pub enum Either { Cat(Cat), Dog(Dog) });
+        crate::definition_type!(#[derive(JsonSchema)] pub struct Both { pub meows: bool, pub barks: u8 });
+    }
+
+    #[test]
+    fn composed_components_export_as_compositions_of_references() {
+        use crate::DefinitionContext;
+        use composed::*;
+        let mut ctx = DefinitionContext::types_in("::models");
+        let cat = ctx.register::<Cat>().unwrap();
+        let dog = ctx.register::<Dog>().unwrap();
+        ctx.one_of::<Pet>([cat.clone(), dog.clone()]).unwrap();
+        ctx.any_of::<Either>([cat.clone(), dog.clone()]).unwrap();
+        ctx.all_of::<Both>([cat, dog]).unwrap();
+        let endpoint = Endpoint::post("Adopt", "/pets").describes("Adopt")
+            .request_json::<Pet>(&mut ctx).returns_json::<Both>(&mut ctx).build().unwrap();
+        let api = RestApi::builder(&ctx, "Pets", "https://example.com").describes("Pets").no_auth()
+            .endpoints([endpoint]).build().unwrap();
+
+        let doc = serde_json::to_value(export(&api, &ExportOptions::new()).unwrap()).unwrap();
+        let schemas = &doc["components"]["schemas"];
+        let refs = serde_json::json!([{"$ref": "#/components/schemas/Cat"}, {"$ref": "#/components/schemas/Dog"}]);
+        assert_eq!(schemas["Pet"], serde_json::json!({"oneOf": refs}));
+        assert_eq!(schemas["Either"], serde_json::json!({"anyOf": refs}));
+        assert_eq!(schemas["Both"], serde_json::json!({"allOf": refs}));
+        assert_eq!(schemas["Cat"]["type"], "object");
+        let body = &doc["paths"]["/pets"]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(body["$ref"], "#/components/schemas/Pet");
+    }
+
+    #[test]
+    fn metadata_reaches_the_document_and_only_overriding_operations() {
+        use crate::metadata::{Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+        let api_limit = RateLimit::new("x-limit", "x-remaining", "x-reset", ResetUnit::EpochSeconds).unwrap();
+        let own_retry = RetryGuidance::new([StatusSelector::Code(503)], false, 2, Backoff::None).unwrap();
+        let ctx = crate::DefinitionContext::types_in("::models");
+        let api = RestApi::builder(&ctx, "Meta", "https://example.com").describes("Meta").no_auth()
+            .rate_limit(api_limit)
+            .endpoints([
+                Endpoint::get("Inherit", "/a").describes("A").returns_empty().build().unwrap(),
+                Endpoint::get("Own", "/b").describes("B").returns_empty().retry_guidance(own_retry).build().unwrap(),
+            ])
+            .build().unwrap();
+
+        let doc = serde_json::to_value(export(&api, &ExportOptions::new()).unwrap()).unwrap();
+        assert_eq!(doc["x-schematic"]["rate_limit"]["reset_unit"], "epoch_seconds");
+        assert!(doc["x-schematic"].get("retry_guidance").is_none());
+        assert_eq!(doc["paths"]["/a"]["get"]["x-schematic"], serde_json::json!({"response": "Empty"}));
+        assert_eq!(doc["paths"]["/b"]["get"]["x-schematic"]["retry_guidance"]["retry_on"], serde_json::json!([{"code": 503}]));
+        assert!(doc["paths"]["/b"]["get"]["x-schematic"].get("rate_limit").is_none());
+
+        let bare = serde_json::to_value(export(&api, &ExportOptions::new().skip_extensions()).unwrap()).unwrap();
+        assert!(!bare.to_string().contains("x-schematic"));
     }
 }

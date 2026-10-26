@@ -7,6 +7,18 @@
 
 ## Recent Dependency Notes
 
+- `schematic-define` adds `regex` 1 and `regex-syntax` 0.8 as production
+  dependencies (2026-10-23) to decide which constraint patterns a generated
+  client can enforce. Both were already in the workspace graph, so the root
+  lockfile and `schematic/schema/Cargo.lock` gain edges and no package. See
+  `schematic/docs/dependencies.md`.
+- `schematic-runtime` adds `num-bigint` 0.4 and `regex` 1 as production
+  dependencies (2026-10-23) for its `validate` module: exact decimal numbers
+  for numeric constraints, and lazily compiled `pattern` rules. Both were
+  already in the workspace graph, so the root lockfile gains edges and no
+  package; `schematic/schema/Cargo.lock` gains `num-bigint` and
+  `num-integer`. See
+  `schematic/docs/dependencies.md`.
 - `darkmatter/lib` vendors the MIT-licensed SublimeText/Mermaid syntax
   (2026-10-24, commit `a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859`, Copyright
   (c) 2017 Peng Wang) as one flattened syntax under
@@ -754,7 +766,7 @@ This is a Rust workspace with the following modules:
 
 - [schematic-define](./schematic/define) _v0.1.0_
 
-    _REST API definition primitives (RestApi, Endpoint, AuthStrategy)._
+    _REST API definition primitives (RestApi, Endpoint, AuthStrategy), plus provider-neutral typed registration using schemars v1 and unconditional serde_json v1, and url v2 for builder base-URL validation._
 
     _Tags: workspace, library, api, codegen_
 
@@ -772,7 +784,7 @@ This is a Rust workspace with the following modules:
 
 - [schematic-runtime](./schematic/runtime) _v0.1.0_
 
-    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs._
+    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs, request-side constraint checks._
 
     _Tags: workspace, library, api, http_
 
@@ -1844,3 +1856,5 @@ This is a Rust workspace with the following modules:
 - `scripts/ci/artifacts/` pins `@actions/artifact` 2.3.2 and its transitive Node
   dependencies with `package-lock.json`. Hosted owners use it to upload multiple
   package-keyed artifacts from a shared compilation job.
+
+- `schematic-gen` uses `biscuit-hash` with the `blake3` feature as a dev dependency for canonical definition and schema baseline fingerprints. This adds no runtime dependency or new external crate.

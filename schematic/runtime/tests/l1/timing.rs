@@ -4,7 +4,6 @@
 //! (R26), and a streaming decoder outlives the single-send expiration under
 //! an idle bound and the shared deadline (R30).
 
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -22,23 +21,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::support::{AbortOnDrop, Call, Item, SENTINEL, TestApi, builder, closed_port_url, listener, read_head, write_all};
-
-/// Serves each accepted connection with `handle`, one at a time, in accept
-/// order.
-async fn serve<F, Fut>(handle: F) -> (String, AbortOnDrop)
-where
-    F: Fn(TcpStream) -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-{
-    let (listener, url) = listener().await;
-    let task = tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            handle(stream).await;
-        }
-    });
-    (url, AbortOnDrop(task))
-}
+use crate::support::{AbortOnDrop, Call, Item, SENTINEL, TestApi, builder, closed_port_url, listener, read_head, serve, write_all};
 
 /// Reads the request head, then never answers.
 async fn hang(mut stream: TcpStream) {
@@ -80,7 +63,8 @@ fn item() -> Call<Json<Item>> {
 }
 
 /// A test-only streaming decoder: its output owns the live body under stream
-/// bounds and yields each line as it arrives.
+/// bounds and yields each line as it arrives, restarting the idle bound with
+/// each line.
 pub(crate) struct Lines;
 
 pub(crate) struct LineStream {
@@ -93,6 +77,7 @@ impl LineStream {
         loop {
             if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = self.pending.drain(..=end).collect();
+                self.body.mark_item();
                 return Some(Ok(String::from_utf8_lossy(&line[..end]).into_owned()));
             }
             match self.body.chunk().await {
@@ -543,7 +528,7 @@ async fn the_shared_deadline_bounds_a_stream_that_never_goes_idle() {
             other => break other,
         }
     };
-    assert_eq!(ended, Some(Err(BodyReadError::TimedOut)));
+    assert_eq!(ended, Some(Err(BodyReadError::DeadlineExceeded)), "the deadline, not the idle bound, ended it");
     assert!(received >= 1, "lines arrived before the deadline");
     assert!(deadline.elapsed() >= Duration::from_millis(300), "{:?}", deadline.elapsed());
     assert!(deadline.elapsed() < Duration::from_secs(5), "{:?}", deadline.elapsed());

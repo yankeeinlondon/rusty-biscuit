@@ -9,6 +9,7 @@
 //! - [`Reference`](OpenApiError::Reference) - Unresolved `$ref` references
 //! - [`UnsupportedFeature`](OpenApiError::UnsupportedFeature) - OpenAPI features not supported by this crate
 //! - [`Validation`](OpenApiError::Validation) - Semantic validation errors
+//! - [`Definition`](OpenApiError::Definition) - Imported definitions that fail reference validation
 //! - [`Io`](OpenApiError::Io) - File system errors
 //!
 //! ## Examples
@@ -117,6 +118,12 @@ pub enum OpenApiError {
         /// Description of the validation failure.
         message: String,
     },
+
+    /// The imported definition fails the same reference validation as a
+    /// built one, such as an endpoint body naming a schema the document
+    /// does not define.
+    #[error("Invalid imported definition: {0}")]
+    Definition(#[from] crate::DefinitionError),
 
     /// File system I/O error.
     ///

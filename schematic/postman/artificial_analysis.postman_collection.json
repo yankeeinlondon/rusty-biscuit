@@ -11,28 +11,26 @@
       "description": "Base URL for ArtificialAnalysisData"
     },
     {
-      "key": "apiKey",
+      "key": "baseUrl2",
+      "value": "https://artificialanalysis.ai/api/v2",
+      "description": "Base URL for ArtificialAnalysisCritPt"
+    },
+    {
+      "key": "apiKey_ArtificialAnalysisData",
       "value": "",
       "description": "API key value"
+    },
+    {
+      "key": "apiKey_ArtificialAnalysisCritPt",
+      "value": "",
+      "description": "API key value"
+    },
+    {
+      "key": "query_include_categories",
+      "value": "",
+      "description": "Value of the `include_categories` query parameter"
     }
   ],
-  "auth": {
-    "type": "apikey",
-    "apikey": [
-      {
-        "key": "key",
-        "value": "x-api-key"
-      },
-      {
-        "key": "value",
-        "value": "{{apiKey}}"
-      },
-      {
-        "key": "in",
-        "value": "header"
-      }
-    ]
-  },
   "item": [
     {
       "name": "Critpt",
@@ -42,18 +40,35 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/critpt/evaluate",
+              "raw": "{{baseUrl2}}/critpt/evaluate",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "critpt",
                 "evaluate"
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisCritPt}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"submissions\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -61,7 +76,21 @@
               }
             },
             "description": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"accuracy\": 0,\n  \"judge_error_count\": 0,\n  \"server_timeout_count\": 0,\n  \"timeout_rate\": 0\n}"
+            }
+          ]
         }
       ]
     },
@@ -83,8 +112,39 @@
                 "models"
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"prompt_options\": {\n    \"parallel_queries\": 0,\n    \"prompt_length\": \"string\"\n  },\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "ListTextToImageModels",
@@ -103,12 +163,45 @@
               "query": [
                 {
                   "key": "include_categories",
+                  "value": "{{query_include_categories}}",
+                  "disabled": true,
                   "description": "Include a breakdown of Elo scores by category."
                 }
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns Elo ratings for text-to-image models."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "ListImageEditingModels",
@@ -125,8 +218,39 @@
                 "image-editing"
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns Elo ratings for image-editing models."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "ListTextToSpeechModels",
@@ -143,8 +267,39 @@
                 "text-to-speech"
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns Elo ratings for text-to-speech models."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "ListTextToVideoModels",
@@ -163,12 +318,45 @@
               "query": [
                 {
                   "key": "include_categories",
+                  "value": "{{query_include_categories}}",
+                  "disabled": true,
                   "description": "Include a breakdown of Elo scores by category."
                 }
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns Elo ratings for text-to-video models."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "ListImageToVideoModels",
@@ -187,12 +375,45 @@
               "query": [
                 {
                   "key": "include_categories",
+                  "value": "{{query_include_categories}}",
+                  "disabled": true,
                   "description": "Include a breakdown of Elo scores by category."
                 }
               ]
             },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey_ArtificialAnalysisData}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            },
             "description": "Returns Elo ratings for image-to-video models."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         }
       ]
     }

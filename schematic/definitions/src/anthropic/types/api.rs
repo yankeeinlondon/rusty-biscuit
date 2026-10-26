@@ -142,6 +142,13 @@ pub struct CreateMessageBody {
     pub thinking: Option<ThinkingConfig>,
 }
 
+impl schematic_define::Registration for CreateMessageBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateMessageBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Default for CreateMessageBody {
     fn default() -> Self {
         Self {
@@ -231,6 +238,13 @@ pub struct CountTokensBody {
     pub thinking: Option<ThinkingConfig>,
 }
 
+impl schematic_define::Registration for CountTokensBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CountTokensBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl CountTokensBody {
     /// Creates a new count tokens request.
     pub fn new(model: impl Into<String>, messages: Vec<Message>) -> Self {
@@ -261,6 +275,13 @@ pub struct CountTokensResponse {
     pub cache_read_input_tokens: Option<u32>,
 }
 
+impl schematic_define::Registration for CountTokensResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CountTokensResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 // =============================================================================
 // Models API Types
 // =============================================================================
@@ -282,6 +303,13 @@ pub struct ModelInfo {
     pub model_type: String,
 }
 
+impl schematic_define::Registration for ModelInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the List Models endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
@@ -296,6 +324,13 @@ pub struct ListModelsResponse {
 
     /// Whether more results are available.
     pub has_more: bool,
+}
+
+impl schematic_define::Registration for ListModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]

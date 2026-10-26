@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use schematic_schema::unfolded_circle_integration_ws::{
-    IntegrationWsEnvelopeKind, IntegrationWsKnownMessage, IntegrationWsMessageName,
-    IntegrationWsRequestEnvelope,
+    IntegrationClientMessage, IntegrationServerMessage, IntegrationWsEnvelopeKind,
+    IntegrationWsEventEnvelope, IntegrationWsKnownMessage, IntegrationWsMessageName,
+    IntegrationWsRequestEnvelope, IntegrationWsResponseEnvelope, WsConnectionContext,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -134,6 +135,69 @@ pub fn remote_setup_abort_error(value: &Value) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// Re-encodes a decoded inbound message as the JSON value the handlers route on.
+///
+/// The host hands handlers a typed [`IntegrationClientMessage`]; the handlers
+/// route on the request/event JSON (see [`IntegrationRequest::parse`] and
+/// [`remote_setup_abort_error`]).
+///
+/// ## Errors
+///
+/// Returns an error if the message does not serialize.
+pub fn client_message_value(message: &IntegrationClientMessage) -> Result<Value, EnvelopeError> {
+    Ok(serde_json::to_value(message)?)
+}
+
+/// Converts a handler-built JSON response or event into the typed host reply.
+///
+/// The handlers build their replies as JSON; the host boundary is typed. A
+/// `kind: "event"` value becomes an [`IntegrationServerMessage::EventEnvelope`],
+/// anything else an [`IntegrationServerMessage::ResponseEnvelope`]. The
+/// envelopes' `msg_data` is a `RawValue`, which `serde_json::from_value`
+/// cannot produce, so the value is decoded from its text.
+///
+/// ## Errors
+///
+/// Returns an error if the value is not a valid response or event envelope.
+pub fn server_message(value: Value) -> Result<IntegrationServerMessage, EnvelopeError> {
+    let text = value.to_string();
+    Ok(if envelope_kind(&value) == Some("event") {
+        IntegrationServerMessage::EventEnvelope(serde_json::from_str::<IntegrationWsEventEnvelope>(
+            &text,
+        )?)
+    } else {
+        IntegrationServerMessage::ResponseEnvelope(serde_json::from_str::<
+            IntegrationWsResponseEnvelope,
+        >(&text)?)
+    })
+}
+
+/// The successful `authentication` response the Remote expects right after
+/// connecting: `{"kind":"resp","req_id":0,"msg":"authentication","code":200,"msg_data":{}}`.
+///
+/// Sent as a response envelope because the declared `Authentication` payload
+/// carries neither `req_id` nor `code`.
+#[must_use]
+pub fn authentication_response() -> IntegrationServerMessage {
+    IntegrationServerMessage::ResponseEnvelope(IntegrationWsResponseEnvelope {
+        kind: IntegrationWsEnvelopeKind::Resp,
+        req_id: 0,
+        msg: IntegrationWsMessageName::Known(IntegrationWsKnownMessage::Authentication),
+        code: 200,
+        msg_data: serde_json::value::to_raw_value(&json!({})).ok(),
+    })
+}
+
+/// The message an integration's `WsHandler::on_authenticated` sends.
+///
+/// Returns [`authentication_response`] when the upgrade checked no credential
+/// (no `UCR_INTEGRATION_TOKEN` configured) and `None` when the host verified
+/// one, matching what the host itself sent before the hook existed.
+#[must_use]
+pub fn authentication_greeting(context: &WsConnectionContext) -> Option<IntegrationServerMessage> {
+    (!context.credential_verified()).then(authentication_response)
 }
 
 fn response(req_id: u64, msg: &str, code: u16, msg_data: Option<Value>) -> Value {
@@ -273,6 +337,60 @@ mod tests {
             error,
             EnvelopeError::UnexpectedKind(IntegrationWsEnvelopeKind::Event)
         ));
+    }
+
+    #[test]
+    fn authentication_response_matches_the_former_host_envelope() {
+        let bytes = serde_json::to_string(&authentication_response()).unwrap();
+
+        assert_eq!(
+            bytes,
+            r#"{"kind":"resp","req_id":0,"msg":"authentication","code":200,"msg_data":{}}"#
+        );
+    }
+
+    #[test]
+    fn authentication_greeting_is_sent_when_no_credential_was_checked() {
+        use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationEventHub;
+
+        let context = WsConnectionContext::new(1, UnfoldedCircleIntegrationEventHub::new());
+        assert!(!context.credential_verified());
+
+        let greeting = authentication_greeting(&context).expect("greeting");
+        assert_eq!(
+            serde_json::to_value(greeting).unwrap(),
+            serde_json::to_value(authentication_response()).unwrap()
+        );
+    }
+
+    #[test]
+    fn server_message_round_trips_responses_and_events() {
+        let response = result_response(7, 404);
+        let event = device_state_event("CONNECTED");
+
+        let typed_response = server_message(response.clone()).unwrap();
+        let typed_event = server_message(event.clone()).unwrap();
+
+        assert!(matches!(
+            typed_response,
+            IntegrationServerMessage::ResponseEnvelope(_)
+        ));
+        assert_eq!(serde_json::to_value(typed_response).unwrap(), response);
+        assert!(matches!(
+            typed_event,
+            IntegrationServerMessage::EventEnvelope(_)
+        ));
+        assert_eq!(serde_json::to_value(typed_event).unwrap(), event);
+    }
+
+    #[test]
+    fn client_message_value_restores_request_json() {
+        use crate::test_fixtures::{client_message, request};
+
+        let value = request(3, "get_driver_version", json!({"a": 1}));
+        let restored = client_message_value(&client_message(value.clone())).unwrap();
+
+        assert_eq!(restored, value);
     }
 
     #[test]

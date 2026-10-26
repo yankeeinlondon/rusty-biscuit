@@ -97,6 +97,62 @@ pub fn run_import_command(options: ImportOptions, verbose: u8) -> Result<(), Gen
     Ok(())
 }
 
+/// Runs the AsyncAPI export command: one document per registered WebSocket
+/// API, or only `api` when given. A full export deletes documents no API
+/// produces; a selected one deletes nothing.
+///
+/// ## Errors
+///
+/// [`GeneratorError::ConfigError`] for an unknown API name, and the errors of
+/// [`prepare_asyncapi_output`](crate::export::asyncapi::prepare_asyncapi_output)
+/// and publication.
+pub fn run_export_asyncapi_command(
+    output: &str,
+    api: Option<&str>,
+    dry_run: bool,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    use crate::export::asyncapi::{asyncapi_documents, prepare_asyncapi_output};
+
+    let mut documents = asyncapi_documents(schematic_definitions::registry::registrations());
+    let complete = api.is_none();
+    if let Some(name) = api {
+        let known: Vec<String> = documents.iter().map(|document| document.api.name.clone()).collect();
+        documents.retain(|document| document.api.name.eq_ignore_ascii_case(name));
+        if documents.is_empty() {
+            return Err(GeneratorError::ConfigError(format!(
+                "unknown WebSocket API `{name}`; available: {}",
+                known.join(", ")
+            )));
+        }
+    }
+    let (plan, warnings) = prepare_asyncapi_output(std::path::Path::new(output), &documents, complete)?;
+    for warning in &warnings {
+        eprintln!("{} {}", "[WARN]".yellow().bold(), warning);
+    }
+    if dry_run {
+        for mutation in plan.mutations() {
+            println!("{} Would {}", "[OK]".green().bold(), mutation);
+        }
+        return Ok(());
+    }
+    let published = plan.publish()?;
+    if verbose > 0 {
+        for mutation in &published.applied {
+            println!("  {mutation}");
+        }
+    }
+    println!(
+        "{} Published {} AsyncAPI document(s) to {} ({} written, {} deleted)",
+        "[OK]".green().bold(),
+        documents.len(),
+        plan.root().display(),
+        published.written(),
+        published.deleted(),
+    );
+    Ok(())
+}
+
 /// Runs the AsyncAPI import command.
 #[allow(clippy::too_many_arguments)]
 pub fn run_import_asyncapi_command(
@@ -132,9 +188,11 @@ pub fn run_import_asyncapi_command(
 
     let result = asyncapi_import::run_import_asyncapi(&options)?;
     let warn_count = result.diagnostics.iter().filter(|d| d.is_warn()).count();
-    let error_count = result.diagnostics.iter().filter(|d| d.is_error()).count();
 
     if !dry_run {
+        for path in &result.outputs {
+            println!("  wrote {}", path.display());
+        }
         println!(
             "{} Imported '{}' (AsyncAPI): {} endpoints, {} messages, {} models",
             "[OK]".green().bold(),
@@ -154,12 +212,8 @@ pub fn run_import_asyncapi_command(
         );
     }
 
-    if warn_count > 0 || error_count > 0 {
-        println!(
-            "     {} warnings, {} errors in diagnostics",
-            warn_count.to_string().yellow(),
-            error_count.to_string().red(),
-        );
+    if warn_count > 0 {
+        println!("     {} warnings in diagnostics", warn_count.to_string().yellow());
     }
 
     Ok(())

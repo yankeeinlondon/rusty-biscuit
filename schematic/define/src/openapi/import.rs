@@ -8,10 +8,13 @@
 //! The import process converts OpenAPI 3.x specifications into Schematic's
 //! internal representation for code generation. It handles:
 //!
-//! - Security schemes → `AuthStrategy`
+//! - Root and operation `security` → `AuthStrategy`, `AuthPolicy`, and
+//!   endpoint auth overrides
 //! - Paths and operations → `Endpoint`
 //! - Component schemas → `ModelCatalog`
-//! - Parameters → `EndpointParams`
+//! - Path-item and operation parameters → `EndpointParams`
+//! - `x-schematic` extensions → the Schematic metadata standard fields cannot
+//!   carry, for the subset `schematic/docs/io/openapi-extensions.md` lists
 //!
 //! ## Examples
 //!
@@ -39,12 +42,14 @@
 //! assert_eq!(result.api.name, "PetStore");
 //! ```
 
-mod auth;
 mod builder;
 mod diagnostics;
+mod extension;
 mod mappings;
 pub mod naming;
 mod normalize;
+mod query_paths;
+mod reconcile;
 mod resolver;
 
 pub use builder::{
@@ -52,5 +57,5 @@ pub use builder::{
     OpenApiImportOptions, OpenApiImportResult,
 };
 pub use diagnostics::{DiagnosticSeverity, OpenApiDiagnostic};
-pub use normalize::clamp_numeric_bounds;
+pub use mappings::{ResponseClassification, classify_responses};
 pub use resolver::RefResolver;

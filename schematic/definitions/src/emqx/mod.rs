@@ -60,98 +60,61 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+#[cfg(test)]
+use schematic_define::ResponseShape;
+use crate::registry::assemble_module_group;
+use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+    AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
     RestMethod,
-    pagination::{Collection, PaginationException},
 };
 
-/// Creates a schema registry containing all EMQX response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the EMQX API.
-/// All response types used by both the Basic and Bearer API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::emqx::{openapi_registry, define_emqx_basic_api, define_emqx_bearer_api};
-///
-/// let registry = openapi_registry();
-/// let basic_api = define_emqx_basic_api();
-/// let bearer_api = define_emqx_bearer_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("NodeInfo").is_some());
-/// assert!(registry.get("ListClientsResponse").is_some());
-///
-/// // Registry is complete for both APIs
-/// assert!(registry.validate_completeness(&basic_api).is_ok());
-/// assert!(registry.validate_completeness(&bearer_api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        // Authentication types (Bearer API only)
-        .register::<LoginBody>("LoginBody")
-        .register::<LoginResponse>("LoginResponse")
-        // Publishing types
-        .register::<SubscribeBody>("SubscribeBody")
-        .register::<PublishBody>("PublishBody")
-        .register::<PublishBatchBody>("PublishBatchBody")
-        // Rules Engine types
-        .register::<CreateRuleBody>("CreateRuleBody")
-        .register::<TestRuleBody>("TestRuleBody")
-        // Authentication types
-        .register::<CreateAuthUserBody>("CreateAuthUserBody")
-        // Banned types
-        .register::<CreateBanBody>("CreateBanBody")
-        // Node & Cluster types
-        .register::<NodeInfo>("NodeInfo")
-        .register::<ListNodesResponse>("ListNodesResponse")
-        .register::<ClusterStatus>("ClusterStatus")
-        // Client types
-        .register::<ClientInfo>("ClientInfo")
-        .register::<ListClientsResponse>("ListClientsResponse")
-        // Subscription types
-        .register::<SubscriptionInfo>("SubscriptionInfo")
-        .register::<ListSubscriptionsResponse>("ListSubscriptionsResponse")
-        // Rules types
-        .register::<RuleInfo>("RuleInfo")
-        .register::<RuleAction>("RuleAction")
-        .register::<ListRulesResponse>("ListRulesResponse")
-        .register::<TestRuleResponse>("TestRuleResponse")
-        // Authentication types
-        .register::<AuthUser>("AuthUser")
-        .register::<Vec<AuthUser>>("Vec<AuthUser>")
-        .register::<AuthenticatorInfo>("AuthenticatorInfo")
-        .register::<ListAuthenticatorsResponse>("ListAuthenticatorsResponse")
-        // Authorization types
-        .register::<AuthzSourceInfo>("AuthzSourceInfo")
-        .register::<ListAuthzSourcesResponse>("ListAuthzSourcesResponse")
-        // Listener types
-        .register::<ListenerInfo>("ListenerInfo")
-        .register::<ListListenersResponse>("ListListenersResponse")
-        // Metrics types
-        .register::<MetricsInfo>("MetricsInfo")
-        .register::<ListMetricsResponse>("ListMetricsResponse")
-        // Stats types
-        .register::<StatsInfo>("StatsInfo")
-        .register::<ListStatsResponse>("ListStatsResponse")
-        // Topic types
-        .register::<TopicInfo>("TopicInfo")
-        .register::<ListTopicsResponse>("ListTopicsResponse")
-        // Retained message types
-        .register::<RetainedMessage>("RetainedMessage")
-        .register::<ListRetainedResponse>("ListRetainedResponse")
-        // Alarm types
-        .register::<AlarmInfo>("AlarmInfo")
-        .register::<ListAlarmsResponse>("ListAlarmsResponse")
-        // Banned types
-        .register::<BanInfo>("BanInfo")
-        .register::<ListBannedResponse>("ListBannedResponse")
-        // Common types
-        .register::<PaginationMeta>("PaginationMeta")
+/// Assemble the APIs and ordered schemas in one destination context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::emqx", |ctx| {
+        ctx.register::<LoginBody>()?;
+        ctx.register::<LoginResponse>()?;
+        ctx.register::<SubscribeBody>()?;
+        ctx.register::<PublishBody>()?;
+        ctx.register::<PublishBatchBody>()?;
+        ctx.register::<CreateRuleBody>()?;
+        ctx.register::<TestRuleBody>()?;
+        ctx.register::<CreateAuthUserBody>()?;
+        ctx.register::<CreateBanBody>()?;
+        ctx.register::<NodeInfo>()?;
+        ctx.register::<ListNodesResponse>()?;
+        ctx.register::<ClusterStatus>()?;
+        ctx.register::<ClientInfo>()?;
+        ctx.register::<ListClientsResponse>()?;
+        ctx.register::<SubscriptionInfo>()?;
+        ctx.register::<ListSubscriptionsResponse>()?;
+        ctx.register::<RuleInfo>()?;
+        ctx.register::<RuleAction>()?;
+        ctx.register::<ListRulesResponse>()?;
+        ctx.register::<TestRuleResponse>()?;
+        ctx.register::<AuthUser>()?;
+        ctx.register::<Vec<AuthUser>>()?;
+        ctx.register::<AuthenticatorInfo>()?;
+        ctx.register::<ListAuthenticatorsResponse>()?;
+        ctx.register::<AuthzSourceInfo>()?;
+        ctx.register::<ListAuthzSourcesResponse>()?;
+        ctx.register::<ListenerInfo>()?;
+        ctx.register::<ListListenersResponse>()?;
+        ctx.register::<MetricsInfo>()?;
+        ctx.register::<ListMetricsResponse>()?;
+        ctx.register::<StatsInfo>()?;
+        ctx.register::<ListStatsResponse>()?;
+        ctx.register::<TopicInfo>()?;
+        ctx.register::<ListTopicsResponse>()?;
+        ctx.register::<RetainedMessage>()?;
+        ctx.register::<ListRetainedResponse>()?;
+        ctx.register::<AlarmInfo>()?;
+        ctx.register::<ListAlarmsResponse>()?;
+        ctx.register::<BanInfo>()?;
+        ctx.register::<ListBannedResponse>()?;
+        ctx.register::<PaginationMeta>()?;
+        Ok(vec![build_emqx_basic_api(ctx)?, build_emqx_bearer_api(ctx)?])
+    })
 }
 
 /// Creates the EMQX REST API definition with Basic Authentication.
@@ -182,31 +145,27 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert!(api.endpoints.len() >= 30);
 /// ```
 pub fn define_emqx_basic_api() -> RestApi {
-    RestApi {
-        name: "EmqxBasic".to_string(),
-        description: "EMQX Broker REST API with Basic Authentication (API Key + Secret)"
-            .to_string(),
-        base_url: "http://localhost:18083/api/v5".to_string(),
-        docs_url: Some("https://docs.emqx.com/en/emqx/latest/admin/api.html".to_string()),
-        auth: AuthStrategy::Basic,
-        auth_policy: None,
-        env_auth: vec!["EMQX_API_SECRET".to_string()],
-        env_username: Some("EMQX_API_KEY".to_string()),
-        headers: vec![],
-        endpoints: build_common_endpoints(),
-        module_path: Some("emqx".to_string()),
-        request_suffix: Some("BasicRequest".to_string()),
-        version: None,
-        env_mapping: Some(EnvMapping {
+    module_group().expect("valid shipped API").remove(0)
+}
+
+fn build_emqx_basic_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    {
+        let endpoints = build_common_endpoints(ctx)?;
+        RestApi::builder(ctx, "EmqxBasic", "http://localhost:18083/api/v5")
+            .describes("EMQX Broker REST API with Basic Authentication (API Key + Secret)"
+            )
+            .basic_env("EMQX_API_KEY", ["EMQX_API_SECRET"])
+            .env_mapping(EnvMapping {
             basic_user: Some(EnvList::single("EMQX_API_KEY")),
             basic_pass: Some(EnvList::single("EMQX_API_SECRET")),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: common_lists(),
+        })
+            .docs_url("https://docs.emqx.com/en/emqx/latest/admin/api.html".to_string())
+            .module_path("emqx".to_string())
+            .request_suffix("BasicRequest".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
@@ -231,92 +190,52 @@ pub fn define_emqx_basic_api() -> RestApi {
 /// assert!(api.endpoints.len() > 30);
 /// ```
 pub fn define_emqx_bearer_api() -> RestApi {
+    module_group().expect("valid shipped API").remove(1)
+}
+
+fn build_emqx_bearer_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
     let mut endpoints = vec![
         // Login endpoint (unique to Bearer API)
-        Endpoint {
-            id: "Login".to_string(),
-            method: RestMethod::Post,
-            path: "/login".to_string(),
-            description: "Authenticate with username/password and receive a JWT token".to_string(),
-            request: Some(ApiRequest::json_type("LoginBody")),
-            response: ApiResponse::json_type("LoginResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("Login", RestMethod::Post, "/login")
+            .describes("Authenticate with username/password and receive a JWT token")
+            .request_json::<LoginBody>(ctx)
+            .returns_json::<LoginResponse>(ctx)
+            .build()?,
         // Logout endpoint
-        Endpoint {
-            id: "Logout".to_string(),
-            method: RestMethod::Post,
-            path: "/logout".to_string(),
-            description: "Invalidate the current bearer token".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("Logout", RestMethod::Post, "/logout")
+            .describes("Invalidate the current bearer token")
+            .returns_empty()
+            .build()?,
     ];
-    endpoints.extend(build_common_endpoints());
+    endpoints.extend(build_common_endpoints(ctx)?);
 
-    RestApi {
-        name: "EmqxBearer".to_string(),
-        description: "EMQX Broker REST API with Bearer Token authentication (JWT)".to_string(),
-        base_url: "http://localhost:18083/api/v5".to_string(),
-        docs_url: Some("https://docs.emqx.com/en/emqx/latest/admin/api.html".to_string()),
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec!["EMQX_TOKEN".to_string()],
-        env_username: None,
-        headers: vec![],
-        endpoints,
-        module_path: Some("emqx".to_string()),
-        request_suffix: Some("BearerRequest".to_string()),
-        version: None,
-        env_mapping: Some(EnvMapping {
+    {
+        RestApi::builder(ctx, "EmqxBearer", "http://localhost:18083/api/v5")
+            .describes("EMQX Broker REST API with Bearer Token authentication (JWT)")
+            .authentication(AuthStrategy::BearerToken { header: None }, vec!["EMQX_TOKEN".to_string()])
+            .env_mapping(EnvMapping {
             bearer_token: Some(EnvList::single("EMQX_TOKEN")),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: common_lists(),
+        })
+            .docs_url("https://docs.emqx.com/en/emqx/latest/admin/api.html".to_string())
+            .module_path("emqx".to_string())
+            .request_suffix("BearerRequest".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
-/// The `{data, meta}` lists shared by both variants, left unpaginated.
-///
-/// Unverified: they are believed to page by `page`/`limit` and report
-/// `meta.hasnext`, but the definitions declare no request inputs and no source
-/// confirms them.
-fn common_lists() -> Vec<PaginationException> {
-    [
-        ("ListAlarms", "AlarmInfo"),
-        ("ListClients", "ClientInfo"),
-        ("ListSubscriptions", "SubscriptionInfo"),
-        ("ListTopics", "TopicInfo"),
-        ("ListRetained", "RetainedMessage"),
-        ("ListRules", "RuleInfo"),
-        ("ListBanned", "BanInfo"),
-    ]
-    .into_iter()
-    .map(|(endpoint, item)| {
-        PaginationException::new(endpoint, Collection::at("data").item_type(item).unpaginated())
-    })
-    .collect()
-}
-
 /// Build the common endpoints shared by both Basic and Bearer API variants.
-fn build_common_endpoints() -> Vec<Endpoint> {
+fn build_common_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
     let mut endpoints = Vec::new();
-    endpoints.extend(endpoints::monitoring_endpoints());
-    endpoints.extend(endpoints::client_endpoints());
-    endpoints.extend(endpoints::messaging_endpoints());
-    endpoints.extend(endpoints::rules_endpoints());
-    endpoints.extend(endpoints::auth_endpoints());
-    endpoints.extend(endpoints::banned_endpoints());
-    endpoints
+    endpoints.extend(endpoints::monitoring_endpoints(ctx)?);
+    endpoints.extend(endpoints::client_endpoints(ctx)?);
+    endpoints.extend(endpoints::messaging_endpoints(ctx)?);
+    endpoints.extend(endpoints::rules_endpoints(ctx)?);
+    endpoints.extend(endpoints::auth_endpoints(ctx)?);
+    endpoints.extend(endpoints::banned_endpoints(ctx)?);
+    Ok(endpoints)
 }
 
 #[cfg(test)]
@@ -340,9 +259,8 @@ mod tests {
     fn basic_api_uses_basic_auth() {
         let api = define_emqx_basic_api();
 
-        assert!(matches!(api.auth, AuthStrategy::Basic));
-        assert!(api.env_auth.contains(&"EMQX_API_SECRET".to_string()));
-        assert_eq!(api.env_username, Some("EMQX_API_KEY".to_string()));
+        assert_eq!(api.auth, AuthStrategy::Basic { username_env: EnvList::single("EMQX_API_KEY"), password_env: EnvList::single("EMQX_API_SECRET") });
+        assert!(api.env_auth.is_empty());
     }
 
     #[test]
@@ -378,7 +296,6 @@ mod tests {
 
         assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
         assert!(api.env_auth.contains(&"EMQX_TOKEN".to_string()));
-        assert!(api.env_username.is_none());
     }
 
     #[test]
@@ -402,7 +319,7 @@ mod tests {
         let logout = logout.unwrap();
         assert_eq!(logout.method, RestMethod::Post);
         assert_eq!(logout.path, "/logout");
-        assert!(matches!(logout.response, ApiResponse::Empty));
+        assert!(matches!(logout.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -483,7 +400,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Delete);
         assert_eq!(endpoint.path, "/clients/{clientid}");
-        assert!(matches!(endpoint.response, ApiResponse::Empty));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Empty));
     }
 
     #[test]
@@ -654,7 +571,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/prometheus/stats");
-        assert!(matches!(endpoint.response, ApiResponse::Text));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Text));
     }
 
     // =========================================================================
@@ -766,4 +683,25 @@ mod tests {
         assert_eq!(basic.request_suffix, Some("BasicRequest".to_string()));
         assert_eq!(bearer.request_suffix, Some("BearerRequest".to_string()));
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_inline_components() {
+        let group = module_group().unwrap();
+        let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
+        let expected = ["ListNodes", "GetNode", "GetCluster", "ListListeners", "GetListener", "ListMetrics", "ListStats", "GetPrometheus", "ListAlarms", "ListClients", "GetClient", "DisconnectClient", "SubscribeClient", "UnsubscribeClient", "ListSubscriptions", "Publish", "PublishBulk", "ListTopics", "ListRetained", "GetRetained", "DeleteRetained", "ListRules", "CreateRule", "GetRule", "UpdateRule", "DeleteRule", "TestRule", "ListAuthenticators", "GetAuthenticator", "ListAuthUsers", "CreateAuthUser", "DeleteAuthUser", "ListAuthzSources", "ListBanned", "CreateBan", "DeleteBan"];
+        assert_eq!(ids(&group[0]), expected);
+        let bearer = [vec!["Login", "Logout"], expected.to_vec()].concat();
+        assert_eq!(ids(&group[1]), bearer);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
+        }
+        assert!(group[0].component("Vec<AuthUser>").is_none(), "container component must be inline");
+        for api in &group {
+            for id in ["ListAlarms", "ListClients", "ListSubscriptions", "ListTopics", "ListRetained", "ListRules", "ListBanned"] {
+                let endpoint = api.endpoints.iter().find(|ep| ep.id == id).unwrap();
+                assert!(endpoint.pagination.is_some(), "{id} retains its explicit collection");
+            }
+        }
+    }
+
 }

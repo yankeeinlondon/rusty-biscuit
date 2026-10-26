@@ -19,6 +19,13 @@ pub struct Branch {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for Branch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Branch");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,6 +10,7 @@ use openapiv3::{OpenAPI, Parameter, ReferenceOr, Response, Schema};
 
 use super::MAX_NESTING_DEPTH;
 use super::diagnostics::OpenApiDiagnostic;
+use super::normalize::{NO_SOURCE_KEYWORDS, SourceKeywords};
 use crate::models::TypeRef;
 
 /// Resolver for OpenAPI `$ref` references.
@@ -36,6 +37,11 @@ pub struct RefResolver<'a> {
     visited: RefCell<HashSet<String>>,
     /// Current nesting depth for depth limiting.
     depth: RefCell<usize>,
+    /// Exact source values of the keywords `openapiv3` narrows or drops.
+    keywords: &'a SourceKeywords,
+    /// The first value rule found malformed or contradictory, as its
+    /// keyword's pointer and the reason; it fails the import.
+    rejected: RefCell<Option<(String, String)>>,
 }
 
 impl<'a> RefResolver<'a> {
@@ -53,7 +59,46 @@ impl<'a> RefResolver<'a> {
             doc,
             visited: RefCell::new(HashSet::new()),
             depth: RefCell::new(0),
+            keywords: &NO_SOURCE_KEYWORDS,
+            rejected: RefCell::new(None),
         }
+    }
+
+    /// A resolver whose [`Self::source_schema`] restores `keywords`.
+    pub(crate) fn with_source_keywords(doc: &'a OpenAPI, keywords: &'a SourceKeywords) -> Self {
+        Self { keywords, ..Self::new(doc) }
+    }
+
+    /// The schema `schema`, found at the RFC 6901 `pointer`, as JSON with its
+    /// exact source numbers and `const` values restored and OpenAPI 3.0
+    /// Boolean exclusive bounds in numeric form. Read constraint values
+    /// from this, never from `openapiv3`'s narrowed numbers.
+    pub(crate) fn source_schema(&self, schema: &impl serde::Serialize, pointer: &str) -> serde_json::Value {
+        self.keywords.source_schema(schema, pointer)
+    }
+
+    /// The source keywords `openapiv3` drops that sit directly in the
+    /// schema object at `pointer` (see [`SourceKeywords::dropped_at`]).
+    pub(crate) fn dropped_keywords(&self, pointer: &str) -> Vec<&'static str> {
+        self.keywords.dropped_at(pointer)
+    }
+
+    /// Records the value rule at the keyword pointer `pointer` as
+    /// malformed or contradictory; the first one recorded fails the import
+    /// (see [`Self::take_rejection`]).
+    pub(crate) fn reject(&self, pointer: String, reason: String) {
+        self.rejected.borrow_mut().get_or_insert((pointer, reason));
+    }
+
+    /// The first rule [`Self::reject`] recorded, as the import error
+    /// located at it.
+    pub(crate) fn take_rejection(&self) -> Option<super::super::error::OpenApiError> {
+        self.rejected.borrow_mut().take().map(|(path, message)| super::super::error::OpenApiError::Validation { path, message })
+    }
+
+    /// The document this resolver reads.
+    pub(crate) fn document(&self) -> &'a OpenAPI {
+        self.doc
     }
 
     /// Resolves a schema reference to its underlying schema.

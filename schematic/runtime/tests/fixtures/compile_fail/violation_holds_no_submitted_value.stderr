@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+ --> tests/fixtures/compile_fail/violation_holds_no_submitted_value.rs
+  |
+  |     let _violation = Violation::new(Vec::new(), Keyword::Enum, submitted);
+  |                                 ^^^ private associated function
+  |
+ ::: src/validate/violation.rs
+  |
+  |     pub(crate) fn new(path: Vec<PathSegment>, keyword: Keyword, reason: String) -> Self {
+  |     ----------------------------------------------------------------------------------- private associated function defined here

@@ -28,26 +28,38 @@
 //! - `ListWorkflowRuns` - List workflow runs for a repository
 //! - `ListOrgRepos` - List repositories for an organization
 //!
+//! ## Rate limit
+//!
+//! Response headers reporting the rate limit (documentation only; the client does not act on them):
+//!
+//! - limit: `x-ratelimit-limit`
+//! - remaining: `x-ratelimit-remaining`
+//! - reset: `x-ratelimit-reset`, as Unix time in seconds
+//! - retry after: `retry-after`
+//!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::github::GetRepositoryRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = GitHub::new();
-//!     let data = client.get_repository("owner", "repo").await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = GitHub::new();
+//! let data = client.get_repository("owner", "repo").await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.get_repository("owner", "repo").full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(GetRepositoryRequest::new("owner", "repo")).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.get_repository("owner", "repo").full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = GitHub::new().base_url("https://staging.example.com/v1");

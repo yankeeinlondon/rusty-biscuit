@@ -7,15 +7,31 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
-use schematic_define::{EndpointParams, ParamDef, QueryParamType};
+use schematic_define::{EndpointParams, ParamDef, QueryParamType, RestApi, TypeRef};
 
-/// Renders a schema type name as Rust type tokens.
+use super::param_enums::param_enum_name;
+pub use super::query_params::{QueryShape, query_shape};
+
+/// The Rust spelling of a JSON body reference, resolved through the API's
+/// own [`RestApi::schemas`].
 ///
-/// Names arriving from an imported spec are not always bare identifiers: a
-/// schema with no `$ref` maps to the path `serde_json::Value`, and generic
-/// spellings such as `Vec<Model>` also occur. Both are valid input to
-/// [`syn::parse_str`] but panic `format_ident!`, so every site that turns a
-/// `Schema::type_name` into tokens must go through here.
+/// A reference that does not resolve is spelled as a `compile_error!` type
+/// naming it, so generated code that bypassed validation fails to compile at
+/// that type instead of silently naming some other type.
+pub fn json_type_name(api: &RestApi, reference: &TypeRef) -> String {
+    api.rust_type(reference).unwrap_or_else(|| {
+        let message = format!("unresolved schema reference {reference:?} in API {}", api.name);
+        format!("::core::compile_error!({message:?})")
+    })
+}
+
+/// Renders a Rust type spelling as tokens.
+///
+/// Spellings are not always bare identifiers: component paths are
+/// qualified (`crate::types::Model`), free-form JSON is
+/// `::serde_json::Value`, and wrappers are generic (`::std::vec::Vec<..>`).
+/// All are valid input to [`syn::parse_str`] but panic `format_ident!`, so
+/// every site that turns a type spelling into tokens must go through here.
 pub fn type_name_to_tokens(type_name: &str) -> TokenStream {
     match syn::parse_str::<syn::Type>(type_name) {
         Ok(ty) => quote! { #ty },
@@ -69,38 +85,129 @@ pub fn to_snake_case(s: &str) -> String {
 /// Information about a query parameter for code generation.
 ///
 /// Header and cookie parameters use it too: they share the query type
-/// mapping and the `Option<T>` field and `with_*` builder shape.
+/// mapping and the `Option<T>` field and `with_*` builder shape. Only query
+/// parameters carry a [`QueryShape`] and can be required.
 #[derive(Debug, Clone)]
 pub struct QueryParamInfo {
     pub name: String,
+    /// Explicit Rust spelling; the query/header/cookie key stays `name`.
+    pub rust_name: Option<String>,
     pub description: Option<String>,
     pub param_type: QueryParamType,
+    /// Documentation only: the field and setter docs say "Deprecated.".
+    pub deprecated: bool,
+    /// A required query parameter: a `T` field and a `new()` argument.
+    /// Always `false` for header and cookie parameters.
+    pub required: bool,
+    /// The Rust type and wire form of a query parameter; `None` for header
+    /// and cookie parameters.
+    pub shape: Option<QueryShape>,
+    /// The parameter's value rules, checked before it is encoded.
+    pub constraints: Option<Box<schematic_define::constraints::Constraints>>,
 }
 
-/// Extracts query parameters from an endpoint's params field.
-pub fn extract_query_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
-    params.as_ref().map(|p| param_infos(&p.query)).unwrap_or_default()
+impl QueryParamInfo {
+    pub fn field_name(&self) -> String {
+        self.rust_name.clone().unwrap_or_else(|| param_field_name(&self.name))
+    }
+
+    /// The doc attributes a deprecated parameter's field and setter append
+    /// after their summary; none otherwise.
+    pub fn deprecation_doc(&self) -> TokenStream {
+        if self.deprecated {
+            let line = format!(" {}", super::endpoint_docs::DEPRECATED_LINE);
+            quote! { #[doc = ""] #[doc = #line] }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// The doc attributes labelling the parameter's value rules, after a
+    /// blank line; none without rules.
+    pub fn rules_doc(&self) -> TokenStream {
+        let lines = self.constraints.as_deref().map(crate::codegen::value_rules::rule_doc_lines).unwrap_or_default();
+        if lines.is_empty() {
+            return quote! {};
+        }
+        quote! { #[doc = ""] #(#[doc = #lines])* }
+    }
+
+    pub fn serde_rename(&self) -> TokenStream {
+        let wire = &self.name;
+        if self.field_name() == *wire { quote! {} } else { quote! { #[serde(rename = #wire)] } }
+    }
+
+    /// The value type: the field is this, or `Option` of it when optional,
+    /// and the `with_*` setter takes it.
+    pub fn rust_type(&self) -> TokenStream {
+        match &self.shape {
+            Some(shape) => shape.rust_type(),
+            None => query_param_type_to_rust_type(&self.param_type),
+        }
+    }
+
+    /// The `new()` argument type of a required parameter: a string takes
+    /// anything `Into<String>`.
+    pub fn arg_type(&self) -> TokenStream {
+        match &self.shape {
+            Some(shape) if shape.is_text() => quote! { impl Into<String> },
+            _ => self.rust_type(),
+        }
+    }
+
+    /// The field initializer `new()` writes from the argument of the same
+    /// name.
+    pub fn arg_init(&self) -> TokenStream {
+        let name = format_ident!("{}", self.field_name());
+        match &self.shape {
+            Some(shape) if shape.is_text() => quote! { #name: #name.into() },
+            _ => quote! { #name },
+        }
+    }
+}
+
+/// The query parameters of `params` that the Rust client sends, for the
+/// request type `request_type`, which names their enums.
+///
+/// A parameter whose type, style, and `explode` have no Rust serialization
+/// is left out; validation reports it (an error when it is required).
+pub fn extract_query_params(params: &Option<EndpointParams>, request_type: &str) -> Vec<QueryParamInfo> {
+    let Some(params) = params else {
+        return Vec::new();
+    };
+    params
+        .query
+        .iter()
+        .filter_map(|param| {
+            let mut info = param_info(param);
+            info.shape = Some(query_shape(param, &param_enum_name(request_type, &info.field_name())).ok()?);
+            info.required = param.required;
+            Some(info)
+        })
+        .collect()
 }
 
 /// Extracts header parameters from an endpoint's params field.
 pub fn extract_header_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
-    params.as_ref().map(|p| param_infos(&p.header)).unwrap_or_default()
+    params.as_ref().map(|p| p.header.iter().map(param_info).collect()).unwrap_or_default()
 }
 
 /// Extracts cookie parameters from an endpoint's params field.
 pub fn extract_cookie_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
-    params.as_ref().map(|p| param_infos(&p.cookie)).unwrap_or_default()
+    params.as_ref().map(|p| p.cookie.iter().map(param_info).collect()).unwrap_or_default()
 }
 
-fn param_infos(params: &[ParamDef]) -> Vec<QueryParamInfo> {
-    params
-        .iter()
-        .map(|p| QueryParamInfo {
-            name: p.name.clone(),
-            description: p.description.clone(),
-            param_type: p.param_type.clone(),
-        })
-        .collect()
+fn param_info(p: &ParamDef) -> QueryParamInfo {
+    QueryParamInfo {
+        name: p.name.clone(),
+        rust_name: p.rust_name.clone(),
+        description: p.description.clone(),
+        param_type: p.param_type.clone(),
+        deprecated: p.deprecated,
+        required: false,
+        shape: None,
+        constraints: p.constraints.clone(),
+    }
 }
 
 /// Maps QueryParamType to a Rust type token stream.
@@ -125,9 +232,9 @@ pub fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream
 /// `path` is the endpoint path with path parameters substituted (and
 /// percent-encoded unless written `{+name}`); any query written into the path
 /// template stays in it untouched. `query` holds the declared query parameters
-/// as unencoded `(name, value)` pairs in declaration order, one pair per array
-/// element. The runtime client percent-encodes them once, when it builds the
-/// URL.
+/// as unencoded `(name, value)` pairs in declaration order (see
+/// [`generate_query_binding`]). The runtime client percent-encodes them once,
+/// when it builds the URL.
 pub fn generate_path_format(
     path: &str,
     path_params: &[&str],
@@ -160,38 +267,43 @@ pub fn generate_path_format(
         quote! { let path = format!(#format_str, #(#format_args),*); }
     };
 
-    let query = if query_params.is_empty() {
-        quote! { let query: Vec<(String, String)> = Vec::new(); }
-    } else {
-        let query_param_collectors = query_params.iter().map(|qp| {
-            let field_name = format_ident!("{}", param_field_name(&qp.name));
-            let param_name = &qp.name;
-
-            match &qp.param_type {
-                QueryParamType::Array(_) => quote! {
-                    if let Some(ref values) = self.#field_name {
-                        for value in values {
-                            query.push((#param_name.to_string(), value.to_string()));
-                        }
-                    }
-                },
-                _ => quote! {
-                    if let Some(ref value) = self.#field_name {
-                        query.push((#param_name.to_string(), value.to_string()));
-                    }
-                },
-            }
-        });
-
-        quote! {
-            let mut query: Vec<(String, String)> = Vec::new();
-            #(#query_param_collectors)*
-        }
-    };
+    let query = generate_query_binding(query_params);
 
     quote! {
         #base_path
         #query
+    }
+}
+
+/// Generates the statement that binds `query` inside `into_parts`: the
+/// declared query parameters as unencoded `(name, value)` pairs in
+/// declaration order, in each parameter's wire form (see [`QueryShape`]).
+pub fn generate_query_binding(query_params: &[QueryParamInfo]) -> TokenStream {
+    if query_params.is_empty() {
+        quote! { let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new(); }
+    } else {
+        let query_param_collectors = query_params.iter().map(|qp| {
+            let field_name = format_ident!("{}", qp.field_name());
+            let shape = qp.shape.as_ref().expect("query parameters carry a shape");
+            let push = shape.push_statements(&qp.name);
+            if qp.required {
+                quote! {
+                    let value = &self.#field_name;
+                    #push
+                }
+            } else {
+                quote! {
+                    if let Some(ref value) = self.#field_name {
+                        #push
+                    }
+                }
+            }
+        });
+
+        quote! {
+            let mut query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
+            #(#query_param_collectors)*
+        }
     }
 }
 

@@ -19,6 +19,56 @@
       "key": "password",
       "value": "",
       "description": "Password for Basic authentication"
+    },
+    {
+      "key": "path_workspace",
+      "value": "",
+      "description": "Value of the `workspace` path parameter"
+    },
+    {
+      "key": "path_repo_slug",
+      "value": "",
+      "description": "Value of the `repo_slug` path parameter"
+    },
+    {
+      "key": "path_commit",
+      "value": "",
+      "description": "Value of the `commit` path parameter"
+    },
+    {
+      "key": "path_path",
+      "value": "",
+      "description": "Value of the `path` path parameter"
+    },
+    {
+      "key": "query_page",
+      "value": "",
+      "description": "Value of the `page` query parameter"
+    },
+    {
+      "key": "query_pagelen",
+      "value": "",
+      "description": "Value of the `pagelen` query parameter"
+    },
+    {
+      "key": "query_state",
+      "value": "",
+      "description": "Value of the `state` query parameter"
+    },
+    {
+      "key": "path_id",
+      "value": "",
+      "description": "Value of the `id` path parameter"
+    },
+    {
+      "key": "path_name",
+      "value": "",
+      "description": "Value of the `name` path parameter"
+    },
+    {
+      "key": "path_filename",
+      "value": "",
+      "description": "Value of the `filename` path parameter"
     }
   ],
   "auth": {
@@ -55,16 +105,30 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 }
               ]
             },
             "description": "Get repository metadata including default branch and workspace info"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"created_on\": null,\n  \"description\": null,\n  \"fork_policy\": null,\n  \"full_name\": null,\n  \"has_issues\": null,\n  \"has_wiki\": null,\n  \"is_private\": false,\n  \"language\": null,\n  \"links\": null,\n  \"mainbranch\": null,\n  \"name\": null,\n  \"owner\": null,\n  \"project\": null,\n  \"size\": null,\n  \"slug\": null,\n  \"type\": null,\n  \"updated_on\": null,\n  \"uuid\": null,\n  \"workspace\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetSource",
@@ -86,34 +150,64 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "commit",
-                  "value": "<commit>"
+                  "value": "{{path_commit}}"
                 },
                 {
                   "key": "path",
-                  "value": "<path>"
+                  "value": "{{path_path}}"
                 }
               ]
             },
             "description": "Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json) — Directory",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            },
+            {
+              "name": "200 OK (application/octet-stream) — File",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "ListPullRequests",
@@ -133,30 +227,50 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 },
                 {
                   "key": "state",
+                  "value": "{{query_state}}",
+                  "disabled": true,
                   "description": "Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 }
               ]
             },
             "description": "List pull requests (all states)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetPullRequest",
@@ -177,20 +291,34 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
             "description": "Get a single pull request by ID"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"author\": null,\n  \"close_source_branch\": false,\n  \"closed_by\": null,\n  \"comment_count\": null,\n  \"created_on\": null,\n  \"description\": null,\n  \"destination\": null,\n  \"id\": null,\n  \"links\": null,\n  \"merge_commit\": null,\n  \"participants\": [],\n  \"reason\": null,\n  \"reviewers\": [],\n  \"source\": null,\n  \"state\": null,\n  \"summary\": null,\n  \"task_count\": null,\n  \"title\": null,\n  \"type\": null,\n  \"updated_on\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListPullRequestComments",
@@ -212,30 +340,48 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
             "description": "List comments on a pull request"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListIssues",
@@ -255,26 +401,44 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 }
               ]
             },
             "description": "List repository issues"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetIssue",
@@ -295,20 +459,34 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
             "description": "Get a single issue by ID"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"assignee\": null,\n  \"comment_count\": null,\n  \"component\": null,\n  \"content\": null,\n  \"created_on\": null,\n  \"edited_on\": null,\n  \"id\": null,\n  \"kind\": null,\n  \"links\": null,\n  \"milestone\": null,\n  \"priority\": null,\n  \"reporter\": null,\n  \"repository\": null,\n  \"state\": null,\n  \"title\": null,\n  \"type\": null,\n  \"updated_on\": null,\n  \"version\": null,\n  \"votes\": null,\n  \"watchers\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListIssueComments",
@@ -330,30 +508,48 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
             "description": "List comments on an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListIssueChanges",
@@ -375,30 +571,48 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "id",
-                  "value": "<id>"
+                  "value": "{{path_id}}"
                 }
               ]
             },
             "description": "List change history for an issue"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetBranch",
@@ -420,20 +634,34 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "name",
-                  "value": "<name>"
+                  "value": "{{path_name}}"
                 }
               ]
             },
             "description": "Get a single branch by name (target.hash is the branch head commit)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"links\": null,\n  \"name\": \"string\",\n  \"target\": {\n    \"hash\": null,\n    \"links\": null,\n    \"type\": null\n  }\n}"
+            }
+          ]
         },
         {
           "name": "ListTags",
@@ -454,26 +682,44 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 }
               ]
             },
             "description": "List repository tags"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetTag",
@@ -495,20 +741,34 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "name",
-                  "value": "<name>"
+                  "value": "{{path_name}}"
                 }
               ]
             },
             "description": "Get a single tag by name"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"date\": null,\n  \"links\": null,\n  \"message\": null,\n  \"name\": null,\n  \"tagger\": null,\n  \"target\": null,\n  \"type\": null\n}"
+            }
+          ]
         },
         {
           "name": "ListDownloads",
@@ -528,26 +788,44 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 }
               ]
             },
             "description": "List repository downloads (release artifacts)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         },
         {
           "name": "GetDownload",
@@ -568,20 +846,34 @@
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 },
                 {
                   "key": "repo_slug",
-                  "value": "<repo_slug>"
+                  "value": "{{path_repo_slug}}"
                 },
                 {
                   "key": "filename",
-                  "value": "<filename>"
+                  "value": "{{path_filename}}"
                 }
               ]
             },
             "description": "Download a file from repository downloads"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "ListWorkspaceRepos",
@@ -599,22 +891,40 @@
               "query": [
                 {
                   "key": "page",
+                  "value": "{{query_page}}",
+                  "disabled": true,
                   "description": "Page number (1-indexed, default: 1)"
                 },
                 {
                   "key": "pagelen",
+                  "value": "{{query_pagelen}}",
+                  "disabled": true,
                   "description": "Items per page (default: 50, max: 100)"
                 }
               ],
               "variable": [
                 {
                   "key": "workspace",
-                  "value": "<workspace>"
+                  "value": "{{path_workspace}}"
                 }
               ]
             },
             "description": "List repositories in a workspace"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"next\": null,\n  \"page\": null,\n  \"pagelen\": null,\n  \"previous\": null,\n  \"size\": null\n}"
+            }
+          ]
         }
       ]
     }

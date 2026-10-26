@@ -517,7 +517,7 @@ async fn a_failed_open_sends_no_page_and_no_close_and_a_second_traversal_does_no
     assert_eq!(meta.status, 500);
     let incomplete = second.expect_err("already failed");
     assert!(
-        matches!(incomplete.error, Some(PagerError::AlreadyFailed { first: PagerErrorKind::Api })),
+        incomplete.error.as_ref() == Some(&error),
         "{incomplete:?}"
     );
     assert!(incomplete.items.is_empty());
