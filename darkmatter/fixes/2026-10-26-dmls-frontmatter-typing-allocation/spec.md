@@ -24,7 +24,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
-next_spec: 2026-10-25-pipeline-work-reduction
+next_spec: 2026-10-25-fix-now
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
@@ -296,10 +296,13 @@ The following stay exactly as today:
 definitions, so the shapes this walk visits contain more `$ref`s. Each
 reference is a schema position. Under this fix's memo key it is resolved
 once and borrowed by every item that reaches it, so the two changes should
-compound rather than conflict. They land independently. **Whichever lands
-second re-runs `cargo bench -p dmls --bench pipeline_work_a3`** and records
-hover and diagnostics bytes before and after in its implementation log. A
-rise means the later change undid part of the earlier one.
+compound rather than conflict. This fix lands first; it is the shared step
+that precedes both `2026-10-25-fix-now` and
+`2026-10-26-sequence-quadratic-frontmatter`. Record this fix's
+`cargo bench -p dmls --bench pipeline_work_a3` hover and diagnostics bytes in
+its implementation log. `2026-10-25-shared-acyclic-definitions`, which lands
+later, re-runs the same bench against them; a rise means it undid part of
+this fix.
 
 ## Out of scope
 

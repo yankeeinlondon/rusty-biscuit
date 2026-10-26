@@ -6,7 +6,7 @@ scope: phase 1 spike report for 2026-10-25-pipeline-work-reduction
 
 # Spike report: pipeline work reduction
 
-This report decides each Track 5 item from the spike's measurements. The raw
+This report decides each item from the spike's measurements. The raw
 data, methods, and per-item tables are in
 [spike-data-darkmatter.md](spike-data-darkmatter.md) and
 [spike-data-claudine.md](spike-data-claudine.md). This page states only what
@@ -36,7 +36,7 @@ happens next.
 ## Three findings outside the item list
 
 These matter more than any single item. Each now has its own dated fix, and
-two of them change how Track 5 should proceed.
+two of them change how this feature should proceed.
 
 ### 1. DMLS frontmatter typing clones schema shapes per entry (defect)
 
@@ -154,14 +154,19 @@ C8, D5, D6, D7, D9, D10, D11, plus finding 3), 3 still deferred (X1, X3, X4).
    follow it today: `file(eager)` checks existence "at validation time"
    (`format.rs`, `docs/topics/schemas/definition.md`). That difference is
    recorded under "Open question" below, not decided by D1.
-3. **Order as recommended:**
-   1. the two defect fixes first, in parallel;
-   2. re-run the counting benches;
-   3. the quiet-host timing pass;
-   4. Track 5 phase 2.
+3. **Order** (revised 2026-10-26, when the work was split across two
+   worktrees):
+   1. `2026-10-26-dmls-frontmatter-typing-allocation`, as a shared first
+      step;
+   2. two parallel worktrees: `2026-10-26-sequence-quadratic-frontmatter`;
+      and `2026-10-25-fix-now` → `2026-10-25-host-function-catalog-leak` →
+      `2026-10-25-schema-diagnostic-provenance` →
+      `2026-10-25-shared-acyclic-definitions`;
+   3. after both merge: re-run the counting benches and the quiet-host timing
+      pass;
+   4. phase 2 of `2026-10-25-pipeline-work-reduction`.
 
-   Tracks 1–4 are independent and may go at any time. Each spec's
-   `next_spec` frontmatter names the spec expected to follow it.
+   Each spec's `next_spec` and `depends-on` frontmatter records this order.
 
 ## Open question: when does `file(eager)` check existence?
 
@@ -181,7 +186,7 @@ The implementation today has three stages:
 Moving the existence check out of ordinary validation changes documented
 behavior. For example, `md schema validate` would stop reporting a missing
 eager file, and composition or launch would report it instead. That needs its
-own spec. It does not block Track 5.
+own spec. It does not block this feature.
 
 ## Next steps
 
@@ -194,7 +199,8 @@ own spec. It does not block Track 5.
    other worktrees), run the timing benches once, check Criterion's spread
    (more than about 5% median absolute deviation means repeat), and save
    `pipeline-work-pre`.
-4. Update the Track 5 spec with these verdicts and write the phase 2 plan.
+4. Update the `2026-10-25-pipeline-work-reduction` spec with these verdicts
+   and write the phase 2 plan.
 
 ## Tooling added by the spike
 

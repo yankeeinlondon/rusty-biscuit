@@ -25,6 +25,9 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
     next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
 human_review: true
+depends-on:
+    - 2026-10-26-sequence-quadratic-frontmatter
+    - 2026-10-25-shared-acyclic-definitions
 related:
     - 2026-10-25-pipeline-improvements
     - 2026-10-25-fix-now
@@ -251,12 +254,23 @@ The author's decisions on that report fix phase 2's scope:
 | **Closed: measured, no change** | C5, C8, D5, D6, D7, D9, D10, D11 |
 | **Still deferred** | X1, X3, X4 |
 
+This feature is the shared final step after two parallel worktrees. Both
+start from `2026-10-26-dmls-frontmatter-typing-allocation`:
+
+- `2026-10-26-sequence-quadratic-frontmatter`;
+- `2026-10-25-fix-now` → `2026-10-25-host-function-catalog-leak` →
+  `2026-10-25-schema-diagnostic-provenance` →
+  `2026-10-25-shared-acyclic-definitions`.
+
 Phase 2 starts only after:
-1. `2026-10-26-dmls-frontmatter-typing-allocation` and
-   `2026-10-26-sequence-quadratic-frontmatter` have landed. The spike found
-   both defects, and both inflate the totals this feature's shares are
-   measured against;
-2. the counting benches have been re-run and the report updated;
+1. both worktrees have merged, through
+   `2026-10-26-sequence-quadratic-frontmatter` and
+   `2026-10-25-shared-acyclic-definitions`. The two defect fixes inflate
+   the totals this feature's shares are measured against, and the
+   other specs change the schema payload, DMLS diagnostics, and the resolver
+   files this feature edits;
+2. the counting benches have been re-run on the merged code and the report
+   updated;
 3. a quiet-host timing pass has been saved as `pipeline-work-pre`.
 
 ## Phase 2: implementation

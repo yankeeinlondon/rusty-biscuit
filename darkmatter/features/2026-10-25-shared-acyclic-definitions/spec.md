@@ -24,6 +24,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
+next_spec: 2026-10-25-pipeline-work-reduction
 human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -248,11 +249,11 @@ All consumers must treat a new acyclic reference like the value it replaces:
 
   This feature adds `$ref`s to the schema shapes DMLS walks for frontmatter
   typing, the same walk `2026-10-26-dmls-frontmatter-typing-allocation`
-  fixes. The two are independent, but **whichever lands second re-runs the
+  fixes. That fix lands before this feature, so **this feature re-runs the
   DMLS edit-loop allocation bench** (`cargo bench -p dmls --bench
-  pipeline_work_a3`) and records hover and diagnostics bytes before and
-  after in its implementation log. A rise means the later change undid part
-  of the earlier one.
+  pipeline_work_a3`) before and after its own changes and records hover and
+  diagnostics bytes in its implementation log. A rise means this feature
+  undid part of that fix.
 - A document-reachable callable still fails conversion at the use's property
   path; sharing must not conceal it in a definition.
 

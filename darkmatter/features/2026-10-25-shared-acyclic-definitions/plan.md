@@ -209,11 +209,11 @@ work; this planning pass does not invent baseline values.
     keep necessary probe code out of routine correctness tests.
   - Record host OS, build mode, invocation, stage boundaries, and bytes/times so
     Phase 4 can reproduce the sample. No benchmark project or extra hosts.
-  - Inspect the current state of `2026-10-26-dmls-frontmatter-typing-allocation`.
-    If its changes are already present, capture pre-change hover and diagnostics
-    allocation bytes using `cargo bench -p dmls --bench pipeline_work_a3` now;
-    Phase 4 supplies the matched post-change run. Otherwise record that the later
-    change owns this paired benchmark obligation.
+  - `2026-10-26-dmls-frontmatter-typing-allocation` lands before this feature.
+    Capture pre-change hover and diagnostics allocation bytes with
+    `cargo bench -p dmls --bench pipeline_work_a3` now; Phase 4 supplies the
+    matched post-change run. If that fix is unexpectedly absent, stop: this
+    feature's branch was cut from the wrong base.
 
 **Checkpoint:** Baseline semantics, actual byte figures, cold-stage samples, and
 the DMLS landing-order obligation are recorded before implementation starts.
@@ -381,12 +381,11 @@ snapshots, Claudine budget/measurement, and docs/skills to separate owners.
   - If the result cannot yield a constant below `2_000_000`, apply Decision 8's
     stop condition and report evidence without declaring this phase complete.
     In-scope defects are fixed before concluding the target is unattainable.
-  - If this feature lands after the DMLS allocation change, run
-    `cargo bench -p dmls --bench pipeline_work_a3` for the matched post-change
-    sample and log hover/diagnostics allocation bytes beside the Phase 1 values.
-    Investigate and fix a rise caused by rebuilding expanded trees; do not add a
-    timing threshold or repeat the spike as a later routine gate. If this feature
-    lands first, record the benchmark obligation for the later change.
+  - Run `cargo bench -p dmls --bench pipeline_work_a3` for the matched
+    post-change sample and log hover/diagnostics allocation bytes beside the
+    Phase 1 values. Investigate and fix a rise caused by rebuilding expanded
+    trees; do not add a timing threshold or repeat the spike as a later
+    routine gate.
   - Remove temporary measurement scaffolding after preserving reproducible
     invocation details and results in the implementation log.
 

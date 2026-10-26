@@ -31,6 +31,8 @@ reviewed_on: 2026-10-26
 review_iterations: 0
 human_review: false
 needs_rulings: false
+depends-on:
+    - 2026-10-26-dmls-frontmatter-typing-allocation
 related:
     - 2026-10-25-pipeline-improvements
     - 2026-10-25-host-function-catalog-leak
