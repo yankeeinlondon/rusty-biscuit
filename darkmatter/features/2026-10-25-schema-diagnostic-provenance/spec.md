@@ -28,6 +28,8 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+    next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
+next_spec: 2026-10-25-shared-acyclic-definitions
 human_review: false
 related:
     - 2026-10-25-pipeline-improvements
