@@ -22,6 +22,7 @@ mod recursive_schema_editor;
 mod expression_call_diagnostics;
 mod expression_scopes;
 mod formatting_transaction;
+mod frontmatter_response_contracts;
 mod full_index_removal_guard;
 mod host_function_diagnostics;
 mod host_globals;

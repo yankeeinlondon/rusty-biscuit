@@ -179,35 +179,111 @@ fn a3_document(raw: &str) -> String {
     raw.replace("\r\n", "\n")
 }
 
-#[test]
-fn a3_hovers_are_unchanged() {
-    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+/// The hovers at `positions` of `text` (each a label and a needle with a
+/// nudge into it), as portable JSON.
+fn hovers_at(text: &str, positions: &[(&str, &str, usize)]) -> Value {
     let session = Session::new();
-    let positions = [
-        ("lifecycle verb", at(&text, "ensure_file", 2)),
-        ("expression call", at(&text, "file_exists(", 2)),
-        ("expression value of a lifecycle guard", at(&text, "!total_phases", 3)),
-        ("lifecycle guard key", at(&text, "- when:", 3)),
-        ("lifecycle then key", at(&text, "then:", 1)),
-        ("loop block key", at(&text, "\nloop:", 2)),
-        ("loop until expression", at(&text, "until: \"phase", 9)),
-        ("break reason key", at(&text, "reason:", 1)),
-        ("schema-typed key", at(&text, "\nplan:", 2)),
-        ("schema-typed expression value", at(&text, "dirname(spec)", 2)),
-        ("plain scalar value", at(&text, "yolo: true", 7)),
-        ("empty string value", at(&text, "commit_message: \"\"", 16)),
-        ("list item marker", at(&text, "- ensure_file", 0)),
-        ("comment line", at(&text, "# The implementation", 3)),
-        ("body", at(&text, "# Implement Phase", 3)),
-    ];
-    let actual = session.with_document(&text, |ctx, registry| {
+    let actual = session.with_document(text, |ctx, registry| {
         let hovers: Vec<Value> = positions
             .iter()
-            .map(|(label, offset)| json!({ "at": label, "hover": registry.hover(ctx, *offset) }))
+            .map(|(label, needle, nudge)| json!({ "at": label, "hover": registry.hover(ctx, at(text, needle, *nudge)) }))
             .collect();
         Value::Array(hovers)
     });
-    assert_golden(include_str!("../fixtures/response_contracts/a3_hovers.json"), "a3_hovers.json", &session.portable(actual));
+    session.portable(actual)
+}
+
+// The hovers are split into tests of a few positions each, so each stays
+// inside the L1 time budget on a loaded Windows runner.
+
+#[test]
+fn a3_lifecycle_value_hovers_are_unchanged() {
+    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("lifecycle verb", "ensure_file", 2),
+            ("expression call", "file_exists(", 2),
+            ("expression value of a lifecycle guard", "!total_phases", 3),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_lifecycle_value_hovers.json"),
+        "a3_lifecycle_value_hovers.json",
+        &actual,
+    );
+}
+
+#[test]
+fn a3_lifecycle_key_hovers_are_unchanged() {
+    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("lifecycle guard key", "- when:", 3),
+            ("lifecycle then key", "then:", 1),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_lifecycle_key_hovers.json"),
+        "a3_lifecycle_key_hovers.json",
+        &actual,
+    );
+}
+
+#[test]
+fn a3_loop_hovers_are_unchanged() {
+    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("loop block key", "\nloop:", 2),
+            ("loop until expression", "until: \"phase", 9),
+            ("break reason key", "reason:", 1),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_loop_hovers.json"),
+        "a3_loop_hovers.json",
+        &actual,
+    );
+}
+
+#[test]
+fn a3_property_hovers_are_unchanged() {
+    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("schema-typed key", "\nplan:", 2),
+            ("schema-typed expression value", "dirname(spec)", 2),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_property_hovers.json"),
+        "a3_property_hovers.json",
+        &actual,
+    );
+}
+
+#[test]
+fn a3_plain_and_silent_hovers_are_unchanged() {
+    let text = a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md"));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("plain scalar value", "yolo: true", 7),
+            ("empty string value", "commit_message: \"\"", 16),
+            ("list item marker", "- ensure_file", 0),
+            ("comment line", "# The implementation", 3),
+            ("body", "# Implement Phase", 3),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_plain_and_silent_hovers.json"),
+        "a3_plain_and_silent_hovers.json",
+        &actual,
+    );
 }
 
 #[test]
@@ -252,6 +328,118 @@ fn a3_diagnostics_are_unchanged() {
         include_str!("../fixtures/response_contracts/a3_diagnostics.json"),
         "a3_diagnostics.json",
         &session.portable(actual),
+    );
+}
+
+/// Stack items prepended to the A3 document's `initialize` stack: a malformed
+/// guard, an unknown verb, an undeclared read inside a verb's interpolation,
+/// an `err` read where the event has none, a guard missing its `then`, and a
+/// guard item with a blank line where a key is being authored.
+const INJECTED_INITIALIZE: &str = concat!(
+    "    - when: '1 +'\n",
+    "      then: [stop]\n",
+    "    - nope_verb: x\n",
+    "    - warn: \"{{ nope_root }}\"\n",
+    "    - when: err.kind == 'timeout'\n",
+    "      then: [stop]\n",
+    "    - when: true\n",
+    "    - when: ready_flag\n",
+    "      \n",
+    "      then: [stop]\n",
+    "    - \n",
+);
+
+/// The A3 document with lifecycle faults and authoring positions injected.
+fn faulted_a3(raw: &str) -> String {
+    let text = raw
+        .replacen("initialize:\n", &format!("initialize:\n{INJECTED_INITIALIZE}"), 1)
+        .replacen("yolo: true\n", "yolo: maybe\n\n", 1);
+    assert_ne!(text, raw, "the faults are injected");
+    text
+}
+
+/// The faulted document's diagnostics and the completions at its blank
+/// authoring positions.
+#[test]
+fn a3_lifecycle_fault_diagnostics_and_completions_are_unchanged() {
+    let text = faulted_a3(&a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md")));
+    let session = Session::new();
+    let completions = [
+        ("blank key inside a guard item", at(&text, "ready_flag\n", "ready_flag\n".len() + 6)),
+        ("blank stack item", at(&text, "    - \n", 6)),
+        ("blank top-level line", at(&text, "yolo: maybe\n\n", "yolo: maybe\n".len())),
+    ];
+    let actual = session.with_document(&text, |ctx, registry| {
+        let diagnostics = registry.diagnostics(ctx);
+        let completions: Vec<Value> = completions
+            .iter()
+            .map(|(label, offset)| {
+                let items: Vec<Value> = registry.completion(ctx, *offset).iter().map(completion_contract).collect();
+                json!({ "at": label, "items": items })
+            })
+            .collect();
+        json!({ "diagnostics": diagnostics, "completions": completions })
+    });
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_lifecycle_faults.json"),
+        "a3_lifecycle_faults.json",
+        &session.portable(actual),
+    );
+}
+
+/// Hovers on the faulted document's injected items.
+#[test]
+fn a3_fault_item_hovers_are_unchanged() {
+    let text = faulted_a3(&a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md")));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("unknown verb", "nope_verb", 2),
+            ("undeclared read in a verb interpolation", "nope_root", 2),
+            ("err read in a guard", "err.kind", 1),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_fault_item_hovers.json"),
+        "a3_fault_item_hovers.json",
+        &actual,
+    );
+}
+
+/// Hovers on the faulted document's shape faults.
+#[test]
+fn a3_fault_shape_hovers_are_unchanged() {
+    let text = faulted_a3(&a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md")));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("guard missing its then", "when: true", 2),
+            ("mistyped boolean", "yolo: maybe", 7),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_fault_shape_hovers.json"),
+        "a3_fault_shape_hovers.json",
+        &actual,
+    );
+}
+
+/// Hovers on verb and message interpolations, which the lifecycle fallback
+/// answers, with the faults injected.
+#[test]
+fn a3_fault_interpolation_hovers_are_unchanged() {
+    let text = faulted_a3(&a3_document(include_str!("../../../lib/benches/fixtures/pipeline-work/implement-plan.md")));
+    let actual = hovers_at(
+        &text,
+        &[
+            ("verb interpolation", "ensure_file: \"{{log}}\"", 17),
+            ("message interpolation", "`{{plan}}` does not provide", 4),
+        ],
+    );
+    assert_golden(
+        include_str!("../fixtures/response_contracts/a3_fault_interpolation_hovers.json"),
+        "a3_fault_interpolation_hovers.json",
+        &actual,
     );
 }
 

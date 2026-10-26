@@ -1,0 +1,192 @@
+[
+  {
+    "range": {
+      "start": {
+        "line": 154,
+        "character": 7
+      },
+      "end": {
+        "line": 154,
+        "character": 29
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_no_formatting.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 156,
+        "character": 7
+      },
+      "end": {
+        "line": 156,
+        "character": 33
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_frontmatter_edits.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 168,
+        "character": 7
+      },
+      "end": {
+        "line": 168,
+        "character": 38
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_headless-orchestration.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 203,
+        "character": 7
+      },
+      "end": {
+        "line": 203,
+        "character": 25
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_decisions.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 238,
+        "character": 7
+      },
+      "end": {
+        "line": 238,
+        "character": 32
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_input-robustness.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 245,
+        "character": 7
+      },
+      "end": {
+        "line": 245,
+        "character": 26
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_test-tiers.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 322,
+        "character": 7
+      },
+      "end": {
+        "line": 322,
+        "character": 29
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_set_spec_schema.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 387,
+        "character": 7
+      },
+      "end": {
+        "line": 387,
+        "character": 34
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_finish-before-exit.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 389,
+        "character": 7
+      },
+      "end": {
+        "line": 389,
+        "character": 26
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_test-scope.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  },
+  {
+    "range": {
+      "start": {
+        "line": 391,
+        "character": 7
+      },
+      "end": {
+        "line": 391,
+        "character": 18
+      }
+    },
+    "severity": 2,
+    "code": "dm.transclusion.broken_path",
+    "source": "darkmatter.compose",
+    "message": "broken transclusion: no file matches `../_os.md`",
+    "data": {
+      "resolution_failure": "NoMatch"
+    }
+  }
+]

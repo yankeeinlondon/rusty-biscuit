@@ -1,0 +1,40 @@
+[
+  {
+    "at": "schema-typed key",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`plan`**\n\nType: **file**\n\nRequired\n\nEager: Validates a supplied value at stabilized launch. Eager alone does not require the property: absence is allowed unless `required` is also declared. `required; eager` makes presence mandatory at launch. An eager file value or item must resolve to an existing file.\n\n\n\nthe _plan file_ which is being implemented"
+      },
+      "range": {
+        "start": {
+          "line": 15,
+          "character": 0
+        },
+        "end": {
+          "line": 15,
+          "character": 4
+        }
+      }
+    }
+  },
+  {
+    "at": "schema-typed expression value",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`plan`**\n\nType: **file**\n\nRequired\n\nEager: Validates a supplied value at stabilized launch. Eager alone does not require the property: absence is allowed unless `required` is also declared. `required; eager` makes presence mandatory at launch. An eager file value or item must resolve to an existing file.\n\n\n\nthe _plan file_ which is being implemented"
+      },
+      "range": {
+        "start": {
+          "line": 15,
+          "character": 0
+        },
+        "end": {
+          "line": 15,
+          "character": 4
+        }
+      }
+    }
+  }
+]
