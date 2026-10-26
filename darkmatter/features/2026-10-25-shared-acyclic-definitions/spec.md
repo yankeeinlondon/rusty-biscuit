@@ -23,6 +23,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+    next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
 human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -34,6 +35,7 @@ related:
     - 2026-10-29-recursive-schema-types
     - 2026-10-30-claudine-recursive-schemas
     - 2026-10-21-claudine-schemas
+    - 2026-10-26-dmls-frontmatter-typing-allocation
 ---
 
 # Share repeated structured named types as definitions
@@ -93,12 +95,15 @@ consumers interpret them.
 A named type is selected for sharing when all three conditions hold:
 
 1. Its resolved value shape is **structured**: an object (including a
-   pattern-key dictionary), an array, a tuple, or a union with at least one
-   structured arm. Arrays of primitives qualify because the array itself is
-   a container. Follow aliases to classify the shape without first building
-   a fully copied expansion. Primitive aliases such as
-   `slug: alphanumeric(allow-dashes)` and unions of only primitive arms stay
-   inlined; narrowing a use such as `slug(min(3))` remains flat and readable.
+   pattern-key dictionary), a tuple, an array whose items are structured, or
+   a union with at least one structured arm. Classify recursively: an array
+   or union arm is structured only through what it contains, so
+   `tags: string[]` and `ids: [string, number][]` are not structured, while
+   `entries: "{ name: string }[]"` is. Follow aliases to classify the shape
+   without first building a fully copied expansion. Primitive aliases such
+   as `slug: alphanumeric(allow-dashes)`, arrays of primitives, and unions of
+   only primitive arms stay inlined; narrowing a use such as `slug(min(3))`
+   or `tags(min(1))` remains flat and readable.
 2. It has **two or more distinct authored use sites**, counted as below.
 3. It is not already cyclic. Cyclic types keep their existing admission and
    reference rules.
@@ -238,6 +243,14 @@ All consumers must treat a new acyclic reference like the value it replaces:
   and definition navigation at both uses. Traversal follows only references
   needed for the current value or cursor path, without rebuilding fully
   copied trees.
+
+  This feature adds `$ref`s to the schema shapes DMLS walks for frontmatter
+  typing, the same walk `2026-10-26-dmls-frontmatter-typing-allocation`
+  fixes. The two are independent, but **whichever lands second re-runs the
+  DMLS edit-loop allocation bench** (`cargo bench -p dmls --bench
+  pipeline_work_a3`) and records hover and diagnostics bytes before and
+  after in its implementation log. A rise means the later change undid part
+  of the earlier one.
 - A document-reachable callable still fails conversion at the use's property
   path; sharing must not conceal it in a definition.
 
@@ -290,8 +303,13 @@ Measure headroom without creating a benchmark project.
   `100_000 * ceil((1.25 * M) / 100_000)`. This is a fixed integer constant,
   not a threshold recomputed from the current result during each test. It
   must be lower than the existing 2,000,000-byte budget, and all three cases
-  must pass it. If they do not, finish the resolver work within this feature
-  until the requirement holds; do not relax the formula or widen profiles.
+  must pass it. With the draft's 1.83 MB estimate, that requires `M` of at
+  most 1,520,000 bytes, a reduction of at least about 17%. If the measured
+  result cannot produce a constant below 2,000,000, **stop and bring the
+  before/after sizes and the largest remaining repeated helpers to the
+  author.** Do not extend the resolver beyond this specification, relax the
+  formula, or widen profiles to reach the target. The author decides between
+  further work and keeping the existing budget.
   Rename the test and comments so they describe the new budget.
 - Record cold resolution and validator-compilation time before and after on
   one host, using one quick matched sample for each existing case. Use a
@@ -316,19 +334,23 @@ out of routine correctness tests unless it already serves those tests.
 
 ### Automatic sharing of structured values
 
-- **Decision:** Share repeated acyclic objects, dictionaries, arrays, tuples,
-  and unions containing a structured arm. Keep primitive-only aliases and
-  callable signatures outside automatic sharing.
+- **Decision:** Share repeated acyclic objects, dictionaries, tuples, arrays
+  of structured items, and unions containing a structured arm. Keep
+  primitive-only aliases, arrays of primitives, and callable signatures
+  outside automatic sharing.
 - **Alternatives considered:**
 
   - Share every named type.
   - Require a per-type declaration.
-  - Exclude arrays.
-- **Why:** Containers cause repeated output, while primitive aliases commonly
-  carry local narrowing. Arrays are structured values already supported by
-  the definition machinery, so excluding them would leave an arbitrary gap.
+  - Share every array, including arrays of primitives.
+- **Why:** Containers of structured values cause repeated output. Primitive
+  aliases and arrays of primitives have tiny bodies, so a definition can cost
+  more bytes than inlining, and their uses commonly carry local narrowing
+  (`tags(min(1))`). One recursive rule ("structured through what it
+  contains") covers arrays and union arms alike, so no gap is arbitrary.
 - **Downsides:** A tiny structured body can cost more bytes as a definition;
-  primitive-only repetition is not reduced. No size heuristic is added.
+  primitive-only repetition, including arrays of primitives, is not reduced.
+  No size heuristic is added.
 
 ### Authored counts within one resolution
 
@@ -440,7 +462,8 @@ out of routine correctness tests unless it already serves those tests.
 - **Why:** The existing cases measure the actual effective schemas, and a
   fixed lower limit catches renewed output duplication early.
 - **Downsides:** A legitimate future schema addition may require an explicit
-  budget update. The present change must save enough to lower the constant.
+  budget update. If the change does not save enough to lower the constant,
+  the work stops for an author decision rather than growing in scope.
 
 ### Proportional measurement and verification
 
@@ -492,8 +515,11 @@ Paths name the package area and then the file within it.
 
 1. **Selection and counting.** Darkmatter unit tests prove one definition and
    two references for a repeated structured type, inlining for a single use,
-   and inlining for repeated primitives and primitive-only unions. Cover
-   objects, pattern dictionaries, arrays, tuples, structured unions, aliases,
+   and inlining for repeated primitives, arrays of primitives (including an
+   array of a primitive-only union), and primitive-only unions. Cover
+   objects, pattern dictionaries, arrays of objects, tuples, structured
+   unions, a union whose only container arm is an array of primitives
+   (inlined), aliases,
    two root sites, and two sites in one body. Prove that a repeated parent,
    a root/body revisit, an unused library declaration, and a callable-only
    reference do not inflate counts. Same-named types in separate namespaces
