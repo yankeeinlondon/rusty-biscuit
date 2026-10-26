@@ -14,6 +14,7 @@
 //! [`DocumentContext`](crate::providers::DocumentContext); no provider ever
 //! touches the YAML parser or the schema library directly.
 
+pub mod analysis;
 pub mod directives;
 pub mod doc_links;
 pub mod event_views;
@@ -53,6 +54,7 @@ pub use frontmatter::{
     FmEntry, FmEntryRole, FmPathSegment, FmScalarStyle, FmValueKind, FrontmatterAst,
     YamlParseError, format_dotted,
 };
+pub use analysis::FrontmatterAnalysis;
 pub use named_types::NamedTypeCatalog;
 pub use registry::{RegistrySummary, RootFileClass};
 pub use schema::{
@@ -131,6 +133,10 @@ pub struct DocumentOverlay {
     /// Why a standalone schema document's own named-type references do not
     /// resolve (an unknown name, contradictory reuse, or an import cycle).
     pub standalone_resolution: Option<Arc<SchemaError>>,
+    /// The shared analysis of this snapshot, the same `Arc` for every overlay
+    /// built while the document's buffer and prepared schema inputs are
+    /// unchanged. Its tree is [`ast`](Self::ast).
+    pub analysis: Arc<FrontmatterAnalysis>,
 }
 
 impl DocumentOverlay {
@@ -178,6 +184,9 @@ struct OverlayCache {
     /// invalidated by content hash, the document's context, or a change to
     /// any file it imports.
     standalone_resolution: HashMap<String, CachedStandalone>,
+    /// The current frontmatter analysis per document URI, replaced whenever
+    /// any input it was built from changes.
+    analysis: HashMap<String, Arc<FrontmatterAnalysis>>,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -225,6 +234,9 @@ struct FrontmatterSchema {
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+    /// The cache key the outcome was assembled under, or `None` when
+    /// assembly was skipped.
+    key: Option<u64>,
 }
 
 impl FrontmatterSchema {
@@ -233,6 +245,7 @@ impl FrontmatterSchema {
             outcome,
             named_types: Arc::default(),
             reference_suggestions: Arc::default(),
+            key: None,
         }
     }
 }
@@ -283,7 +296,7 @@ impl OverlayState {
     ) -> Option<DocumentOverlay> {
         self.prepare_for_document(text, path, workspace_roots, resolution);
         let timings = RequestTimings::untimed();
-        self.for_document_timed(uri, text, path, config, workspace_roots, resolution, &timings)
+        self.for_document_timed(uri, None, text, path, config, workspace_roots, resolution, &timings)
     }
 
     /// Builds the overlay for one open document from the installed trigger
@@ -295,10 +308,16 @@ impl OverlayState {
     /// installed state (none, for a document never prepared). The server
     /// therefore builds an overlay only once the registry the document needs
     /// is prepared.
+    ///
+    /// `revision` is the client's version of the buffer, which the shared
+    /// [`FrontmatterAnalysis`] is keyed on with the text: a new version starts
+    /// a new analysis even when its text is unchanged. `None` (a caller with
+    /// no versioned buffer) keys it on the text alone.
     #[allow(clippy::too_many_arguments)]
     pub fn for_document_timed(
         &self,
         uri: &Uri,
+        revision: Option<i32>,
         text: &str,
         path: &Path,
         config: &DmlsConfig,
@@ -314,7 +333,6 @@ impl OverlayState {
             let (ast, stale, parse_error) = match parse.ast {
                 Some(fresh) => {
                     let fresh = Arc::new(fresh);
-                    cache.last_good.insert(uri_key.clone(), Arc::clone(&fresh));
                     cache.last_good_text.insert(uri_key.clone(), text.to_string());
                     (Some(fresh), false, None)
                 }
@@ -330,7 +348,7 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions } =
+            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions, key: schema_key } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
                         &uri_key,
@@ -342,6 +360,34 @@ impl OverlayState {
                         timings,
                     )
                 });
+            let text_hash = xx_hash_bytes(text.as_bytes());
+            let identity = analysis::AnalysisIdentity {
+                revision,
+                text_hash,
+                stale,
+                tree_text_hash: if stale { xx_hash_bytes(schema_text.as_bytes()) } else { text_hash },
+                schema_key,
+                bundle: match &schema {
+                    SchemaOutcome::Ready(Some(bundle)) => Some(Arc::clone(bundle)),
+                    _ => None,
+                },
+                named_types: Arc::clone(&named_types),
+            };
+            let analysis = match cache.analysis.get(&uri_key) {
+                Some(current) if current.matches(&identity) => Arc::clone(current),
+                _ => {
+                    let fresh = Arc::new(FrontmatterAnalysis::new(identity, ast));
+                    cache.analysis.insert(uri_key.clone(), Arc::clone(&fresh));
+                    fresh
+                }
+            };
+            // A reused analysis keeps the tree it was built over, so entry
+            // indices its caches hold address the tree every consumer reads.
+            let ast = analysis.ast().cloned();
+            if !stale && let Some(tree) = &ast {
+                cache.last_good.insert(uri_key.clone(), Arc::clone(tree));
+            }
+            drop(cache);
             let mut suggestions = suggestions::inline_lints(text, ast.as_deref());
             // A stale outcome was assembled from the last-good text, whose
             // spans do not describe the current buffer.
@@ -360,6 +406,7 @@ impl OverlayState {
                 schema_authoring,
                 named_types,
                 standalone_resolution: None,
+                analysis,
             });
         }
 
@@ -383,6 +430,7 @@ impl OverlayState {
                         schema_authoring: SchemaAuthoringState::Inactive,
                         named_types: Arc::default(),
                         standalone_resolution: None,
+                        analysis: Arc::new(FrontmatterAnalysis::detached()),
                     });
                 }
                 Ok(Some(_)) => {
@@ -405,6 +453,7 @@ impl OverlayState {
                             schema_authoring: SchemaAuthoringState::Inactive,
                             named_types: Arc::default(),
                             standalone_resolution: None,
+                            analysis: Arc::new(FrontmatterAnalysis::detached()),
                         });
                     }
                 }
@@ -453,6 +502,7 @@ impl OverlayState {
                     },
                     named_types: resolved.named_types,
                     standalone_resolution: resolved.error,
+                    analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -501,6 +551,7 @@ impl OverlayState {
                     },
                     named_types: Arc::default(),
                     standalone_resolution: None,
+                    analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
         }
@@ -516,6 +567,7 @@ impl OverlayState {
         cache.standalone_last_good.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
         cache.standalone_resolution.remove(uri.as_str());
+        cache.analysis.remove(uri.as_str());
     }
 
     /// The published warning for trigger file `path`, when a prepared
@@ -805,6 +857,7 @@ impl OverlayCache {
                 outcome: cached.outcome.clone(),
                 named_types: Arc::clone(&cached.named_types),
                 reference_suggestions: Arc::clone(&cached.reference_suggestions),
+                key: Some(key),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -842,6 +895,7 @@ impl OverlayCache {
             outcome,
             named_types,
             reference_suggestions,
+            key: Some(key),
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -2115,7 +2169,7 @@ mod tests {
         let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
         let build = || {
             state
-                .for_document_timed(&doc, text, &path, &DmlsConfig::default(), &roots, &resolution, &RequestTimings::untimed())
+                .for_document_timed(&doc, None, text, &path, &DmlsConfig::default(), &roots, &resolution, &RequestTimings::untimed())
                 .unwrap()
         };
         let triggered = |overlay: &DocumentOverlay| {
@@ -2328,5 +2382,69 @@ mod tests {
             panic!("sibling-only bare reference must fail schema preparation");
         };
         assert!(error.to_string().contains("./local.yaml"));
+    }
+
+    #[test]
+    fn frontmatter_analysis_is_shared_until_an_input_changes() {
+        use crate::work_counters::work_counts;
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(root.join("shape.yaml"), "$schema:\n  title: string\n").unwrap();
+        let path = root.join("doc.md");
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let text = "---\n$schema: ./shape.yaml\ntitle: one\n---\n\nbody\n";
+        let roots = [root.clone()];
+        let in_repository = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let build = |revision: i32, text: &str, config: &DmlsConfig, resolution: &DocumentResolution| {
+            let overlay = state
+                .for_document_timed(&doc, Some(revision), text, &path, config, &roots, resolution, &RequestTimings::untimed())
+                .expect("frontmatter overlay");
+            assert!(
+                overlay.ast.as_ref().zip(overlay.analysis.ast()).is_some_and(|(own, shared)| Arc::ptr_eq(own, shared)),
+                "the overlay reads the analysis's tree"
+            );
+            overlay.analysis
+        };
+        let config = DmlsConfig::default();
+        let shared = |left: &Arc<FrontmatterAnalysis>, right: &Arc<FrontmatterAnalysis>| Arc::ptr_eq(left, right);
+
+        let first = build(1, text, &config, &in_repository);
+        assert!(first.root().properties.contains_key("title"));
+        let before = work_counts();
+        assert!(shared(&first, &build(1, text, &config, &in_repository)), "a fresh overlay shares the snapshot");
+        assert_eq!(work_counts().since(before).root_assemblies, 0);
+
+        let revised = build(2, text, &config, &in_repository);
+        assert!(!shared(&first, &revised), "a new revision with the same text replaces it");
+        let edited = build(3, &text.replace("one", "two"), &config, &in_repository);
+        assert!(!shared(&revised, &edited), "an edit replaces it");
+
+        std::fs::write(root.join("shape.yaml"), "$schema:\n  title: string\n  added: string\n").unwrap();
+        let reimported = build(3, &text.replace("one", "two"), &config, &in_repository);
+        assert!(!shared(&edited, &reimported), "an imported-schema change replaces it");
+        assert!(reimported.root().properties.contains_key("added"));
+        assert!(!edited.root().properties.contains_key("added"), "a retained snapshot keeps its own inputs");
+
+        let mut strict = DmlsConfig::default();
+        strict.schema.strict = !config.schema.strict;
+        let reconfigured = build(3, &text.replace("one", "two"), &strict, &in_repository);
+        assert!(!shared(&reimported, &reconfigured), "a configuration change replaces it");
+        let other_context = crate::context::test_support::resolution_in(&root, &path);
+        let recontexted = build(3, &text.replace("one", "two"), &strict, &other_context);
+        assert!(!shared(&reconfigured, &recontexted), "a context change replaces it");
+
+        let malformed = build(4, "---\n$schema: ./shape.yaml\ntitle: [\n---\n\nbody\n", &strict, &other_context);
+        assert!(!shared(&recontexted, &malformed), "a malformed buffer is its own snapshot");
+        assert!(
+            Arc::ptr_eq(malformed.ast().unwrap(), recontexted.ast().unwrap()),
+            "over the last-good tree"
+        );
+        let repaired = build(5, &text.replace("one", "two"), &strict, &other_context);
+        assert!(!shared(&malformed, &repaired), "a repair replaces it");
+
+        state.forget(&doc);
+        assert_eq!(Arc::strong_count(&repaired), 1, "closing drops the cache's snapshot");
+        assert!(!shared(&repaired, &build(5, &text.replace("one", "two"), &strict, &other_context)));
     }
 }

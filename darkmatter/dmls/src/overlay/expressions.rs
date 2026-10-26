@@ -368,40 +368,54 @@ pub fn frontmatter_interpolations<'a>(
 ) -> Vec<FrontmatterInterpolation<'a>> {
     let mut out = Vec::new();
     for (index, entry) in ast.entries().iter().enumerate() {
-        let Some(scalar) = entry.scalar.as_deref().filter(|_| entry.kind == FmValueKind::Scalar)
-        else {
-            continue;
-        };
-        if !scalar.contains("{{") {
-            continue;
+        out.extend(scalar_interpolations(document, entry, index));
+    }
+    out
+}
+
+/// The `{{ … }}` spans inside the one scalar entry `entry` (arena `index`), in
+/// order: the per-scalar step of [`frontmatter_interpolations`], for a caller
+/// that needs one scalar without scanning the document. Empty for a
+/// non-scalar entry.
+pub fn scalar_interpolations<'a>(
+    document: &str,
+    entry: &'a FmEntry,
+    index: usize,
+) -> Vec<FrontmatterInterpolation<'a>> {
+    let Some(scalar) = entry.scalar.as_deref().filter(|_| entry.kind == FmValueKind::Scalar) else {
+        return Vec::new();
+    };
+    if !scalar.contains("{{") {
+        return Vec::new();
+    }
+    let whole_value = is_whole_value_span(scalar);
+    let raw = document.get(entry.value_span.clone());
+    let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
+        (Some(FmScalarStyle::Literal), false, Some(raw)) => {
+            // Skip the block header line, which may carry a comment.
+            let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+            let projection = ScalarProjection {
+                scalar: entry.value_span.clone(),
+                mode: ProjectionMode::Literal { base: entry.value_span.start },
+            };
+            (projection, raw.to_string(), body)
         }
-        let whole_value = is_whole_value_span(scalar);
-        let raw = document.get(entry.value_span.clone());
-        let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
-            (Some(FmScalarStyle::Literal), false, Some(raw)) => {
-                // Skip the block header line, which may carry a comment.
-                let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
-                let projection = ScalarProjection {
-                    scalar: entry.value_span.clone(),
-                    mode: ProjectionMode::Literal { base: entry.value_span.start },
-                };
-                (projection, raw.to_string(), body)
-            }
-            _ => {
-                let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document)
-                else {
-                    continue;
-                };
-                (projection, analyzed, 0)
-            }
-        };
-        for location in ExpressionFinder::find_all_plain(&analyzed[scan_from..]) {
+        _ => {
+            let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document) else {
+                return Vec::new();
+            };
+            (projection, analyzed, 0)
+        }
+    };
+    ExpressionFinder::find_all_plain(&analyzed[scan_from..])
+        .into_iter()
+        .map(|location| {
             let start = scan_from + location.start;
             let end = scan_from + location.end;
             let inner_slice = &analyzed[start + 2..end - 2];
             let leading = inner_slice.len() - inner_slice.trim_start().len();
             let inner_start = start + 2 + leading;
-            out.push(FrontmatterInterpolation {
+            FrontmatterInterpolation {
                 entry,
                 index,
                 inner: inner_start..inner_start + location.expression.len(),
@@ -409,10 +423,9 @@ pub fn frontmatter_interpolations<'a>(
                 whole_value,
                 outer: start..end,
                 projection: projection.clone(),
-            });
-        }
-    }
-    out
+            }
+        })
+        .collect()
 }
 
 /// Parses a **value-dialect** expression, span-carrying. This is the body

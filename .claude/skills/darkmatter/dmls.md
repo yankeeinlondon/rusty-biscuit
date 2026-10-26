@@ -496,7 +496,41 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `EffectiveSchema::property_shape` (base → extensions → matching trigger
   payloads in registry order → authored `$schema`, whole top-level property
   replacement, as validation merges); `providers/frontmatter.rs::known_shape`
-  and `overlay/schema.rs::effective_shape` both call it. Trigger payload
+  (through the snapshot's `FrontmatterAnalysis::root`, assembled once per
+  snapshot) and `overlay/schema.rs::effective_shape` both call it.
+- **Shared frontmatter analysis.** `overlay/analysis.rs::FrontmatterAnalysis`
+  is one snapshot's shared schema state, kept per URI in `OverlayCache` and
+  handed as the same `Arc` to every `DocumentOverlay` (`overlay.analysis`)
+  while its `AnalysisIdentity` matches: buffer revision (threaded from the
+  router as `for_document_timed`'s `revision`), text hash, stale-tree state,
+  the schema-cache key, and the bundle and named-type `Arc`s by identity (an
+  imported-schema change reassembles the bundle, so it replaces the
+  snapshot). `forget` drops it. It holds the effective root, merged views of
+  several union arms, arm discriminant JSON, and synthesized array-item
+  definitions, keyed by schema-node address (a merged copy of a single arm's
+  property keeps its source's identity, so recursive depths converge). Never
+  key it by instance path. `ShapeMemo::new(ctx, crossing)` is the per-pass
+  instance-path memo over it; `memo.shape` / `memo.def_at` borrow `&'c`
+  values from the snapshot and clone nothing. Single admissible arms and
+  selected arms are borrowed, never copied. `work_counters` counts the
+  constructions (`root_assemblies`, `merged_shapes`, `item_syntheses`) and the
+  whole-document walks (`typing_walks`, `scalar_classifications`,
+  `stack_walks`).
+- **Point versus document typing.** The snapshot also stores each scalar
+  entry's `ScalarTyping` (file-typed; expression-typed with its decoded text
+  and projection, or undecodable; unresolved misses too) by entry index in its
+  own tree. `providers::frontmatter::scalar_typing(ctx, index)` (backed by
+  `FrontmatterAnalysis::scalar`) types one entry and never starts the walk;
+  `scalar_inventory` / `expression_values` / `nav_targets` read
+  `FrontmatterAnalysis::inventory`, built once per snapshot (one
+  `typing_walks`) reusing point results. Hover and definition locate the
+  cursor scalar (`cursor_scalar`) and use point typing plus
+  `event_views::scalar_stack_expressions` for that one scalar; only
+  diagnostics calls the whole-document `stack_expressions` (which delegates
+  per scalar to the same extractor). Never call `expression_values`,
+  `nav_targets`, or `stack_expressions` from a cursor request.
+  `ExpressionValue` borrows its text and projection from the snapshot.
+  Trigger payload
   shapes are retained at registry-scan time (`ResolvedPayload::shape`);
   `EffectiveSchema::simplified` stays the authored `$schema` alone, which is
   what "authored parameters" consumers (expression property-name completion,
@@ -597,7 +631,7 @@ branch, even without frontmatter. It comes from the library's passive
   catalog. `undeclared_property.rs` fails on any root-name string literal, a
   host-global list, or an evaluation-session type in production `src/`.
   `providers::dsl::KnownRoots` adds frontmatter keys and schema properties. It
-  computes `known_shape` once per diagnostics pass, and it is `None` for a
+  borrows the snapshot's shared `known_shape`, and it is `None` for a
   frontmatter-less document, whose names are never reported undeclared.
 - **Dash-separated keys.** A subtraction of only variables (`foo--bar`, `a- b`)
   that contains an undeclared operand, and whose whitespace-free source is a

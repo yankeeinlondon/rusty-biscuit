@@ -274,9 +274,12 @@ fn completion_and_hover_open_only_the_definitions_on_the_cursor_path() {
             let markup = hover_at(fixture, &document, at);
             assert!(markup.contains("The node text"), "level {level}: {markup}");
         });
+        // The item definition of `children` is one recursive node at every
+        // depth, synthesized once per snapshot, so a deeper hover may open
+        // nothing the level above did not.
         if let Some(previous) = previous_hover {
             assert!(
-                (1..=2).contains(&(opened - previous)),
+                opened >= previous && opened - previous <= 2,
                 "hover at level {level} opened {opened} definitions, {previous} one level up"
             );
         }

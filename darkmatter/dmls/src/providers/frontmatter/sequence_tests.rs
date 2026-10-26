@@ -1,5 +1,6 @@
 //! Sequence descent (spec D6) through the frontmatter provider: typed schema
-//! paths, Claudine's predicate typing (from `claudine/schemas/`), the per-pass shape memo, and
+//! paths, Claudine's predicate typing (from `claudine/schemas/`), shape sharing through the
+//! snapshot's analysis, and
 //! the hover/completion/navigation boundary at real list items versus
 //! synthetic item positions.
 
@@ -16,6 +17,7 @@ use biscuit_file::FileResolutionContext;
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
 use crate::graph::WorkspaceGraph;
 use crate::overlay::{OverlayState, format_dotted};
+use crate::work_counters::work_counts;
 use crate::source_map::{PositionEncoding, SourceMap};
 
 use FmPathSegment::{Index, Key};
@@ -229,37 +231,81 @@ fn context_aware_walk_selects_discriminated_arm_inside_array_items() {
     let doc = dir.path().join("doc.md");
     let uri: Uri = url::Url::from_file_path(&doc).unwrap().as_str().parse().unwrap();
     with_ctx_at(&doc, uri, dir.path(), text, false, |ctx| {
-        let shape = known_shape(ctx);
-        let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-        fn resolve<'p>(
-            ctx: &DocumentContext,
-            shape: &SchemaShape,
-            path: &[FmPathSegment<'p>],
-            memo: &mut ShapeMemo<'p>,
-        ) -> Option<PropertyDef> {
-            def_at_path_ctx(ctx, shape, path, memo).map(Cow::into_owned)
-        }
-        let resolve = |path: &[FmPathSegment<'static>], memo: &mut ShapeMemo<'static>| {
-            resolve(ctx, &shape, path, memo)
-        };
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let resolve = |path: &[FmPathSegment<'static>], memo: &mut ShapeMemo<'_, 'static>| memo.def_at(path).is_some();
         // Item 0 selects the note arm: `run` does not exist there.
-        assert!(resolve(&[Key("steps"), Index(0), Key("text")], &mut memo).is_some());
-        assert!(resolve(&[Key("steps"), Index(0), Key("run")], &mut memo).is_none());
+        assert!(resolve(&[Key("steps"), Index(0), Key("text")], &mut memo));
+        assert!(!resolve(&[Key("steps"), Index(0), Key("run")], &mut memo));
         // Item 1 selects the shell arm.
-        let run = resolve(&[Key("steps"), Index(1), Key("run")], &mut memo).expect("shell run");
-        assert!(is_expression_def(&run));
-        assert!(resolve(&[Key("steps"), Index(1), Key("text")], &mut memo).is_none());
+        let run = memo.def_at(&[Key("steps"), Index(1), Key("run")]).expect("shell run");
+        assert!(is_expression_def(run));
+        assert!(!resolve(&[Key("steps"), Index(1), Key("text")], &mut memo));
         // Item 2 has no discriminant: the merged-arm fallback keeps both keys.
-        assert!(resolve(&[Key("steps"), Index(2), Key("run")], &mut memo).is_some());
-        assert!(resolve(&[Key("steps"), Index(2), Key("text")], &mut memo).is_some());
+        assert!(resolve(&[Key("steps"), Index(2), Key("run")], &mut memo));
+        assert!(resolve(&[Key("steps"), Index(2), Key("text")], &mut memo));
 
         // Expression values reach the selected arm's list-item value only.
-        let ast = overlay_ast(ctx).unwrap();
-        let pointers: Vec<String> = expression_values(ctx, ast)
+        let pointers: Vec<String> = expression_values(ctx)
             .iter()
             .map(|value| value.entry.pointer.clone())
             .collect();
         assert_eq!(pointers, vec!["/steps/1/run", "/steps/2/run"]);
+    });
+}
+
+#[test]
+fn sibling_items_share_their_selected_arm_and_nothing_else() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("types.yaml"),
+        concat!(
+            "$schema:\n",
+            "  shell-step:\n",
+            "    kind: literal(shell)\n",
+            "    run: expression\n",
+            "  count-step:\n",
+            "    kind: literal(2)\n",
+            "    count: number\n",
+        ),
+    )
+    .unwrap();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  steps:\n",
+        "    - \"shell-step[]@./types.yaml\"\n",
+        "    - \"count-step[]@./types.yaml\"\n",
+        "steps:\n",
+        "  - kind: shell\n",
+        "  - kind: 2\n",
+        "  - kind: shell\n",
+        "  - kind: '2'\n",
+        "  - run: ctx.none\n",
+        "  - kind: [shell]\n",
+        "---\n\nbody\n",
+    );
+    let doc = dir.path().join("doc.md");
+    let uri: Uri = url::Url::from_file_path(&doc).unwrap().as_str().parse().unwrap();
+    with_ctx_at(&doc, uri, dir.path(), text, false, |ctx| {
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let mut item = |index: usize| {
+            let shape = memo.shape(&[Key("steps"), Index(index)]).expect("item shape");
+            (std::ptr::from_ref(shape), shape.properties.keys().cloned().collect::<Vec<_>>())
+        };
+        let before = work_counts();
+        let (shell, shell_keys) = item(0);
+        let (count, count_keys) = item(1);
+        assert_eq!(item(2).0, shell, "the same selected arm is one shape");
+        assert_ne!(shell, count, "a different arm is a different shape");
+        assert_eq!((shell_keys, count_keys), (vec!["kind".to_string(), "run".into()], vec!["kind".to_string(), "count".into()]));
+        // A quoted '2' is a string, so it selects no numeric arm: the merged
+        // view, in arm then property order, shared by every unselected item.
+        let (merged, merged_keys) = item(3);
+        assert_eq!(merged_keys, ["kind", "run", "count"]);
+        assert_eq!(item(4).0, merged);
+        assert_eq!(item(5).0, merged);
+        assert_ne!(merged, shell);
+        assert_eq!(work_counts().since(before).merged_shapes, 1);
     });
 }
 
@@ -269,15 +315,14 @@ fn transparent_crossing_serves_key_only_authoring_ancestry() {
     // never on its non-array `entry` (category or bundle) arm.
     let text = "---\nloop:\n  gate:\n    - when: ok\n      then: [stop]\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
-        let shape = known_shape(ctx);
         let keys = [Key("loop"), Key("gate"), Key("then")];
-        let mut transparent = ShapeMemo::new(ArrayCrossing::Transparent);
-        assert!(def_at_path_ctx(ctx, &shape, &keys, &mut transparent).is_some());
-        let mut explicit = ShapeMemo::new(ArrayCrossing::Explicit);
-        assert!(def_at_path_ctx(ctx, &shape, &keys, &mut explicit).is_none());
+        let mut transparent = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+        assert!(transparent.def_at(&keys).is_some());
+        let mut explicit = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        assert!(explicit.def_at(&keys).is_none());
         let indexed = [Key("loop"), Key("gate"), Index(0), Key("then")];
-        assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut explicit).is_some());
-        assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut transparent).is_none());
+        assert!(explicit.def_at(&indexed).is_some());
+        assert!(transparent.def_at(&indexed).is_none());
     });
 }
 
@@ -317,8 +362,7 @@ fn shipped_claudine_predicates_are_expression_typed() {
         "---\n\nbody\n",
     );
     with_ctx(text, true, |ctx| {
-        let shape = known_shape(ctx);
-        let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
         for path in [
             vec![Key("initialize"), Index(0), Key("when")],
             vec![Key("failure"), Index(2), Key("when")],
@@ -329,9 +373,8 @@ fn shipped_claudine_predicates_are_expression_typed() {
             vec![Key("loop"), Key("until")],
             vec![Key("loop"), Key("gate"), Index(0), Key("when")],
         ] {
-            let def = def_at_path_ctx(ctx, &shape, &path, &mut memo)
-                .unwrap_or_else(|| panic!("{path:?} resolves"));
-            assert!(is_expression_def(&def), "{} is expression-typed", format_dotted(&path));
+            let def = memo.def_at(&path).unwrap_or_else(|| panic!("{path:?} resolves"));
+            assert!(is_expression_def(def), "{} is expression-typed", format_dotted(&path));
         }
         // Verb values are interpolated, not conditions.
         for path in [
@@ -339,8 +382,8 @@ fn shipped_claudine_predicates_are_expression_typed() {
             vec![Key("failure"), Index(1), Key("say")],
             vec![Key("loop"), Key("say")],
         ] {
-            let def = def_at_path_ctx(ctx, &shape, &path, &mut memo);
-            assert!(def.is_none_or(|def| !is_expression_def(&def)), "{}", format_dotted(&path));
+            let def = memo.def_at(&path);
+            assert!(def.is_none_or(|def| !is_expression_def(def)), "{}", format_dotted(&path));
         }
     });
 }
@@ -362,8 +405,7 @@ fn predicates_inside_stack_items_reach_expression_values_without_executing() {
         "---\n\nbody\n",
     );
     with_ctx(text, true, |ctx| {
-        let ast = overlay_ast(ctx).unwrap();
-        let values = expression_values(ctx, ast);
+        let values = expression_values(ctx);
         let reached: Vec<(&str, &str)> = values
             .iter()
             .map(|value| (value.entry.dotted.as_str(), value.expression()))
@@ -383,18 +425,18 @@ fn predicates_inside_stack_items_reach_expression_values_without_executing() {
 // ── Shape memo ──────────────────────────────────────────────────────────────
 
 #[test]
-fn expression_pass_materializes_each_distinct_ancestor_shape_once() {
+fn expression_pass_builds_each_shared_construction_once_per_snapshot() {
     let text = include_str!("../../../tests/fixtures/sequence_descent/implement-plan.md");
     with_ctx(text, true, |ctx| {
         let ast = overlay_ast(ctx).unwrap();
-        // The distinct step prefixes a memoized pass may materialize, and the
-        // per-entry ancestor levels an unmemoized pass would.
+        // The distinct ancestor paths the old per-path memo built a shape for.
         let mut distinct: HashSet<Vec<FmPathSegment<'_>>> = HashSet::new();
-        let mut unmemoized = 0;
+        let mut scalars = 0;
         for (index, entry) in ast.entries().iter().enumerate() {
             if entry.kind != FmValueKind::Scalar {
                 continue;
             }
+            scalars += 1;
             let path = ast.path_at(index);
             let Some(leaf_at) = path.iter().rposition(|segment| matches!(segment, Key(_))) else {
                 continue;
@@ -402,22 +444,241 @@ fn expression_pass_materializes_each_distinct_ancestor_shape_once() {
             for end in 1..=leaf_at {
                 if matches!(path.get(end), Some(Key(_)) | None) {
                     distinct.insert(path[..end].to_vec());
-                    unmemoized += 1;
                 }
             }
         }
         assert!(ast.entries().iter().any(|entry| entry.depth >= 4), "fixture is sequence-deep");
 
-        SHAPE_MATERIALIZATIONS.with(|count| count.set(0));
-        let values = expression_values(ctx, ast);
-        let materialized = SHAPE_MATERIALIZATIONS.with(std::cell::Cell::get);
+        let before = work_counts();
+        let values = expression_values(ctx);
+        let first = work_counts().since(before);
         assert!(!values.is_empty(), "stack predicates are reached");
+        assert_eq!(first.root_assemblies, 1, "{first:?}");
+        assert_eq!((first.typing_walks, first.scalar_classifications), (1, scalars));
+        let built = first.merged_shapes + first.item_syntheses;
+        assert!(built > 0, "the fixture reaches merged item views: {first:?}");
         assert!(
-            materialized <= distinct.len(),
-            "{materialized} shape materializations for {} distinct ancestor paths",
+            built < distinct.len(),
+            "{built} constructions for {} distinct ancestor paths",
             distinct.len()
         );
-        assert!(materialized < unmemoized, "{materialized} vs {unmemoized} without the memo");
+
+        // A second pass on the same snapshot builds nothing.
+        let before = work_counts();
+        let again = expression_values(ctx);
+        let second = work_counts().since(before);
+        assert_eq!(again.len(), values.len());
+        assert_eq!(
+            (second.root_assemblies, second.merged_shapes, second.item_syntheses),
+            (0, 0, 0),
+            "{second:?}"
+        );
+        assert_eq!(
+            (second.typing_walks, second.scalar_classifications),
+            (0, 0),
+            "the second pass reads the stored inventory: {second:?}"
+        );
+    });
+}
+
+/// The arena index of the entry at JSON `pointer`.
+fn index_at(ast: &FrontmatterAst, pointer: &str) -> usize {
+    ast.entries().iter().position(|entry| entry.pointer == pointer).unwrap_or_else(|| panic!("{pointer}"))
+}
+
+#[test]
+fn point_typing_never_starts_the_inventory_and_the_inventory_reuses_it() {
+    let mut text = repeated_lifecycle(5);
+    text = text.replacen("---\nfailure:\n", "---\nmystery: x\nfailure:\n", 1);
+    text = text.replacen("      - say: hi\n", "      - say: \"{{ err.message }}\"\n", 1);
+    with_ctx(&text, true, |ctx| {
+        let ast = overlay_ast(ctx).unwrap();
+        let scalars = ast.entries().iter().filter(|entry| entry.kind == FmValueKind::Scalar).count();
+        let guard = &ast.entries()[index_at(ast, "/failure/0/when")];
+        let say = &ast.entries()[index_at(ast, "/failure/0/then/0/say")];
+        let unknown = index_at(ast, "/mystery");
+
+        // Expression hover, then the stack hover of an untyped `{{ … }}`
+        // span: each types the cursor's scalar alone.
+        for (entry, label) in [(guard, "guard"), (say, "span")] {
+            let before = work_counts();
+            let hover = hover(ctx, entry.value_span.start + 1);
+            let work = work_counts().since(before);
+            assert!(hover.is_some(), "{label} hovers");
+            assert_eq!(
+                (work.typing_walks, work.stack_walks, work.scalar_classifications),
+                (0, 0, 1),
+                "{label}: {work:?}"
+            );
+        }
+
+        // Negative outcomes are stored too: neither lookup is repeated.
+        let before = work_counts();
+        for _ in 0..2 {
+            let unresolved = scalar_typing(ctx, unknown).expect("typed");
+            assert!(!unresolved.file && matches!(unresolved.expression, ExpressionTyping::No));
+            let plain = scalar_typing(ctx, index_at(ast, "/failure/1/then/0/say")).expect("typed");
+            assert!(matches!(plain.expression, ExpressionTyping::No), "{plain:?}");
+        }
+        assert_eq!(work_counts().since(before).scalar_classifications, 2);
+
+        // The inventory classifies only what no point request did, once.
+        let before = work_counts();
+        let values = expression_values(ctx);
+        let first = work_counts().since(before);
+        assert_eq!(values.len(), 5 * 2, "every guard is typed");
+        assert_eq!((first.typing_walks, first.scalar_classifications), (1, scalars - 4), "{first:?}");
+        let before = work_counts();
+        assert_eq!(expression_values(ctx).len(), values.len());
+        let _ = nav_targets(ctx);
+        let _ = hover(ctx, guard.value_span.start + 1);
+        let again = work_counts().since(before);
+        assert_eq!((again.typing_walks, again.scalar_classifications), (0, 0), "{again:?}");
+    });
+
+    // Point and document access agree, each on its own fresh snapshot.
+    let point: Vec<String> = with_ctx(&text, true, |ctx| {
+        let ast = overlay_ast(ctx).unwrap();
+        (0..ast.entries().len())
+            .filter(|&index| ast.entries()[index].kind == FmValueKind::Scalar)
+            .map(|index| format!("{index}: {:?}", scalar_typing(ctx, index).expect("typed")))
+            .collect()
+    });
+    let inventory: Vec<String> = with_ctx(&text, true, |ctx| {
+        scalar_inventory(ctx).map(|(index, typing)| format!("{index}: {typing:?}")).collect()
+    });
+    assert_eq!(point, inventory);
+    assert!(point.iter().any(|line| line.contains("Decoded")), "{point:#?}");
+}
+
+#[test]
+fn definition_types_only_the_cursor_scalar() {
+    let text = "---\n$schema:\n  refs: file[]\n  note: string\nnote: ./c.md\nrefs:\n  - ./a.md\n  - ./b.md\n---\n\nbody\n";
+    with_ctx(text, false, |ctx| {
+        let offset = text.find("./b.md").unwrap() + 1;
+        let before = work_counts();
+        let found = definition(ctx, offset);
+        let work = work_counts().since(before);
+        assert_eq!((work.typing_walks, work.scalar_classifications), (0, 1), "{work:?}");
+        // Document links see the same target, through the inventory.
+        let expected: Vec<Uri> = nav_targets(ctx)
+            .into_iter()
+            .filter(|(span, _)| span.contains(&offset))
+            .filter_map(|(_, path)| file_path_to_uri(&path))
+            .collect();
+        assert_eq!(found.into_iter().map(|location| location.uri).collect::<Vec<_>>(), expected);
+        assert_eq!(nav_targets(ctx).len(), 2, "both list items, never the string-typed `note`");
+        // A cursor on a string-typed value has no target.
+        assert!(definition(ctx, text.find("./c.md").unwrap() + 1).is_empty());
+    });
+}
+
+/// A lifecycle document with `items` identical nested guard items.
+fn repeated_lifecycle(items: usize) -> String {
+    let mut text = String::from("---\nfailure:\n");
+    for index in 0..items {
+        text.push_str(&format!(
+            "  - when: flag_{index}\n    then:\n      - say: hi\n      - when: deeper\n        then: [stop]\n"
+        ));
+    }
+    text.push_str("---\n\nbody\n");
+    text
+}
+
+#[test]
+fn identical_items_do_not_multiply_shared_constructions() {
+    let built = |items: usize| {
+        let text = repeated_lifecycle(items);
+        with_ctx(&text, true, |ctx| {
+            let before = work_counts();
+            let values = expression_values(ctx);
+            assert_eq!(values.len(), items * 2, "every guard is typed");
+            work_counts().since(before)
+        })
+    };
+    let (small, large) = (built(10), built(20));
+    assert!(small.merged_shapes > 0, "{small:?}");
+    assert_eq!(
+        (small.root_assemblies, small.merged_shapes, small.item_syntheses),
+        (large.root_assemblies, large.merged_shapes, large.item_syntheses),
+        "doubling identical items doubles no construction"
+    );
+    assert!(large.scalar_classifications > small.scalar_classifications, "classification is per entry");
+}
+
+#[test]
+fn recursive_depths_and_same_arm_items_share_one_view() {
+    let text = concat!(
+        "---\n",
+        "failure:\n",
+        "  - when: a\n",
+        "    then:\n",
+        "      - when: b\n",
+        "        then:\n",
+        "          - when: c\n",
+        "            then:\n",
+        "              - when: d\n",
+        "                then: [stop]\n",
+        "  - when: e\n",
+        "    then: [stop]\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, true, |ctx| {
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let depth = |memo: &mut ShapeMemo<'_, 'static>, path: &[FmPathSegment<'static>]| {
+            std::ptr::from_ref(memo.shape(path).unwrap_or_else(|| panic!("{path:?} resolves")))
+        };
+        let first = depth(&mut memo, &[Key("failure"), Index(0)]);
+        let sibling = depth(&mut memo, &[Key("failure"), Index(1)]);
+        assert_eq!(first, sibling, "sibling items share one view");
+        let before = work_counts();
+        let two = depth(&mut memo, &[Key("failure"), Index(0), Key("then"), Index(0)]);
+        let three = depth(&mut memo, &[Key("failure"), Index(0), Key("then"), Index(0), Key("then"), Index(0)]);
+        let four = depth(
+            &mut memo,
+            &[Key("failure"), Index(0), Key("then"), Index(0), Key("then"), Index(0), Key("then"), Index(0)],
+        );
+        assert_eq!(two, three, "a recursive depth returns to the same view");
+        assert_eq!(three, four);
+        assert!(work_counts().since(before).merged_shapes <= 1, "one view serves every depth");
+        // A fresh pass on the same snapshot reuses the views.
+        let mut next = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let before = work_counts();
+        assert_eq!(depth(&mut next, &[Key("failure"), Index(1)]), first);
+        assert_eq!(work_counts().since(before).merged_shapes, 0);
+    });
+}
+
+#[test]
+fn item_definitions_are_synthesized_once_for_every_item() {
+    let mut text = String::from("---\n$schema:\n  tags: string[]\ntags:\n");
+    for index in 0..50 {
+        text.push_str(&format!("  - tag{index}\n"));
+    }
+    text.push_str("---\n\nbody\n");
+    with_ctx(&text, false, |ctx| {
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+        let before = work_counts();
+        let first = memo.def_at(&[Key("tags"), Index(0)]).expect("item definition");
+        let last = memo.def_at(&[Key("tags"), Index(49)]).expect("item definition");
+        assert!(std::ptr::eq(first, last));
+        let atom = primary_atom(first).expect("one atom");
+        assert!(!atom.is_array && atom.array_constraints.is_empty(), "the item, not the array");
+        expression_values(ctx);
+        assert_eq!(work_counts().since(before).item_syntheses, 1);
+    });
+}
+
+#[test]
+fn the_root_is_assembled_once_and_shared() {
+    with_ctx(STACK_DOC, true, |ctx| {
+        let before = work_counts();
+        let root = known_shape(ctx);
+        assert!(std::ptr::eq(root, known_shape(ctx)));
+        let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+        assert!(memo.def_at(&[Key("initialize")]).is_some());
+        assert!(hover(ctx, STACK_DOC.find("when:").unwrap() + 1).is_some());
+        assert_eq!(work_counts().since(before).root_assemblies, 1);
     });
 }
 
@@ -516,8 +777,7 @@ fn navigation_works_at_list_item_file_values_only() {
     with_ctx(text, false, |ctx| {
         // `nav_targets` backs both definition and document links; the virtual
         // `/w` root has no file URI on Windows, so assert the resolved paths.
-        let ast = overlay_ast(ctx).unwrap();
-        let targets = nav_targets(ctx, ast);
+        let targets = nav_targets(ctx);
         let resolved: Vec<(&str, &Path)> = targets
             .iter()
             .map(|(span, path)| (&text[span.clone()], path.as_path()))

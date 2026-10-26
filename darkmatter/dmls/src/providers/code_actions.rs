@@ -237,7 +237,7 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     let shape = crate::providers::frontmatter::known_shape(ctx);
     let new_text: String = keys
         .iter()
-        .map(|key| match literal_scaffold(&shape, key, crate::providers::frontmatter::definitions(ctx)) {
+        .map(|key| match literal_scaffold(shape, key, crate::providers::frontmatter::definitions(ctx)) {
             Some(value) => format!("\n{key}: {value}"),
             None => format!("\n{key}: "),
         })

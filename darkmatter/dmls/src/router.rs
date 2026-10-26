@@ -933,6 +933,7 @@ impl ServerState {
         let overlay = self.timings.time(Stage::OverlayBuild, || {
             self.overlay.for_document_timed(
                 uri,
+                Some(open.version()),
                 open.text(),
                 &path,
                 self.config.effective(),

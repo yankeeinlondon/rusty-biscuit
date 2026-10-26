@@ -85,7 +85,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 // Likewise one expression-value set per publication: it decodes
                 // every Expression-typed value, and both passes read it.
                 let expression_values =
-                    crate::providers::frontmatter::expression_values(ctx, ast);
+                    crate::providers::frontmatter::expression_values(ctx);
                 schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
                 // One lifecycle host and one library walk serve every

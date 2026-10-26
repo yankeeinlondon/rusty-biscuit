@@ -268,8 +268,18 @@ fn work_text(snapshot: &WorkSnapshot) -> String {
 
 fn dmls_text(counts: &WorkCounts) -> String {
     format!(
-        "reads={},hashes={},parses={},enumerations={},registry_scans={}",
-        counts.reads, counts.hashes, counts.parses, counts.enumerations, counts.registry_scans
+        "reads={},hashes={},parses={},enumerations={},registry_scans={},root_assemblies={},merged_shapes={},item_syntheses={},scalar_classifications={},typing_walks={},stack_walks={}",
+        counts.reads,
+        counts.hashes,
+        counts.parses,
+        counts.enumerations,
+        counts.registry_scans,
+        counts.root_assemblies,
+        counts.merged_shapes,
+        counts.item_syntheses,
+        counts.scalar_classifications,
+        counts.typing_walks,
+        counts.stack_walks
     )
 }
 
@@ -318,13 +328,7 @@ fn main() {
                 total.allocated.peak_live_bytes = total.allocated.peak_live_bytes.max(phase.allocated.peak_live_bytes);
             }
             let darkmatter_total = counted.iter().fold(WorkSnapshot::default(), |sum, phase| sum.plus(&phase.darkmatter));
-            let dmls_total = counted.iter().fold(WorkCounts::default(), |sum, phase| WorkCounts {
-                reads: sum.reads + phase.dmls.reads,
-                hashes: sum.hashes + phase.dmls.hashes,
-                parses: sum.parses + phase.dmls.parses,
-                enumerations: sum.enumerations + phase.dmls.enumerations,
-                registry_scans: sum.registry_scans + phase.dmls.registry_scans,
-            });
+            let dmls_total = counted.iter().fold(WorkCounts::default(), |sum, phase| sum.plus(phase.dmls));
             println!(
                 "{case}\ttotal\t{}\t{}\t{}\t{}\t{}\t{}",
                 work_text(&darkmatter_total),

@@ -270,60 +270,76 @@ impl StackExpression<'_> {
 /// `{{ … }}` spans of any scalar beneath the stack, and each item's `when`
 /// guard that holds no span. `skip` names entries another surface already
 /// analyzes (an Expression-typed value), which contribute nothing here.
+///
+/// This walks the whole document; a request about one cursor uses
+/// [`scalar_stack_expressions`] instead, which yields the same expressions for
+/// its one scalar.
 pub fn stack_expressions<'a>(
     host: &LifecycleHost,
     document: &str,
     ast: &'a FrontmatterAst,
     skip: impl Fn(usize) -> bool,
 ) -> Vec<StackExpression<'a>> {
+    crate::work_counters::record_stack_walk();
     let mut out = Vec::new();
-    for interpolation in expressions::frontmatter_interpolations(document, ast) {
-        if skip(interpolation.index) {
-            continue;
+    for index in 0..ast.entries().len() {
+        if !skip(index) {
+            out.extend(scalar_stack_expressions(host, document, ast, index));
         }
-        let Some(event) = host.stack_event(&ast.path_at(interpolation.index)) else {
-            continue;
-        };
-        out.push(StackExpression {
-            event,
-            entry: interpolation.entry,
-            index: interpolation.index,
+    }
+    out.sort_by_key(|expression| expression.reach.start);
+    out
+}
+
+/// The lifecycle expressions inside the one scalar entry `index`, in order:
+/// its `{{ … }}` spans, or, for a `when` guard holding no span, the guard
+/// itself. Empty for a non-scalar entry or one outside every stack.
+pub fn scalar_stack_expressions<'a>(
+    host: &LifecycleHost,
+    document: &str,
+    ast: &'a FrontmatterAst,
+    index: usize,
+) -> Vec<StackExpression<'a>> {
+    let Some(entry) = ast.entries().get(index).filter(|entry| entry.kind == FmValueKind::Scalar) else {
+        return Vec::new();
+    };
+    let path = ast.path_at(index);
+    let Some(event) = host.stack_event(&path) else {
+        return Vec::new();
+    };
+    let spans: Vec<StackExpression<'a>> = expressions::scalar_interpolations(document, entry, index)
+        .into_iter()
+        .map(|interpolation| StackExpression {
+            event: event.clone(),
+            entry,
+            index,
             start: interpolation.analyzed_start(),
             reach: interpolation.outer_span(),
             projection: interpolation.projection().clone(),
             text: interpolation.text,
             dialect: Dialect::Value,
-        });
+        })
+        .collect();
+    if !spans.is_empty() || !crate::diagnostics::nested_span::lifecycle::is_stack_predicate(&path[1..]) {
+        return spans;
     }
-    for (index, entry) in ast.entries().iter().enumerate() {
-        if entry.kind != FmValueKind::Scalar || skip(index) {
-            continue;
-        }
-        let path = ast.path_at(index);
-        let Some(event) = host.stack_event(&path) else { continue };
-        if !crate::diagnostics::nested_span::lifecycle::is_stack_predicate(&path[1..]) {
-            continue;
-        }
-        let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document) else {
-            continue;
-        };
-        // A guard holding a `{{ … }}` span is analyzed through that span.
-        if analyzed.contains("{{") || analyzed.trim().is_empty() {
-            continue;
-        }
-        out.push(StackExpression {
-            event,
-            entry,
-            index,
-            start: 0,
-            reach: entry.value_span.clone(),
-            projection,
-            text: analyzed,
-            dialect: Dialect::Condition,
-        });
+    let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document) else {
+        return spans;
+    };
+    // A guard holding a `{{ … }}` span is analyzed through that span.
+    if analyzed.contains("{{") || analyzed.trim().is_empty() {
+        return spans;
     }
-    out.sort_by_key(|expression| expression.reach.start);
-    out
+    vec![StackExpression {
+        event,
+        entry,
+        index,
+        start: 0,
+        reach: entry.value_span.clone(),
+        projection,
+        text: analyzed,
+        dialect: Dialect::Condition,
+    }]
 }
 
 #[cfg(test)]
@@ -378,5 +394,87 @@ mod tests {
         let texts: Vec<(&str, Dialect)> = found.iter().map(|e| (e.text.as_str(), e.dialect)).collect();
         assert_eq!(texts, [("err.message != ''", Dialect::Condition), ("err.message", Dialect::Value)]);
         assert!(found.iter().all(|e| e.event.name() == "composed"));
+    }
+
+    /// `(index, text, dialect, reach)` of each expression, comparable.
+    fn summary(found: &[StackExpression<'_>]) -> Vec<(usize, String, Dialect, SourceSpan)> {
+        found.iter().map(|e| (e.index, e.text.clone(), e.dialect, e.reach().clone())).collect()
+    }
+
+    #[test]
+    fn one_scalar_yields_exactly_its_share_of_the_document_walk() {
+        let text = concat!(
+            "---\n",
+            "title: \"{{ outside }}\"\n",
+            "composed:\n",
+            "  - when: plain != ''\n",
+            "    then:\n",
+            "      - info: '{{ first }} and {{ second }}'\n",
+            "      - info: \"{{ quoted }}\"\n",
+            "      - info: |\n",
+            "          {{ block }}\n",
+            "      - info: !!str \"{{ tagged }}\"\n",
+            "  - when: \"{{ wrapped }}\"\n",
+            "    then: [stop]\n",
+            "  - when: typed == 1\n",
+            "    then: [stop]\n",
+            "---\n",
+        );
+        let ast = ast(text);
+        let host = LifecycleHost::md();
+        let typed = ast.entries().iter().position(|entry| entry.scalar.as_deref() == Some("typed == 1")).unwrap();
+        let skip = |index: usize| index == typed;
+
+        let walked = stack_expressions(&host, text, &ast, skip);
+        let mut per_scalar: Vec<StackExpression<'_>> = (0..ast.entries().len())
+            .filter(|&index| !skip(index))
+            .flat_map(|index| scalar_stack_expressions(&host, text, &ast, index))
+            .collect();
+        per_scalar.sort_by_key(|expression| expression.reach.start);
+        assert_eq!(summary(&walked), summary(&per_scalar));
+
+        let texts: Vec<(&str, Dialect)> = walked.iter().map(|e| (e.text.as_str(), e.dialect)).collect();
+        assert_eq!(
+            texts,
+            [
+                ("plain != ''", Dialect::Condition),
+                ("first", Dialect::Value),
+                ("second", Dialect::Value),
+                ("quoted", Dialect::Value),
+                ("block", Dialect::Value),
+                ("tagged", Dialect::Value),
+                ("wrapped", Dialect::Value),
+            ],
+            "a span-holding guard is analyzed through its span; the typed guard is skipped"
+        );
+        // Two spans of one scalar come from that scalar alone, in order.
+        let pair = walked.iter().find(|e| e.text == "first").unwrap().index;
+        let own: Vec<String> =
+            scalar_stack_expressions(&host, text, &ast, pair).into_iter().map(|e| e.text).collect();
+        assert_eq!(own, ["first", "second"]);
+        // A value outside every stack, and a container, yield nothing.
+        let outside = ast.entries().iter().position(|entry| entry.key == "title").unwrap();
+        assert!(scalar_stack_expressions(&host, text, &ast, outside).is_empty());
+        let container = ast.entries().iter().position(|entry| entry.key == "composed").unwrap();
+        assert!(scalar_stack_expressions(&host, text, &ast, container).is_empty());
+        assert!(scalar_stack_expressions(&host, text, &ast, ast.entries().len()).is_empty());
+        // The typed guard, asked for directly, is still a guard: skipping is
+        // the caller's decision.
+        let guard = scalar_stack_expressions(&host, text, &ast, typed);
+        assert_eq!(summary(&guard).len(), 1);
+        assert_eq!(guard[0].dialect, Dialect::Condition);
+    }
+
+    #[test]
+    fn only_the_document_walk_is_counted_as_one() {
+        let text = "---\ncomposed:\n  - when: a\n    then: [stop]\n---\n";
+        let ast = ast(text);
+        let before = crate::work_counters::work_counts();
+        for index in 0..ast.entries().len() {
+            let _ = scalar_stack_expressions(&LifecycleHost::md(), text, &ast, index);
+        }
+        assert_eq!(crate::work_counters::work_counts().since(before).stack_walks, 0);
+        let _ = stack_expressions(&LifecycleHost::md(), text, &ast, |_| false);
+        assert_eq!(crate::work_counters::work_counts().since(before).stack_walks, 1);
     }
 }

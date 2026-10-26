@@ -572,7 +572,7 @@ fn interpolation_hover_markdown(
 fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = frontmatter::known_shape(ctx);
     let definitions = frontmatter::definitions(ctx);
-    let def = frontmatter::def_at_path(&shape, &[crate::overlay::FmPathSegment::Key(name)], definitions)?;
+    let def = frontmatter::def_at_path(shape, &[crate::overlay::FmPathSegment::Key(name)], definitions)?;
     frontmatter::schema_hover_details(def, definitions)
 }
 
@@ -1114,7 +1114,7 @@ fn expression_diagnostics(
 pub(crate) struct KnownRoots<'a> {
     catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
     ast: &'a crate::overlay::FrontmatterAst,
-    shape: darkmatter::markdown::schemas::SchemaShape,
+    shape: &'a darkmatter::markdown::schemas::SchemaShape,
 }
 
 impl<'a> KnownRoots<'a> {
