@@ -3,6 +3,11 @@ kind: feature
 created: 2026-10-25
 status: draft-spec
 area: darkmatter
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-26
+review_iterations: 0
+needs_rulings: false
 $schema:
     status: |-
         enum(
@@ -52,9 +57,11 @@ library's YAML scalar rules.
 
 ### Today
 
-`resolve.rs::merge_constraints` holds each conflicting `Constraint` next to
-its `SchemaConstraintOrigin` (the `Tagged` pair), but `MergeSite::conflict`
-keeps only the origins:
+In the **darkmatter** library,
+[`merge_constraints`](../../../lib/src/markdown/schemas/resolve.rs) combines
+inherited and use-site constraints. It holds each conflicting `Constraint`
+next to its `SchemaConstraintOrigin` (the `Tagged` pair), but the error
+constructor in that module keeps only the origins:
 
 ```rust
 SchemaError::ConstraintConflict {
@@ -92,11 +99,49 @@ All three renderers have only the keyword to show:
   in place (`existing.retain(…)`) and only then finds it empty. The
   inherited participant must be captured before the narrowing, or it would
   always render as `scheme()`.
-- One canonical renderer formats a single constraint, so every consumer shows
-  the same spelling the schema grammar accepts. It is the existing
-  `simplified/serialize.rs::write_constraint`, exposed as
-  `Constraint::to_schema_text(ty)` or an equivalent public function. Messages
-  never hand-format constraint values.
+
+  For repeated successful intersections, this inherited value can be narrower
+  than the text at its origin. Keep the existing origin selection: it locates
+  the declaration that introduced the group, while the participant records
+  the effective value at the failing merge. DMLS describes such a value as
+  `` `scheme(https)` is the effective constraint from this declaration ``;
+  it must not claim that narrowed text was authored verbatim.
+
+  Bounds retain the origin of the surviving stricter bound and its existing
+  position in the inherited-then-use-site stream; equal bounds keep the first
+  origin. Defaults retain their typed JSON values before comparison, including
+  the item-versus-container reconciliation path. Numeric normalization still
+  decides equality; this feature changes no merge rules.
+
+  Options require both canonical sets, including
+  `Constraint::Options(empty_set)` when the named type declares bare
+  `alphanumeric`. The empty set points at that type declaration using the
+  existing synthetic origin; it must not be omitted for lacking an authored
+  option token. File watching and related-location lookup continue to read
+  each participant's `origin`, including through referenced-schema wrappers
+  and recursive named-type resolution.
+- One canonical renderer formats a single constraint. In the **darkmatter**
+  library, expose `Constraint::to_schema_text(ty: Option<SimplifiedType>)`
+  through the existing
+  [constraint serializer](../../../lib/src/markdown/schemas/simplified/serialize.rs).
+  All conflict renderers pass `None`: the four conflict kinds carry enough
+  typed information to render without reconstructing the enclosing type.
+  Messages never hand-format values.
+
+  The formatter must cover options rather than forwarding them into the
+  current `write_constraint` branch that panics. Render an option participant
+  as `alphanumeric(allow-dashes)` (canonical option order), or `alphanumeric`
+  for the empty set; do not invent an `options(...)` grammar keyword.
+  Preserve JSON scalar identity in defaults: string `"3"` and number `3`
+  must display differently, as must string `"null"` and null. Share the
+  serializer's quoting and escaping rules, correcting ambiguous default
+  quoting there as part of this change.
+
+  Values constructible only through Rust, such as object or array defaults,
+  remain fully represented in typed data. Render them defensively as
+  `default(<compact JSON>)`; this diagnostic representation does not add
+  compound defaults to the authored schema grammar or promise a grammar
+  round trip for those values.
 - Renderers show values:
 
   ```text
@@ -105,9 +150,19 @@ All three renderers have only the keyword to show:
 
   The `StatusBlock` lines become `` `min(10)` at [slug] in ./types.yaml ``,
   and DMLS related information says `` `max(5)` is declared here ``.
-- A long value (a big `default` object) is shortened in a message line by
-  the same rule the `StatusBlock` already uses for long values elsewhere. The
-  structured field always holds the full `Constraint`.
+- Escape line breaks, tabs, and other control characters in the rendered
+  constraint before putting it in a message. Shorten only that constraint
+  excerpt to at most 160 Unicode scalar values, including a final `…` when
+  shortened. Use the same excerpt in `Display`, terminal output, and DMLS
+  related information; keep paths and sources outside that limit. The
+  structured field always holds the full `Constraint`. Terminal output still
+  uses biscuit-terminal's `StatusBlock` and `Prose` escaping, so schema text
+  cannot become terminal markup.
+
+Reader's note: the current single-constraint writer deliberately excludes
+options, and the conflict renderer has no existing value-shortening helper.
+The explicit rules above replace those two assumptions in the draft. They
+keep all three renderers consistent without expanding the schema language.
 
 ## B. Grammar failures report where they happened
 
